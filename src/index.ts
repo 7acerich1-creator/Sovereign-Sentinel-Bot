@@ -185,7 +185,7 @@ async function main() {
   // ── 6. Wire Message Handler ──
   const defaultChatId = String(config.telegram.authorizedUserIds[0]);
 
-  telegram.onMessage(async (message: Message) => {
+  router.onMessage(async (message: Message) => {
     try {
       console.log(`📥 [Handler] Message received — chatType: ${message.metadata?.chatType}, isGroup: ${message.metadata?.isGroup}, metadata: ${JSON.stringify(message.metadata)}`);
       // Group filtering

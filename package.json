@@ -1,7 +1,7 @@
 {
   "name": "gravity-claw",
-  "version": "2.0.0",
-  "description": "Gravity Claw — Sovereign Synthesis Telegram Sentinel + Maven Crew",
+  "version": "3.0.0",
+  "description": "Gravity Claw v3.0 — Sovereign Synthesis AI Agent | Agentic Tool Loop + Multi-LLM + MCP Bridge",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
@@ -12,12 +12,13 @@
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
     "@supabase/supabase-js": "^2.49.0",
+    "better-sqlite3": "^11.0.0",
     "dotenv": "^16.4.7",
-    "node-telegram-bot-api": "^0.66.0"
+    "grammy": "^1.30.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.0.0",
-    "@types/node-telegram-bot-api": "^0.64.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.0"
   },

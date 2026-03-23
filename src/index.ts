@@ -1,560 +1,541 @@
-import TelegramBot from "node-telegram-bot-api";
-import * as http from "http";
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// GRAVITY CLAW v3.0 — Main Entry Point
+// Sovereign Synthesis Sentinel — Full Agent Architecture
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+import { randomUUID } from "crypto";
 import { config } from "./config";
-import {
-  getSystemStatus,
-  pushIntent,
-  getRecentGlitches,
-  calibratePersonality,
-  logGlitch,
-  logSyncActivity,
-} from "./supabase";
-import { brainQuery, synthesizeGlitches } from "./gemini";
-import { runMavenCrew, runSovereignCrew } from "./maven";
+import type { Message, Tool, MemoryProvider, LLMProvider, BotCore, ChannelType } from "./types";
 
-// ── Initialize Bot (Long-Polling) ──
-const bot = new TelegramBot(config.telegram.botToken, { polling: true });
+// ── Memory ──
+import { SqliteMemory } from "./memory/sqlite";
+import { MarkdownMemory } from "./memory/markdown";
+import { SupabaseVectorMemory } from "./memory/supabase-vector";
+import { KnowledgeGraph, KnowledgeGraphTool } from "./memory/knowledge-graph";
+import { SelfEvolvingMemory } from "./memory/self-evolving";
 
-const AUTHORIZED = config.telegram.authorizedUserId;
+// ── LLM ──
+import { createProvider } from "./llm/providers";
+import { FailoverLLM } from "./llm/failover";
 
-console.log("⚡ GRAVITY CLAW ONLINE — Sovereign Frequency Locked");
-console.log(`🔒 Authorized User ID: ${AUTHORIZED}`);
+// ── Agent ──
+import { AgentLoop } from "./agent/loop";
+import { AgentSwarm, SwarmTool } from "./agent/swarm";
+import { AgentComms, AgentCommsTool } from "./agent/comms";
+import { MeshWorkflow, MeshTool } from "./agent/mesh";
 
-// ── Auth Guard ──
-function isAuthorized(msg: TelegramBot.Message): boolean {
-  return msg.from?.id === AUTHORIZED;
-}
+// ── Channels ──
+import { TelegramChannel } from "./channels/telegram";
+import { MessageRouter } from "./channels/router";
 
-function reject(msg: TelegramBot.Message): void {
-  // Silent ignore per protocol — no response to unauthorized users
-}
+// ── Tools ──
+import { ShellTool } from "./tools/shell";
+import { FileReadTool, FileWriteTool, FileListTool, FileDeleteTool, FileSearchTool } from "./tools/files";
+import { WebSearchTool, WebFetchTool } from "./tools/search";
+import { BrowserTool } from "./tools/browser";
+import { Scheduler, SchedulerTool } from "./tools/scheduler";
+import { WebhookServer } from "./tools/webhooks";
+import { MCPBridge } from "./tools/mcp-bridge";
+import { SkillsSystem, SkillsTool } from "./tools/skills";
+import { MavenCrewTool } from "./tools/maven-crew";
+import { SystemTool } from "./tools/system";
 
-// ── Heartbeat ──
-setInterval(() => {
-  console.log(`💓 Heartbeat — ${new Date().toISOString()}`);
-}, 60_000);
+// ── Voice ──
+import { transcribeAudio, downloadTelegramFile } from "./voice/transcription";
+import { textToSpeech } from "./voice/tts";
 
-// ── Sovereign Pulse System (3x Daily Auto-Messages) ──
-// Sends directly to your Telegram user ID as a chat
-const PULSE_HOURS = [8, 13, 21]; // 8 AM, 1 PM, 9 PM (uses Railway TZ env)
-const firedPulses = new Set<string>();
+// ── Proactive ──
+import { ProactiveBriefings } from "./proactive/briefings";
+import { HeartbeatSystem } from "./proactive/heartbeat";
 
-async function sendMorningPulse() {
-  try {
-    const s = await getSystemStatus();
-    const glitches = await getRecentGlitches(3);
-    const glitchLine =
-      glitches.length > 0
-        ? `\n⚠️ ${glitches.length} anomalies detected — run /glitch`
-        : `\n✅ Zero anomalies. System clean.`;
+// ── Plugins ──
+import { PluginManager, MemoryTool, RecallTool } from "./plugins/system";
 
-    const brain = await brainQuery(
-      `Generate a short, powerful morning sovereign activation message for the Architect.
-       Current revenue: $${s.revenue.toLocaleString()} of $1.2M target (${s.progress}%).
-       Active habits: ${s.activeHabits}. Minds liberated: ${s.liberationCount}.
-       Keep it under 200 words. Be direct, sovereign, no filler. End with a tactical directive for today.`
-    );
+// ── UX ──
+import { GroupManager } from "./ux/groups";
 
-    await bot.sendMessage(
-      AUTHORIZED,
-      `☀️ *MORNING PULSE — SOVEREIGN ACTIVATION*\n\n` +
-        `💰 Revenue: $${s.revenue.toLocaleString()} / $1,200,000 (${s.progress}%)\n` +
-        `🔥 Habits: ${s.activeHabits} active | 🌍 Liberated: ${s.liberationCount}` +
-        glitchLine +
-        `\n\n━━━ *TRANSMISSION* ━━━\n${brain}`,
-      { parse_mode: "Markdown" }
-    );
-    console.log("☀️ Morning pulse sent");
-  } catch (err: any) {
-    console.error("Morning pulse failed:", err.message);
-  }
-}
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-async function sendMiddayPulse() {
-  try {
-    const s = await getSystemStatus();
-    const brain = await brainQuery(
-      `Generate a short midday momentum check for the Architect.
-       Revenue: $${s.revenue.toLocaleString()} of $1.2M. Pending commands: ${s.pendingCommands}.
-       Give a sharp reality check — are we on pace? What needs to happen in the next 4 hours?
-       Under 150 words. Zero filler.`
-    );
+async function main() {
+  console.log("⚡ GRAVITY CLAW v3.0 — Initializing...");
+  console.log(`🔒 Security: Max ${config.security.maxAgentIterations} agent iterations`);
 
-    await bot.sendMessage(
-      AUTHORIZED,
-      `⚡ *MIDDAY PULSE — MOMENTUM CHECK*\n\n` +
-        `📋 Pending Commands: ${s.pendingCommands}\n` +
-        `📈 Progress: ${s.progress}%\n\n` +
-        `${brain}`,
-      { parse_mode: "Markdown" }
-    );
-    console.log("⚡ Midday pulse sent");
-  } catch (err: any) {
-    console.error("Midday pulse failed:", err.message);
-  }
-}
+  // ── 1. Initialize Memory Providers ──
+  const sqliteMemory = new SqliteMemory();
+  await sqliteMemory.initialize();
 
-async function sendEveningPulse() {
-  try {
-    const s = await getSystemStatus();
-    const glitches = await getRecentGlitches(5);
-    const brain = await brainQuery(
-      `Generate a short evening debrief for the Architect.
-       Revenue: $${s.revenue.toLocaleString()} of $1.2M (${s.progress}%).
-       ${glitches.length} glitches today. Active habits: ${s.activeHabits}.
-       Summarize the day's frequency, call out any Biological Drag to override tomorrow,
-       and set one sovereign intent for the morning. Under 150 words.`
-    );
+  const markdownMemory = new MarkdownMemory("./memory");
+  await markdownMemory.initialize();
 
-    await bot.sendMessage(
-      AUTHORIZED,
-      `🌙 *EVENING PULSE — SOVEREIGN DEBRIEF*\n\n` +
-        `💰 End-of-day: $${s.revenue.toLocaleString()} / $1,200,000\n` +
-        `🔻 Glitches: ${glitches.length} | 🔥 Habits: ${s.activeHabits}\n\n` +
-        `${brain}`,
-      { parse_mode: "Markdown" }
-    );
-    console.log("🌙 Evening pulse sent");
-  } catch (err: any) {
-    console.error("Evening pulse failed:", err.message);
-  }
-}
+  const supabaseMemory = new SupabaseVectorMemory();
+  await supabaseMemory.initialize();
 
-// Check every minute if it's time to fire a pulse
-setInterval(() => {
-  const now = new Date();
-  const hour = now.getHours();
-  const dateKey = `${now.toDateString()}-${hour}`;
+  const memoryProviders: MemoryProvider[] = [sqliteMemory, markdownMemory, supabaseMemory];
+  console.log("# ✅ Environment validated");
 
-  if (PULSE_HOURS.includes(hour) && !firedPulses.has(dateKey)) {
-    firedPulses.add(dateKey);
+  // Knowledge Graph
+  const knowledgeGraph = new KnowledgeGraph();
+  await knowledgeGraph.initialize();
 
-    // Clean old keys (keep set from growing forever)
-    for (const key of firedPulses) {
-      if (!key.startsWith(now.toDateString())) firedPulses.delete(key);
-    }
+  // Self-Evolving Memory
+  const selfEvolvingMemory = new SelfEvolvingMemory();
+  await selfEvolvingMemory.initialize();
 
-    if (hour === 8) sendMorningPulse();
-    else if (hour === 13) sendMiddayPulse();
-    else if (hour === 21) sendEveningPulse();
-  }
-}, 60_000);
+  // ── 2. Initialize LLM Providers ──
+  const llmProviders: LLMProvider[] = [];
 
-// ── /start ──
-bot.onText(/\/start/, (msg) => {
-  if (!isAuthorized(msg)) return reject(msg);
-  bot.sendMessage(
-    msg.chat.id,
-    `⚡ *GRAVITY CLAW v2.0 — ONLINE*\n\n` +
-      `Sovereign Frequency: *LOCKED*\n` +
-      `Protocol 77: *ACTIVE*\n\n` +
-      `Commands:\n` +
-      `/status — System resonance check\n` +
-      `/intent [command] — Inject sovereign intent\n` +
-      `/glitch — Recent anomalies\n` +
-      `/brain [query] — Cognitive engine query\n` +
-      `/calibrate [slider] [value] — Personality adjustment\n` +
-      `/maven — Trigger Maven Crew harvest\n` +
-      `/synthesize [text] — Sovereign Crew content engine`,
-    { parse_mode: "Markdown" }
-  );
-  logSyncActivity("SYSTEM", "Sentinel Reactive", "Gravity Claw /start command executed by Architect");
-});
-
-// ── /status ──
-bot.onText(/\/status/, async (msg) => {
-  if (!isAuthorized(msg)) return reject(msg);
-
-  try {
-    const s = await getSystemStatus();
-    const response =
-      `📊 *SYSTEM STATUS — PROTOCOL 77*\n\n` +
-      `💰 Revenue: $${s.revenue.toLocaleString()} / $${s.target.toLocaleString()}\n` +
-      `📈 Progress: ${s.progress}%\n` +
-      `🔥 Active Habits: ${s.activeHabits}\n` +
-      `${s.habits.map((h) => `  → ${h}`).join("\n")}\n` +
-      `🌍 Minds Liberated: ${s.liberationCount.toLocaleString()}\n` +
-      `📋 Pending Commands: ${s.pendingCommands}\n\n` +
-      `*FREQUENCY: SOVEREIGN*`;
-
-    bot.sendMessage(msg.chat.id, response, { parse_mode: "Markdown" });
-    logSyncActivity("STATUS", "System Resonance Check", `Revenue: $${s.revenue.toLocaleString()} | Progress: ${s.progress}%`);
-  } catch (err: any) {
-    bot.sendMessage(msg.chat.id, `⚠️ Status check failed: ${err.message}`);
-    logGlitch("Minor", `Status check failure: ${err.message}`);
-  }
-});
-
-// ── /intent [command] ──
-bot.onText(/\/intent (.+)/, async (msg, match) => {
-  if (!isAuthorized(msg)) return reject(msg);
-  const command = match?.[1];
-  if (!command) return;
-
-  try {
-    const result = await pushIntent(command, String(msg.from?.id));
-    bot.sendMessage(
-      msg.chat.id,
-      `✅ *INTENT INJECTED*\n\n` +
-        `Command: \`${command}\`\n` +
-        `Queue ID: \`${result?.id}\`\n` +
-        `Status: *Pending*`,
-      { parse_mode: "Markdown" }
-    );
-    logSyncActivity("INTENT", "Sovereign Intent Injected", `Command: ${command}`);
-  } catch (err: any) {
-    bot.sendMessage(msg.chat.id, `⚠️ Intent injection failed: ${err.message}`);
-  }
-});
-
-// ── /glitch ──
-bot.onText(/\/glitch/, async (msg) => {
-  if (!isAuthorized(msg)) return reject(msg);
-
-  try {
-    const glitches = await getRecentGlitches();
-    if (glitches.length === 0) {
-      bot.sendMessage(msg.chat.id, "✅ *No anomalies detected.* System clean.", {
-        parse_mode: "Markdown",
-      });
-      return;
-    }
-
-    const lines = glitches.map(
-      (g, i) =>
-        `${i + 1}. [${g.severity}] ${g.description}\n   🕐 ${new Date(g.detected_at).toLocaleString()}`
-    );
-
-    // Also get AI synthesis of the glitches
-    const synthesis = await synthesizeGlitches(glitches);
-
-    bot.sendMessage(
-      msg.chat.id,
-      `🔻 *GLITCH LOG — Last ${glitches.length}*\n\n${lines.join("\n\n")}\n\n` +
-        `━━━ *SYNTHESIS* ━━━\n${synthesis}`,
-      { parse_mode: "Markdown" }
-    );
-  } catch (err: any) {
-    bot.sendMessage(msg.chat.id, `⚠️ Glitch retrieval failed: ${err.message}`);
-  }
-});
-
-// ── /brain [query] ──
-bot.onText(/\/brain (.+)/, async (msg, match) => {
-  if (!isAuthorized(msg)) return reject(msg);
-  const query = match?.[1];
-  if (!query) return;
-
-  bot.sendChatAction(msg.chat.id, "typing");
-
-  try {
-    const response = await brainQuery(query);
-    // Telegram has a 4096 char limit — chunk if needed
-    const chunks = response.match(/[\s\S]{1,4000}/g) || [response];
-    for (const chunk of chunks) {
-      await bot.sendMessage(msg.chat.id, `🧠 *SOVEREIGN BRAIN*\n\n${chunk}`, {
-        parse_mode: "Markdown",
-      });
-    }
-  } catch (err: any) {
-    bot.sendMessage(msg.chat.id, `⚠️ Brain query failed: ${err.message}`);
-  }
-});
-
-// ── /calibrate [slider] [value] ──
-bot.onText(/\/calibrate (\w+) ([\d.]+)/, async (msg, match) => {
-  if (!isAuthorized(msg)) return reject(msg);
-  const slider = match?.[1];
-  const value = parseFloat(match?.[2] || "0");
-
-  if (!slider || isNaN(value) || value < 0 || value > 1) {
-    bot.sendMessage(
-      msg.chat.id,
-      "⚠️ Usage: `/calibrate [slider_name] [0.0-1.0]`",
-      { parse_mode: "Markdown" }
-    );
-    return;
-  }
-
-  try {
-    await calibratePersonality(slider, value);
-    bot.sendMessage(
-      msg.chat.id,
-      `🎛️ *CALIBRATION COMPLETE*\n\n` +
-        `Slider: \`${slider}\`\n` +
-        `Value: \`${value}\`\n` +
-        `Agent: gravity-claw`,
-      { parse_mode: "Markdown" }
-    );
-  } catch (err: any) {
-    bot.sendMessage(msg.chat.id, `⚠️ Calibration failed: ${err.message}`);
-  }
-});
-
-// ── /maven — Trigger Maven Crew ──
-bot.onText(/\/maven/, async (msg) => {
-  if (!isAuthorized(msg)) return reject(msg);
-
-  bot.sendMessage(msg.chat.id, "🚀 *Triggering Maven Crew harvest...*", {
-    parse_mode: "Markdown",
-  });
-
-  try {
-    const output = await runMavenCrew();
-    const trimmed = output.slice(-3500); // last 3500 chars to stay in limit
-    bot.sendMessage(
-      msg.chat.id,
-      `✅ *MAVEN CREW — COMPLETE*\n\n\`\`\`\n${trimmed}\n\`\`\``,
-      { parse_mode: "Markdown" }
-    );
-  } catch (err: any) {
-    bot.sendMessage(
-      msg.chat.id,
-      `⚠️ Maven Crew failure:\n${err.message.slice(-500)}`
-    );
-    logGlitch("Critical", `Maven Crew crash: ${err.message.slice(0, 200)}`);
-    logSyncActivity("MAVEN", "Protocol Failure", `Maven Crew crash: ${err.message.slice(0, 50)}`, "error");
-  }
-});
-
-// ── /synthesize [text] — Sovereign Crew content engine ──
-bot.onText(/\/synthesize (.+)/s, async (msg, match) => {
-  if (!isAuthorized(msg)) return reject(msg);
-  const rawText = match?.[1];
-  if (!rawText) return;
-
-  bot.sendMessage(
-    msg.chat.id,
-    "🔮 *Sovereign Crew activated — encoding in progress...*",
-    { parse_mode: "Markdown" }
-  );
-
-  try {
-    const output = await runSovereignCrew(rawText);
-    const trimmed = output.slice(-3500);
-    bot.sendMessage(
-      msg.chat.id,
-      `✅ *SOVEREIGN SYNTHESIS — COMPLETE*\n\n\`\`\`\n${trimmed}\n\`\`\``,
-      { parse_mode: "Markdown" }
-    );
-  } catch (err: any) {
-    bot.sendMessage(
-      msg.chat.id,
-      `⚠️ Sovereign Crew failure:\n${err.message.slice(-500)}`
-    );
-    logGlitch("Minor", `Sovereign Crew error: ${err.message.slice(0, 200)}`);
-  }
-});
-
-// ── /override — Trigger Production Pipeline (Make.com) ──
-bot.onText(/\/override (.+)?/s, async (msg, match) => {
-  if (!isAuthorized(msg)) return reject(msg);
-  
-  const payloadUrl = process.env.MAKE_PRODUCTION_WEBHOOK_URL || "https://hook.make.com/1b86ff8cd634d28a2c22c9051ec0db01";
-  const intentTag = match?.[1] || "reality-override-default";
-  
-  bot.sendMessage(msg.chat.id, "🚀 *FIRING PRODUCTION PIPELINE...*", { parse_mode: "Markdown" });
-
-  try {
-    const response = await fetch(payloadUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        trigger: "telegram_command",
-        intent_tag: intentTag,
-        timestamp: new Date().toISOString()
-      })
-    });
-    
-    if (response.ok) {
-      bot.sendMessage(msg.chat.id, `✅ *MAKE.COM PIPELINE TRIGGERED*\n\nTag: \`${intentTag}\`\nAwaiting heartbeat confirmation.`, { parse_mode: "Markdown" });
-    } else {
-      throw new Error(`HTTP ${response.status}`);
-    }
-  } catch (err: any) {
-    bot.sendMessage(msg.chat.id, `⚠️ Pipeline trigger failed: ${err.message}`);
-    logGlitch("Critical", `Make.com trigger failure: ${err.message}`);
-  }
-});
-
-// ── Voice Memo Handler — Auto-forward to Make.com Factory ──
-bot.on("voice", async (msg) => {
-  if (!isAuthorized(msg)) return reject(msg);
-
-  const webhookUrl = process.env.MAKE_INGESTION_WEBHOOK_URL;
-  if (!webhookUrl) {
-    bot.sendMessage(
-      msg.chat.id,
-      "⚠️ *MAKE_INGESTION_WEBHOOK_URL not configured.*\nVoice pipeline offline. Set the env var and redeploy.",
-      { parse_mode: "Markdown" }
-    );
-    return;
-  }
-
-  bot.sendMessage(msg.chat.id, "🔊 *VOICE MEMO CAPTURED — Firing to Content Factory...*", {
-    parse_mode: "Markdown",
-  });
-
-  try {
-    // 1. Get the downloadable file link from Telegram
-    const fileId = msg.voice!.file_id;
-    const fileLink = await bot.getFileLink(fileId);
-
-    // 2. POST payload to Make.com Ingestion Webhook
-    const payload = {
-      source: "telegram_voice",
-      audio_url: fileLink,
-      file_id: fileId,
-      duration_seconds: msg.voice!.duration || 0,
-      mime_type: msg.voice!.mime_type || "audio/ogg",
-      intent_tag: "auto",
-      architect_id: String(msg.from?.id),
-      timestamp: new Date().toISOString(),
-    };
-
-    const response = await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    if (response.ok) {
-      bot.sendMessage(
-        msg.chat.id,
-        `✅ *VOICE MEMO → FACTORY*\n\n` +
-          `Duration: ${payload.duration_seconds}s\n` +
-          `File ID: \`${fileId.slice(0, 20)}...\`\n` +
-          `Pipeline: Auphonic → Whisper → CrewAI → Supabase\n\n` +
-          `You'll get a heartbeat when synthesis completes.`,
-        { parse_mode: "Markdown" }
-      );
-    } else {
-      throw new Error(`Make.com returned HTTP ${response.status}`);
-    }
-  } catch (err: any) {
-    bot.sendMessage(
-      msg.chat.id,
-      `⚠️ *Voice pipeline error:* ${err.message}\n\nFallback: Use \`/synthesize [text]\` to encode manually.`,
-      { parse_mode: "Markdown" }
-    );
-    logGlitch("Critical", `Voice→Make.com pipeline failure: ${err.message}`);
-  }
-});
-
-// ── Audio Message Handler (voice notes sent as audio files) ──
-bot.on("audio", async (msg) => {
-  if (!isAuthorized(msg)) return reject(msg);
-
-  const webhookUrl = process.env.MAKE_INGESTION_WEBHOOK_URL;
-  if (!webhookUrl) {
-    bot.sendMessage(msg.chat.id, "⚠️ Voice pipeline offline. MAKE_INGESTION_WEBHOOK_URL not set.", { parse_mode: "Markdown" });
-    return;
-  }
-
-  try {
-    const fileId = msg.audio!.file_id;
-    const fileLink = await bot.getFileLink(fileId);
-
-    const payload = {
-      source: "telegram_voice",
-      audio_url: fileLink,
-      file_id: fileId,
-      duration_seconds: msg.audio!.duration || 0,
-      mime_type: msg.audio!.mime_type || "audio/mpeg",
-      intent_tag: "auto",
-      architect_id: String(msg.from?.id),
-      timestamp: new Date().toISOString(),
-    };
-
-    const response = await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    if (response.ok) {
-      bot.sendMessage(msg.chat.id, `✅ *AUDIO FILE → FACTORY*\nPipeline engaged. Heartbeat incoming.`, { parse_mode: "Markdown" });
-    } else {
-      throw new Error(`HTTP ${response.status}`);
-    }
-  } catch (err: any) {
-    bot.sendMessage(msg.chat.id, `⚠️ Audio pipeline error: ${err.message}`, { parse_mode: "Markdown" });
-    logGlitch("Minor", `Audio→Make.com failure: ${err.message}`);
-  }
-});
-
-// ── Catch-all: Forward unrecognized messages to brain ──
-bot.on("message", async (msg) => {
-  if (!isAuthorized(msg)) return reject(msg);
-
-  // Skip if it's a command we already handle
-  if (msg.text?.startsWith("/")) return;
-
-  // Treat as brain query
-  bot.sendChatAction(msg.chat.id, "typing");
-  try {
-    const response = await brainQuery(msg.text || "");
-    const chunks = response.match(/[\s\S]{1,4000}/g) || [response];
-    for (const chunk of chunks) {
-      await bot.sendMessage(msg.chat.id, chunk);
-    }
-  } catch (err: any) {
-    bot.sendMessage(msg.chat.id, `⚠️ ${err.message}`);
-  }
-});
-
-// ── Webhook Engine (Heartbeat / Mission Control Integration) ──
-const server = http.createServer(async (req, res) => {
-  if (req.method === "POST" && req.url === "/api/heartbeat") {
-    let body = "";
-    req.on("data", chunk => { body += chunk.toString(); });
-    req.on("end", async () => {
+  for (const providerName of config.llm.failoverOrder) {
+    const providerConfig = config.llm.providers[providerName];
+    if (providerConfig?.apiKey) {
       try {
-        const payload = JSON.parse(body);
-        const { message, tag } = payload;
-        const finalMsg = message || `⚡ *HEARTBEAT RECEIVED*\n\nTag: \`${tag || 'unknown'}\`\n✅ Mission Control Pipeline Success.`;
-        
-        await bot.sendMessage(AUTHORIZED, finalMsg, { parse_mode: "Markdown" });
-        
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "ok", delivered: true }));
+        const provider = createProvider(
+          providerName,
+          providerConfig.apiKey,
+          providerConfig.model,
+          providerConfig.baseUrl
+        );
+        llmProviders.push(provider);
+        console.log(`# ✅ Active model: ${providerConfig.model}`);
       } catch (err: any) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "error", error: err.message }));
+        console.warn(`⚠️ LLM provider ${providerName} skipped: ${err.message}`);
       }
-    });
-  } else {
-    res.writeHead(404);
-    res.end();
+    }
   }
-});
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🌐 Gravity Claw Webhook Engine listening on port ${PORT}`);
-});
+  if (llmProviders.length === 0) {
+    console.error("❌ No LLM providers configured. Set at least one API key.");
+    process.exit(1);
+  }
 
-// ── Graceful Shutdown ──
-process.on("SIGINT", () => {
-  console.log("🛑 Gravity Claw shutting down...");
-  server.close();
-  bot.stopPolling();
-  process.exit(0);
-});
+  const failoverLLM = new FailoverLLM(llmProviders);
 
-process.on("SIGTERM", () => {
-  console.log("🛑 Gravity Claw received SIGTERM — shutting down...");
-  bot.stopPolling();
-  process.exit(0);
-});
+  // ── 3. Initialize Tools ──
+  const tools: Tool[] = [
+    // Core tools
+    new ShellTool(),
+    new FileReadTool(),
+    new FileWriteTool(),
+    new FileListTool(),
+    new FileDeleteTool(),
+    new FileSearchTool(),
+    new WebSearchTool(),
+    new WebFetchTool(),
+    new BrowserTool(),
 
-// ── Uncaught Error Handling ──
-process.on("uncaughtException", (err) => {
-  console.error("💥 Uncaught Exception:", err);
-  logGlitch("Critical", `Uncaught exception: ${err.message}`).catch(() => {});
-});
+    // Memory tools
+    new MemoryTool(memoryProviders),
+    new RecallTool(memoryProviders),
+    new KnowledgeGraphTool(knowledgeGraph),
+  ];
 
-process.on("unhandledRejection", (reason: any) => {
-  console.error("💥 Unhandled Rejection:", reason);
-  logGlitch("Minor", `Unhandled rejection: ${String(reason)}`).catch(() => {});
+  // MCP Bridge
+  const mcpBridge = new MCPBridge();
+  try {
+    const mcpTools = await mcpBridge.initialize();
+    tools.push(...mcpTools);
+    if (mcpTools.length > 0) {
+      console.log(`🔗 MCP: ${mcpTools.length} tools from ${mcpBridge.listConnectedServers().length} servers`);
+    }
+  } catch (err: any) {
+    console.warn(`⚠️ MCP Bridge: ${err.message}`);
+  }
+
+  // Skills System
+  const skillsSystem = new SkillsSystem("./skills");
+  await skillsSystem.loadAll();
+  tools.push(new SkillsTool(skillsSystem));
+
+  // Maven Crew Bridge
+  tools.push(new MavenCrewTool());
+
+  // System Utilities
+  tools.push(new SystemTool());
+
+  // Scheduler
+  const scheduler = new Scheduler();
+  tools.push(new SchedulerTool(scheduler));
+
+  // Agent Swarm
+  const swarm = new AgentSwarm(failoverLLM, tools);
+  tools.push(new SwarmTool(swarm));
+
+  // Agent Comms
+  const comms = new AgentComms();
+  tools.push(new AgentCommsTool(comms));
+
+  // ── 4. Initialize Agent Loop ──
+  const agentLoop = new AgentLoop(failoverLLM, tools, memoryProviders);
+  const providersMap = new Map<string, LLMProvider>();
+  llmProviders.forEach((p) => providersMap.set(p.model, p));
+  agentLoop.setLLMProviders(providersMap);
+
+  // Mesh Workflow
+  const meshWorkflow = new MeshWorkflow(failoverLLM, agentLoop);
+  const meshTool = new MeshTool(meshWorkflow);
+  tools.push(meshTool);
+  agentLoop.addTool(meshTool);
+
+  // ── 5. Initialize Channels ──
+  const telegram = new TelegramChannel();
+  const router = new MessageRouter();
+
+  // Group management
+  const groupManager = new GroupManager("gravity_claw_bot", config.telegram.authorizedUserIds);
+
+  // ── 6. Wire Message Handler ──
+  const defaultChatId = String(config.telegram.authorizedUserIds[0]);
+
+  telegram.onMessage(async (message: Message) => {
+    try {
+      console.log(`📥 [Handler] Message received — chatType: ${message.metadata?.chatType}, isGroup: ${message.metadata?.isGroup}, metadata: ${JSON.stringify(message.metadata)}`);
+      // Group filtering
+      const shouldResp = groupManager.shouldRespond(message);
+      console.log(`📥 [Handler] shouldRespond: ${shouldResp}`);
+      if (!shouldResp) {
+        console.log(`🚫 [Handler] Message DROPPED by groupManager`);
+        return;
+      }
+
+      // Strip bot mention from group messages
+      if (message.metadata?.isGroup) {
+        message.content = groupManager.stripMention(message.content);
+      }
+
+      // ── Voice message handling ──
+      if (message.attachments?.some((a) => a.type === "voice" || a.type === "audio")) {
+        const voiceAttachment = message.attachments.find((a) => a.type === "voice" || a.type === "audio");
+
+        if (voiceAttachment?.url) {
+          await telegram.sendTyping(message.chatId);
+
+          try {
+            const audioBuffer = await downloadTelegramFile(voiceAttachment.url);
+            const transcription = await transcribeAudio(audioBuffer, voiceAttachment.mimeType);
+
+            message.content = transcription;
+            message.metadata = { ...message.metadata, originalType: "voice", transcription };
+
+            await telegram.sendMessage(
+              message.chatId,
+              `🎙️ _Transcribed:_ ${transcription.slice(0, 200)}${transcription.length > 200 ? "..." : ""}`,
+              { parseMode: "Markdown" }
+            );
+          } catch (err: any) {
+            await telegram.sendMessage(message.chatId, `⚠️ Voice transcription failed: ${err.message}`);
+            return;
+          }
+        }
+      }
+
+      // ── Command routing ──
+      if (message.content.startsWith("/")) {
+        const handled = await handleCommand(message);
+        if (handled) return;
+      }
+
+      // ── Send typing indicator ──
+      console.log(`📥 [Handler] Sending typing indicator...`);
+      await telegram.sendTyping(message.chatId);
+
+      // ── Send immediate processing signal ──
+      const processingMsg = await telegram.sendMessage(message.chatId, "⚡ _Vanguard Processing..._", { parseMode: "Markdown" });
+      const HANDLER_TIMEOUT_MS = 120_000;
+      
+      const response = await Promise.race([
+        agentLoop.processMessage(
+          message,
+          () => telegram.sendTyping(message.chatId)
+        ),
+        new Promise<string>((_, reject) =>
+          setTimeout(() => reject(new Error("Agent loop timed out after 120s")), HANDLER_TIMEOUT_MS)
+        ),
+      ]);
+
+      // ── Send response ──
+      // Check if voice response was requested
+      const wantsVoice = message.metadata?.originalType === "voice" && config.voice.elevenLabsApiKey;
+
+      if (wantsVoice) {
+        try {
+          const audioBuffer = await textToSpeech(response);
+          if (telegram.deleteMessage) {
+            await telegram.deleteMessage(message.chatId, processingMsg.channelMessageId!);
+          }
+          await telegram.sendVoice!(message.chatId, audioBuffer);
+        } catch (err: any) {
+          console.error("TTS failed, sending text:", err.message);
+          if (telegram.editMessage) {
+            await telegram.editMessage(message.chatId, processingMsg.channelMessageId!, response, { parseMode: "Markdown" });
+          } else {
+            await telegram.sendMessage(message.chatId, response, { parseMode: "Markdown" });
+          }
+        }
+      } else {
+        if (telegram.editMessage) {
+          await telegram.editMessage(message.chatId, processingMsg.channelMessageId!, response, { parseMode: "Markdown" });
+        } else {
+          await telegram.sendMessage(message.chatId, response, { parseMode: "Markdown" });
+        }
+      }
+
+    } catch (err: any) {
+      console.error("Message handling error:", err);
+      try {
+        await telegram.sendMessage(message.chatId, `⚠️ Processing error: ${err.message}`);
+      } catch {
+        // Last resort
+      }
+    }
+  });
+
+  // ── Command Handler ──
+  async function handleCommand(message: Message): Promise<boolean> {
+    const [cmd, ...args] = message.content.split(" ");
+    const arg = args.join(" ");
+
+    switch (cmd) {
+      case "/start":
+        await telegram.sendMessage(message.chatId,
+          `⚡ *GRAVITY CLAW v3.0 — ONLINE*\n\n` +
+          `Sovereign Frequency: *LOCKED*\n` +
+          `Protocol 77: *ACTIVE*\n` +
+          `LLM: *${failoverLLM.activeProvider || failoverLLM.listProviders()[0]}*\n` +
+          `Memory: *${memoryProviders.map((m) => m.name).join(", ")}*\n` +
+          `Tools: *${tools.length} loaded*\n\n` +
+          `Commands:\n` +
+          `/model [name] — Switch LLM provider\n` +
+          `/models — List available providers\n` +
+          `/memory — Show memory stats\n` +
+          `/compact — Compress conversation history\n` +
+          `/skills — List loaded skills\n` +
+          `/schedule — List scheduled tasks\n` +
+          `/mesh [goal] — Run mesh workflow\n` +
+          `/swarm [goal] — Deploy agent swarm\n` +
+          `/status — System status\n` +
+          `/voice — Toggle voice responses`,
+          { parseMode: "Markdown" }
+        );
+        return true;
+
+      case "/model":
+        if (!arg) {
+          await telegram.sendMessage(message.chatId, `Current: ${failoverLLM.activeProvider || "auto"}\nUse /models to see available.`);
+        } else {
+          const switched = failoverLLM.switchPrimary(arg);
+          await telegram.sendMessage(message.chatId,
+            switched ? `🔀 Switched to: *${arg}*` : `⚠️ Provider "${arg}" not found. Use /models.`,
+            { parseMode: "Markdown" }
+          );
+        }
+        return true;
+
+      case "/models":
+        await telegram.sendMessage(message.chatId,
+          `🧠 *Available LLM Providers:*\n${failoverLLM.listProviders().map((p, i) => `${i + 1}. ${p}`).join("\n")}`,
+          { parseMode: "Markdown" }
+        );
+        return true;
+
+      case "/memory":
+        const facts = await sqliteMemory.getFacts();
+        const msgCount = sqliteMemory.getMessageCount(message.chatId);
+        await telegram.sendMessage(message.chatId,
+          `🧠 *Memory Status:*\n` +
+          `SQLite: ${msgCount} messages, ${facts.length} facts\n` +
+          `Markdown: Active\n` +
+          `Supabase: ${config.memory.supabaseUrl ? "Connected" : "Not configured"}\n` +
+          `Knowledge Graph: Active`,
+          { parseMode: "Markdown" }
+        );
+        return true;
+
+      case "/compact":
+        await telegram.sendMessage(message.chatId, "🗜️ Compacting conversation history...");
+        await sqliteMemory.compact(message.chatId);
+        await telegram.sendMessage(message.chatId, "✅ Compaction complete.");
+        return true;
+
+      case "/skills":
+        const skillList = skillsSystem.listSkills();
+        if (skillList.length === 0) {
+          await telegram.sendMessage(message.chatId, "No skills loaded. Add .md files to /skills directory.");
+        } else {
+          await telegram.sendMessage(message.chatId,
+            `📚 *Loaded Skills:*\n${skillList.map((s) => `• ${s.name}: ${s.description}`).join("\n")}`,
+            { parseMode: "Markdown" }
+          );
+        }
+        return true;
+
+      case "/schedule":
+        const tasks = scheduler.list();
+        if (tasks.length === 0) {
+          await telegram.sendMessage(message.chatId, "No scheduled tasks.");
+        } else {
+          await telegram.sendMessage(message.chatId,
+            `⏰ *Scheduled Tasks:*\n${tasks.map((t) => `${t.id} | ${t.name} | ${t.enabled ? "ACTIVE" : "PAUSED"}`).join("\n")}`,
+            { parseMode: "Markdown" }
+          );
+        }
+        return true;
+
+      case "/status":
+        await telegram.sendMessage(message.chatId,
+          `📊 *SYSTEM STATUS — GRAVITY CLAW v3.0*\n\n` +
+          `⚡ LLM: ${failoverLLM.activeProvider || failoverLLM.listProviders()[0]}\n` +
+          `🧠 Memory Tiers: ${memoryProviders.length}\n` +
+          `🔧 Tools: ${tools.length}\n` +
+          `📡 MCP Servers: ${mcpBridge.listConnectedServers().length}\n` +
+          `📚 Skills: ${skillsSystem.listSkills().length}\n` +
+          `⏰ Scheduled: ${scheduler.list().length}\n` +
+          `🔒 Security: ${config.security.maxAgentIterations} max iterations\n\n` +
+          `*FREQUENCY: SOVEREIGN*`,
+          { parseMode: "Markdown" }
+        );
+        return true;
+
+      case "/mesh":
+        if (!arg) {
+          await telegram.sendMessage(message.chatId, "Usage: /mesh <goal>");
+          return true;
+        }
+        // Run mesh as a regular message (let agent loop handle it)
+        return false;
+
+      case "/swarm":
+        if (!arg) {
+          await telegram.sendMessage(message.chatId, "Usage: /swarm <goal> [agents]");
+          return true;
+        }
+        return false;
+
+      default:
+        // Unknown command — let agent loop handle it
+        return false;
+    }
+  }
+
+  // ── 7. Proactive Systems ──
+  const briefings = new ProactiveBriefings(failoverLLM, memoryProviders, telegram, defaultChatId);
+  const heartbeat = new HeartbeatSystem(telegram, defaultChatId);
+
+  // In-memory guard to prevent briefings from firing every 60s during the matching hour
+  const briefingFiredDates = { morning: "", evening: "" };
+
+  // Schedule morning briefing
+  scheduler.add({
+    name: "Morning Briefing",
+    intervalMs: 60_000, // Check every minute
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      const hour = new Date().getHours();
+      const dateKey = new Date().toDateString();
+      if (hour === config.scheduler.morningBriefingHour && briefingFiredDates.morning !== dateKey) {
+        briefingFiredDates.morning = dateKey;
+        console.log(`📋 Pulse 1: Morning briefing firing for ${dateKey}`);
+        await briefings.morningBriefing();
+      }
+    },
+  });
+
+  // Schedule evening recap
+  scheduler.add({
+    name: "Evening Recap",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      const hour = new Date().getHours();
+      const dateKey = new Date().toDateString();
+      if (hour === config.scheduler.eveningRecapHour && briefingFiredDates.evening !== dateKey) {
+        briefingFiredDates.evening = dateKey;
+        console.log(`📋 Pulse 2: Evening recap firing for ${dateKey}`);
+        await briefings.eveningRecap();
+      }
+    },
+  });
+
+  // Heartbeat with memory evolution
+  heartbeat.addCheck({
+    name: "Pulse 3: Memory Evolution",
+    check: async () => {
+      // Run memory decay once per day
+      const lastDecay = await sqliteMemory.getSummary("__last_decay");
+      const today = new Date().toDateString();
+      if (lastDecay === today) return null;
+
+      const result = selfEvolvingMemory.reorganize();
+      await sqliteMemory.saveSummary("__last_decay", today);
+      return result;
+    },
+  });
+
+  heartbeat.start();
+  console.log("# Heartbeat: Running every 300s — SILENT mode");
+
+  // ── 8. Webhook Server ──
+  const webhookServer = new WebhookServer();
+
+  webhookServer.register("/api/heartbeat", async (payload: any) => {
+    const message = payload?.message || `⚡ Heartbeat received — ${payload?.tag || "system"}`;
+    await telegram.sendMessage(defaultChatId, message, { parseMode: "Markdown" });
+    return "delivered";
+  });
+
+  webhookServer.register("/api/notify", async (payload: any) => {
+    const text = payload?.text || JSON.stringify(payload).slice(0, 1000);
+    await telegram.sendMessage(defaultChatId, `🔔 *NOTIFICATION*\n${text}`, { parseMode: "Markdown" });
+    return "delivered";
+  });
+
+  await webhookServer.start();
+
+  // ── 9. Start Telegram ──
+  await telegram.initialize();
+  console.log("# ✅ Vanguard is LIVE");
+
+  // Register channel in router
+  router.registerChannel(telegram);
+
+  // ── 10. Memory heartbeat log ──
+  console.log("\n━━━ GRAVITY CLAW v3.0 — FULLY ONLINE ━━━");
+  console.log(`🧠 Memory: ${memoryProviders.map((m) => m.name).join(" + ")}`);
+  console.log(`🔧 Tools: ${tools.length} loaded`);
+  console.log(`🧬 LLM: ${failoverLLM.listProviders().join(" → ")}`);
+  console.log(`📡 Channels: ${router.listChannels().join(", ")}`);
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+  // ── Graceful Shutdown ──
+  const shutdown = async () => {
+    console.log("🛑 GRAVITY CLAW shutting down...");
+    heartbeat.stop();
+    scheduler.shutdown();
+    await webhookServer.shutdown();
+    await mcpBridge.shutdown();
+    await router.shutdownAll();
+    for (const provider of memoryProviders) {
+      await provider.close();
+    }
+    knowledgeGraph.close();
+    selfEvolvingMemory.close();
+    process.exit(0);
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
+  process.on("uncaughtException", (err) => {
+    console.error("💥 Uncaught Exception:", err);
+  });
+
+  process.on("unhandledRejection", (reason: any) => {
+    console.error("💥 Unhandled Rejection:", reason);
+  });
+}
+
+// ── Launch ──
+main().catch((err) => {
+  console.error("❌ Fatal startup error:", err);
+  process.exit(1);
 });

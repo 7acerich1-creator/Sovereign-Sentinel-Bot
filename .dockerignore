@@ -1,0 +1,15 @@
+node_modules
+dist
+.env
+.env.*
+!.env.example
+# Exclude non-essential markdown but keep identity files
+README.md
+CHANGELOG.md
+progress.md
+findings.md
+task_plan.md
+.git
+__pycache__
+*.pyc
+.venv

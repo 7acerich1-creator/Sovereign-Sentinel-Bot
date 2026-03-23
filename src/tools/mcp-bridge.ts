@@ -21,17 +21,28 @@ export class MCPBridge {
   private pendingRequests: Map<string, { resolve: (value: unknown) => void; reject: (err: Error) => void }> = new Map();
 
   async initialize(): Promise<Tool[]> {
-    // Load MCP config from JSON file
     let mcpConfig: Record<string, MCPServerConfig> = {};
 
-    if (fs.existsSync(config.mcp.configPath)) {
+    if (process.env.MCP_JSON_B64) {
+      try {
+        const raw = Buffer.from(process.env.MCP_JSON_B64, "base64").toString("utf-8");
+        const parsed = JSON.parse(raw);
+        mcpConfig = parsed.mcpServers || parsed.servers || parsed;
+        console.log("✅ [MCP Bridge] Securely loaded configuration from encrypted MCP_JSON_B64 environment variable");
+      } catch (err: any) {
+        console.error(`❌ [MCP Bridge Error] Failed to parse Base64 environment config: ${err.message}`);
+      }
+    } else if (fs.existsSync(config.mcp.configPath)) {
       try {
         const raw = fs.readFileSync(config.mcp.configPath, "utf-8");
         const parsed = JSON.parse(raw);
         mcpConfig = parsed.mcpServers || parsed.servers || parsed;
+        console.log(`✅ [MCP Bridge] Loaded configuration from secure local file -> ${config.mcp.configPath}`);
       } catch (err: any) {
-        console.warn(`⚠️ Failed to parse MCP config: ${err.message}`);
+        console.error(`❌ [MCP Bridge Error] Failed to parse local MCP config file at ${config.mcp.configPath}: ${err.message}`);
       }
+    } else {
+      console.warn(`⚠️ [MCP Bridge Warning] Local config NOT FOUND at ${config.mcp.configPath} and MCP_JSON_B64 is undefined. Only defaulting to code-defined servers.`);
     }
 
     // Merge with config-defined servers

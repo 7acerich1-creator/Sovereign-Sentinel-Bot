@@ -30,7 +30,6 @@ COPY --from=builder /app/dist ./dist
 # Copy identity, config, and support files
 COPY soul.md ./soul.md
 COPY claude.md ./claude.md
-COPY mcp.json ./mcp.json
 COPY maven_crew ./maven_crew
 COPY skills ./skills
 

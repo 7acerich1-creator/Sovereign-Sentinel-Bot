@@ -140,7 +140,7 @@ export interface Channel {
   name: ChannelType;
   initialize(): Promise<void>;
   sendMessage(chatId: string, text: string, options?: SendOptions): Promise<Message>;
-  editMessage?(chatId: string, messageId: string | number, text: string, options?: SendOptions): Promise<Message>;
+  editMessage?(chatId: string, messageId: string | number, text: string, options?: SendOptions): Promise<void>;
   deleteMessage?(chatId: string, messageId: string | number): Promise<void>;
   sendVoice?(chatId: string, audioBuffer: Buffer, options?: SendOptions): Promise<void>;
   sendTyping?(chatId: string): Promise<void>;

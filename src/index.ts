@@ -459,6 +459,7 @@ async function main() {
   // Heartbeat with memory evolution
   heartbeat.addCheck({
     name: "Pulse 3: Memory Evolution",
+    silent: true,
     check: async () => {
       // Run memory decay once per day
       const lastDecay = await sqliteMemory.getSummary("__last_decay");
@@ -478,8 +479,15 @@ async function main() {
   const webhookServer = new WebhookServer();
 
   webhookServer.register("/api/heartbeat", async (payload: any) => {
-    const message = payload?.message || `⚡ Heartbeat received — ${payload?.tag || "system"}`;
-    await telegram.sendMessage(defaultChatId, message, { parseMode: "Markdown" });
+    const tag = payload?.tag || "system";
+    const message = payload?.message || `⚡ Heartbeat received — ${tag}`;
+    
+    // Suppress Telegram notification for "system" tag as requested by Architect
+    if (tag !== "system") {
+      await telegram.sendMessage(defaultChatId, message, { parseMode: "Markdown" });
+    }
+    
+    console.log(`📡 [Webhook] Heartbeat: ${message} (Telegram: ${tag !== "system" ? "SENT" : "SUPPRESSED"})`);
     return "delivered";
   });
 

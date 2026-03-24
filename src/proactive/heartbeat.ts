@@ -9,6 +9,7 @@ import { config } from "../config";
 type HeartbeatCheck = {
   name: string;
   check: () => Promise<string | null>; // Returns message if noteworthy, null if nothing
+  silent?: boolean;
 };
 
 export class HeartbeatSystem {
@@ -54,11 +55,14 @@ export class HeartbeatSystem {
         const message = await check.check();
         if (message) {
           console.log(`💓 Heartbeat: ${check.name} -> ${message.slice(0, 100)}`);
-          await this.channel.sendMessage(
-            this.chatId,
-            `⚙️ _Background Sync: ${check.name}_\n\`\`\`\n${message}\n\`\`\``,
-            { parseMode: "Markdown" }
-          );
+          
+          if (!check.silent) {
+            await this.channel.sendMessage(
+              this.chatId,
+              `⚙️ _Background Sync: ${check.name}_\n\`\`\`\n${message}\n\`\`\``,
+              { parseMode: "Markdown" }
+            );
+          }
         }
       } catch (err: any) {
         console.error(`Heartbeat check "${check.name}" failed:`, err.message);

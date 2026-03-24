@@ -1,0 +1,9 @@
+fastapi==0.109.2
+uvicorn==0.27.1
+crewai
+crewai-tools
+langchain-google-genai
+langchain-openai
+python-dotenv
+pydantic
+supabase

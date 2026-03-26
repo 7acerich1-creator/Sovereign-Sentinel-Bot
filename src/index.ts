@@ -516,10 +516,13 @@ async function main() {
     { name: "vector", token: (config.telegram as any).vector_token },
   ];
 
-  if (config.memory.supabaseUrl && config.memory.supabaseKey) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_ANON_KEY;
+
+  if (supabaseUrl && supabaseKey) {
     const supabase = (await import("@supabase/supabase-js")).createClient(
-      config.memory.supabaseUrl,
-      config.memory.supabaseKey
+      supabaseUrl,
+      supabaseKey
     );
 
     for (const agentCfg of agents) {
@@ -527,6 +530,7 @@ async function main() {
 
       try {
         // Fetch personality from Supabase
+        console.log(`[BotInit] Querying personality_config for agent_name = '${agentCfg.name}'`);
         const { data: personality, error } = await supabase
           .from("personality_config")
           .select("prompt_blueprint, agent_name")
@@ -535,6 +539,8 @@ async function main() {
 
         if (error || !personality) {
           console.warn(`⚠️ Could not find personality for ${agentCfg.name} in Supabase`);
+          if (error) console.error(`[BotInit] Supabase Error for ${agentCfg.name}:`, JSON.stringify(error, null, 2));
+          else console.warn(`[BotInit] personality_config returned empty for ${agentCfg.name}`);
           continue;
         }
 

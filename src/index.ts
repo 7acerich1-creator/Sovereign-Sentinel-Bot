@@ -499,7 +499,7 @@ async function main() {
 
   await webhookServer.start();
 
-  // ── 9. Start Telegram ──
+  // ── 9. Start Telegram (Veritas) ──
   await telegram.initialize();
   console.log("# ✅ Vanguard is LIVE");
 
@@ -507,14 +507,16 @@ async function main() {
   router.registerChannel(telegram);
 
   // ── 11. Multi-Bot Initialization (Maven Crew) ──
-  const agents = [
-    { name: "veritas", token: (config.telegram as any).veritas_token },
-    { name: "sapphire", token: (config.telegram as any).sapphire_token },
-    { name: "alfred", token: (config.telegram as any).alfred_token },
-    { name: "yuki", token: (config.telegram as any).yuki_token },
-    { name: "anita", token: (config.telegram as any).anita_token },
-    { name: "vector", token: (config.telegram as any).vector_token },
+  const crewAgents = [
+    { name: "sapphire", token: process.env.SAPPHIRE_TOKEN },
+    { name: "alfred", token: process.env.ALFRED_TOKEN },
+    { name: "yuki", token: process.env.YUKI_TOKEN },
+    { name: "anita", token: process.env.ANITA_TOKEN },
+    { name: "vector", token: process.env.VECTOR_TOKEN },
   ];
+
+  const agentChannels: TelegramChannel[] = [];
+  const activeBotHandles: string[] = ["Veritas"];
 
   if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
     const supabase = (await import("@supabase/supabase-js")).createClient(
@@ -522,10 +524,13 @@ async function main() {
       process.env.SUPABASE_ANON_KEY
     );
 
-    for (const agentCfg of agents) {
-      if (!agentCfg.token || agentCfg.token === config.telegram.botToken) continue;
+    for (const agentCfg of crewAgents) {
+      const token = agentCfg.token;
+      if (!token) continue;
 
       try {
+        console.log(`[BotInit] ${agentCfg.name} token: ${token.substring(0, 8)}...`);
+
         // Fetch personality from Supabase
         console.log(`[BotInit] Querying personality_config for agent_name = '${agentCfg.name}'`);
         const { data: personality, error } = await supabase
@@ -541,13 +546,12 @@ async function main() {
           continue;
         }
 
-        // Initialize Channel with token swapping trick
+        // Initialize Channel with token swapping trick (swap -> init -> swap back)
         const originalToken = config.telegram.botToken;
-        (config.telegram as any).botToken = agentCfg.token;
+        (config.telegram as any).botToken = token;
         const agentChannel = new TelegramChannel();
-        (config.telegram as any).botToken = originalToken;
-
         await agentChannel.initialize();
+        (config.telegram as any).botToken = originalToken;
 
         // Wrap LLM for system prompt injection
         const blueprint = personality.prompt_blueprint;
@@ -557,14 +561,14 @@ async function main() {
             failoverLLM.generate(messages, { ...options, systemPrompt: blueprint }),
         };
 
-        // Initialize Agent Loop
+        // Initialize Agent Loop (Unique per bot)
         const agentBotLoop = new AgentLoop(injectedLLM, tools, memoryProviders);
         agentBotLoop.setLLMProviders(providersMap);
 
         // Group management for agent bot
         const agentGroupManager = new GroupManager(`${agentCfg.name}_bot`, config.telegram.authorizedUserIds);
 
-        // Wire Handler (Identical to main bot but using agent's loop/channel)
+        // Wire Handler (Isolated from MessageRouter)
         agentChannel.onMessage(async (message: Message) => {
           try {
             if (!agentGroupManager.shouldRespond(message)) return;
@@ -583,7 +587,8 @@ async function main() {
             }
 
             await agentChannel.sendTyping(message.chatId);
-            const processingMsg = await agentChannel.sendMessage(message.chatId, `⚡ _${agentCfg.name.charAt(0).toUpperCase() + agentCfg.name.slice(1)} Processing..._`, { parseMode: "Markdown" });
+            const agentNameCap = agentCfg.name.charAt(0).toUpperCase() + agentCfg.name.slice(1);
+            const processingMsg = await agentChannel.sendMessage(message.chatId, `⚡ _${agentNameCap} Processing..._`, { parseMode: "Markdown" });
             
             const response = await agentBotLoop.processMessage(message, () => agentChannel.sendTyping(message.chatId));
 
@@ -598,8 +603,8 @@ async function main() {
           }
         });
 
-        router.registerChannel(agentChannel);
-        console.log(`✅ [${agentCfg.name.toUpperCase()}] bot online — token: ${agentCfg.token.slice(0, 8)}...`);
+        agentChannels.push(agentChannel);
+        activeBotHandles.push(agentCfg.name.charAt(0).toUpperCase() + agentCfg.name.slice(1));
       } catch (err: any) {
         console.error(`❌ Failed to initialize ${agentCfg.name} bot:`, err.message);
       }
@@ -612,6 +617,7 @@ async function main() {
   console.log(`🔧 Tools: ${tools.length} loaded`);
   console.log(`🧬 LLM: ${failoverLLM.listProviders().join(" → ")}`);
   console.log(`📡 Channels: ${router.listChannels().join(", ")}`);
+  console.log(`✅ Maven Crew ONLINE — [${activeBotHandles.join(", ")}]`);
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
   // ── Graceful Shutdown ──
@@ -622,6 +628,12 @@ async function main() {
     await webhookServer.shutdown();
     await mcpBridge.shutdown();
     await router.shutdownAll();
+    
+    // Shutdown agent channels
+    for (const chan of agentChannels) {
+      await chan.shutdown();
+    }
+
     for (const provider of memoryProviders) {
       await provider.close();
     }

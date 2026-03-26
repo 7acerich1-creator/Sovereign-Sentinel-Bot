@@ -238,7 +238,7 @@ async function main() {
       await telegram.sendTyping(message.chatId);
 
       // ── Send immediate processing signal ──
-      const processingMsg = await telegram.sendMessage(message.chatId, "⚡ _Vanguard Processing..._", { parseMode: "Markdown" });
+      const processingMsg = await telegram.sendMessage(message.chatId, "⚡ _Veritas Processing..._", { parseMode: "Markdown" });
       const HANDLER_TIMEOUT_MS = 120_000;
       
       const response = await Promise.race([

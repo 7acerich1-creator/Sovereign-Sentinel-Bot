@@ -506,6 +506,106 @@ async function main() {
   // Register channel in router
   router.registerChannel(telegram);
 
+  // ── 11. Multi-Bot Initialization (Maven Crew) ──
+  const agents = [
+    { name: "veritas", token: (config.telegram as any).veritas_token },
+    { name: "sapphire", token: (config.telegram as any).sapphire_token },
+    { name: "alfred", token: (config.telegram as any).alfred_token },
+    { name: "yuki", token: (config.telegram as any).yuki_token },
+    { name: "anita", token: (config.telegram as any).anita_token },
+    { name: "vector", token: (config.telegram as any).vector_token },
+  ];
+
+  if (config.memory.supabaseUrl && config.memory.supabaseKey) {
+    const supabase = (await import("@supabase/supabase-js")).createClient(
+      config.memory.supabaseUrl,
+      config.memory.supabaseKey
+    );
+
+    for (const agentCfg of agents) {
+      if (!agentCfg.token || agentCfg.token === config.telegram.botToken) continue;
+
+      try {
+        // Fetch personality from Supabase
+        const { data: personality, error } = await supabase
+          .from("personality_config")
+          .select("prompt_blueprint, agent_name")
+          .eq("agent_name", agentCfg.name)
+          .single();
+
+        if (error || !personality) {
+          console.warn(`⚠️ Could not find personality for ${agentCfg.name} in Supabase`);
+          continue;
+        }
+
+        // Initialize Channel with token swapping trick
+        const originalToken = config.telegram.botToken;
+        (config.telegram as any).botToken = agentCfg.token;
+        const agentChannel = new TelegramChannel();
+        (config.telegram as any).botToken = originalToken;
+
+        await agentChannel.initialize();
+
+        // Wrap LLM for system prompt injection
+        const blueprint = personality.prompt_blueprint;
+        const injectedLLM: LLMProvider = {
+          ...failoverLLM,
+          generate: (messages, options) => 
+            failoverLLM.generate(messages, { ...options, systemPrompt: blueprint }),
+          generateStream: failoverLLM.generateStream 
+            ? (messages, options) => failoverLLM.generateStream!(messages, { ...options, systemPrompt: blueprint })
+            : undefined,
+        };
+
+        // Initialize Agent Loop
+        const agentBotLoop = new AgentLoop(injectedLLM, tools, memoryProviders);
+        agentBotLoop.setLLMProviders(providersMap);
+
+        // Group management for agent bot
+        const agentGroupManager = new GroupManager(`${agentCfg.name}_bot`, config.telegram.authorizedUserIds);
+
+        // Wire Handler (Identical to main bot but using agent's loop/channel)
+        agentChannel.onMessage(async (message: Message) => {
+          try {
+            if (!agentGroupManager.shouldRespond(message)) return;
+            if (message.metadata?.isGroup) message.content = agentGroupManager.stripMention(message.content);
+
+            // Voice handling
+            if (message.attachments?.some((a) => a.type === "voice" || a.type === "audio")) {
+              const voiceAttachment = message.attachments.find((a) => a.type === "voice" || a.type === "audio");
+              if (voiceAttachment?.url) {
+                await agentChannel.sendTyping(message.chatId);
+                const audioBuffer = await downloadTelegramFile(voiceAttachment.url);
+                const transcription = await transcribeAudio(audioBuffer, voiceAttachment.mimeType);
+                message.content = transcription;
+                await agentChannel.sendMessage(message.chatId, `🎙️ _Transcribed:_ ${transcription.slice(0, 200)}...`, { parseMode: "Markdown" });
+              }
+            }
+
+            await agentChannel.sendTyping(message.chatId);
+            const processingMsg = await agentChannel.sendMessage(message.chatId, `⚡ _${agentCfg.name.charAt(0).toUpperCase() + agentCfg.name.slice(1)} Processing..._`, { parseMode: "Markdown" });
+            
+            const response = await agentBotLoop.processMessage(message, () => agentChannel.sendTyping(message.chatId));
+
+            if (agentChannel.editMessage) {
+              await agentChannel.editMessage(message.chatId, processingMsg.channelMessageId!, response, { parseMode: "Markdown" });
+            } else {
+              await agentChannel.sendMessage(message.chatId, response, { parseMode: "Markdown" });
+            }
+          } catch (err: any) {
+            console.error(`[${agentCfg.name}] Handler error:`, err);
+            await agentChannel.sendMessage(message.chatId, `⚠️ Error: ${err.message}`);
+          }
+        });
+
+        router.registerChannel(agentChannel);
+        console.log(`✅ [${agentCfg.name.toUpperCase()}] bot online — token: ${agentCfg.token.slice(0, 8)}...`);
+      } catch (err: any) {
+        console.error(`❌ Failed to initialize ${agentCfg.name} bot:`, err.message);
+      }
+    }
+  }
+
   // ── 10. Memory heartbeat log ──
   console.log("\n━━━ GRAVITY CLAW v3.0 — FULLY ONLINE ━━━");
   console.log(`🧠 Memory: ${memoryProviders.map((m) => m.name).join(" + ")}`);

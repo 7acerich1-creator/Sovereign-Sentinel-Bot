@@ -19,11 +19,17 @@ function envInt(key: string, fallback: number): number {
 export const config: GravityClawConfig = {
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN || "",
+    veritas_token: process.env.VERITAS_TOKEN || process.env.TELEGRAM_BOT_TOKEN || "",
+    sapphire_token: process.env.SAPPHIRE_TOKEN || "",
+    alfred_token: process.env.ALFRED_TOKEN || "",
+    yuki_token: process.env.YUKI_TOKEN || "",
+    anita_token: process.env.ANITA_TOKEN || "",
+    vector_token: process.env.VECTOR_TOKEN || "",
     authorizedUserIds: envList(
       "TELEGRAM_AUTHORIZED_USER_IDS",
       [process.env.TELEGRAM_AUTHORIZED_USER_ID || process.env.AUTHORIZED_USER_ID || "8593700720"]
     ).map(Number),
-  },
+  } as any,
 
   llm: {
     defaultProvider: process.env.LLM_DEFAULT_PROVIDER || "gemini",

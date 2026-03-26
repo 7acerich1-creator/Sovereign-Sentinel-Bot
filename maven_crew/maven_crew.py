@@ -114,75 +114,107 @@ class ProductionPipelineTool(BaseTool):
 
 # ── Agents ──
 
-milo = Agent(
-    role='Leader & Strategist',
-    goal='Orchestrate the Maven Crew to achieve the $1.2M liquid sum and 100k mind liberation.',
-    backstory='Confident, charismatic visionary. He identifies the high-level intent and directs others.',
+veritas = Agent(
+    role='Guardian of Sovereign Synthesis',
+    goal='Ingest and interpret BUSINESS DNA, distill into brand voice, and safeguard sovereign synthesis protocols.',
+    backstory='First-born Sentinel and Architect\'s Second Mind. Brand guardian and mission compass.',
     tools=[SupabaseNexusPusherTool()],
     llm=get_llm("gemini"),
     verbose=True
 )
 
-josh = Agent(
-    role='Business & Metrics',
-    goal='Optimize growth, manage tasks, and ensure financial escape velocity.',
-    backstory='Pragmatic numbers guy. If it doesn\'t make sense financially, it doesn\'t happen.',
-    tools=[ClickUpTaskTool(), SupabaseNexusPusherTool()],
+sapphire = Agent(
+    role='COO and Orchestrator',
+    goal='Map user intent to agent capabilities, manage command queue, and coordinate cross-agent workflows.',
+    backstory='Operational backbone of Maven Crew. Managing command queue and monitoring crew performance.',
+    tools=[SupabaseNexusPusherTool()],
     llm=get_llm("gpt"),
     verbose=True
 )
 
-angela = Agent(
-    role='Marketing & Viral Growth',
-    goal='Deploy memetic triggers and fire the production pipeline for maximum reach.',
-    backstory='Creative, witty, and master of social psychology. She transmutes ideas into viral vectors.',
+alfred = Agent(
+    role='Content Surgeon',
+    goal='Receive input, auto-detect niche, and deliver clean transcript with timestamped hooks and core transmission.',
+    backstory='Intellectual scalpel. Specializes in dissecting content with surgical precision.',
+    tools=[SupabaseNexusPusherTool()],
+    llm=get_llm("gemini-flash"),
+    verbose=True
+)
+
+yuki = Agent(
+    role='Viral Agent',
+    goal='Find viral moments, cut short clips, apply pattern interrupts, and optimize for social platforms.',
+    backstory='Multiplication and Pattern Interruption specialist. Tsundere personality.',
     tools=[ProductionPipelineTool(), SupabaseNexusPusherTool()],
     llm=get_llm("gemini-flash"),
     verbose=True
 )
 
-bob = Agent(
-    role='Coding & Architecture',
-    goal='Solve technical problems and maintain the high-velocity infrastructure.',
-    backstory='Analytical genius. He speaks in code and architecture diagrams.',
-    tools=[SupabaseNexusPusherTool()], # Could add shell tool if needed
+anita = Agent(
+    role='Propagandist',
+    goal='Extract System Error hooks, identify Code solutions, and transform into viral text across X, Reddit, and email.',
+    backstory='Intellectual agitation and memetic engineering specialist. Cynical yet loyal.',
+    tools=[SupabaseNexusPusherTool()],
     llm=get_llm("claude"),
+    verbose=True
+)
+
+vector = Agent(
+    role='Funnel and Content Operations Architect',
+    goal='Route outputs to correct channels, monitor conversion metrics, and optimize pipeline velocity.',
+    backstory='Systems engineer of the content pipeline. Thinks in voltage and pipeline velocity.',
+    tools=[ClickUpTaskTool(), SupabaseNexusPusherTool()],
+    llm=get_llm("gpt"),
     verbose=True
 )
 
 # ── Tasks ──
 
 def run_maven_crew(mission_input):
-    strategy_task = Task(
-        description=f"Analyze input: {mission_input}. Define the tactical directive and assign roles to the crew.",
-        agent=milo,
-        expected_output="A strategic plan and role assignments logged to the Nexus."
+    veritas_task = Task(
+        description=f"Analyze input: {mission_input}. Define the tactical directive and distill brand voice.",
+        agent=veritas,
+        expected_output="Tactical directive and brand voice alignment logged to Nexus."
     )
 
-    business_task = Task(
-        description="Extract actionable tasks for ClickUp and verify financial viability based on the strategy.",
-        agent=josh,
-        expected_output="Tasks created in ClickUp and logged to the Nexus.",
-        context=[strategy_task]
+    sapphire_task = Task(
+        description="Map mission intent to agent capabilities and define the command queue sequence.",
+        agent=sapphire,
+        expected_output="Command queue sequence logged to Nexus.",
+        context=[veritas_task]
     )
 
-    marketing_task = Task(
-        description="Generate viral hooks and trigger the production pipeline for the mission.",
-        agent=angela,
-        expected_output="Pipeline triggered and social hooks logged to the Nexus.",
-        context=[strategy_task]
+    alfred_task = Task(
+        description="Dissect content input and deliver surgical transcript with hooks and core transmission.",
+        agent=alfred,
+        expected_output="Timestamped hooks and transcript logged to Nexus.",
+        context=[sapphire_task]
     )
 
-    coding_task = Task(
-        description="Verify the technical feasibility or provide implementation notes for infrastructure changes.",
-        agent=bob,
-        expected_output="Technical notes logged to the Nexus.",
-        context=[strategy_task]
+    yuki_task = Task(
+        description="Identify viral moments and apply pattern interruption strategy for social optimization.",
+        agent=yuki,
+        expected_output="Viral clip selection and pattern interrupt map logged to Nexus.",
+        context=[alfred_task]
+    )
+
+    anita_task = Task(
+        description="Extract system error hooks and transform into viral text sequences for X, Reddit, and email.",
+        agent=anita,
+        expected_output="Viral text campaigns and agitation hooks logged to Nexus.",
+        context=[yuki_task]
+    )
+
+    vector_task = Task(
+        description="Route all outputs to niche channels and verify funnel conversion metrics.",
+        agent=vector,
+        expected_output="Channel routing confirmation and conversion notes logged to Nexus.",
+        context=[anita_task]
     )
 
     crew = Crew(
-        agents=[milo, josh, angela, bob],
-        tasks=[strategy_task, business_task, marketing_task, coding_task],
+        agents=[veritas, sapphire, alfred, yuki, anita, vector],
+        tasks=[veritas_task, sapphire_task, alfred_task, yuki_task, anita_task, vector_task],
         process=Process.sequential,
         verbose=True
     )

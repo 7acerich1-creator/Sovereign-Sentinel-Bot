@@ -42,10 +42,10 @@ Include (only if real data exists):
 Keep it under 150 words. Be direct, sovereign, no filler. Format for Telegram (Markdown).`;
 
     try {
-      const miloPrompt = getSystemPrompt(PERSONA_REGISTRY.milo);
+      const veritasPrompt = getSystemPrompt(PERSONA_REGISTRY.veritas);
       const response = await this.llm.generate(
         [{ role: "user", content: prompt }],
-        { systemPrompt: miloPrompt, maxTokens: 500 }
+        { systemPrompt: veritasPrompt, maxTokens: 500 }
       );
 
       await this.channel.sendMessage(
@@ -80,10 +80,10 @@ Include (only if real data exists):
 Keep it under 150 words. Format for Telegram (Markdown).`;
 
     try {
-      const miloPrompt = getSystemPrompt(PERSONA_REGISTRY.milo);
+      const veritasPrompt = getSystemPrompt(PERSONA_REGISTRY.veritas);
       const response = await this.llm.generate(
         [{ role: "user", content: prompt }],
-        { systemPrompt: miloPrompt, maxTokens: 500 }
+        { systemPrompt: veritasPrompt, maxTokens: 500 }
       );
 
       await this.channel.sendMessage(

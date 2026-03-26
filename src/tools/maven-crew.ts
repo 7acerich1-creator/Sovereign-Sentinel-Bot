@@ -10,7 +10,7 @@ import path from "path";
 export class MavenCrewTool implements Tool {
   definition: ToolDefinition = {
     name: "maven_crew",
-    description: "Deploy the Maven Crew (Milo, Josh, Angela, Bob) to handle complex strategy, coding, and marketing missions. Best for tasks requiring multi-agent collaboration and external tool usage (ClickUp, Make.com).",
+    description: "Deploy the Maven Crew (Veritas, Sapphire, Alfred, Yuki, Anita, Vector) to handle complex strategy, coding, and marketing missions. Best for tasks requiring multi-agent collaboration and external tool usage (ClickUp, Make.com).",
     parameters: {
       mission: { type: "string", description: "The specific mission or goal for the crew to accomplish" },
     },

@@ -552,9 +552,6 @@ async function main() {
           ...failoverLLM,
           generate: (messages, options) => 
             failoverLLM.generate(messages, { ...options, systemPrompt: blueprint }),
-          generateStream: failoverLLM.generateStream 
-            ? (messages, options) => failoverLLM.generateStream!(messages, { ...options, systemPrompt: blueprint })
-            : undefined,
         };
 
         // Initialize Agent Loop

@@ -215,9 +215,9 @@ export class SocialSchedulerPendingTool implements Tool {
         due_at: u.due_at,
       }));
 
-      return `${updates.length} pending posts for profile ${profileId}:\n${JSON.stringify(summary, null, 2)}`;
+      return `${updates.length} pending post(s) for profile ${profileId}:\n${JSON.stringify(summary, null, 2)}`;
     } catch (err: any) {
-      return `Error getting pending posts: ${err.message}`;
+      return `Error fetching pending posts: ${err.message}`;
     }
   }
 }

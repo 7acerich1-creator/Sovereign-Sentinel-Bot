@@ -520,19 +520,20 @@ async function main() {
   });
 
   // ── Crew Dispatch webhook — external systems (Make.com) can push tasks to agents ──
-  webhookServer.register("/api/dispatch", async (payload: any) => {
-    const { from_agent, to_agent, task_type, data, priority, chat_id } = payload as any;
+  webhookServer.register("/api/dispatch", async (incoming: any) => {
+    const { from_agent, to_agent, task_type, payload: taskPayload, data, priority, chat_id } = incoming as any;
     if (!to_agent) return "error: to_agent required";
 
     const id = await dispatchTask({
       from_agent: from_agent || "external",
       to_agent,
       task_type: task_type || "webhook_trigger",
-      payload: data || payload,
+      payload: taskPayload || data || incoming,
       priority: priority || 5,
       chat_id: chat_id || defaultChatId,
     });
 
+    console.log(`📡 [Dispatch Webhook] ${from_agent || "external"} → ${to_agent} | type: ${task_type} | id: ${id}`);
     return id ? `dispatched:${id}` : "error: dispatch failed";
   });
 
@@ -653,6 +654,10 @@ async function main() {
             }
 
             // ── ALFRED: YouTube URL Pipeline Interceptor ──
+            // Fires three parallel streams:
+            //   1. Scenario E — DumplingAI transcript → dispatches back to Alfred via /api/dispatch
+            //   2. Scenario F — OpusClip clip extraction → dispatches to Yuki via /api/dispatch
+            //   3. Alfred's own LLM processes the URL with injected pipeline context
             const YOUTUBE_URL_RE = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11})/i;
             if (agentCfg.name === "alfred" && YOUTUBE_URL_RE.test(message.content)) {
               const match = message.content.match(YOUTUBE_URL_RE);
@@ -661,31 +666,64 @@ async function main() {
 
               await agentChannel.sendTyping(message.chatId);
               await agentChannel.sendMessage(message.chatId,
-                `🎯 _YouTube URL detected. Triggering Sovereign Content Factory..._\n` +
-                `Video ID: \`${videoId}\``,
+                `🎯 _YouTube URL detected. Activating Vid Rush Pipeline..._\n` +
+                `Video ID: \`${videoId}\`\n` +
+                `📡 _Scenario E (Transcript) + Scenario F (OpusClip) firing in parallel..._`,
                 { parseMode: "Markdown" }
               );
 
-              // Fire Make.com webhook to trigger content pipeline
-              const MAKE_WEBHOOK_URL = process.env.MAKE_CONTENT_FACTORY_WEBHOOK || "https://hook.us2.make.com/snoqd8i7rcrbfmkvmpgx83toploxea3w";
-              try {
-                await fetch(MAKE_WEBHOOK_URL, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ youtube_url: youtubeUrl, video_id: videoId, triggered_by: "alfred" }),
-                });
-                console.log(`[Alfred] Make.com webhook fired for ${youtubeUrl}`);
-              } catch (webhookErr: any) {
-                console.error(`[Alfred] Make.com webhook error: ${webhookErr.message}`);
+              // Fire Make.com webhooks in parallel — Scenario E (transcript) + Scenario F (OpusClip)
+              const SCENARIO_E_WEBHOOK = process.env.MAKE_SCENARIO_E_WEBHOOK || "";
+              const SCENARIO_F_WEBHOOK = process.env.MAKE_SCENARIO_F_WEBHOOK || "";
+              const webhookPayload = {
+                youtube_url: youtubeUrl,
+                video_id: videoId,
+                chat_id: String(message.chatId),
+                triggered_by: "alfred",
+              };
+
+              const webhookFires: Promise<void>[] = [];
+
+              if (SCENARIO_E_WEBHOOK) {
+                webhookFires.push(
+                  fetch(SCENARIO_E_WEBHOOK, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(webhookPayload),
+                  }).then(() => console.log(`📡 [Alfred] Scenario E webhook fired for ${youtubeUrl}`))
+                    .catch((err: any) => console.error(`[Alfred] Scenario E webhook error: ${err.message}`))
+                );
+              } else {
+                console.warn("[Alfred] MAKE_SCENARIO_E_WEBHOOK not set — transcript pipeline skipped");
               }
 
+              if (SCENARIO_F_WEBHOOK) {
+                webhookFires.push(
+                  fetch(SCENARIO_F_WEBHOOK, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      ...webhookPayload,
+                      opusclip_api_key: process.env.OPUSCLIP_API_KEY || "",
+                    }),
+                  }).then(() => console.log(`📡 [Alfred] Scenario F webhook fired for ${youtubeUrl}`))
+                    .catch((err: any) => console.error(`[Alfred] Scenario F webhook error: ${err.message}`))
+                );
+              } else {
+                console.warn("[Alfred] MAKE_SCENARIO_F_WEBHOOK not set — OpusClip pipeline skipped");
+              }
+
+              // Fire all webhooks in parallel (don't block the main flow)
+              Promise.all(webhookFires).catch(() => {});
+
               // Inject pipeline context into the message so Alfred's LLM processes it
-              message.content = `[CONTENT PIPELINE TRIGGERED] The Sovereign Content Factory has been activated for: ${youtubeUrl}\n\n` +
+              message.content = `[VID RUSH PIPELINE ACTIVATED] Content Factory triggered for: ${youtubeUrl}\n\n` +
                 `Your task: Process this YouTube URL. Auto-detect the niche (dark psychology, self-improvement, burnout, or quantum physics). ` +
                 `Extract 3 timestamped hooks: (1) 0:00 scroll-stopping opening, (2) ~30% escalation, (3) ~70% solution/reveal. ` +
                 `Generate a cleaned transcript summary and 1 core transmission sentence. Apply Sovereign Synthesis lexicon. ` +
                 `Use the crew_dispatch tool to send your outputs downstream: ` +
                 `dispatch timestamped_hooks to yuki, cleaned_transcript to anita, and core_summary to sapphire.\n` +
+                `NOTE: DumplingAI transcript (Scenario E) and OpusClip clips (Scenario F) are being processed in parallel via Make.com.\n` +
                 `Original message: ${message.content}`;
             }
 
@@ -755,6 +793,21 @@ async function main() {
               try {
                 const response = await agentLoop.processMessage(dispatchMessage);
                 await completeDispatch(task.id, "completed", response.slice(0, 4000));
+
+                // Auto-trigger pipeline handoffs if this agent has downstream routes
+                try {
+                  const handoffIds = await triggerPipelineHandoffs(
+                    agentName,
+                    { response, ...task.payload },
+                    task.id,
+                    task.chat_id || defaultChatId
+                  );
+                  if (handoffIds.length > 0) {
+                    console.log(`🔗 [Pipeline] ${agentName} auto-dispatched ${handoffIds.length} downstream task(s)`);
+                  }
+                } catch (handoffErr: any) {
+                  console.error(`[Pipeline] Handoff error for ${agentName}: ${handoffErr.message}`);
+                }
 
                 // Notify the originating chat that dispatch was processed
                 if (task.chat_id) {

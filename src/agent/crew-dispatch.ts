@@ -350,14 +350,15 @@ export class CrewDispatchTool implements Tool {
 
       case "complete": {
         const taskId = String(args.task_id || "");
-        if (!taskId) return "Error: task_id required.";
+        if (!taskId) return "Error: task_id required for completion.";
 
-        await completeDispatch(taskId, "completed", String(args.result || ""));
-        return `✅ Task ${taskId} marked complete.`;
+        const status = String(args.result || "").toLowerCase().includes("fail") ? "failed" as const : "completed" as const;
+        await completeDispatch(taskId, status, String(args.result || "Task completed"));
+        return `✅ Task ${taskId} marked as ${status}.`;
       }
 
       default:
-        return `Unknown action: ${action}. Use dispatch, claim, status, or complete.`;
+        return `Unknown action: ${action}. Use: dispatch, claim, status, or complete.`;
     }
   }
 }

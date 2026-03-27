@@ -53,6 +53,6 @@ export class GroupManager {
   }
 
   stripMention(text: string): string {
-    return text.replace(new RegExp(`@${this.botUsername}\\b`, "gi"), "").trim();
+    return text.replace(new RegExp(`@${this.botUsername}`, "gi"), "").trim();
   }
 }

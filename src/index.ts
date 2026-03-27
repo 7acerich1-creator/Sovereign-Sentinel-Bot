@@ -597,10 +597,46 @@ async function main() {
               }
             }
 
+            // ── ALFRED: YouTube URL Pipeline Interceptor ──
+            const YOUTUBE_URL_RE = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11})/i;
+            if (agentCfg.name === "alfred" && YOUTUBE_URL_RE.test(message.content)) {
+              const match = message.content.match(YOUTUBE_URL_RE);
+              const videoId = match?.[1];
+              const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
+              await agentChannel.sendTyping(message.chatId);
+              await agentChannel.sendMessage(message.chatId,
+                `🎯 _YouTube URL detected. Triggering Sovereign Content Factory..._\n` +
+                `Video ID: \`${videoId}\``,
+                { parseMode: "Markdown" }
+              );
+
+              // Fire Make.com webhook to trigger content pipeline
+              const MAKE_WEBHOOK_URL = process.env.MAKE_CONTENT_FACTORY_WEBHOOK || "https://hook.us2.make.com/snoqd8i7rcrbfmkvmpgx83toploxea3w";
+              try {
+                await fetch(MAKE_WEBHOOK_URL, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ youtube_url: youtubeUrl, video_id: videoId, triggered_by: "alfred" }),
+                });
+                console.log(`[Alfred] Make.com webhook fired for ${youtubeUrl}`);
+              } catch (webhookErr: any) {
+                console.error(`[Alfred] Make.com webhook error: ${webhookErr.message}`);
+              }
+
+              // Inject pipeline context into the message so Alfred's LLM processes it as a content extraction task
+              message.content = `[CONTENT PIPELINE TRIGGERED] The Sovereign Content Factory has been activated for: ${youtubeUrl}\n\n` +
+                `Your task: Process this YouTube URL. Auto-detect the niche (dark psychology, self-improvement, burnout, or quantum physics). ` +
+                `Extract 3 timestamped hooks: (1) 0:00 scroll-stopping opening, (2) ~30% escalation, (3) ~70% solution/reveal. ` +
+                `Generate 1 core transmission sentence. Apply Sovereign Synthesis lexicon. ` +
+                `Confirm Yuki and Anita have been triggered for clips and text content respectively. ` +
+                `Original message: ${message.content}`;
+            }
+
             await agentChannel.sendTyping(message.chatId);
             const agentNameCap = agentCfg.name.charAt(0).toUpperCase() + agentCfg.name.slice(1);
             const processingMsg = await agentChannel.sendMessage(message.chatId, `⚡ _${agentNameCap} Processing..._`, { parseMode: "Markdown" });
-            
+
             const response = await agentBotLoop.processMessage(message, () => agentChannel.sendTyping(message.chatId));
 
             if (agentChannel.editMessage) {

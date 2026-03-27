@@ -10,8 +10,15 @@ export class GroupManager {
   private adminUserIds: number[];
 
   constructor(botUsername: string, adminUserIds: number[]) {
-    this.botUsername = botUsername.toLowerCase();
+    this.botUsername = botUsername.toLowerCase().replace(/^@/, "");
     this.adminUserIds = adminUserIds;
+  }
+
+  /**
+   * Update the bot username dynamically (e.g., after getMe() resolves).
+   */
+  setBotUsername(username: string): void {
+    this.botUsername = username.toLowerCase().replace(/^@/, "");
   }
 
   shouldRespond(message: Message): boolean {
@@ -20,12 +27,20 @@ export class GroupManager {
     // Always respond in private chats
     if (meta.chatType === "private") return true;
 
-    // In groups, only respond when mentioned
+    // Check Telegram entities for @mention (most reliable)
+    const mentionedUsernames = meta.mentionedUsernames as string[] | undefined;
+    if (mentionedUsernames?.includes(this.botUsername)) return true;
+
+    // Respond to replies to this bot's messages
+    if (meta.replyToBotMessage) return true;
+
+    // Fallback: text-based @mention check (handles edge cases)
     const content = message.content.toLowerCase();
     if (content.includes(`@${this.botUsername}`)) return true;
-    if (content.startsWith("/")) return true; // Respond to commands
 
-    // Check for reply to bot (would need channelMessageId tracking)
+    // Respond to slash commands
+    if (content.startsWith("/")) return true;
+
     return false;
   }
 
@@ -34,7 +49,6 @@ export class GroupManager {
   }
 
   getChatId(message: Message): string {
-    // Use unique chat ID for per-group memory isolation
     return message.chatId;
   }
 

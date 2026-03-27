@@ -13,6 +13,7 @@ export class TelegramChannel implements Channel {
   private bot: Bot;
   private messageHandler?: (message: Message) => Promise<void>;
   private callbackHandler?: (chatId: string, data: string) => Promise<void>;
+  public botUsername: string = "";  // Populated after initialize() via getMe()
 
   constructor() {
     this.bot = new Bot(config.telegram.botToken);
@@ -44,6 +45,14 @@ export class TelegramChannel implements Channel {
         return;
       }
 
+      // Extract mention entities for robust group chat routing
+      const mentionUsernames = (ctx.message.entities || [])
+        .filter((e: any) => e.type === "mention")
+        .map((e: any) => ctx.message.text.substring(e.offset + 1, e.offset + e.length).toLowerCase());
+
+      // Detect if this is a reply to a message from this bot
+      const replyToBotMessage = ctx.message.reply_to_message?.from?.id === this.bot.botInfo?.id;
+
       const message: Message = {
         id: randomUUID(),
         role: "user",
@@ -58,6 +67,8 @@ export class TelegramChannel implements Channel {
           username: ctx.from.username,
           isGroup: ctx.chat.type !== "private",
           chatType: ctx.chat.type,
+          mentionedUsernames: mentionUsernames,
+          replyToBotMessage,
         },
       };
 
@@ -190,6 +201,15 @@ export class TelegramChannel implements Channel {
 
     // Start polling — drop_pending_updates forces Telegram to clear
     // any queued updates and ensures THIS instance claims the connection
+    // Fetch bot identity BEFORE polling — needed for GroupManager
+    try {
+      const me = await this.bot.api.getMe();
+      this.botUsername = me.username || "";
+      console.log(`🤖 Bot identity: @${this.botUsername} (id: ${me.id})`);
+    } catch (err: any) {
+      console.error(`⚠️ getMe() failed — GroupManager will use fallback username: ${err.message}`);
+    }
+
     const pollingPromise = this.bot.start({
       drop_pending_updates: true,
       onStart: (info) => {

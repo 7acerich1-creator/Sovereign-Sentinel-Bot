@@ -40,6 +40,8 @@ import { SkillsSystem, SkillsTool } from "./tools/skills";
 import { MavenCrewTool } from "./tools/maven-crew";
 import { SystemTool } from "./tools/system";
 import { SocialSchedulerListProfilesTool, SocialSchedulerPostTool, SocialSchedulerPendingTool } from "./tools/social-scheduler";
+import { logTask, updateTask } from "./tools/task-logger";
+import { CrewDispatchTool, claimTasks, completeDispatch, dispatchTask, triggerPipelineHandoffs } from "./agent/crew-dispatch";
 
 // ── Voice ──
 import { transcribeAudio, downloadTelegramFile } from "./voice/transcription";
@@ -165,9 +167,12 @@ async function main() {
   const swarm = new AgentSwarm(failoverLLM, tools);
   tools.push(new SwarmTool(swarm));
 
-  // Agent Comms
+  // Agent Comms (legacy in-memory — kept for backward compat)
   const comms = new AgentComms();
   tools.push(new AgentCommsTool(comms));
+
+  // Crew Dispatch (Supabase-backed inter-agent routing — replaces AgentComms for cross-bot work)
+  tools.push(new CrewDispatchTool("veritas"));
 
   // ── 4. Initialize Agent Loop ──
   const agentLoop = new AgentLoop(failoverLLM, tools, memoryProviders);
@@ -185,8 +190,8 @@ async function main() {
   const telegram = new TelegramChannel();
   const router = new MessageRouter();
 
-  // Group management
-  const groupManager = new GroupManager("gravity_claw_bot", config.telegram.authorizedUserIds);
+  // Group management — username updated after telegram.initialize() resolves getMe()
+  const groupManager = new GroupManager("sovereign_bot", config.telegram.authorizedUserIds);
 
   // ── 6. Wire Message Handler ──
   const defaultChatId = String(config.telegram.authorizedUserIds[0]);
@@ -239,6 +244,14 @@ async function main() {
         if (handled) return;
       }
 
+      // ── Log task to Supabase command_queue ──
+      const taskId = await logTask({
+        command: message.content.slice(0, 500),
+        agent_name: "veritas",
+        chat_id: message.chatId,
+        status: "in_progress",
+      });
+
       // ── Send typing indicator ──
       console.log(`📥 [Handler] Sending typing indicator...`);
       await telegram.sendTyping(message.chatId);
@@ -246,7 +259,7 @@ async function main() {
       // ── Send immediate processing signal ──
       const processingMsg = await telegram.sendMessage(message.chatId, "⚡ _Veritas Processing..._", { parseMode: "Markdown" });
       const HANDLER_TIMEOUT_MS = 120_000;
-      
+
       const response = await Promise.race([
         agentLoop.processMessage(
           message,
@@ -256,6 +269,9 @@ async function main() {
           setTimeout(() => reject(new Error("Agent loop timed out after 120s")), HANDLER_TIMEOUT_MS)
         ),
       ]);
+
+      // ── Update task status ──
+      if (taskId) await updateTask(taskId, "completed", response.slice(0, 500));
 
       // ── Send response ──
       // Check if voice response was requested
@@ -503,10 +519,32 @@ async function main() {
     return "delivered";
   });
 
+  // ── Crew Dispatch webhook — external systems (Make.com) can push tasks to agents ──
+  webhookServer.register("/api/dispatch", async (payload: any) => {
+    const { from_agent, to_agent, task_type, data, priority, chat_id } = payload as any;
+    if (!to_agent) return "error: to_agent required";
+
+    const id = await dispatchTask({
+      from_agent: from_agent || "external",
+      to_agent,
+      task_type: task_type || "webhook_trigger",
+      payload: data || payload,
+      priority: priority || 5,
+      chat_id: chat_id || defaultChatId,
+    });
+
+    return id ? `dispatched:${id}` : "error: dispatch failed";
+  });
+
   await webhookServer.start();
 
   // ── 9. Start Telegram (Veritas) ──
   await telegram.initialize();
+  // Update Veritas GroupManager with real Telegram username from getMe()
+  if (telegram.botUsername) {
+    groupManager.setBotUsername(telegram.botUsername);
+    console.log(`[Veritas] GroupManager updated to real username: @${telegram.botUsername}`);
+  }
   console.log("# ✅ Vanguard is LIVE");
 
   // Register channel in router
@@ -526,6 +564,9 @@ async function main() {
 
   // Stagger delay between bot inits to prevent simultaneous Anthropic rate-limit hits
   const BOT_INIT_STAGGER_MS = 4_000;
+
+  // ── Map to hold each agent's AgentLoop + Channel for dispatch processing ──
+  const agentLoops: Map<string, { loop: AgentLoop; channel: TelegramChannel }> = new Map();
 
   if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
     const supabase = (await import("@supabase/supabase-js")).createClient(
@@ -574,16 +615,24 @@ async function main() {
         const blueprint = personality.prompt_blueprint;
         const injectedLLM: LLMProvider = {
           ...failoverLLM,
-          generate: (messages, options) => 
+          generate: (messages, options) =>
             failoverLLM.generate(messages, { ...options, systemPrompt: blueprint }),
         };
 
+        // Build per-agent tool set: shared tools + agent-specific CrewDispatchTool
+        const agentTools = [...tools, new CrewDispatchTool(agentCfg.name)];
+
         // Initialize Agent Loop (Unique per bot)
-        const agentBotLoop = new AgentLoop(injectedLLM, tools, memoryProviders);
+        const agentBotLoop = new AgentLoop(injectedLLM, agentTools, memoryProviders);
         agentBotLoop.setLLMProviders(providersMap);
 
-        // Group management for agent bot
-        const agentGroupManager = new GroupManager(`${agentCfg.name}_bot`, config.telegram.authorizedUserIds);
+        // Store loop + channel reference for dispatch polling
+        agentLoops.set(agentCfg.name, { loop: agentBotLoop, channel: agentChannel });
+
+        // Group management for agent bot — use REAL Telegram username from getMe()
+        const realBotUsername = agentChannel.botUsername || `${agentCfg.name}_SovereignBot`;
+        const agentGroupManager = new GroupManager(realBotUsername, config.telegram.authorizedUserIds);
+        console.log(`[BotInit] ${agentCfg.name} GroupManager username: @${realBotUsername}`);
 
         // Wire Handler (Isolated from MessageRouter)
         agentChannel.onMessage(async (message: Message) => {
@@ -630,20 +679,32 @@ async function main() {
                 console.error(`[Alfred] Make.com webhook error: ${webhookErr.message}`);
               }
 
-              // Inject pipeline context into the message so Alfred's LLM processes it as a content extraction task
+              // Inject pipeline context into the message so Alfred's LLM processes it
               message.content = `[CONTENT PIPELINE TRIGGERED] The Sovereign Content Factory has been activated for: ${youtubeUrl}\n\n` +
                 `Your task: Process this YouTube URL. Auto-detect the niche (dark psychology, self-improvement, burnout, or quantum physics). ` +
                 `Extract 3 timestamped hooks: (1) 0:00 scroll-stopping opening, (2) ~30% escalation, (3) ~70% solution/reveal. ` +
-                `Generate 1 core transmission sentence. Apply Sovereign Synthesis lexicon. ` +
-                `Confirm Yuki and Anita have been triggered for clips and text content respectively. ` +
+                `Generate a cleaned transcript summary and 1 core transmission sentence. Apply Sovereign Synthesis lexicon. ` +
+                `Use the crew_dispatch tool to send your outputs downstream: ` +
+                `dispatch timestamped_hooks to yuki, cleaned_transcript to anita, and core_summary to sapphire.\n` +
                 `Original message: ${message.content}`;
             }
+
+            // Log task to Supabase command_queue
+            const agentTaskId = await logTask({
+              command: message.content.slice(0, 500),
+              agent_name: agentCfg.name,
+              chat_id: message.chatId,
+              status: "in_progress",
+            });
 
             await agentChannel.sendTyping(message.chatId);
             const agentNameCap = agentCfg.name.charAt(0).toUpperCase() + agentCfg.name.slice(1);
             const processingMsg = await agentChannel.sendMessage(message.chatId, `⚡ _${agentNameCap} Processing..._`, { parseMode: "Markdown" });
 
             const response = await agentBotLoop.processMessage(message, () => agentChannel.sendTyping(message.chatId));
+
+            // Update task status
+            if (agentTaskId) await updateTask(agentTaskId, "completed", response.slice(0, 500));
 
             if (agentChannel.editMessage) {
               await agentChannel.editMessage(message.chatId, processingMsg.channelMessageId!, response, { parseMode: "Markdown" });
@@ -661,6 +722,59 @@ async function main() {
       } catch (err: any) {
         console.error(`❌ Failed to initialize ${agentCfg.name} bot:`, err.message);
       }
+    }
+
+    // ── Dispatch Poller — checks Supabase crew_dispatch for pending tasks every 15s ──
+    const DISPATCH_POLL_MS = 15_000;
+    if (agentLoops.size > 0) {
+      console.log(`📡 [CrewDispatch] Starting dispatch poller for ${agentLoops.size} agents (every ${DISPATCH_POLL_MS / 1000}s)`);
+
+      setInterval(async () => {
+        for (const [agentName, { loop: agentLoop, channel }] of agentLoops) {
+          try {
+            const tasks = await claimTasks(agentName, 3);
+            if (tasks.length === 0) continue;
+
+            for (const task of tasks) {
+              console.log(`🔄 [DispatchPoller] ${agentName} processing dispatch ${task.id} (type: ${task.task_type})`);
+
+              // Build a synthetic message from the dispatch payload
+              const payloadStr = JSON.stringify(task.payload, null, 2);
+              const dispatchMessage: Message = {
+                id: `dispatch-${task.id}`,
+                role: "user",
+                content: `[DISPATCHED TASK from ${task.from_agent}]\nType: ${task.task_type}\nDispatch ID: ${task.id}\n\nPayload:\n${payloadStr}\n\n` +
+                  `Process this task according to your role. When done, use crew_dispatch tool with action "complete" and task_id "${task.id}" to mark it done.`,
+                timestamp: new Date(),
+                channel: "telegram",
+                chatId: task.chat_id || defaultChatId,
+                userId: "dispatch-system",
+                metadata: { isDispatch: true, dispatchId: task.id, fromAgent: task.from_agent },
+              };
+
+              try {
+                const response = await agentLoop.processMessage(dispatchMessage);
+                await completeDispatch(task.id, "completed", response.slice(0, 4000));
+
+                // Notify the originating chat that dispatch was processed
+                if (task.chat_id) {
+                  await channel.sendMessage(
+                    task.chat_id,
+                    `📡 _${agentName.charAt(0).toUpperCase() + agentName.slice(1)} completed dispatch from ${task.from_agent}: ${task.task_type}_`,
+                    { parseMode: "Markdown" }
+                  );
+                }
+              } catch (processErr: any) {
+                console.error(`[DispatchPoller] ${agentName} failed on ${task.id}: ${processErr.message}`);
+                await completeDispatch(task.id, "failed", processErr.message);
+              }
+            }
+          } catch (pollErr: any) {
+            // Silent — don't let polling errors crash anything
+            console.error(`[DispatchPoller] ${agentName} poll error: ${pollErr.message}`);
+          }
+        }
+      }, DISPATCH_POLL_MS);
     }
   }
 

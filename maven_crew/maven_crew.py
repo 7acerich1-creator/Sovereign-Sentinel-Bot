@@ -14,12 +14,12 @@ load_dotenv()
 
 def get_llm(model_name):
     if "gemini" in model_name:
-        # System Override: Map Sovereign lore names to public API endpoints
-        raw_gemini_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-        api_gemini_model = "gemini-1.5-pro-latest" if "3.1-pro" in raw_gemini_model else raw_gemini_model
-        
+        # Use GEMINI_MODEL env var directly — no hardcoded remapping.
+        # Railway env var must be set to a valid Google API model string.
+        gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
         return ChatGoogleGenerativeAI(
-            model=api_gemini_model,
+            model=gemini_model,
             google_api_key=os.getenv("GEMINI_API_KEY"),
             temperature=0.7
         )

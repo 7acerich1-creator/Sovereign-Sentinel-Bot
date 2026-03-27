@@ -6,6 +6,51 @@
 import { GoogleGenerativeAI, Content, Part, FunctionDeclarationSchema } from "@google/generative-ai";
 import type { LLMProvider, LLMMessage, LLMOptions, LLMResponse, ToolDefinition, ToolCall } from "../types";
 
+// ── Gemini Schema Sanitizer ──
+// Gemini requires array types to have an "items" field and rejects
+// malformed schemas from MCP tool definitions. This recursively sanitizes
+// any property to be Gemini-compatible.
+function sanitizeGeminiProperty(prop: any): any {
+  if (!prop || typeof prop !== "object") {
+    return { type: "STRING", description: "" };
+  }
+
+  const typeStr = (prop.type || "string").toUpperCase();
+  const result: any = {
+    type: typeStr,
+    description: prop.description || "",
+  };
+
+  // Gemini requires "items" for ARRAY types — inject default if missing
+  if (typeStr === "ARRAY") {
+    if (prop.items && typeof prop.items === "object") {
+      result.items = sanitizeGeminiProperty(prop.items);
+    } else {
+      // Default: array of strings when items spec is missing
+      result.items = { type: "STRING" };
+    }
+  }
+
+  // Handle nested OBJECT types with properties
+  if (typeStr === "OBJECT" && prop.properties && typeof prop.properties === "object") {
+    const nestedProps: Record<string, any> = {};
+    for (const [k, v] of Object.entries(prop.properties as Record<string, any>)) {
+      nestedProps[k] = sanitizeGeminiProperty(v);
+    }
+    result.properties = nestedProps;
+    if (prop.required) {
+      result.required = prop.required;
+    }
+  }
+
+  // Preserve enum values
+  if (prop.enum) {
+    result.enum = prop.enum;
+  }
+
+  return result;
+}
+
 // ── Gemini Provider ──
 export class GeminiProvider implements LLMProvider {
   name: string;
@@ -16,10 +61,12 @@ export class GeminiProvider implements LLMProvider {
   constructor(apiKey: string, model: string) {
     this.name = "gemini";
     this.model = model;
-    
-    // [SYSTEM OVERRIDE] Map Sovereign project lore names to public API endpoints to prevent 404
-    this.apiModel = model.includes("3.1-pro") ? "gemini-1.5-pro-latest" : model;
-    
+
+    // Use the model string directly from GEMINI_MODEL env var.
+    // No hardcoded remapping — Railway env var must be set to a valid Google API model.
+    // Valid examples: gemini-2.0-flash, gemini-1.5-pro-latest, gemini-2.5-pro-preview-05-06
+    this.apiModel = model;
+
     this.genAI = new GoogleGenerativeAI(apiKey);
   }
 
@@ -47,11 +94,7 @@ export class GeminiProvider implements LLMProvider {
               // JSON Schema format — convert property types to uppercase for Gemini
               const props: Record<string, any> = {};
               for (const [k, v] of Object.entries(t.parameters.properties as Record<string, any>)) {
-                props[k] = {
-                  type: (v?.type || "string").toUpperCase(),
-                  description: v?.description || "",
-                  ...(v?.enum ? { enum: v.enum } : {}),
-                };
+                props[k] = sanitizeGeminiProperty(v);
               }
               params = {
                 type: "OBJECT" as const,
@@ -63,11 +106,7 @@ export class GeminiProvider implements LLMProvider {
               const props: Record<string, any> = {};
               for (const [k, v] of Object.entries(t.parameters as Record<string, any>)) {
                 if (v && typeof v === "object" && v.type) {
-                  props[k] = {
-                    type: v.type.toUpperCase(),
-                    description: v.description || "",
-                    ...(v.enum ? { enum: v.enum } : {}),
-                  };
+                  props[k] = sanitizeGeminiProperty(v);
                 }
               }
               params = {

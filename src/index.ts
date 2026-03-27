@@ -518,15 +518,26 @@ async function main() {
   const agentChannels: TelegramChannel[] = [];
   const activeBotHandles: string[] = ["Veritas"];
 
+  // Stagger delay between bot inits to prevent simultaneous Anthropic rate-limit hits
+  const BOT_INIT_STAGGER_MS = 4_000;
+
   if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
     const supabase = (await import("@supabase/supabase-js")).createClient(
       process.env.SUPABASE_URL,
       process.env.SUPABASE_ANON_KEY
     );
 
+    let botIndex = 0;
     for (const agentCfg of crewAgents) {
       const token = agentCfg.token;
       if (!token) continue;
+
+      // Stagger: wait before initializing each subsequent bot
+      if (botIndex > 0) {
+        console.log(`⏳ Stagger delay: waiting ${BOT_INIT_STAGGER_MS / 1000}s before initializing ${agentCfg.name}...`);
+        await new Promise((resolve) => setTimeout(resolve, BOT_INIT_STAGGER_MS));
+      }
+      botIndex++;
 
       try {
         console.log(`[BotInit] ${agentCfg.name} token: ${token.substring(0, 8)}...`);

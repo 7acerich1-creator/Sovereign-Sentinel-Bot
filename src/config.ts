@@ -94,6 +94,7 @@ export const config: GravityClawConfig = {
       "ls", "cat", "head", "tail", "grep", "find", "wc", "date", "echo",
       "node", "npm", "npx", "python3", "pip", "git", "curl",
       "df", "du", "free", "uptime", "whoami", "pwd",
+      "yt-dlp", "ffmpeg", "ffprobe", "whisper",
     ]),
     fileRootPath: process.env.FILE_ROOT_PATH || process.cwd(),
     browserEnabled: process.env.BROWSER_ENABLED === "true",
@@ -115,6 +116,12 @@ export const config: GravityClawConfig = {
   webhooks: {
     enabled: process.env.WEBHOOKS_ENABLED === "true",
     port: envInt("WEBHOOK_PORT", 3000),
+  },
+
+  vidRush: {
+    makeScenarioEWebhook: process.env.MAKE_SCENARIO_E_WEBHOOK || "",
+    makeScenarioFWebhook: process.env.MAKE_SCENARIO_F_WEBHOOK || "",
+    bufferApiKey: process.env.BUFFER_API_KEY || "",
   },
 
   security: {

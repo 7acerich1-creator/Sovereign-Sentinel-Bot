@@ -40,6 +40,8 @@ import { SkillsSystem, SkillsTool } from "./tools/skills";
 import { MavenCrewTool } from "./tools/maven-crew";
 import { SystemTool } from "./tools/system";
 import { SocialSchedulerListProfilesTool, SocialSchedulerPostTool, SocialSchedulerPendingTool } from "./tools/social-scheduler";
+import { ClipGeneratorTool } from "./tools/clip-generator";
+import { VidRushTool } from "./tools/vid-rush";
 import { logTask, updateTask } from "./tools/task-logger";
 import { CrewDispatchTool, claimTasks, completeDispatch, dispatchTask, triggerPipelineHandoffs } from "./agent/crew-dispatch";
 
@@ -158,6 +160,10 @@ async function main() {
   tools.push(new SocialSchedulerListProfilesTool());
   tools.push(new SocialSchedulerPostTool());
   tools.push(new SocialSchedulerPendingTool());
+
+  // Sovereign Clip Pipeline (yt-dlp + ffmpeg + Whisper)
+  tools.push(new ClipGeneratorTool());
+  tools.push(new VidRushTool());
 
   // Scheduler
   const scheduler = new Scheduler();
@@ -519,6 +525,157 @@ async function main() {
     return "delivered";
   });
 
+  // ── /api/release — Agent payloads ingest (Make.com, external tools) ──
+  webhookServer.register("/api/release", async (incoming: any) => {
+    const { agent_name, payload_type, payload, data } = incoming as any;
+    if (!agent_name) return "error: agent_name required";
+
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseKey) return "error: supabase not configured";
+
+    try {
+      const resp = await fetch(`${supabaseUrl}/rest/v1/agent_payloads`, {
+        method: "POST",
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          agent_name,
+          payload_type: payload_type || "release",
+          payload: payload || data || incoming,
+          status: "received",
+        }),
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        return `error: supabase ${resp.status} — ${errText.slice(0, 200)}`;
+      }
+
+      const rows = (await resp.json()) as any[];
+      const id = rows?.[0]?.id;
+      console.log(`📡 [Release] ${agent_name} payload stored (id: ${id})`);
+
+      // Notify via Telegram
+      await telegram.sendMessage(
+        defaultChatId,
+        `📦 _Agent payload received_\nAgent: *${agent_name}*\nType: ${payload_type || "release"}\nID: \`${id}\``,
+        { parseMode: "Markdown" }
+      );
+
+      return id ? `stored:${id}` : "stored";
+    } catch (err: any) {
+      return `error: ${err.message}`;
+    }
+  });
+
+  // ── /api/vidrush — Make.com Scenario E/F callback endpoint ──
+  // Scenario E sends back transcript → dispatches to Alfred
+  // Scenario E sends transcript → Alfred | Scenario F sends timestamps → Yuki (sovereign clip pipeline)
+  webhookServer.register("/api/vidrush", async (incoming: any) => {
+    const { scenario, video_id, youtube_url, transcript, timestamps, clips, chat_id } = incoming as any;
+
+    if (scenario === "E" || incoming.transcript) {
+      // Transcript callback from DumplingAI → dispatch to Alfred for analysis
+      const id = await dispatchTask({
+        from_agent: "make_scenario_e",
+        to_agent: "alfred",
+        task_type: "transcript_analysis",
+        payload: {
+          transcript: transcript || incoming.data?.transcript,
+          video_id,
+          youtube_url,
+          source: "dumplingai",
+        },
+        priority: 2,
+        chat_id: chat_id || defaultChatId,
+      });
+
+      console.log(`📡 [VidRush] Scenario E callback → Alfred dispatch (id: ${id})`);
+      await telegram.sendMessage(
+        chat_id || defaultChatId,
+        `📜 _Transcript received for_ \`${video_id || "unknown"}\`\n_Dispatched to Alfred for analysis._`,
+        { parseMode: "Markdown" }
+      );
+
+      return id ? `dispatched:alfred:${id}` : "dispatch_failed";
+    }
+
+    if (scenario === "F" || incoming.timestamps || incoming.clips) {
+      // Sovereign clip pipeline — dispatch to Yuki with timestamps for in-house clip generation
+      const id = await dispatchTask({
+        from_agent: "make_scenario_f",
+        to_agent: "yuki",
+        task_type: "sovereign_clip_generation",
+        payload: {
+          timestamps: timestamps || clips || incoming.data?.timestamps,
+          video_id,
+          youtube_url,
+          source: "sovereign_pipeline",
+          pipeline: "yt-dlp + ffmpeg + whisper",
+        },
+        priority: 2,
+        chat_id: chat_id || defaultChatId,
+      });
+
+      console.log(`📡 [VidRush] Scenario F callback → Yuki sovereign clip dispatch (id: ${id})`);
+      await telegram.sendMessage(
+        chat_id || defaultChatId,
+        `🎬 _Sovereign clip pipeline triggered for_ \`${video_id || "unknown"}\`\n_Dispatched to Yuki — yt-dlp + ffmpeg in-house._`,
+        { parseMode: "Markdown" }
+      );
+
+      return id ? `dispatched:yuki:${id}` : "dispatch_failed";
+    }
+
+    return "error: unknown scenario — send {scenario: 'E'} or {scenario: 'F'}";
+  });
+
+  // ── /api/glitch — Log errors/incidents from external systems ──
+  webhookServer.register("/api/glitch", async (incoming: any) => {
+    const { severity, description, agent_name, stack_trace } = incoming as any;
+    if (!description) return "error: description required";
+
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseKey) return "error: supabase not configured";
+
+    try {
+      await fetch(`${supabaseUrl}/rest/v1/glitch_log`, {
+        method: "POST",
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({
+          severity: severity || "medium",
+          description,
+          agent_name: agent_name || "external",
+          stack_trace: stack_trace || null,
+        }),
+      });
+
+      // Alert on high/critical severity
+      if (severity === "high" || severity === "critical") {
+        await telegram.sendMessage(
+          defaultChatId,
+          `🚨 *GLITCH DETECTED*\nSeverity: *${severity}*\nAgent: ${agent_name || "external"}\n${description.slice(0, 300)}`,
+          { parseMode: "Markdown" }
+        );
+      }
+
+      return "logged";
+    } catch (err: any) {
+      return `error: ${err.message}`;
+    }
+  });
+
   // ── Crew Dispatch webhook — external systems (Make.com) can push tasks to agents ──
   webhookServer.register("/api/dispatch", async (incoming: any) => {
     const { from_agent, to_agent, task_type, payload: taskPayload, data, priority, chat_id } = incoming as any;
@@ -654,9 +811,9 @@ async function main() {
             }
 
             // ── ALFRED: YouTube URL Pipeline Interceptor ──
-            // Fires three parallel streams:
-            //   1. Scenario E — DumplingAI transcript → dispatches back to Alfred via /api/dispatch
-            //   2. Scenario F — OpusClip clip extraction → dispatches to Yuki via /api/dispatch
+            // Fires two parallel streams:
+            //   1. Scenario E — DumplingAI transcript → dispatches back to Alfred via /api/vidrush
+            //   2. Scenario F — Sovereign clip pipeline (yt-dlp + ffmpeg) → Yuki via /api/vidrush
             //   3. Alfred's own LLM processes the URL with injected pipeline context
             const YOUTUBE_URL_RE = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11})/i;
             if (agentCfg.name === "alfred" && YOUTUBE_URL_RE.test(message.content)) {
@@ -668,13 +825,13 @@ async function main() {
               await agentChannel.sendMessage(message.chatId,
                 `🎯 _YouTube URL detected. Activating Vid Rush Pipeline..._\n` +
                 `Video ID: \`${videoId}\`\n` +
-                `📡 _Scenario E (Transcript) + Scenario F (OpusClip) firing in parallel..._`,
+                `📡 _Scenario E (Transcript) + Scenario F (Sovereign Clip Pipeline) firing in parallel..._`,
                 { parseMode: "Markdown" }
               );
 
-              // Fire Make.com webhooks in parallel — Scenario E (transcript) + Scenario F (OpusClip)
-              const SCENARIO_E_WEBHOOK = process.env.MAKE_SCENARIO_E_WEBHOOK || "";
-              const SCENARIO_F_WEBHOOK = process.env.MAKE_SCENARIO_F_WEBHOOK || "";
+              // Fire Make.com webhooks in parallel — Scenario E (transcript) + Scenario F (sovereign clips)
+              const SCENARIO_E_WEBHOOK = config.vidRush.makeScenarioEWebhook;
+              const SCENARIO_F_WEBHOOK = config.vidRush.makeScenarioFWebhook;
               const webhookPayload = {
                 youtube_url: youtubeUrl,
                 video_id: videoId,
@@ -702,15 +859,12 @@ async function main() {
                   fetch(SCENARIO_F_WEBHOOK, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      ...webhookPayload,
-                      opusclip_api_key: process.env.OPUSCLIP_API_KEY || "",
-                    }),
+                    body: JSON.stringify(webhookPayload),
                   }).then(() => console.log(`📡 [Alfred] Scenario F webhook fired for ${youtubeUrl}`))
                     .catch((err: any) => console.error(`[Alfred] Scenario F webhook error: ${err.message}`))
                 );
               } else {
-                console.warn("[Alfred] MAKE_SCENARIO_F_WEBHOOK not set — OpusClip pipeline skipped");
+                console.warn("[Alfred] MAKE_SCENARIO_F_WEBHOOK not set — sovereign clip pipeline skipped");
               }
 
               // Fire all webhooks in parallel (don't block the main flow)
@@ -723,7 +877,7 @@ async function main() {
                 `Generate a cleaned transcript summary and 1 core transmission sentence. Apply Sovereign Synthesis lexicon. ` +
                 `Use the crew_dispatch tool to send your outputs downstream: ` +
                 `dispatch timestamped_hooks to yuki, cleaned_transcript to anita, and core_summary to sapphire.\n` +
-                `NOTE: DumplingAI transcript (Scenario E) and OpusClip clips (Scenario F) are being processed in parallel via Make.com.\n` +
+                `NOTE: DumplingAI transcript (Scenario E) and sovereign clip pipeline (Scenario F) are being processed in parallel via Make.com.\n` +
                 `Original message: ${message.content}`;
             }
 

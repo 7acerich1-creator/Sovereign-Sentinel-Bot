@@ -260,6 +260,11 @@ export interface GravityClawConfig {
     enabled: boolean;
     port: number;
   };
+  vidRush: {
+    makeScenarioEWebhook: string;
+    makeScenarioFWebhook: string;
+    bufferApiKey: string;
+  };
   security: {
     maxAgentIterations: number;
     dangerousCommandConfirmation: boolean;

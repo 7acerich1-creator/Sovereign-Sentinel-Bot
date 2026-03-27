@@ -39,6 +39,7 @@ import { MCPBridge } from "./tools/mcp-bridge";
 import { SkillsSystem, SkillsTool } from "./tools/skills";
 import { MavenCrewTool } from "./tools/maven-crew";
 import { SystemTool } from "./tools/system";
+import { SocialSchedulerListProfilesTool, SocialSchedulerPostTool, SocialSchedulerPendingTool } from "./tools/social-scheduler";
 
 // ── Voice ──
 import { transcribeAudio, downloadTelegramFile } from "./voice/transcription";
@@ -150,6 +151,11 @@ async function main() {
 
   // System Utilities
   tools.push(new SystemTool());
+
+  // Social Scheduler (Buffer) — Vector's content distribution tools
+  tools.push(new SocialSchedulerListProfilesTool());
+  tools.push(new SocialSchedulerPostTool());
+  tools.push(new SocialSchedulerPendingTool());
 
   // Scheduler
   const scheduler = new Scheduler();

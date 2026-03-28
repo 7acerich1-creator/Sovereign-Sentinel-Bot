@@ -49,6 +49,7 @@ import { RelationshipContextTool } from "./tools/relationship-context";
 import { SapphireSentinel } from "./proactive/sapphire-sentinel";
 import { PineconeMemory } from "./memory/pinecone";
 import { KnowledgeWriterTool } from "./tools/knowledge-writer";
+import { ImageGeneratorTool } from "./tools/image-generator";
 
 // ── Voice ──
 import { transcribeAudio, downloadTelegramFile } from "./voice/transcription";
@@ -94,6 +95,11 @@ async function main() {
   // Pinecone Semantic Memory (Tier 4 — crew-wide institutional intelligence)
   const pineconeMemory = new PineconeMemory();
   await pineconeMemory.initialize();
+
+  // Log Pinecone status on startup
+  if (pineconeMemory.isReady()) {
+    console.log(`🧠 Pinecone semantic memory: ${process.env.PINECONE_INDEX || "gravity-claw"} — ACTIVE`);
+  }
 
   // Seed personality blueprints into Pinecone on first boot (idempotent — deterministic IDs prevent duplicates)
   // Then sync any unembedded knowledge_nodes (bulk SQL imports like memory transfers) into Pinecone
@@ -191,6 +197,9 @@ async function main() {
   // Sovereign Clip Pipeline (yt-dlp + ffmpeg + Whisper)
   tools.push(new ClipGeneratorTool());
   tools.push(new VidRushTool());
+
+  // Sovereign Image Generator (Gemini Imagen 3 + DALL-E 3 fallback)
+  tools.push(new ImageGeneratorTool());
 
   // Scheduler
   const scheduler = new Scheduler();

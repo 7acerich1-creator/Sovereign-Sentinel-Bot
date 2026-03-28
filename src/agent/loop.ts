@@ -82,7 +82,12 @@ export class AgentLoop {
     // 1b. Pinecone semantic recall — inject relevant past intelligence
     if (this.pinecone?.isReady() && message.content.length > 10) {
       try {
-        const recalls = await this.pinecone.queryRelevant(message.content, 3);
+        const recalls = await this.pinecone.queryRelevant(
+          message.content,
+          3,
+          this.identity.namespace, // Query agent's own namespace for focused recall
+          0.75 // Similarity threshold per spec
+        );
         if (recalls.length > 0) {
           const recallText = recalls.map(
             (r, i) => `[${i + 1}] (${r.agent}/${r.type}, score: ${r.score.toFixed(2)}) ${r.content}`

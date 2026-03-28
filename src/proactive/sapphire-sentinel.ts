@@ -37,13 +37,13 @@ export class SapphireSentinel {
   }
 
   private async scan(): Promise<void> {
-    if (!config.memory.supabaseUrl || !config.memory.supabaseAnonKey) return;
+    if (!config.memory.supabaseUrl || !config.memory.supabaseKey) return;
 
     try {
       const { createClient } = await import("@supabase/supabase-js");
       const supabase = createClient(
         config.memory.supabaseUrl,
-        config.memory.supabaseAnonKey
+        config.memory.supabaseKey
       );
 
       const since = this.lastScanAt.toISOString();
@@ -125,11 +125,12 @@ Do NOT use bullet points, headers, or formatting. Just speak.
 Do NOT start with "Hey" or "Hi". Start with "Ace —" or jump straight in.
 End with *[inner state: ...]*`;
 
-      const observation = await this.llm.generate(
+      const response = await this.llm.generate(
         [{ role: "user", content: prompt }],
         { maxTokens: 300 }
       );
 
+      const observation = response.content;
       if (observation && observation.trim().length > 10) {
         await this.channel.sendMessage(this.chatId, observation, {
           parseMode: "Markdown",

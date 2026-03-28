@@ -3,7 +3,7 @@
 // Signal vs. Noise Matrix — CEO Standing Orders
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-import type { Tool } from "../types";
+import type { Tool, ToolContext, ToolDefinition } from "../types";
 import { config } from "../config";
 
 /**
@@ -11,26 +11,25 @@ import { config } from "../config";
  * Used by Alfred, Yuki, Anita before executing any content task.
  */
 export class ProtocolReaderTool implements Tool {
-  name = "read_protocols";
-  description =
-    "Read all active Architect protocols for a given niche. Returns niche-specific directives plus all global directives. Call this BEFORE executing any content creation task.";
-
-  parameters = {
-    type: "object" as const,
-    properties: {
+  definition: ToolDefinition = {
+    name: "read_protocols",
+    description:
+      "Read all active Architect protocols for a given niche. Returns niche-specific directives plus all global directives. Call this BEFORE executing any content creation task.",
+    parameters: {
       niche: {
         type: "string",
         description:
           "Content niche: dark_psychology | self_improvement | burnout | quantum | all",
+        enum: ["dark_psychology", "self_improvement", "burnout", "quantum", "all"],
       },
     },
     required: ["niche"],
   };
 
-  async execute(params: { niche: string }): Promise<string> {
-    const { niche } = params;
+  async execute(args: Record<string, unknown>, _context: ToolContext): Promise<string> {
+    const niche = String(args.niche || "");
 
-    if (!config.memory.supabaseUrl || !config.memory.supabaseAnonKey) {
+    if (!config.memory.supabaseUrl || !config.memory.supabaseKey) {
       return "Error: Supabase not configured — cannot read protocols.";
     }
 
@@ -38,7 +37,7 @@ export class ProtocolReaderTool implements Tool {
       const { createClient } = await import("@supabase/supabase-js");
       const supabase = createClient(
         config.memory.supabaseUrl,
-        config.memory.supabaseAnonKey
+        config.memory.supabaseKey
       );
 
       // Fetch niche-specific + global ("all") active protocols
@@ -77,13 +76,11 @@ export class ProtocolReaderTool implements Tool {
  * Triggered by messages containing "standing directive" or "new protocol".
  */
 export class ProtocolWriterTool implements Tool {
-  name = "write_protocol";
-  description =
-    "Write a new Architect protocol to the protocols table. Use when the Architect issues a 'standing directive' or 'new protocol'. Extract the protocol name, niche, and directive from context.";
-
-  parameters = {
-    type: "object" as const,
-    properties: {
+  definition: ToolDefinition = {
+    name: "write_protocol",
+    description:
+      "Write a new Architect protocol to the protocols table. Use when the Architect issues a 'standing directive' or 'new protocol'. Extract the protocol name, niche, and directive from context.",
+    parameters: {
       protocol_name: {
         type: "string",
         description: "Snake_case name for the protocol (e.g. visual_inversion_dark_psychology)",
@@ -91,6 +88,7 @@ export class ProtocolWriterTool implements Tool {
       niche: {
         type: "string",
         description: "Target niche: dark_psychology | self_improvement | burnout | quantum | all",
+        enum: ["dark_psychology", "self_improvement", "burnout", "quantum", "all"],
       },
       directive: {
         type: "string",
@@ -100,14 +98,12 @@ export class ProtocolWriterTool implements Tool {
     required: ["protocol_name", "niche", "directive"],
   };
 
-  async execute(params: {
-    protocol_name: string;
-    niche: string;
-    directive: string;
-  }): Promise<string> {
-    const { protocol_name, niche, directive } = params;
+  async execute(args: Record<string, unknown>, _context: ToolContext): Promise<string> {
+    const protocol_name = String(args.protocol_name || "");
+    const niche = String(args.niche || "");
+    const directive = String(args.directive || "");
 
-    if (!config.memory.supabaseUrl || !config.memory.supabaseAnonKey) {
+    if (!config.memory.supabaseUrl || !config.memory.supabaseKey) {
       return "Error: Supabase not configured — cannot write protocol.";
     }
 
@@ -126,7 +122,7 @@ export class ProtocolWriterTool implements Tool {
       const { createClient } = await import("@supabase/supabase-js");
       const supabase = createClient(
         config.memory.supabaseUrl,
-        config.memory.supabaseAnonKey
+        config.memory.supabaseKey
       );
 
       const { data, error } = await supabase

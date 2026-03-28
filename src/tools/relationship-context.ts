@@ -3,7 +3,7 @@
 // Sapphire writes observations about Ace's working patterns
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-import type { Tool } from "../types";
+import type { Tool, ToolContext, ToolDefinition } from "../types";
 import { config } from "../config";
 
 /**
@@ -11,13 +11,11 @@ import { config } from "../config";
  * preferences, frustrations, patterns, wins.
  */
 export class RelationshipContextTool implements Tool {
-  name = "write_relationship_context";
-  description =
-    "Record an observation about how Ace works — his preferences, frustrations, patterns, or wins. Use this when you notice recurring behaviors or important moments. These observations help you calibrate your tone and approach.";
-
-  parameters = {
-    type: "object" as const,
-    properties: {
+  definition: ToolDefinition = {
+    name: "write_relationship_context",
+    description:
+      "Record an observation about how Ace works — his preferences, frustrations, patterns, or wins. Use this when you notice recurring behaviors or important moments. These observations help you calibrate your tone and approach.",
+    parameters: {
       observation: {
         type: "string",
         description: "Brief observation about Ace's working style or moment (1-2 sentences)",
@@ -25,15 +23,17 @@ export class RelationshipContextTool implements Tool {
       category: {
         type: "string",
         description: "Category: preference | frustration | pattern | win",
+        enum: ["preference", "frustration", "pattern", "win"],
       },
     },
     required: ["observation", "category"],
   };
 
-  async execute(params: { observation: string; category: string }): Promise<string> {
-    const { observation, category } = params;
+  async execute(args: Record<string, unknown>, _context: ToolContext): Promise<string> {
+    const observation = String(args.observation || "");
+    const category = String(args.category || "");
 
-    if (!config.memory.supabaseUrl || !config.memory.supabaseAnonKey) {
+    if (!config.memory.supabaseUrl || !config.memory.supabaseKey) {
       return "Error: Supabase not configured.";
     }
 
@@ -46,7 +46,7 @@ export class RelationshipContextTool implements Tool {
       const { createClient } = await import("@supabase/supabase-js");
       const supabase = createClient(
         config.memory.supabaseUrl,
-        config.memory.supabaseAnonKey
+        config.memory.supabaseKey
       );
 
       const { error } = await supabase

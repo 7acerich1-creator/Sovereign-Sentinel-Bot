@@ -31,8 +31,15 @@ export class WebhookServer {
     this.server = http.createServer(async (req, res) => {
       // GET /health — lightweight probe for Railway / load balancers
       if (req.method === "GET" && (req.url === "/health" || req.url === "/api/health")) {
+        const health: Record<string, unknown> = {
+          status: "ok",
+          uptime: process.uptime(),
+          pinecone: !!process.env.PINECONE_API_KEY && !!process.env.PINECONE_HOST,
+          supabase: !!config.memory.supabaseUrl && !!config.memory.supabaseKey,
+          gemini: !!config.llm.providers.gemini?.apiKey,
+        };
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "ok", uptime: process.uptime() }));
+        res.end(JSON.stringify(health));
         return;
       }
 

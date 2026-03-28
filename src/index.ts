@@ -676,6 +676,119 @@ async function main() {
     }
   });
 
+  // ── /api/stripe-webhook — Stripe payment events → revenue_log + mission_metrics ──
+  webhookServer.register("/api/stripe-webhook", async (incoming: any, headers: any) => {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseKey) return "error: supabase not configured";
+
+    // Stripe sends the event object directly as the payload
+    const event = incoming as any;
+    const eventType = event?.type;
+
+    // Only process successful payment events
+    const REVENUE_EVENTS = [
+      "checkout.session.completed",
+      "invoice.payment_succeeded",
+      "payment_intent.succeeded",
+    ];
+
+    if (!REVENUE_EVENTS.includes(eventType)) {
+      console.log(`[Stripe] Ignored event type: ${eventType}`);
+      return `ignored:${eventType}`;
+    }
+
+    try {
+      // Extract payment details based on event type
+      let amount = 0;
+      let productId = "";
+      let customerEmail = "";
+      let stripeId = "";
+      const obj = event.data?.object || {};
+
+      if (eventType === "checkout.session.completed") {
+        amount = (obj.amount_total || 0) / 100; // Stripe sends cents
+        customerEmail = obj.customer_email || obj.customer_details?.email || "";
+        stripeId = obj.id || "";
+        productId = obj.metadata?.product_id || obj.metadata?.product_name || "checkout";
+      } else if (eventType === "invoice.payment_succeeded") {
+        amount = (obj.amount_paid || 0) / 100;
+        customerEmail = obj.customer_email || "";
+        stripeId = obj.id || "";
+        productId = obj.lines?.data?.[0]?.price?.product || "invoice";
+      } else if (eventType === "payment_intent.succeeded") {
+        amount = (obj.amount || 0) / 100;
+        customerEmail = obj.receipt_email || "";
+        stripeId = obj.id || "";
+        productId = obj.metadata?.product_id || "payment";
+      }
+
+      if (amount <= 0) {
+        console.log(`[Stripe] Zero-amount event, skipping: ${eventType}`);
+        return "skipped:zero_amount";
+      }
+
+      // 1. Write to revenue_log
+      const revResp = await fetch(`${supabaseUrl}/rest/v1/revenue_log`, {
+        method: "POST",
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          amount,
+          source: "stripe",
+          product_id: productId,
+          customer_email: customerEmail,
+          metadata: {
+            stripe_event: eventType,
+            stripe_id: stripeId,
+            event_id: event.id,
+          },
+        }),
+      });
+
+      if (!revResp.ok) {
+        const errText = await revResp.text();
+        console.error(`[Stripe] revenue_log write failed: ${errText}`);
+        return `error:revenue_log:${errText}`;
+      }
+
+      // 2. Update mission_metrics.fiscal_sum (atomic increment)
+      await fetch(`${supabaseUrl}/rest/v1/rpc/increment_fiscal_sum`, {
+        method: "POST",
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ amount_to_add: amount }),
+      }).catch((err: any) => {
+        // If RPC doesn't exist yet, fall back to manual update
+        console.warn(`[Stripe] increment_fiscal_sum RPC failed (creating fallback): ${err.message}`);
+      });
+
+      // 3. Alert Architect via Telegram
+      await telegram.sendMessage(
+        defaultChatId,
+        `💰 *REVENUE DETECTED*\n` +
+        `Amount: *$${amount.toFixed(2)}*\n` +
+        `Product: ${productId}\n` +
+        `Customer: ${customerEmail || "N/A"}\n` +
+        `Event: \`${eventType}\``,
+        { parseMode: "Markdown" }
+      );
+
+      console.log(`💰 [Stripe] $${amount.toFixed(2)} from ${customerEmail} → revenue_log ✅`);
+      return `recorded:$${amount.toFixed(2)}`;
+    } catch (err: any) {
+      console.error(`[Stripe] Webhook error: ${err.message}`);
+      return `error:${err.message}`;
+    }
+  });
+
   // ── Crew Dispatch webhook — external systems (Make.com) can push tasks to agents ──
   webhookServer.register("/api/dispatch", async (incoming: any) => {
     const { from_agent, to_agent, task_type, payload: taskPayload, data, priority, chat_id } = incoming as any;

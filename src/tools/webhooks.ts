@@ -43,6 +43,84 @@ export class WebhookServer {
         return;
       }
 
+      // GET /debug/memory — diagnostic for memory pipeline (temporary)
+      if (req.method === "GET" && req.url === "/debug/memory") {
+        try {
+          const { createClient } = await import("@supabase/supabase-js");
+          const diag: Record<string, unknown> = {
+            supabaseUrl: !!config.memory.supabaseUrl,
+            supabaseKey: !!config.memory.supabaseKey,
+            supabaseKeyLength: config.memory.supabaseKey?.length || 0,
+          };
+
+          if (config.memory.supabaseUrl && config.memory.supabaseKey) {
+            const supabase = createClient(config.memory.supabaseUrl, config.memory.supabaseKey);
+
+            const { data: kn, error: knErr } = await supabase
+              .from("knowledge_nodes")
+              .select("id, agent_name", { count: "exact" })
+              .limit(3);
+            diag.knowledge_nodes_count = kn?.length ?? 0;
+            diag.knowledge_nodes_error = knErr?.message || null;
+            diag.knowledge_nodes_sample = kn?.map((r: any) => r.agent_name) || [];
+
+            const { data: sl, error: slErr } = await supabase
+              .from("sync_log")
+              .select("id, status", { count: "exact" })
+              .limit(3);
+            diag.sync_log_count = sl?.length ?? 0;
+            diag.sync_log_error = slErr?.message || null;
+
+            // Test Gemini embedding
+            const geminiKey = config.llm.providers.gemini?.apiKey;
+            if (geminiKey) {
+              const url = `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${geminiKey}`;
+              const embedRes = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  model: "models/text-embedding-004",
+                  content: { parts: [{ text: "test embedding" }] },
+                }),
+              });
+              diag.gemini_embed_status = embedRes.status;
+              if (embedRes.ok) {
+                const embedData = (await embedRes.json()) as any;
+                diag.gemini_embed_dims = embedData.embedding?.values?.length || 0;
+              } else {
+                diag.gemini_embed_error = await embedRes.text();
+              }
+            }
+
+            // Test Pinecone
+            const pcHost = process.env.PINECONE_HOST;
+            const pcKey = process.env.PINECONE_API_KEY;
+            if (pcHost && pcKey) {
+              const pcRes = await fetch(`${pcHost}/describe_index_stats`, {
+                method: "POST",
+                headers: { "Api-Key": pcKey, "Content-Type": "application/json" },
+                body: "{}",
+              });
+              diag.pinecone_status = pcRes.status;
+              if (pcRes.ok) {
+                const pcData = (await pcRes.json()) as any;
+                diag.pinecone_vectors = pcData.totalVectorCount || 0;
+                diag.pinecone_namespaces = Object.keys(pcData.namespaces || {});
+              } else {
+                diag.pinecone_error = await pcRes.text();
+              }
+            }
+          }
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(diag, null, 2));
+        } catch (err: any) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+        return;
+      }
+
       if (req.method !== "POST") {
         res.writeHead(404);
         res.end();

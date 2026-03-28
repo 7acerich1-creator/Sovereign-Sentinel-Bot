@@ -406,6 +406,99 @@ export class PineconeMemory {
     return { success, failed };
   }
 
+  // ── Sync unembedded knowledge_nodes to Pinecone ──
+  // Reads knowledge_nodes that exist in Supabase but haven't been embedded in Pinecone
+  // (i.e. bulk imports via SQL). Checks sync_log to avoid re-embedding.
+  async syncUnembeddedToVector(): Promise<number> {
+    if (!this.ready) return 0;
+    if (!config.memory.supabaseUrl || !config.memory.supabaseKey) return 0;
+
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const supabase = createClient(config.memory.supabaseUrl, config.memory.supabaseKey);
+
+      // Find knowledge_nodes whose IDs don't appear in sync_log
+      const { data: unsynced, error } = await supabase
+        .from("knowledge_nodes")
+        .select("id, content, agent_name, niche, type, namespace, tags")
+        .order("created_at", { ascending: true });
+
+      if (error || !unsynced || unsynced.length === 0) {
+        console.log("[Vector Sync] No knowledge_nodes to process");
+        return 0;
+      }
+
+      // Get already-synced IDs from sync_log
+      const { data: synced } = await supabase
+        .from("sync_log")
+        .select("vector_id");
+
+      const syncedIds = new Set((synced || []).map((s: any) => s.vector_id));
+
+      const toSync = unsynced.filter((n: any) => !syncedIds.has(n.id));
+      if (toSync.length === 0) {
+        console.log("[Vector Sync] All knowledge_nodes already embedded");
+        return 0;
+      }
+
+      console.log(`🔄 [Vector Sync] ${toSync.length} unembedded nodes found — syncing to Pinecone...`);
+
+      let synced_count = 0;
+      for (const node of toSync) {
+        try {
+          const vector = await embedText(node.content);
+          if (vector.length === 0) continue;
+
+          // Determine namespace from node data
+          const ns = node.namespace || "general";
+
+          const upsertRes = await fetch(`${this.host}/vectors/upsert`, {
+            method: "POST",
+            headers: {
+              "Api-Key": this.apiKey,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              vectors: [{
+                id: node.id,
+                values: vector,
+                metadata: {
+                  content: (node.content || "").slice(0, 1000),
+                  agent_name: node.agent_name || "unknown",
+                  niche: node.niche || "general",
+                  type: node.type || "insight",
+                  tags: Array.isArray(node.tags) ? node.tags.join(",") : String(node.tags || ""),
+                  timestamp: new Date().toISOString(),
+                },
+              }],
+              namespace: ns,
+            }),
+          });
+
+          if (upsertRes.ok) {
+            await this.writeSyncLog(node.id, node.agent_name, ns, "success");
+            synced_count++;
+          } else {
+            const errText = await upsertRes.text();
+            console.error(`[Vector Sync] Failed for ${node.id}: ${errText}`);
+            await this.writeSyncLog(node.id, node.agent_name, ns, "error", errText);
+          }
+
+          // Rate limit
+          await new Promise((r) => setTimeout(r, 250));
+        } catch (err: any) {
+          console.error(`[Vector Sync] Error for ${node.id}: ${err.message}`);
+        }
+      }
+
+      console.log(`✅ [Vector Sync] ${synced_count}/${toSync.length} nodes embedded into Pinecone`);
+      return synced_count;
+    } catch (err: any) {
+      console.error(`[Vector Sync] Error: ${err.message}`);
+      return 0;
+    }
+  }
+
   // ── Text chunking utility ──
   private chunkText(text: string, chunkSize: number, overlap: number): string[] {
     if (text.length <= chunkSize) return [text];

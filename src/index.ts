@@ -670,6 +670,54 @@ async function main() {
 
   console.log("⚡ [AutoOps] Scheduled: Vector daily sweep (10AM), Alfred trend scan (8AM), Veritas weekly directive (Mon 9AM)");
 
+  // ── Stasis Detection — Daily Agent Self-Check (2 PM) ──
+  const stasisFiredDate = { value: "" };
+  const stasisAgents = ["vector", "yuki", "alfred", "anita", "sapphire", "veritas"];
+
+  scheduler.add({
+    name: "Daily Stasis Detection Sweep",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      const now = new Date();
+      const hour = now.getHours();
+      const dateKey = now.toDateString();
+      if (hour === 14 && stasisFiredDate.value !== dateKey) {
+        stasisFiredDate.value = dateKey;
+        console.log(`🔍 [StasisCheck] Dispatching daily stasis self-check to all agents for ${dateKey}`);
+        for (const agent of stasisAgents) {
+          try {
+            await dispatchTask({
+              from_agent: "system",
+              to_agent: agent,
+              task_type: "stasis_self_check",
+              priority: 2,
+              chat_id: defaultChatId,
+              payload: {
+                directive:
+                  "STASIS SELF-CHECK — Review your Stasis Detection Protocol. " +
+                  "Evaluate: (1) Have you received tasks in the last 48 hours? " +
+                  "(2) Are any KPIs in your domain declining or flatlined? " +
+                  "(3) Are expected pipeline outputs arriving on schedule? " +
+                  "(4) Do you see a strategic opportunity or threat requiring Ace's decision? " +
+                  "(5) Are you blocked on output from another crew member? " +
+                  "If ANY trigger condition is met, send a proactive message to Ace with the data, your diagnosis, and a clear action request. " +
+                  "If all systems nominal, log 'nominal' and take no action.",
+                triggered_at: new Date().toISOString(),
+                check_type: "daily_stasis",
+              },
+            });
+          } catch (err: any) {
+            console.error(`[StasisCheck] ${agent} dispatch failed: ${err.message}`);
+          }
+        }
+      }
+    },
+  });
+
+  console.log("🔍 [StasisCheck] Scheduled: Daily stasis detection sweep (2PM) for all 6 agents");
+
   // Heartbeat with memory evolution
   heartbeat.addCheck({
     name: "Pulse 3: Memory Evolution",

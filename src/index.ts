@@ -1104,13 +1104,21 @@ async function main() {
   }
 
   // ── 10. Memory heartbeat log ──
+  const mem = process.memoryUsage();
   console.log("\n━━━ GRAVITY CLAW v3.0 — FULLY ONLINE ━━━");
   console.log(`🧠 Memory: ${memoryProviders.map((m) => m.name).join(" + ")}`);
   console.log(`🔧 Tools: ${tools.length} loaded`);
   console.log(`🧬 LLM: ${failoverLLM.listProviders().join(" → ")}`);
   console.log(`📡 Channels: ${router.listChannels().join(", ")}`);
   console.log(`✅ Maven Crew ONLINE — [${activeBotHandles.join(", ")}]`);
+  console.log(`📊 Process Memory — RSS: ${Math.round(mem.rss / 1024 / 1024)}MB | Heap: ${Math.round(mem.heapUsed / 1024 / 1024)}/${Math.round(mem.heapTotal / 1024 / 1024)}MB | External: ${Math.round(mem.external / 1024 / 1024)}MB`);
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+  // ── Memory Monitor (every 5 min) ──
+  setInterval(() => {
+    const m = process.memoryUsage();
+    console.log(`📊 [MemWatch] RSS: ${Math.round(m.rss / 1024 / 1024)}MB | Heap: ${Math.round(m.heapUsed / 1024 / 1024)}/${Math.round(m.heapTotal / 1024 / 1024)}MB`);
+  }, 300_000);
 
   // ── Graceful Shutdown ──
   const shutdown = async () => {

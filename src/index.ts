@@ -98,12 +98,15 @@ async function main() {
   // Seed personality blueprints into Pinecone on first boot (idempotent — deterministic IDs prevent duplicates)
   // Then sync any unembedded knowledge_nodes (bulk SQL imports like memory transfers) into Pinecone
   if (pineconeMemory.isReady()) {
-    pineconeMemory.seedBlueprints().then(async (count) => {
-      if (count > 0) console.log(`🌱 [Boot] Seeded ${count} blueprint chunks into Pinecone`);
-      // After blueprints, sync any SQL-imported knowledge_nodes that lack vector embeddings
-      const vectorSynced = await pineconeMemory.syncUnembeddedToVector();
-      if (vectorSynced > 0) console.log(`🔄 [Boot] Synced ${vectorSynced} knowledge nodes to Pinecone vectors`);
-    }).catch((err) => console.error(`[Boot] Memory seeding failed: ${err.message}`));
+    // Blueprint seeder (fire-and-forget, non-blocking)
+    pineconeMemory.seedBlueprints()
+      .then((count) => { if (count > 0) console.log(`🌱 [Boot] Seeded ${count} blueprint chunks into Pinecone`); })
+      .catch((err) => console.error(`[Boot] Blueprint seeding failed: ${err.message}`));
+
+    // Vector sync for SQL-imported knowledge_nodes (independent, runs in parallel)
+    pineconeMemory.syncUnembeddedToVector()
+      .then((count) => { if (count > 0) console.log(`🔄 [Boot] Synced ${count} knowledge nodes to Pinecone vectors`); })
+      .catch((err) => console.error(`[Boot] Vector sync failed: ${err.message}`));
   }
 
   // ── 2. Initialize LLM Providers ──

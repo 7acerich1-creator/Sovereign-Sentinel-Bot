@@ -242,6 +242,12 @@ export class PineconeMemory {
   private async writeToSupabase(node: KnowledgeNode): Promise<void> {
     if (!config.memory.supabaseUrl || !config.memory.supabaseKey) return;
 
+    // Skip Supabase mirror for non-UUID IDs (e.g., blueprint seed IDs like "blueprint-sapphire-chunk-0")
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_REGEX.test(node.id)) {
+      return; // Pinecone-only entry (blueprints, etc.)
+    }
+
     try {
       const { createClient } = await import("@supabase/supabase-js");
       const supabase = createClient(config.memory.supabaseUrl, config.memory.supabaseKey);

@@ -260,9 +260,18 @@ async function main() {
         return;
       }
 
-      // ── Roll Call / Check-In — Veritas responds immediately with name only ──
+      // ── Roll Call / Check-In — Veritas gives full group-aware status ──
       if (message.metadata?.isGroup && groupManager.isBroadcastTrigger(message)) {
-        await telegram.sendMessage(message.chatId, "@Veritas");
+        await telegram.sendTyping(message.chatId);
+        const rollCallMsg: Message = {
+          ...message,
+          content: `[GROUP CHECK-IN] The Architect has called a check-in in the Maven Crew group chat. ` +
+            `You are Veritas. Give a brief but substantive status report in your voice. ` +
+            `Include: your operational status, what you're currently tracking, and one actionable insight or recommendation. ` +
+            `Keep it concise (3-5 sentences). Speak with authority. No @mentions.`,
+        };
+        const response = await agentLoop.processMessage(rollCallMsg, () => telegram.sendTyping(message.chatId));
+        await telegram.sendMessage(message.chatId, response, { parseMode: "Markdown" });
         return;
       }
 
@@ -1118,11 +1127,19 @@ async function main() {
           try {
             if (!agentGroupManager.shouldRespond(message)) return;
 
-            // ── Roll Call / Check-In — respond with name after stagger delay ──
+            // ── Roll Call / Check-In — full group-aware status response ──
             if (message.metadata?.isGroup && agentGroupManager.isBroadcastTrigger(message)) {
               await new Promise((resolve) => setTimeout(resolve, rollCallDelay));
-              const rollCallText = `@${agentDisplayName}`;
-              await agentChannel.sendMessage(message.chatId, rollCallText);
+              await agentChannel.sendTyping(message.chatId);
+              const rollCallMsg: Message = {
+                ...message,
+                content: `[GROUP CHECK-IN] The Architect has called a check-in in the Maven Crew group chat. ` +
+                  `You are ${agentDisplayName}. Give a brief but substantive status report in your voice. ` +
+                  `Include: your operational status, what you're currently working on or tracking, and one insight or recommendation relevant to your role. ` +
+                  `Keep it concise (3-5 sentences). Stay in character. No @mentions.`,
+              };
+              const response = await agentBotLoop.processMessage(rollCallMsg, () => agentChannel.sendTyping(message.chatId));
+              await agentChannel.sendMessage(message.chatId, response, { parseMode: "Markdown" });
               return;
             }
 

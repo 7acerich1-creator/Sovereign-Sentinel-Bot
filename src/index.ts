@@ -47,6 +47,8 @@ import { CrewDispatchTool, claimTasks, completeDispatch, dispatchTask, triggerPi
 import { ProtocolReaderTool, ProtocolWriterTool } from "./tools/protocol-reader";
 import { RelationshipContextTool } from "./tools/relationship-context";
 import { SapphireSentinel } from "./proactive/sapphire-sentinel";
+import { PineconeMemory } from "./memory/pinecone";
+import { KnowledgeWriterTool } from "./tools/knowledge-writer";
 
 // ── Voice ──
 import { transcribeAudio, downloadTelegramFile } from "./voice/transcription";
@@ -88,6 +90,10 @@ async function main() {
   // Self-Evolving Memory
   const selfEvolvingMemory = new SelfEvolvingMemory();
   await selfEvolvingMemory.initialize();
+
+  // Pinecone Semantic Memory (Tier 4 — crew-wide institutional intelligence)
+  const pineconeMemory = new PineconeMemory();
+  await pineconeMemory.initialize();
 
   // ── 2. Initialize LLM Providers ──
   const llmProviders: LLMProvider[] = [];
@@ -188,11 +194,22 @@ async function main() {
   // Crew Dispatch (Supabase-backed inter-agent routing — replaces AgentComms for cross-bot work)
   tools.push(new CrewDispatchTool("veritas"));
 
+  // Pinecone KnowledgeWriter for Veritas (namespace: brand)
+  if (pineconeMemory.isReady()) {
+    tools.push(new KnowledgeWriterTool(pineconeMemory, "veritas", "brand"));
+  }
+
   // ── 4. Initialize Agent Loop ──
   const agentLoop = new AgentLoop(failoverLLM, tools, memoryProviders);
   const providersMap = new Map<string, LLMProvider>();
   llmProviders.forEach((p) => providersMap.set(p.model, p));
   agentLoop.setLLMProviders(providersMap);
+
+  // Wire Pinecone semantic memory to Veritas
+  if (pineconeMemory.isReady()) {
+    agentLoop.setPinecone(pineconeMemory);
+    agentLoop.setIdentity({ agentName: "veritas", namespace: "brand", defaultNiche: "general" });
+  }
 
   // Mesh Workflow
   const meshWorkflow = new MeshWorkflow(failoverLLM, agentLoop);
@@ -905,6 +922,11 @@ async function main() {
 
         // Protocol injection — content crew (Alfred, Yuki, Anita) must read protocols before content tasks
         const CONTENT_CREW = ["alfred", "yuki", "anita"];
+        // Knowledge memory directive — all agents should use write_knowledge for significant outputs
+        const knowledgeDirective = pineconeMemory.isReady()
+          ? "\n\n[INSTITUTIONAL MEMORY] You have the write_knowledge tool. When you produce a strong hook, discover a conversion pattern, extract a key insight, or create content that performs well — call write_knowledge to store it permanently. Every agent can recall these later. Build the crew's collective intelligence."
+          : "";
+
         const protocolDirective = CONTENT_CREW.includes(agentCfg.name)
           ? "\n\n[STANDING ORDER] Before executing any content task, call read_protocols with the detected niche. Apply every returned directive to your output. These are standing orders from the Architect."
           : agentCfg.name === "sapphire"
@@ -914,7 +936,7 @@ async function main() {
         const injectedLLM: LLMProvider = {
           ...failoverLLM,
           generate: (messages, options) =>
-            failoverLLM.generate(messages, { ...options, systemPrompt: blueprint + protocolDirective }),
+            failoverLLM.generate(messages, { ...options, systemPrompt: blueprint + protocolDirective + knowledgeDirective }),
         };
 
         // Build per-agent tool set: shared tools + agent-specific tools
@@ -929,9 +951,33 @@ async function main() {
           agentTools.push(new RelationshipContextTool());
         }
 
+        // Pinecone KnowledgeWriter — agent-specific namespaces
+        // Alfred: hooks | Yuki: clips | Anita: content | Vector: funnels | Sapphire: brand
+        const AGENT_NAMESPACES: Record<string, string> = {
+          alfred: "hooks",
+          yuki: "clips",
+          anita: "content",
+          vector: "funnels",
+          sapphire: "brand",
+        };
+        const agentNamespace = AGENT_NAMESPACES[agentCfg.name] || "general";
+        if (pineconeMemory.isReady()) {
+          agentTools.push(new KnowledgeWriterTool(pineconeMemory, agentCfg.name, agentNamespace));
+        }
+
         // Initialize Agent Loop (Unique per bot)
         const agentBotLoop = new AgentLoop(injectedLLM, agentTools, memoryProviders);
         agentBotLoop.setLLMProviders(providersMap);
+
+        // Wire Pinecone semantic memory + agent identity
+        if (pineconeMemory.isReady()) {
+          agentBotLoop.setPinecone(pineconeMemory);
+          agentBotLoop.setIdentity({
+            agentName: agentCfg.name,
+            namespace: agentNamespace,
+            defaultNiche: CONTENT_CREW.includes(agentCfg.name) ? undefined : "general",
+          });
+        }
 
         // Store loop + channel reference for dispatch polling
         agentLoops.set(agentCfg.name, { loop: agentBotLoop, channel: agentChannel });

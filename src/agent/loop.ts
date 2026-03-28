@@ -1,6 +1,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Agentic Tool Loop
 // LLM calls tools → gets results → iterates until final response
+// + Pinecone semantic memory recall & knowledge extraction
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { randomUUID } from "crypto";
@@ -10,20 +11,37 @@ import type {
 } from "../types";
 import { config } from "../config";
 import { PERSONA_REGISTRY, DEFAULT_PERSONA, getSystemPrompt, Persona } from "./personas";
+import type { PineconeMemory, KnowledgeNode } from "../memory/pinecone";
 
 // Persona-based system prompt generation is now handled by getSystemPrompt(persona)
+
+export interface AgentIdentity {
+  agentName: string;
+  namespace: string;
+  defaultNiche?: string;
+}
 
 export class AgentLoop {
   private llm: LLMProvider;
   private tools: Map<string, Tool>;
   private memoryProviders: MemoryProvider[];
   private llmProviders: Map<string, LLMProvider> = new Map();
+  private pinecone: PineconeMemory | null = null;
+  private identity: AgentIdentity = { agentName: "veritas", namespace: "general" };
 
   constructor(llm: LLMProvider, tools: Tool[], memoryProviders: MemoryProvider[]) {
     this.llm = llm;
     this.llmProviders.set(llm.model, llm);
     this.tools = new Map(tools.map((t) => [t.definition.name, t]));
     this.memoryProviders = memoryProviders;
+  }
+
+  setPinecone(pinecone: PineconeMemory): void {
+    this.pinecone = pinecone;
+  }
+
+  setIdentity(identity: AgentIdentity): void {
+    this.identity = identity;
   }
 
   setLLMProviders(providers: Map<string, LLMProvider>): void {
@@ -61,6 +79,25 @@ export class AgentLoop {
     const context = await this.buildContext(message);
     console.log(`🧠 [AgentLoop] Context built: ${context.length} messages`);
 
+    // 1b. Pinecone semantic recall — inject relevant past intelligence
+    if (this.pinecone?.isReady() && message.content.length > 10) {
+      try {
+        const recalls = await this.pinecone.queryRelevant(message.content, 3);
+        if (recalls.length > 0) {
+          const recallText = recalls.map(
+            (r, i) => `[${i + 1}] (${r.agent}/${r.type}, score: ${r.score.toFixed(2)}) ${r.content}`
+          ).join("\n");
+          context.push({
+            role: "system",
+            content: `[RELEVANT PAST INTELLIGENCE — from crew semantic memory]\n${recallText}`,
+          });
+          console.log(`🔮 [Pinecone] Injected ${recalls.length} relevant memories (scores: ${recalls.map(r => r.score.toFixed(2)).join(", ")})`);
+        }
+      } catch (err: any) {
+        console.error(`[Pinecone recall] ${err.message}`);
+      }
+    }
+
     // 2. Add user message
     context.push({ role: "user", content: message.content });
 
@@ -74,6 +111,8 @@ export class AgentLoop {
       "web_search", "web_browse", "memory_search", "memory_save",
       "send_message", "schedule_task", "calendar_search",
       "email_search", "email_send", "knowledge_graph_query",
+      "write_knowledge", "read_protocols", "write_protocol",
+      "write_relationship_context",
     ]);
     // Prioritize core tools, then fill remaining slots
     const coreTools = allTools.filter((t) => coreToolNames.has(t.definition.name));
@@ -111,6 +150,11 @@ export class AgentLoop {
         // Fire-and-forget: save to memory
         this.saveToMemory(message, finalResponse).catch((err) =>
           console.error("Memory save failed:", err.message)
+        );
+
+        // Fire-and-forget: extract and embed key insight to Pinecone
+        this.extractAndEmbed(message.content, finalResponse).catch((err) =>
+          console.error("[Pinecone embed] failed:", err.message)
         );
 
         return finalResponse;
@@ -203,6 +247,63 @@ export class AgentLoop {
     return context;
   }
 
+  // ── Post-response knowledge extraction ──
+  // Extracts the core insight from the response and embeds it to Pinecone.
+  // Only fires when the response is substantive (>50 chars) and Pinecone is available.
+  private async extractAndEmbed(userMessage: string, response: string): Promise<void> {
+    if (!this.pinecone?.isReady()) return;
+    if (response.length < 50) return;
+
+    // Skip trivial/system responses
+    const lowerResp = response.toLowerCase();
+    if (lowerResp.startsWith("⚠️") || lowerResp.includes("error:")) return;
+
+    // Detect niche from content
+    const niche = this.detectNiche(userMessage + " " + response);
+
+    // Detect type from content
+    const type = this.detectKnowledgeType(response);
+
+    // Build a concise knowledge node: first 500 chars of response as the insight
+    const content = response.length > 500
+      ? response.slice(0, 497) + "..."
+      : response;
+
+    const node: KnowledgeNode = {
+      id: randomUUID(),
+      content,
+      agent_name: this.identity.agentName,
+      niche,
+      type,
+      namespace: this.identity.namespace,
+      tags: [niche, type, this.identity.agentName],
+      timestamp: new Date().toISOString(),
+    };
+
+    await this.pinecone.writeKnowledge(node);
+  }
+
+  private detectNiche(text: string): string {
+    const lower = text.toLowerCase();
+    if (lower.includes("dark psych") || lower.includes("manipulation") || lower.includes("power dynamic")) return "dark_psychology";
+    if (lower.includes("self improvement") || lower.includes("self-improvement") || lower.includes("personal growth") || lower.includes("mindset")) return "self_improvement";
+    if (lower.includes("burnout") || lower.includes("exhaustion") || lower.includes("recovery")) return "burnout";
+    if (lower.includes("quantum") || lower.includes("consciousness") || lower.includes("simulation")) return "quantum";
+    return this.identity.defaultNiche || "general";
+  }
+
+  private detectKnowledgeType(response: string): KnowledgeNode["type"] {
+    const lower = response.toLowerCase();
+    if (lower.includes("hook") || lower.includes("opening line") || lower.includes("attention")) return "hook";
+    if (lower.includes("funnel") || lower.includes("conversion") || lower.includes("checkout")) return "funnel";
+    if (lower.includes("clip") || lower.includes("video") || lower.includes("yt-dlp")) return "clip";
+    if (lower.includes("brand") || lower.includes("voice") || lower.includes("identity")) return "brand";
+    if (lower.includes("protocol") || lower.includes("directive") || lower.includes("standing order")) return "protocol";
+    if (lower.includes("research") || lower.includes("analysis") || lower.includes("data")) return "research";
+    if (lower.includes("briefing") || lower.includes("report") || lower.includes("summary")) return "briefing";
+    return "insight";
+  }
+
   private async executeToolCalls(
     toolCalls: ToolCall[],
     context: ToolContext
@@ -272,7 +373,7 @@ export class AgentLoop {
 
   private determinePersona(content: string): Persona {
     const text = content.toLowerCase();
-    
+
     if (text.includes("bob") || text.includes("code") || text.includes("debug")) return PERSONA_REGISTRY.bob;
     if (text.includes("angela") || text.includes("marketing") || text.includes("viral")) return PERSONA_REGISTRY.angela;
     if (text.includes("josh") || text.includes("business") || text.includes("metrics") || text.includes("money")) return PERSONA_REGISTRY.josh;

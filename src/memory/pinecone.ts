@@ -287,4 +287,137 @@ export class PineconeMemory {
       console.error(`[Pinecone→Supabase] sync_log write error: ${err.message}`);
     }
   }
+
+  // ── Boot-time blueprint seeder ──
+  // Reads all personality_config blueprints from Supabase and seeds them into
+  // Pinecone so every agent starts with foundational crew knowledge on day one.
+  async seedBlueprints(): Promise<number> {
+    if (!this.ready) return 0;
+    if (!config.memory.supabaseUrl || !config.memory.supabaseKey) return 0;
+
+    const AGENT_NAMESPACES: Record<string, string> = {
+      alfred: "hooks", yuki: "clips", anita: "content",
+      vector: "funnels", sapphire: "brand", veritas: "brand",
+    };
+
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const supabase = createClient(config.memory.supabaseUrl, config.memory.supabaseKey);
+
+      const { data: blueprints, error } = await supabase
+        .from("personality_config")
+        .select("agent_name, prompt_blueprint");
+
+      if (error || !blueprints || blueprints.length === 0) {
+        console.warn("[Pinecone Seeder] No blueprints found in personality_config");
+        return 0;
+      }
+
+      let seeded = 0;
+      for (const bp of blueprints) {
+        if (!bp.prompt_blueprint || bp.prompt_blueprint.length < 100) continue;
+
+        const agentName = bp.agent_name.toLowerCase().replace(/\s+/g, "_");
+        const namespace = AGENT_NAMESPACES[agentName] || "general";
+
+        // Deterministic ID so re-runs don't create duplicates
+        const seedId = `blueprint-${agentName}`;
+
+        // Chunk large blueprints: Pinecone metadata limit is ~40KB,
+        // and embeddings work best on focused chunks.
+        // Split into ~1000 char chunks with overlap
+        const chunks = this.chunkText(bp.prompt_blueprint, 1000, 100);
+
+        for (let i = 0; i < chunks.length; i++) {
+          const chunkId = chunks.length === 1 ? seedId : `${seedId}-chunk-${i}`;
+          const node: KnowledgeNode = {
+            id: chunkId,
+            content: chunks[i],
+            agent_name: agentName,
+            niche: "identity",
+            type: "brand",
+            namespace,
+            tags: ["blueprint", "identity", agentName, "foundational"],
+            timestamp: new Date().toISOString(),
+          };
+
+          await this.writeKnowledge(node);
+          seeded++;
+        }
+
+        console.log(`🌱 [Seeder] ${bp.agent_name}: ${chunks.length} chunk(s) seeded to Pinecone/${namespace}`);
+      }
+
+      console.log(`✅ [Pinecone Seeder] ${seeded} blueprint chunks seeded across ${blueprints.length} agents`);
+      return seeded;
+    } catch (err: any) {
+      console.error(`[Pinecone Seeder] Error: ${err.message}`);
+      return 0;
+    }
+  }
+
+  // ── Bulk memory ingestion ──
+  // Ingests an array of raw knowledge entries (from memory files, transcripts, etc.)
+  // directly into Pinecone + Supabase. Used for transferring existing memory banks.
+  async ingestBulk(entries: Array<{
+    content: string;
+    agent_name: string;
+    niche?: string;
+    type?: KnowledgeNode["type"];
+    namespace?: string;
+    tags?: string[];
+  }>): Promise<{ success: number; failed: number }> {
+    if (!this.ready) return { success: 0, failed: entries.length };
+
+    let success = 0;
+    let failed = 0;
+
+    for (const entry of entries) {
+      try {
+        // Chunk large entries
+        const chunks = this.chunkText(entry.content, 1000, 100);
+
+        for (let i = 0; i < chunks.length; i++) {
+          const node: KnowledgeNode = {
+            id: `bulk-${entry.agent_name}-${Date.now()}-${i}`,
+            content: chunks[i],
+            agent_name: entry.agent_name,
+            niche: entry.niche || "general",
+            type: entry.type || "insight",
+            namespace: entry.namespace || "general",
+            tags: entry.tags || [entry.agent_name],
+            timestamp: new Date().toISOString(),
+          };
+
+          const ok = await this.writeKnowledge(node);
+          if (ok) success++;
+          else failed++;
+
+          // Rate limit: small delay between writes to avoid overwhelming APIs
+          await new Promise((r) => setTimeout(r, 200));
+        }
+      } catch (err: any) {
+        console.error(`[Bulk ingest] Failed for ${entry.agent_name}: ${err.message}`);
+        failed++;
+      }
+    }
+
+    console.log(`📦 [Bulk Ingest] Complete: ${success} succeeded, ${failed} failed`);
+    return { success, failed };
+  }
+
+  // ── Text chunking utility ──
+  private chunkText(text: string, chunkSize: number, overlap: number): string[] {
+    if (text.length <= chunkSize) return [text];
+
+    const chunks: string[] = [];
+    let start = 0;
+    while (start < text.length) {
+      const end = Math.min(start + chunkSize, text.length);
+      chunks.push(text.slice(start, end));
+      start += chunkSize - overlap;
+      if (end === text.length) break;
+    }
+    return chunks;
+  }
 }

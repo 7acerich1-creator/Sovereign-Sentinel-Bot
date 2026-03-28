@@ -95,6 +95,13 @@ async function main() {
   const pineconeMemory = new PineconeMemory();
   await pineconeMemory.initialize();
 
+  // Seed personality blueprints into Pinecone on first boot (idempotent — deterministic IDs prevent duplicates)
+  if (pineconeMemory.isReady()) {
+    pineconeMemory.seedBlueprints().then((count) => {
+      if (count > 0) console.log(`🌱 [Boot] Seeded ${count} blueprint chunks into Pinecone`);
+    }).catch((err) => console.error(`[Boot] Blueprint seeding failed: ${err.message}`));
+  }
+
   // ── 2. Initialize LLM Providers ──
   const llmProviders: LLMProvider[] = [];
 

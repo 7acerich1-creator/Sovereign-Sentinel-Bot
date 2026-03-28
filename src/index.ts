@@ -42,7 +42,7 @@ import { SystemTool } from "./tools/system";
 import { SocialSchedulerListProfilesTool, SocialSchedulerPostTool, SocialSchedulerPendingTool } from "./tools/social-scheduler";
 import { ClipGeneratorTool } from "./tools/clip-generator";
 import { VidRushTool } from "./tools/vid-rush";
-import { logTask, updateTask } from "./tools/task-logger";
+import { logTask, updateTask, logAgentActivity } from "./tools/task-logger";
 import { CrewDispatchTool, claimTasks, completeDispatch, dispatchTask, triggerPipelineHandoffs } from "./agent/crew-dispatch";
 import { ProtocolReaderTool, ProtocolWriterTool } from "./tools/protocol-reader";
 import { RelationshipContextTool } from "./tools/relationship-context";
@@ -320,8 +320,12 @@ async function main() {
         ),
       ]);
 
-      // ── Update task status ──
+      // ── Update task status + log to Mission Control ──
       if (taskId) await updateTask(taskId, "completed", response.slice(0, 500));
+      logAgentActivity("veritas", response.slice(0, 500), {
+        trigger: message.content.slice(0, 200),
+        chat_id: message.chatId,
+      });
 
       // ── Send response ──
       // Check if voice response was requested
@@ -1117,8 +1121,12 @@ async function main() {
 
             const response = await agentBotLoop.processMessage(message, () => agentChannel.sendTyping(message.chatId));
 
-            // Update task status
+            // Update task status + log to Mission Control
             if (agentTaskId) await updateTask(agentTaskId, "completed", response.slice(0, 500));
+            logAgentActivity(agentCfg.name, response.slice(0, 500), {
+              trigger: message.content.slice(0, 200),
+              chat_id: message.chatId,
+            });
 
             if (agentChannel.editMessage) {
               await agentChannel.editMessage(message.chatId, processingMsg.channelMessageId!, response, { parseMode: "Markdown" });

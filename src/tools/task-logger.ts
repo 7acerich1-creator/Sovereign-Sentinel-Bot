@@ -61,6 +61,54 @@ export async function logTask(entry: TaskLogEntry): Promise<string | null> {
   }
 }
 
+// ── Agent role mapping for Mission Control dashboard ──
+const AGENT_ROLES: Record<string, string> = {
+  veritas: "Truth Engine & Research",
+  sapphire: "Core API & Orchestration",
+  alfred: "Operations & Automation",
+  yuki: "Creative & Content",
+  anita: "Outreach & Nurture",
+  vector: "Analytics & Intelligence",
+};
+
+/**
+ * Log agent activity to Supabase agent_history.
+ * This feeds the Mission Control dashboard — agent cards, online status, last action.
+ * Non-blocking — failures are logged but never throw.
+ */
+export async function logAgentActivity(
+  agentName: string,
+  content: string,
+  metadata?: Record<string, unknown>
+): Promise<void> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return;
+
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/agent_history`, {
+      method: "POST",
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        agent_name: agentName.charAt(0).toUpperCase() + agentName.slice(1),
+        role: AGENT_ROLES[agentName.toLowerCase()] || "Agent",
+        content: content.slice(0, 1000),
+        metadata: metadata || null,
+      }),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error(`[AgentHistory] Supabase ${resp.status}: ${errText.slice(0, 200)}`);
+    }
+  } catch (err: any) {
+    console.error(`[AgentHistory] Error: ${err.message}`);
+  }
+}
+
 /**
  * Update an existing task's status and result.
  */

@@ -37,7 +37,7 @@ import { Scheduler, SchedulerTool } from "./tools/scheduler";
 import { WebhookServer } from "./tools/webhooks";
 import { MCPBridge } from "./tools/mcp-bridge";
 import { SkillsSystem, SkillsTool } from "./tools/skills";
-import { MavenCrewTool } from "./tools/maven-crew";
+// MavenCrewTool removed — Python CrewAI replaced by TS crew-dispatch system
 import { SystemTool } from "./tools/system";
 import { SocialSchedulerListProfilesTool, SocialSchedulerPostTool, SocialSchedulerPendingTool } from "./tools/social-scheduler";
 import { ClipGeneratorTool } from "./tools/clip-generator";
@@ -164,8 +164,7 @@ async function main() {
   await skillsSystem.loadAll();
   tools.push(new SkillsTool(skillsSystem));
 
-  // Maven Crew Bridge
-  tools.push(new MavenCrewTool());
+  // Maven Crew Bridge — removed (Python CrewAI replaced by TS crew-dispatch)
 
   // System Utilities
   tools.push(new SystemTool());

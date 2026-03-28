@@ -15,9 +15,9 @@ RUN ./node_modules/.bin/tsc
 # ── Production Stage ──
 FROM node:20-slim
 
-# Python for Maven Crew + ffmpeg for sovereign clip pipeline + native module runtime
+# ffmpeg for sovereign clip pipeline + Python for yt-dlp/whisper
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip python3-venv \
+    python3 python3-pip \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
@@ -31,17 +31,10 @@ COPY --from=builder /app/dist ./dist
 # Copy identity, config, and support files
 COPY soul.md ./soul.md
 COPY claude.md ./claude.md
-COPY maven_crew ./maven_crew
 COPY skills ./skills
 
-# Install Python deps for Maven Crew + sovereign clip pipeline
+# Install Python deps for sovereign clip pipeline (yt-dlp + whisper)
 RUN pip3 install --no-cache-dir --break-system-packages \
-    crewai \
-    python-dotenv \
-    requests \
-    langchain-google-genai \
-    langchain-openai \
-    langchain-anthropic \
     yt-dlp \
     openai-whisper
 
@@ -52,7 +45,6 @@ RUN mkdir -p /app/data /app/memory /app/.agent/logs
 HEALTHCHECK --interval=60s --timeout=10s --start-period=60s \
     CMD node -e "const http=require('http');const r=http.get('http://localhost:3000/health',res=>{process.exit(res.statusCode===200?0:1)});r.on('error',()=>process.exit(1));r.setTimeout(5000,()=>{r.destroy();process.exit(1)})" || exit 1
 
-ENV MAVEN_CREW_PATH=./maven_crew
 ENV NODE_ENV=production
 ENV SQLITE_PATH=/app/data/gravity-claw.db
 

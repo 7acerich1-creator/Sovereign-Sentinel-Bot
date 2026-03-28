@@ -550,6 +550,126 @@ async function main() {
     },
   });
 
+  // ── Autonomous Business Ops — Scheduled Agent Jobs ──
+  // These dispatch tasks to crew agents via crew_dispatch, picked up by the dispatch poller.
+  // Each fires once per day at a specific hour using the same minute-check pattern as briefings.
+
+  const autonomousFiredDates = { vectorSweep: "", alfredScan: "", veritasDirective: "" };
+
+  // Vector — Daily CRO Metrics Sweep (10 AM)
+  scheduler.add({
+    name: "Vector Daily Metrics Sweep",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      const hour = new Date().getHours();
+      const dateKey = new Date().toDateString();
+      if (hour === 10 && autonomousFiredDates.vectorSweep !== dateKey) {
+        autonomousFiredDates.vectorSweep = dateKey;
+        console.log(`📊 [AutoOps] Vector daily metrics sweep firing for ${dateKey}`);
+        try {
+          await dispatchTask({
+            from_agent: "system",
+            to_agent: "vector",
+            task_type: "daily_metrics_sweep",
+            priority: 1,
+            chat_id: defaultChatId,
+            payload: {
+              directive: "DAILY CRO METRICS SWEEP — Execute your Chief Revenue Officer protocol. " +
+                "Pull current revenue metrics from Stripe (MRR, churn rate, new subscriptions, failed payments). " +
+                "Calculate velocity toward $100K/month target. " +
+                "Identify the top conversion bottleneck and recommend one specific optimization. " +
+                "Check all active funnels for statistical significance on any running A/B tests (min 100 visitors, 50 opens, 20 checkouts). " +
+                "Report findings to the Architect. Keep it actionable — numbers, not narratives.",
+              triggered_at: new Date().toISOString(),
+              sweep_type: "daily",
+            },
+          });
+        } catch (err: any) {
+          console.error(`[AutoOps] Vector sweep dispatch failed: ${err.message}`);
+        }
+      }
+    },
+  });
+
+  // Alfred — Daily Trend Scan & Content Brief (8 AM)
+  scheduler.add({
+    name: "Alfred Daily Trend Scan",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      const hour = new Date().getHours();
+      const dateKey = new Date().toDateString();
+      if (hour === 8 && autonomousFiredDates.alfredScan !== dateKey) {
+        autonomousFiredDates.alfredScan = dateKey;
+        console.log(`🔍 [AutoOps] Alfred daily trend scan firing for ${dateKey}`);
+        try {
+          await dispatchTask({
+            from_agent: "system",
+            to_agent: "alfred",
+            task_type: "daily_trend_scan",
+            priority: 1,
+            chat_id: defaultChatId,
+            payload: {
+              directive: "DAILY TREND SCAN & CONTENT BRIEF — Execute your Content Director protocol. " +
+                "Scan trending topics across your 5 niches (dark psychology, self-improvement, burnout recovery, quantum consciousness, sovereign systems). " +
+                "Score each opportunity by relevance to Sovereign Synthesis brand (1-10) and viral potential (1-10). " +
+                "Generate today's content brief: top 3 content opportunities with suggested hooks, formats (short-form, long-form, carousel), and target platforms. " +
+                "Dispatch the top hook to Yuki for distribution optimization. " +
+                "Report the full brief to the Architect.",
+              triggered_at: new Date().toISOString(),
+              scan_type: "daily",
+            },
+          });
+        } catch (err: any) {
+          console.error(`[AutoOps] Alfred trend scan dispatch failed: ${err.message}`);
+        }
+      }
+    },
+  });
+
+  // Veritas — Weekly Strategic Directive (Monday 9 AM)
+  scheduler.add({
+    name: "Veritas Weekly Directive",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      const now = new Date();
+      const dateKey = now.toDateString();
+      if (now.getDay() === 1 && now.getHours() === 9 && autonomousFiredDates.veritasDirective !== dateKey) {
+        autonomousFiredDates.veritasDirective = dateKey;
+        console.log(`🎯 [AutoOps] Veritas weekly strategic directive firing for ${dateKey}`);
+        try {
+          await dispatchTask({
+            from_agent: "system",
+            to_agent: "veritas",
+            task_type: "weekly_strategic_directive",
+            priority: 1,
+            chat_id: defaultChatId,
+            payload: {
+              directive: "WEEKLY STRATEGIC DIRECTIVE — Execute your Chief Strategy Officer protocol. " +
+                "Review the past 7 days of crew activity, revenue movement, and content performance. " +
+                "Assess mission velocity toward $1.2M liquid by Jan 2027 and 100K minds liberated. " +
+                "Evaluate each crew member's output quality and identify any drift from brand standards. " +
+                "Issue this week's strategic priority — one clear directive the entire crew should orient around. " +
+                "Flag any risks, bottlenecks, or resource gaps that need the Architect's attention. " +
+                "Deliver as a concise executive briefing.",
+              triggered_at: new Date().toISOString(),
+              directive_type: "weekly",
+            },
+          });
+        } catch (err: any) {
+          console.error(`[AutoOps] Veritas directive dispatch failed: ${err.message}`);
+        }
+      }
+    },
+  });
+
+  console.log("⚡ [AutoOps] Scheduled: Vector daily sweep (10AM), Alfred trend scan (8AM), Veritas weekly directive (Mon 9AM)");
+
   // Heartbeat with memory evolution
   heartbeat.addCheck({
     name: "Pulse 3: Memory Evolution",
@@ -1003,6 +1123,9 @@ async function main() {
 
   // ── Map to hold each agent's AgentLoop + Channel for dispatch processing ──
   const agentLoops: Map<string, { loop: AgentLoop; channel: TelegramChannel }> = new Map();
+
+  // Register Veritas in the dispatch map so system-dispatched tasks reach the lead agent
+  agentLoops.set("veritas", { loop: agentLoop, channel: telegram });
 
   if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
     const supabase = (await import("@supabase/supabase-js")).createClient(

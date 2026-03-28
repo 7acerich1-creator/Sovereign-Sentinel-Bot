@@ -133,16 +133,21 @@ async function main() {
     new KnowledgeGraphTool(knowledgeGraph),
   ];
 
-  // MCP Bridge
+  // MCP Bridge — gated behind MCP_ENABLED to prevent OOM on constrained containers
+  // Each MCP server spawns a child process (~100-200MB each). With 9 servers = ~1.5GB extra.
   const mcpBridge = new MCPBridge();
-  try {
-    const mcpTools = await mcpBridge.initialize();
-    tools.push(...mcpTools);
-    if (mcpTools.length > 0) {
-      console.log(`🔗 MCP: ${mcpTools.length} tools from ${mcpBridge.listConnectedServers().length} servers`);
+  if (process.env.MCP_ENABLED === "true") {
+    try {
+      const mcpTools = await mcpBridge.initialize();
+      tools.push(...mcpTools);
+      if (mcpTools.length > 0) {
+        console.log(`🔗 MCP: ${mcpTools.length} tools from ${mcpBridge.listConnectedServers().length} servers`);
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ MCP Bridge: ${err.message}`);
     }
-  } catch (err: any) {
-    console.warn(`⚠️ MCP Bridge: ${err.message}`);
+  } else {
+    console.log("ℹ️ MCP Bridge DISABLED (set MCP_ENABLED=true to activate)");
   }
 
   // Skills System

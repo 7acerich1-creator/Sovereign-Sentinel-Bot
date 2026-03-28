@@ -29,6 +29,13 @@ export class WebhookServer {
     }
 
     this.server = http.createServer(async (req, res) => {
+      // GET /health — lightweight probe for Railway / load balancers
+      if (req.method === "GET" && (req.url === "/health" || req.url === "/api/health")) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "ok", uptime: process.uptime() }));
+        return;
+      }
+
       if (req.method !== "POST") {
         res.writeHead(404);
         res.end();

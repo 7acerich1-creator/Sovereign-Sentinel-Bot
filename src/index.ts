@@ -728,11 +728,68 @@ async function main() {
     }
   });
 
-  // ── /api/stripe-webhook — Stripe payment events → revenue_log + mission_metrics ──
-  webhookServer.register("/api/stripe-webhook", async (incoming: any, headers: any) => {
+  // ── /api/stripe-webhook — Stripe payment events → revenue_log + mission_metrics + activity_log ──
+  // Product price-to-name mapping for Sovereign Synthesis tiers
+  const STRIPE_PRODUCT_MAP: Record<number, string> = {
+    77: "Protocol 77",
+    177: "The Map",
+    477: "Defense Protocol Phase 1",
+    1497: "Defense Protocol Phase 2",
+    3777: "Defense Protocol Phase 3",
+    12000: "Inner Circle",
+  };
+  function resolveProductName(productId: string, amount: number): string {
+    // First check if product_id already has a name from metadata
+    if (productId && !["checkout", "invoice", "payment"].includes(productId)) return productId;
+    // Fall back to amount-based lookup
+    return STRIPE_PRODUCT_MAP[amount] || `$${amount} Purchase`;
+  }
+
+  webhookServer.register("/api/stripe-webhook", async (incoming: any, headers: any, rawBody?: string) => {
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_ANON_KEY;
     if (!supabaseUrl || !supabaseKey) return "error: supabase not configured";
+
+    // ── Stripe signature verification ──
+    const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+    if (WEBHOOK_SECRET && rawBody) {
+      const crypto = await import("crypto");
+      const sigHeader = headers["stripe-signature"] as string;
+      if (!sigHeader) return "error: missing stripe-signature header";
+
+      // Parse Stripe signature: t=timestamp,v1=hash
+      const parts = sigHeader.split(",").reduce((acc: Record<string, string>, part: string) => {
+        const [key, val] = part.split("=");
+        acc[key] = val;
+        return acc;
+      }, {} as Record<string, string>);
+
+      const timestamp = parts["t"];
+      const expectedSig = parts["v1"];
+      if (!timestamp || !expectedSig) return "error: malformed stripe-signature";
+
+      // Verify: HMAC-SHA256(timestamp + "." + rawBody) == v1 signature
+      const signedPayload = `${timestamp}.${rawBody}`;
+      const computedSig = crypto
+        .createHmac("sha256", WEBHOOK_SECRET)
+        .update(signedPayload)
+        .digest("hex");
+
+      if (computedSig !== expectedSig) {
+        console.error("[Stripe] Signature verification FAILED");
+        return "error: signature_verification_failed";
+      }
+
+      // Reject events older than 5 minutes (replay protection)
+      const eventAge = Math.floor(Date.now() / 1000) - parseInt(timestamp);
+      if (eventAge > 300) {
+        console.error(`[Stripe] Event too old: ${eventAge}s`);
+        return "error: event_too_old";
+      }
+      console.log("[Stripe] ✅ Webhook signature verified");
+    } else if (WEBHOOK_SECRET && !rawBody) {
+      console.warn("[Stripe] STRIPE_WEBHOOK_SECRET set but rawBody unavailable — skipping verification");
+    }
 
     // Stripe sends the event object directly as the payload
     const event = incoming as any;
@@ -780,6 +837,9 @@ async function main() {
         return "skipped:zero_amount";
       }
 
+      // Resolve human-readable product name
+      const productName = resolveProductName(productId, amount);
+
       // 1. Write to revenue_log
       const revResp = await fetch(`${supabaseUrl}/rest/v1/revenue_log`, {
         method: "POST",
@@ -792,12 +852,13 @@ async function main() {
         body: JSON.stringify({
           amount,
           source: "stripe",
-          product_id: productId,
+          product_id: productName,
           customer_email: customerEmail,
           metadata: {
             stripe_event: eventType,
             stripe_id: stripeId,
             event_id: event.id,
+            original_product_id: productId,
           },
         }),
       });
@@ -808,7 +869,34 @@ async function main() {
         return `error:revenue_log:${errText}`;
       }
 
-      // 2. Update mission_metrics.fiscal_sum (atomic increment)
+      // 2. Write to activity_log (feeds Mission Control activity feed)
+      await fetch(`${supabaseUrl}/rest/v1/activity_log`, {
+        method: "POST",
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({
+          event_type: "revenue",
+          title: "Payment received",
+          description: `$${amount.toFixed(2)} from ${productName}`,
+          agent_name: "system",
+          status: "completed",
+          details: JSON.stringify({
+            amount,
+            product: productName,
+            customer: customerEmail,
+            stripe_event: eventType,
+            stripe_id: stripeId,
+          }),
+        }),
+      }).catch((err: any) => {
+        console.error(`[Stripe] activity_log write failed: ${err.message}`);
+      });
+
+      // 3. Update mission_metrics.fiscal_sum (atomic increment)
       await fetch(`${supabaseUrl}/rest/v1/rpc/increment_fiscal_sum`, {
         method: "POST",
         headers: {
@@ -822,19 +910,26 @@ async function main() {
         console.warn(`[Stripe] increment_fiscal_sum RPC failed (creating fallback): ${err.message}`);
       });
 
-      // 3. Alert Architect via Telegram
+      // 4. Log to agent_history (lights up "System" on Mission Control)
+      logAgentActivity("system", `Payment: $${amount.toFixed(2)} — ${productName} from ${customerEmail || "anonymous"}`, {
+        type: "stripe_payment",
+        amount,
+        product: productName,
+      });
+
+      // 5. Alert Architect via Telegram
       await telegram.sendMessage(
         defaultChatId,
         `💰 *REVENUE DETECTED*\n` +
         `Amount: *$${amount.toFixed(2)}*\n` +
-        `Product: ${productId}\n` +
+        `Product: ${productName}\n` +
         `Customer: ${customerEmail || "N/A"}\n` +
         `Event: \`${eventType}\``,
         { parseMode: "Markdown" }
       );
 
-      console.log(`💰 [Stripe] $${amount.toFixed(2)} from ${customerEmail} → revenue_log ✅`);
-      return `recorded:$${amount.toFixed(2)}`;
+      console.log(`💰 [Stripe] $${amount.toFixed(2)} — ${productName} from ${customerEmail} → revenue_log + activity_log ✅`);
+      return `recorded:$${amount.toFixed(2)}:${productName}`;
     } catch (err: any) {
       console.error(`[Stripe] Webhook error: ${err.message}`);
       return `error:${err.message}`;

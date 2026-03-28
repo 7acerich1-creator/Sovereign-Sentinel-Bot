@@ -7,7 +7,7 @@ import * as http from "http";
 import { randomUUID } from "crypto";
 import { config } from "../config";
 
-type WebhookHandler = (payload: unknown, headers: http.IncomingHttpHeaders) => Promise<string>;
+type WebhookHandler = (payload: unknown, headers: http.IncomingHttpHeaders, rawBody?: string) => Promise<string>;
 
 export class WebhookServer {
   private server: http.Server | null = null;
@@ -146,7 +146,7 @@ export class WebhookServer {
             payload = body;
           }
 
-          const result = await handler(payload, req.headers);
+          const result = await handler(payload, req.headers, body);
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ status: "ok", result }));
         } catch (err: any) {

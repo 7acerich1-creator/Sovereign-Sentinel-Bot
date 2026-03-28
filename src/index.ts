@@ -44,6 +44,7 @@ import { ClipGeneratorTool } from "./tools/clip-generator";
 import { VidRushTool } from "./tools/vid-rush";
 import { logTask, updateTask } from "./tools/task-logger";
 import { CrewDispatchTool, claimTasks, completeDispatch, dispatchTask, triggerPipelineHandoffs } from "./agent/crew-dispatch";
+import { ProtocolReaderTool, ProtocolWriterTool } from "./tools/protocol-reader";
 
 // ── Voice ──
 import { transcribeAudio, downloadTelegramFile } from "./voice/transcription";
@@ -215,6 +216,12 @@ async function main() {
       console.log(`📥 [Handler] shouldRespond: ${shouldResp}`);
       if (!shouldResp) {
         console.log(`🚫 [Handler] Message DROPPED by groupManager`);
+        return;
+      }
+
+      // ── Roll Call / Check-In — Veritas responds immediately with name only ──
+      if (message.metadata?.isGroup && groupManager.isBroadcastTrigger(message)) {
+        await telegram.sendMessage(message.chatId, "Veritas");
         return;
       }
 
@@ -889,14 +896,31 @@ async function main() {
 
         // Wrap LLM for system prompt injection
         const blueprint = personality.prompt_blueprint;
+
+        // Protocol injection — content crew (Alfred, Yuki, Anita) must read protocols before content tasks
+        const CONTENT_CREW = ["alfred", "yuki", "anita"];
+        const protocolDirective = CONTENT_CREW.includes(agentCfg.name)
+          ? "\n\n[STANDING ORDER] Before executing any content task, call read_protocols with the detected niche. Apply every returned directive to your output. These are standing orders from the Architect."
+          : agentCfg.name === "sapphire"
+            ? "\n\n[STANDING ORDER] When you receive a message containing 'standing directive' or 'new protocol', extract the protocol name, niche, and directive. Use the write_protocol tool to save it. Confirm: 'Protocol [name] locked. All crew members will execute this on every [niche] task going forward.'"
+            : "";
+
         const injectedLLM: LLMProvider = {
           ...failoverLLM,
           generate: (messages, options) =>
-            failoverLLM.generate(messages, { ...options, systemPrompt: blueprint }),
+            failoverLLM.generate(messages, { ...options, systemPrompt: blueprint + protocolDirective }),
         };
 
-        // Build per-agent tool set: shared tools + agent-specific CrewDispatchTool
-        const agentTools = [...tools, new CrewDispatchTool(agentCfg.name)];
+        // Build per-agent tool set: shared tools + agent-specific tools
+        const agentTools: Tool[] = [...tools, new CrewDispatchTool(agentCfg.name)];
+
+        // Protocol tools — content crew gets reader, Sapphire gets writer
+        if (CONTENT_CREW.includes(agentCfg.name)) {
+          agentTools.push(new ProtocolReaderTool());
+        }
+        if (agentCfg.name === "sapphire") {
+          agentTools.push(new ProtocolWriterTool());
+        }
 
         // Initialize Agent Loop (Unique per bot)
         const agentBotLoop = new AgentLoop(injectedLLM, agentTools, memoryProviders);
@@ -910,10 +934,25 @@ async function main() {
         const agentGroupManager = new GroupManager(realBotUsername, config.telegram.authorizedUserIds);
         console.log(`[BotInit] ${agentCfg.name} GroupManager username: @${realBotUsername}`);
 
+        // Roll call stagger: Veritas = 0s, then crew bots stagger 4s each
+        // botIndex is already 1-based from the loop, so delay = botIndex * 4000
+        const rollCallDelay = botIndex * 4000;
+        const agentDisplayName = agentCfg.name.charAt(0).toUpperCase() + agentCfg.name.slice(1);
+
         // Wire Handler (Isolated from MessageRouter)
         agentChannel.onMessage(async (message: Message) => {
           try {
             if (!agentGroupManager.shouldRespond(message)) return;
+
+            // ── Roll Call / Check-In — respond with name after stagger delay ──
+            if (message.metadata?.isGroup && agentGroupManager.isBroadcastTrigger(message)) {
+              await new Promise((resolve) => setTimeout(resolve, rollCallDelay));
+              // Sapphire responds with name only, rest with @name (matching original pattern)
+              const rollCallText = agentCfg.name === "sapphire" ? agentDisplayName : `@${agentDisplayName}`;
+              await agentChannel.sendMessage(message.chatId, rollCallText);
+              return;
+            }
+
             if (message.metadata?.isGroup) message.content = agentGroupManager.stripMention(message.content);
 
             // Voice handling

@@ -45,6 +45,8 @@ import { VidRushTool } from "./tools/vid-rush";
 import { logTask, updateTask } from "./tools/task-logger";
 import { CrewDispatchTool, claimTasks, completeDispatch, dispatchTask, triggerPipelineHandoffs } from "./agent/crew-dispatch";
 import { ProtocolReaderTool, ProtocolWriterTool } from "./tools/protocol-reader";
+import { RelationshipContextTool } from "./tools/relationship-context";
+import { SapphireSentinel } from "./proactive/sapphire-sentinel";
 
 // ── Voice ──
 import { transcribeAudio, downloadTelegramFile } from "./voice/transcription";
@@ -221,7 +223,7 @@ async function main() {
 
       // ── Roll Call / Check-In — Veritas responds immediately with name only ──
       if (message.metadata?.isGroup && groupManager.isBroadcastTrigger(message)) {
-        await telegram.sendMessage(message.chatId, "Veritas");
+        await telegram.sendMessage(message.chatId, "@Veritas");
         return;
       }
 
@@ -514,6 +516,10 @@ async function main() {
 
   heartbeat.start();
   console.log("# Heartbeat: Running every 300s — SILENT mode");
+
+  // ── Sapphire Sentinel — proactive observations every 2 hours ──
+  const sapphireSentinel = new SapphireSentinel(failoverLLM, telegram, defaultChatId);
+  sapphireSentinel.start();
 
   // ── 8. Webhook Server ──
   const webhookServer = new WebhookServer();
@@ -902,7 +908,7 @@ async function main() {
         const protocolDirective = CONTENT_CREW.includes(agentCfg.name)
           ? "\n\n[STANDING ORDER] Before executing any content task, call read_protocols with the detected niche. Apply every returned directive to your output. These are standing orders from the Architect."
           : agentCfg.name === "sapphire"
-            ? "\n\n[STANDING ORDER] When you receive a message containing 'standing directive' or 'new protocol', extract the protocol name, niche, and directive. Use the write_protocol tool to save it. Confirm: 'Protocol [name] locked. All crew members will execute this on every [niche] task going forward.'"
+            ? "\n\n[STANDING ORDER] When you receive a message containing 'standing directive' or 'new protocol', extract the protocol name, niche, and directive. Use the write_protocol tool to save it. Confirm: 'Protocol [name] locked. All crew members will execute this on every [niche] task going forward.'\n\n[RELATIONSHIP AWARENESS] You have the write_relationship_context tool. When you notice patterns in how Ace works — what he asks for repeatedly, what frustrates him, what he celebrates — write a brief observation. Categories: preference, frustration, pattern, win. These observations help you calibrate your tone."
             : "";
 
         const injectedLLM: LLMProvider = {
@@ -920,6 +926,7 @@ async function main() {
         }
         if (agentCfg.name === "sapphire") {
           agentTools.push(new ProtocolWriterTool());
+          agentTools.push(new RelationshipContextTool());
         }
 
         // Initialize Agent Loop (Unique per bot)
@@ -947,8 +954,7 @@ async function main() {
             // ── Roll Call / Check-In — respond with name after stagger delay ──
             if (message.metadata?.isGroup && agentGroupManager.isBroadcastTrigger(message)) {
               await new Promise((resolve) => setTimeout(resolve, rollCallDelay));
-              // Sapphire responds with name only, rest with @name (matching original pattern)
-              const rollCallText = agentCfg.name === "sapphire" ? agentDisplayName : `@${agentDisplayName}`;
+              const rollCallText = `@${agentDisplayName}`;
               await agentChannel.sendMessage(message.chatId, rollCallText);
               return;
             }
@@ -1163,6 +1169,7 @@ async function main() {
   const shutdown = async () => {
     console.log("🛑 GRAVITY CLAW shutting down...");
     heartbeat.stop();
+    sapphireSentinel.stop();
     scheduler.shutdown();
     await webhookServer.shutdown();
     await mcpBridge.shutdown();

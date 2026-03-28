@@ -24,21 +24,23 @@ export interface PineconeMatch {
 }
 
 // ── Embedding helper ──
-// Uses Gemini text-embedding-004 (768 dimensions) via the REST API
+// Uses Gemini gemini-embedding-001 (768d via MRL) via the REST API
 // so we don't pull in extra SDK dependencies for a single call.
+// NOTE: text-embedding-004 was deprecated Jan 14 2026, replaced by gemini-embedding-001
 async function embedText(text: string): Promise<number[]> {
   const geminiKey = config.llm.providers.gemini?.apiKey;
   const openaiKey = config.llm.providers.openai?.apiKey;
 
-  // Primary: Gemini embedding (768d)
+  // Primary: Gemini embedding (768d via Matryoshka Representation Learning)
   if (geminiKey) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${geminiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${geminiKey}`;
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "models/text-embedding-004",
+        model: "models/gemini-embedding-001",
         content: { parts: [{ text: text.slice(0, 2000) }] },
+        outputDimensionality: 768, // Match Pinecone index dimensions
       }),
     });
     if (res.ok) {

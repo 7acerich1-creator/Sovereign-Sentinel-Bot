@@ -74,13 +74,14 @@ export class WebhookServer {
             // Test Gemini embedding
             const geminiKey = config.llm.providers.gemini?.apiKey;
             if (geminiKey) {
-              const url = `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${geminiKey}`;
+              const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${geminiKey}`;
               const embedRes = await fetch(url, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                  model: "models/text-embedding-004",
+                  model: "models/gemini-embedding-001",
                   content: { parts: [{ text: "test embedding" }] },
+                  outputDimensionality: 768,
                 }),
               });
               diag.gemini_embed_status = embedRes.status;

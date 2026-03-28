@@ -31,7 +31,7 @@ async function embedText(text: string): Promise<number[]> {
   const geminiKey = config.llm.providers.gemini?.apiKey;
   const openaiKey = config.llm.providers.openai?.apiKey;
 
-  // Primary: Gemini embedding (768d via Matryoshka Representation Learning)
+  // Primary: Gemini embedding (1024d via Matryoshka Representation Learning)
   if (geminiKey) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${geminiKey}`;
     const res = await fetch(url, {
@@ -40,7 +40,7 @@ async function embedText(text: string): Promise<number[]> {
       body: JSON.stringify({
         model: "models/gemini-embedding-001",
         content: { parts: [{ text: text.slice(0, 2000) }] },
-        outputDimensionality: 768, // Match Pinecone index dimensions
+        outputDimensionality: 1024, // Match Pinecone index dimensions (gravity-claw = 1024d)
       }),
     });
     if (res.ok) {

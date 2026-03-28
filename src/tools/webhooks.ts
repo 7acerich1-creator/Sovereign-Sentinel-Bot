@@ -81,7 +81,7 @@ export class WebhookServer {
                 body: JSON.stringify({
                   model: "models/gemini-embedding-001",
                   content: { parts: [{ text: "test embedding" }] },
-                  outputDimensionality: 768,
+                  outputDimensionality: 1024,
                 }),
               });
               diag.gemini_embed_status = embedRes.status;

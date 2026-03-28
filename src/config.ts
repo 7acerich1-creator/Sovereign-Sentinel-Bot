@@ -115,7 +115,7 @@ export const config: GravityClawConfig = {
 
   webhooks: {
     enabled: process.env.WEBHOOKS_ENABLED === "true",
-    port: envInt("WEBHOOK_PORT", 3000),
+    port: envInt("PORT", 0) || envInt("WEBHOOK_PORT", 3000),
   },
 
   vidRush: {

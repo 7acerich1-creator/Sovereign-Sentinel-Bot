@@ -1467,6 +1467,13 @@ async function main() {
               };
 
               try {
+                // Guard: skip if agent persona hasn't loaded yet (prevents crash during deploy windows)
+                if (!agentLoop || typeof agentLoop.processMessage !== "function") {
+                  console.warn(`⚠️ [DispatchPoller] ${agentName} agent loop not ready — requeueing task ${task.id}`);
+                  await completeDispatch(task.id, "failed", "Agent loop not initialized yet — will retry on next cycle");
+                  continue;
+                }
+
                 const response = await agentLoop.processMessage(dispatchMessage);
                 await completeDispatch(task.id, "completed", response.slice(0, 4000));
 
@@ -1487,9 +1494,16 @@ async function main() {
 
                 // Notify the originating chat that dispatch was processed
                 if (task.chat_id) {
+                  const agentLabel = agentName.charAt(0).toUpperCase() + agentName.slice(1);
+                  const sourceLabel = task.from_agent.charAt(0).toUpperCase() + task.from_agent.slice(1);
+                  const taskLabel = task.task_type
+                    .replace(/_/g, " ")
+                    .replace(/\b\w/g, (c: string) => c.toUpperCase());
+
                   await channel.sendMessage(
                     task.chat_id,
-                    `📡 _${agentName.charAt(0).toUpperCase() + agentName.slice(1)} completed dispatch from ${task.from_agent}: ${task.task_type}_`,
+                    `✅ *${agentLabel}* — ${taskLabel}\n` +
+                    `   ↳ _Dispatched by ${sourceLabel}_`,
                     { parseMode: "Markdown" }
                   );
                 }

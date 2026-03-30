@@ -1588,7 +1588,7 @@ async function main() {
 
           if (!agentEntry) {
             console.warn(`⚠️ [TaskPoller] Task ${task.id} assigned to "${assignedTo}" — agent not found in agentLoops`);
-            // Mark as failed so it doesn't loop forever
+            // Mark as Complete so it doesn't loop forever
             await fetch(`${supabaseUrl}/rest/v1/tasks?id=eq.${task.id}`, {
               method: "PATCH",
               headers: {
@@ -1596,7 +1596,7 @@ async function main() {
                 Authorization: `Bearer ${supabaseKey}`,
                 "Content-Type": "application/json",
               },
-              body: JSON.stringify({ status: "Done", description: task.description + "\n\n[AUTO] Agent not found — task could not be executed." }),
+              body: JSON.stringify({ status: "Complete", description: task.description + "\n\n[AUTO] Agent not found — task could not be executed." }),
             }).catch(() => {});
             continue;
           }
@@ -1644,7 +1644,7 @@ async function main() {
                 Authorization: `Bearer ${supabaseKey}`,
                 "Content-Type": "application/json",
               },
-              body: JSON.stringify({ status: "Done" }),
+              body: JSON.stringify({ status: "Complete" }),
             }).catch(() => {});
 
             // Log activity
@@ -1673,7 +1673,7 @@ async function main() {
                 Authorization: `Bearer ${supabaseKey}`,
                 "Content-Type": "application/json",
               },
-              body: JSON.stringify({ status: "Done", description: task.description + `\n\n[EXECUTION FAILED] ${execErr.message}` }),
+              body: JSON.stringify({ status: "Complete", description: task.description + `\n\n[EXECUTION FAILED] ${execErr.message}` }),
             }).catch(() => {});
 
             // Notify Ace of failure

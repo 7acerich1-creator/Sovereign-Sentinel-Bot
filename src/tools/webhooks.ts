@@ -43,6 +43,13 @@ export class WebhookServer {
         return;
       }
 
+      // TikTok domain verification — serves the verification signature file
+      if (req.method === "GET" && req.url === "/tiktok-developers-site-verification.txt") {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end("tiktok-developers-site-verification=n7lNKYkofPRzHuXTzRv9BZKi8VLC5NBO");
+        return;
+      }
+
       // GET /legal/* — serve Terms of Service and Privacy Policy (required for TikTok/Meta app review)
       if (req.method === "GET" && req.url?.startsWith("/legal/")) {
         const LEGAL_PAGES: Record<string, { title: string; content: string }> = {

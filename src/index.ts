@@ -52,6 +52,7 @@ import { KnowledgeWriterTool } from "./tools/knowledge-writer";
 import { ImageGeneratorTool } from "./tools/image-generator";
 import { ProposeTaskTool, SaveContentDraftTool, FileBriefingTool, CheckApprovedTasksTool } from "./tools/action-surface";
 import { StripeMetricsTool } from "./tools/stripe-metrics";
+import { VideoPublisherTool, TikTokPublishTool, InstagramReelsPublishTool, YouTubeShortsPublishTool } from "./tools/video-publisher";
 
 // ── Voice ──
 import { transcribeAudio, downloadTelegramFile } from "./voice/transcription";
@@ -199,6 +200,10 @@ async function main() {
   // Sovereign Clip Pipeline (yt-dlp + ffmpeg + Whisper)
   tools.push(new ClipGeneratorTool());
   tools.push(new VidRushTool());
+
+  // Direct Video Publisher (Path A — bypasses Buffer for video content)
+  // Buffer v1 API has NO video upload capability. Videos go direct to platform APIs.
+  tools.push(new VideoPublisherTool());
 
   // Sovereign Image Generator (Gemini Imagen 3 + DALL-E 3 fallback)
   tools.push(new ImageGeneratorTool());
@@ -1548,6 +1553,145 @@ async function main() {
         }
       }, DISPATCH_POLL_MS);
     }
+
+    // ── Task Approval Poller — executes tasks Ace moves to "In Progress" in Mission Control ──
+    // Agents propose tasks via propose_task → tasks table status "To Do"
+    // Ace reviews in Mission Control → moves to "In Progress" = green light
+    // This poller detects the approval and feeds the task to the assigned agent
+    const TASK_POLL_MS = 30_000;
+    console.log(`📋 [TaskPoller] Starting task approval poller (every ${TASK_POLL_MS / 1000}s)`);
+
+    setInterval(async () => {
+      try {
+        const supabaseUrl = process.env.SUPABASE_URL!;
+        const supabaseKey = process.env.SUPABASE_ANON_KEY!;
+
+        // Fetch approved AI tasks (status = "In Progress", type = "ai")
+        const resp = await fetch(
+          `${supabaseUrl}/rest/v1/tasks?status=eq.In%20Progress&type=eq.ai&order=created_at.asc&limit=5`,
+          {
+            headers: {
+              apikey: supabaseKey,
+              Authorization: `Bearer ${supabaseKey}`,
+            },
+          }
+        );
+
+        if (!resp.ok) return;
+        const approvedTasks = (await resp.json()) as any[];
+        if (approvedTasks.length === 0) return;
+
+        for (const task of approvedTasks) {
+          // Resolve assigned agent name (lowercase)
+          const assignedTo = (task.assigned_to || "").toLowerCase();
+          const agentEntry = agentLoops.get(assignedTo);
+
+          if (!agentEntry) {
+            console.warn(`⚠️ [TaskPoller] Task ${task.id} assigned to "${assignedTo}" — agent not found in agentLoops`);
+            // Mark as failed so it doesn't loop forever
+            await fetch(`${supabaseUrl}/rest/v1/tasks?id=eq.${task.id}`, {
+              method: "PATCH",
+              headers: {
+                apikey: supabaseKey,
+                Authorization: `Bearer ${supabaseKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ status: "Done", description: task.description + "\n\n[AUTO] Agent not found — task could not be executed." }),
+            }).catch(() => {});
+            continue;
+          }
+
+          console.log(`✅ [TaskPoller] Executing approved task ${task.id} → ${assignedTo}: ${task.title}`);
+
+          // Mark as "Executing" to prevent re-pickup on next poll
+          await fetch(`${supabaseUrl}/rest/v1/tasks?id=eq.${task.id}`, {
+            method: "PATCH",
+            headers: {
+              apikey: supabaseKey,
+              Authorization: `Bearer ${supabaseKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ status: "Executing" }),
+          }).catch(() => {});
+
+          // Build synthetic message from the task
+          const taskMessage: Message = {
+            id: `task-approval-${task.id}`,
+            role: "user",
+            content: `[APPROVED TASK — Execute immediately]\n` +
+              `Task ID: ${task.id}\n` +
+              `Title: ${task.title}\n` +
+              `Priority: ${task.priority || "medium"}\n` +
+              `Category: ${task.category || "General"}\n\n` +
+              `Description:\n${task.description || "(no description)"}\n\n` +
+              `The Architect has reviewed and approved this task. Execute it now according to your role and capabilities. ` +
+              `When complete, report results. If blocked, explain why.`,
+            timestamp: new Date(),
+            channel: "telegram",
+            chatId: defaultChatId,
+            userId: "task-approval-system",
+            metadata: { isTaskApproval: true, taskId: task.id },
+          };
+
+          try {
+            const response = await agentEntry.loop.processMessage(taskMessage);
+
+            // Mark task as Done
+            await fetch(`${supabaseUrl}/rest/v1/tasks?id=eq.${task.id}`, {
+              method: "PATCH",
+              headers: {
+                apikey: supabaseKey,
+                Authorization: `Bearer ${supabaseKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ status: "Done" }),
+            }).catch(() => {});
+
+            // Log activity
+            logAgentActivity(assignedTo, `Task completed: ${task.title} — ${response.slice(0, 300)}`, {
+              type: "task_approval_execution",
+              task_id: task.id,
+            });
+
+            // Notify Ace via Telegram
+            const agentLabel = assignedTo.charAt(0).toUpperCase() + assignedTo.slice(1);
+            await agentEntry.channel.sendMessage(
+              defaultChatId,
+              `✅ *${agentLabel}* executed approved task:\n*${task.title}*\n\n${response.slice(0, 500)}`,
+              { parseMode: "Markdown" }
+            );
+
+            console.log(`✅ [TaskPoller] ${assignedTo} completed task ${task.id}: ${task.title}`);
+          } catch (execErr: any) {
+            console.error(`[TaskPoller] ${assignedTo} failed on task ${task.id}: ${execErr.message}`);
+
+            // Mark as failed
+            await fetch(`${supabaseUrl}/rest/v1/tasks?id=eq.${task.id}`, {
+              method: "PATCH",
+              headers: {
+                apikey: supabaseKey,
+                Authorization: `Bearer ${supabaseKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ status: "Done", description: task.description + `\n\n[EXECUTION FAILED] ${execErr.message}` }),
+            }).catch(() => {});
+
+            // Notify Ace of failure
+            const agentLabel = assignedTo.charAt(0).toUpperCase() + assignedTo.slice(1);
+            await agentEntry.channel.sendMessage(
+              defaultChatId,
+              `⚠️ *${agentLabel}* failed to execute: *${task.title}*\nError: ${execErr.message}`,
+              { parseMode: "Markdown" }
+            );
+          }
+        }
+      } catch (pollErr: any) {
+        // Silent — don't crash
+        if (!pollErr.message?.includes("fetch")) {
+          console.error(`[TaskPoller] Poll error: ${pollErr.message}`);
+        }
+      }
+    }, TASK_POLL_MS);
   }
 
   // ── 10. Memory heartbeat log ──

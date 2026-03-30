@@ -137,6 +137,19 @@ export class SocialSchedulerPostTool implements Tool {
       }
 
       if (mediaUrl) {
+        // ── VIDEO DETECTION — Buffer v1 API CANNOT handle video ──
+        // media[photo] only accepts image URLs. Video URLs cause Error 1030.
+        // Route video content through publish_video tool instead.
+        const isVideoUrl = /\.(mp4|mov|avi|webm|mkv)(\?|$)/i.test(mediaUrl) ||
+          mediaUrl.includes("/video/") || mediaUrl.includes("video_url");
+
+        if (isVideoUrl) {
+          return `⚠️ Buffer cannot publish video content (API limitation — media[photo] only accepts images).\n` +
+            `Use the publish_video tool instead to post video to TikTok, Instagram Reels, and YouTube Shorts.\n` +
+            `Video URL: ${mediaUrl}\n` +
+            `Text content can still be posted via this tool (just remove the media_url parameter).`;
+        }
+
         body["media[link]"] = mediaUrl;
         body["media[photo]"] = mediaUrl;
       }

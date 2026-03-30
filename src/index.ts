@@ -50,6 +50,8 @@ import { SapphireSentinel } from "./proactive/sapphire-sentinel";
 import { PineconeMemory } from "./memory/pinecone";
 import { KnowledgeWriterTool } from "./tools/knowledge-writer";
 import { ImageGeneratorTool } from "./tools/image-generator";
+import { ProposeTaskTool, SaveContentDraftTool, FileBriefingTool, CheckApprovedTasksTool } from "./tools/action-surface";
+import { StripeMetricsTool } from "./tools/stripe-metrics";
 
 // ── Voice ──
 import { transcribeAudio, downloadTelegramFile } from "./voice/transcription";
@@ -215,6 +217,12 @@ async function main() {
 
   // Crew Dispatch (Supabase-backed inter-agent routing — replaces AgentComms for cross-bot work)
   tools.push(new CrewDispatchTool("veritas"));
+
+  // Action Surface — Veritas gets all tools (lead agent)
+  tools.push(new ProposeTaskTool("veritas"));
+  tools.push(new CheckApprovedTasksTool("veritas"));
+  tools.push(new SaveContentDraftTool("veritas"));
+  tools.push(new FileBriefingTool("veritas"));
 
   // Pinecone KnowledgeWriter for Veritas (namespace: brand)
   if (pineconeMemory.isReady()) {
@@ -1250,6 +1258,27 @@ async function main() {
         if (agentCfg.name === "sapphire") {
           agentTools.push(new ProtocolWriterTool());
           agentTools.push(new RelationshipContextTool());
+        }
+
+        // Action Surface Layer — every agent gets visibility tools
+        // These write to Supabase tables that Mission Control can display
+        agentTools.push(new ProposeTaskTool(agentCfg.name));
+        agentTools.push(new CheckApprovedTasksTool(agentCfg.name));
+
+        // Content crew (Alfred, Yuki, Anita) gets the draft tool
+        if (CONTENT_CREW.includes(agentCfg.name)) {
+          agentTools.push(new SaveContentDraftTool(agentCfg.name));
+        }
+
+        // Strategy/ops agents (Sapphire, Veritas, Vector) get the briefing tool
+        const BRIEFING_AGENTS = ["sapphire", "vector", "veritas"];
+        if (BRIEFING_AGENTS.includes(agentCfg.name)) {
+          agentTools.push(new FileBriefingTool(agentCfg.name));
+        }
+
+        // Vector gets Stripe metrics for CRO sweeps
+        if (agentCfg.name === "vector") {
+          agentTools.push(new StripeMetricsTool());
         }
 
         // Pinecone KnowledgeWriter — agent-specific namespaces

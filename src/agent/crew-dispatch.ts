@@ -195,9 +195,20 @@ export async function triggerPipelineHandoffs(
   const dispatchIds: string[] = [];
 
   for (const route of routes) {
-    const payloadData = outputs[route.payloadKey];
+    // Try the specific payload key first, then fall back to the full response
+    let payloadData = outputs[route.payloadKey];
+    let usedFallback = false;
+
+    if (!payloadData && outputs.response) {
+      // Fallback: the agent produced freeform text instead of structured keys.
+      // Pass the full response so the downstream agent can work with it.
+      payloadData = outputs.response;
+      usedFallback = true;
+      console.log(`[CrewDispatch] ${fromAgent} → ${route.to}: "${route.payloadKey}" not found, forwarding full response`);
+    }
+
     if (!payloadData) {
-      console.log(`[CrewDispatch] Skipping ${fromAgent} → ${route.to}: no "${route.payloadKey}" in outputs`);
+      console.log(`[CrewDispatch] Skipping ${fromAgent} → ${route.to}: no "${route.payloadKey}" and no response in outputs`);
       continue;
     }
 
@@ -207,6 +218,9 @@ export async function triggerPipelineHandoffs(
       task_type: route.task_type,
       payload: {
         [route.payloadKey]: payloadData,
+        directive: usedFallback
+          ? `Process this ${route.task_type} task using the content provided. The upstream agent (${fromAgent}) provided a freeform response — extract what you need.`
+          : undefined,
         source_agent: fromAgent,
         pipeline: true,
       },

@@ -5,8 +5,53 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { execSync } from "child_process";
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
 import type { Tool, ToolDefinition } from "../types";
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
+const STORAGE_BUCKET = "public-assets";
+
+/**
+ * Upload a local file to Supabase Storage and return the public URL.
+ * Path format: clips/<videoId>/<filename>
+ */
+async function uploadToStorage(localPath: string, storagePath: string): Promise<string | null> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return null;
+
+  try {
+    const fileBuffer = readFileSync(localPath);
+    const contentType = localPath.endsWith(".mp4") ? "video/mp4" : "application/octet-stream";
+
+    const resp = await fetch(
+      `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
+      {
+        method: "POST",
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          "Content-Type": contentType,
+          "x-upsert": "true",
+        },
+        body: fileBuffer,
+      }
+    );
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error(`[Storage] Upload failed ${resp.status}: ${errText.slice(0, 200)}`);
+      return null;
+    }
+
+    // Public URL format for public buckets
+    const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${storagePath}`;
+    console.log(`📤 [Storage] Uploaded → ${publicUrl}`);
+    return publicUrl;
+  } catch (err: any) {
+    console.error(`[Storage] Upload error: ${err.message}`);
+    return null;
+  }
+}
 
 const CLIP_DIR = "/tmp/sovereign_clips";
 
@@ -139,18 +184,33 @@ export class ClipGeneratorTool implements Tool {
       }
     }
 
-    // STEP 4 — Write to Supabase vid_rush_queue
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    // STEP 4 — Upload clips to Supabase Storage + write to vid_rush_queue
+    const uploadedUrls: (string | null)[] = [];
 
-    if (supabaseUrl && supabaseKey) {
+    for (let i = 0; i < clipPaths.length; i++) {
+      const clipFile = clipPaths[i];
+      const fileName = clipFile.split("/").pop() || `clip_${videoId}_${i}.mp4`;
+      const storagePath = `clips/${videoId}/${fileName}`;
+
+      const publicUrl = await uploadToStorage(clipFile, storagePath);
+      uploadedUrls.push(publicUrl);
+
+      if (publicUrl) {
+        results.push(`📤 Clip ${i + 1}: Uploaded → public URL ready`);
+      } else {
+        results.push(`⚠️ Clip ${i + 1}: Storage upload failed (clip exists locally at ${clipFile})`);
+      }
+    }
+
+    // Write metadata + public URLs to vid_rush_queue
+    if (SUPABASE_URL && SUPABASE_KEY) {
       for (let i = 0; i < clipPaths.length; i++) {
         try {
-          await fetch(`${supabaseUrl}/rest/v1/vid_rush_queue`, {
+          await fetch(`${SUPABASE_URL}/rest/v1/vid_rush_queue`, {
             method: "POST",
             headers: {
-              apikey: supabaseKey,
-              Authorization: `Bearer ${supabaseKey}`,
+              apikey: SUPABASE_KEY,
+              Authorization: `Bearer ${SUPABASE_KEY}`,
               "Content-Type": "application/json",
               Prefer: "return=minimal",
             },
@@ -160,27 +220,39 @@ export class ClipGeneratorTool implements Tool {
               niche,
               youtube_url: youtubeUrl,
               script: captions[i] || null,
-              status: "ready",
+              video_url: uploadedUrls[i] || null,
               audio_path: clipPaths[i],
+              status: uploadedUrls[i] ? "ready" : "upload_failed",
+              platform: "multi",
+              metadata: {
+                storage_bucket: STORAGE_BUCKET,
+                local_path: clipPaths[i],
+                public_url: uploadedUrls[i] || null,
+                clip_index: i,
+                total_clips: clipPaths.length,
+              },
             }),
           });
         } catch {
-          results.push(`⚠️ Clip ${i + 1}: Supabase write failed (clip still exists locally)`);
+          results.push(`⚠️ Clip ${i + 1}: vid_rush_queue write failed`);
         }
       }
     }
 
     // STEP 5 — Return summary
     const successCount = clipPaths.length;
+    const uploadedCount = uploadedUrls.filter(Boolean).length;
     return (
       `🎬 SOVEREIGN CLIP PIPELINE — COMPLETE\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
       `Source: ${youtubeUrl}\n` +
       `Niche: ${niche}\n` +
       `Clips generated: ${successCount}/${timestamps.length}\n` +
+      `Clips uploaded to storage: ${uploadedCount}/${successCount}\n` +
       `Color grade: ${niche}\n` +
       `Format: 9:16 (1080x1920) MP4\n` +
-      `Queue: vid_rush_queue updated\n\n` +
+      `Storage: Supabase public-assets bucket\n` +
+      `Queue: vid_rush_queue updated with public URLs\n\n` +
       results.join("\n")
     );
   }

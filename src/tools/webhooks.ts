@@ -44,9 +44,13 @@ export class WebhookServer {
       }
 
       // TikTok domain verification — serves the verification signature file
-      if (req.method === "GET" && req.url === "/tiktok-developers-site-verification.txt") {
+      // Supports both URL-prefix method (filename download) and DNS fallback
+      if (req.method === "GET" && (
+        req.url === "/tiktokMLHJDkp6yFPkV9GuX9PKQpSCJXdzNlC7.txt" ||
+        req.url === "/tiktok-developers-site-verification.txt"
+      )) {
         res.writeHead(200, { "Content-Type": "text/plain" });
-        res.end("tiktok-developers-site-verification=n7lNKYkofPRzHuXTzRv9BZKi8VLC5NBO");
+        res.end("tiktok-developers-site-verification=MLHJDkp6yFPkV9GuX9PKQpSCJXdzNlC7");
         return;
       }
 

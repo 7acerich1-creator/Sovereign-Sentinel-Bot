@@ -43,6 +43,28 @@ export class WebhookServer {
         return;
       }
 
+      // GET /legal/* — serve Terms of Service and Privacy Policy (required for TikTok/Meta app review)
+      if (req.method === "GET" && req.url?.startsWith("/legal/")) {
+        const LEGAL_PAGES: Record<string, { title: string; content: string }> = {
+          "/legal/terms": {
+            title: "Terms of Service",
+            content: `<h1>Terms of Service</h1><p class="updated">Last updated: March 30, 2026</p><h2>1. Acceptance of Terms</h2><p>By accessing or using Sovereign Synthesis services, applications, and content distribution platform ("Service"), you agree to be bound by these Terms of Service.</p><h2>2. Description of Service</h2><p>Sovereign Synthesis is a content management and distribution platform that creates and publishes educational and personal development content across social media platforms including TikTok, Instagram, YouTube, and other channels.</p><h2>3. User Accounts and Authorization</h2><p>The Service operates under the authorization of the account owner. By connecting your social media accounts, you grant Sovereign Synthesis permission to publish content on your behalf. You may revoke this authorization at any time.</p><h2>4. Content Ownership</h2><p>You retain all rights to content created and published through the Service.</p><h2>5. Prohibited Uses</h2><p>You agree not to use the Service to publish content that is illegal, harmful, threatening, abusive, or otherwise objectionable.</p><h2>6. API Usage</h2><p>The Service integrates with third-party APIs including TikTok Content Posting API, Instagram Graph API, and YouTube Data API. Your use is subject to each platform's terms.</p><h2>7. Privacy</h2><p>Your use is governed by our <a href="/legal/privacy">Privacy Policy</a>.</p><h2>8. Limitation of Liability</h2><p>The Service is provided "as is" without warranties of any kind.</p><h2>9. Contact</h2><p>Questions: empoweredservices2013@gmail.com</p>`,
+          },
+          "/legal/privacy": {
+            title: "Privacy Policy",
+            content: `<h1>Privacy Policy</h1><p class="updated">Last updated: March 30, 2026</p><h2>1. Introduction</h2><p>Sovereign Synthesis operates a content management and distribution platform. This Privacy Policy explains how we collect, use, and protect information.</p><h2>2. Information We Collect</h2><p>OAuth access tokens for authorized social media accounts, basic profile information (username, account ID), and content publishing metadata. We do not collect personal data from audiences of published content.</p><h2>3. How We Use Information</h2><p>Information is used solely for publishing content to connected accounts, monitoring publishing success, and maintaining service functionality.</p><h2>4. Data Storage and Security</h2><p>Access tokens are stored securely using encrypted environment variables on Railway cloud infrastructure. We do not sell, rent, or share your data.</p><h2>5. Third-Party Services</h2><p>We integrate with TikTok Content Posting API, Instagram Graph API (Meta), and YouTube Data API (Google). Your use is subject to each platform's privacy policy.</p><h2>6. Data Retention</h2><p>Tokens are retained only while accounts are connected. You may revoke access at any time.</p><h2>7. Your Rights</h2><p>You may request access to stored data, request deletion, revoke API access, and opt out of the Service.</p><h2>8. Children's Privacy</h2><p>The Service is not directed at children under 13.</p><h2>9. Contact</h2><p>Privacy inquiries: empoweredservices2013@gmail.com</p>`,
+          },
+        };
+
+        const page = LEGAL_PAGES[req.url];
+        if (page) {
+          const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>${page.title} — Sovereign Synthesis</title><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:800px;margin:0 auto;padding:40px 20px;color:#e0e0e0;background:#0a0a0f;line-height:1.7}h1{color:#00f0ff;border-bottom:1px solid #1a1a2e;padding-bottom:16px}h2{color:#b8b8cc;margin-top:32px}a{color:#00f0ff}.updated{color:#666;font-size:14px}</style></head><body>${page.content}</body></html>`;
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(html);
+          return;
+        }
+      }
+
       // GET /debug/memory — diagnostic for memory pipeline (temporary)
       if (req.method === "GET" && req.url === "/debug/memory") {
         try {

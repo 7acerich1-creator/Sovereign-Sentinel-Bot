@@ -1136,6 +1136,44 @@ async function main() {
     }
   });
 
+  // ── Chat Bridge webhook — Mission Control dashboard routes chat through REAL agent loops ──
+  // POST /api/chat-bridge { agent_name, content, history? }
+  // Returns the full agent response (personality, tools, memory, Pinecone — the whole pipeline)
+  webhookServer.register("/api/chat-bridge", async (incoming: any) => {
+    const { agent_name, content, history } = incoming as { agent_name: string; content: string; history?: Array<{ sender: string; content: string }> };
+    if (!agent_name || !content) return "error: agent_name and content required";
+
+    const agentKey = agent_name.toLowerCase();
+    const agentEntry = agentLoops.get(agentKey);
+    if (!agentEntry) return `error: agent "${agentKey}" not found — available: ${Array.from(agentLoops.keys()).join(", ")}`;
+
+    console.log(`🌉 [ChatBridge] ${agentKey} ← "${content.slice(0, 80)}..."`);
+
+    // Build a Message object that the AgentLoop understands
+    const bridgeMessage: Message = {
+      id: `bridge-${Date.now()}`,
+      role: "user",
+      content,
+      timestamp: new Date(),
+      channel: "dashboard",
+      chatId: `dashboard-${agentKey}`,
+      userId: String(config.telegram.authorizedUserIds[0] || "architect"),
+      metadata: {
+        chatType: "private",  // Treat dashboard as private chat (no group routing)
+        source: "mission-control",
+      },
+    };
+
+    try {
+      const response = await agentEntry.loop.processMessage(bridgeMessage);
+      console.log(`🌉 [ChatBridge] ${agentKey} → "${response.slice(0, 80)}..."`);
+      return JSON.stringify({ agent: agentKey, response });
+    } catch (err: any) {
+      console.error(`🔥 [ChatBridge] ${agentKey} error:`, err.message);
+      return `error: ${err.message}`;
+    }
+  });
+
   // ── Crew Dispatch webhook — external systems (Make.com) can push tasks to agents ──
   webhookServer.register("/api/dispatch", async (incoming: any) => {
     const { from_agent, to_agent, task_type, payload: taskPayload, data, priority, chat_id } = incoming as any;

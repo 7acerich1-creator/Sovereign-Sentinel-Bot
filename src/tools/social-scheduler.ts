@@ -1,97 +1,105 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// GRAVITY CLAW v3.0 — Social Scheduler (Buffer API)
+// GRAVITY CLAW v3.0 — Social Scheduler (Buffer GraphQL API)
 // Vector routes content to niche channels via Buffer
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { Tool, ToolDefinition } from "../types";
 
-const BUFFER_API_BASE = "https://api.bufferapp.com/1";
+const BUFFER_GRAPHQL_ENDPOINT = "https://api.buffer.com";
 
-// Niche channel mapping — Vector uses these to route content
-// Profile IDs will be populated from Buffer API on first call
-interface NicheChannel {
-  niche: string;
-  profileIds: string[]; // Buffer profile IDs for this niche
+// Organization ID — from Buffer account settings
+const BUFFER_ORG_ID = process.env.BUFFER_ORG_ID || "69c613a244dbc563b3e05a50";
+
+function getBufferToken(): string {
+  const token = process.env.BUFFER_API_KEY || process.env.BUFFER_ACCESS_TOKEN || process.env.SOCIAL_SCHEDULER_API_KEY;
+  if (!token) throw new Error("Buffer API key not configured. Set BUFFER_API_KEY in Railway.");
+  return token;
 }
 
-async function bufferRequest(endpoint: string, method: string = "GET", body?: Record<string, unknown>): Promise<any> {
-  const token = process.env.BUFFER_API_KEY || process.env.BUFFER_ACCESS_TOKEN || process.env.SOCIAL_SCHEDULER_API_KEY;
-  if (!token) throw new Error("Buffer API key not configured. Set BUFFER_API_KEY or BUFFER_ACCESS_TOKEN in Railway.");
+async function bufferGraphQL(query: string, variables?: Record<string, unknown>): Promise<any> {
+  const token = getBufferToken();
 
-  const url = `${BUFFER_API_BASE}${endpoint}`;
+  const body: Record<string, unknown> = { query };
+  if (variables) body.variables = variables;
 
-  const options: RequestInit = {
-    method,
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-  };
+  const resp = await fetch(BUFFER_GRAPHQL_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
 
-  if (method === "POST" && body) {
-    const params = new URLSearchParams();
-    for (const [k, v] of Object.entries(body)) {
-      if (Array.isArray(v)) {
-        v.forEach((item) => params.append(`${k}[]`, String(item)));
-      } else if (v !== undefined && v !== null) {
-        params.append(k, String(v));
-      }
-    }
-    params.append("access_token", token);
-    options.body = params.toString();
-  } else {
-    const separator = endpoint.includes("?") ? "&" : "?";
-    const fetchUrl = `${url}${separator}access_token=${token}`;
-    const resp = await fetch(fetchUrl, options);
-    if (!resp.ok) {
-      const errText = await resp.text();
-      throw new Error(`Buffer API ${resp.status}: ${errText.slice(0, 300)}`);
-    }
-    return resp.json();
-  }
-
-  const resp = await fetch(url, options);
   if (!resp.ok) {
     const errText = await resp.text();
-    throw new Error(`Buffer API ${resp.status}: ${errText.slice(0, 300)}`);
+    throw new Error(`Buffer GraphQL ${resp.status}: ${errText.slice(0, 500)}`);
   }
-  return resp.json();
+
+  const result: any = await resp.json();
+
+  if (result.errors && result.errors.length > 0) {
+    throw new Error(`Buffer GraphQL error: ${result.errors.map((e: any) => e.message).join("; ")}`);
+  }
+
+  return result.data;
 }
 
-// ── List Profiles Tool ──
+// ── List Channels Tool ──
 export class SocialSchedulerListProfilesTool implements Tool {
   definition: ToolDefinition = {
     name: "social_scheduler_list_profiles",
-    description: "[Buffer] List all connected social media profiles/channels. Use this to discover available posting destinations.",
+    description: "[Buffer] List all connected social media channels. Use this to discover available posting destinations and their channel IDs.",
     parameters: {},
     required: [],
   };
 
   async execute(): Promise<string> {
     try {
-      const profiles = await bufferRequest("/profiles.json");
-      if (!Array.isArray(profiles) || profiles.length === 0) {
-        return "No Buffer profiles found. Connect social accounts at buffer.com/manage.";
+      const query = `
+        query GetChannels {
+          channels(input: { organizationId: "${BUFFER_ORG_ID}" }) {
+            id
+            name
+            displayName
+            service
+            avatar
+            isQueuePaused
+          }
+        }
+      `;
+
+      const data = await bufferGraphQL(query);
+      const channels = data?.channels;
+
+      if (!Array.isArray(channels) || channels.length === 0) {
+        return "No Buffer channels found. Connect social accounts at buffer.com/manage.";
       }
-      const summary = profiles.map((p: any) => ({
-        id: p.id,
-        service: p.service,
-        service_username: p.service_username,
-        formatted_username: p.formatted_username,
+
+      const summary = channels.map((c: any) => ({
+        id: c.id,
+        service: c.service,
+        name: c.name,
+        displayName: c.displayName,
+        queuePaused: c.isQueuePaused,
       }));
+
       return JSON.stringify(summary, null, 2);
     } catch (err: any) {
-      return `Error listing profiles: ${err.message}`;
+      return `Error listing channels: ${err.message}`;
     }
   }
 }
 
-// ── Schedule Post Tool ──
+// ── Schedule/Publish Post Tool ──
 export class SocialSchedulerPostTool implements Tool {
   definition: ToolDefinition = {
     name: "social_scheduler_create_post",
-    description: "[Buffer] Schedule or publish a post to a social media channel. Requires profile_id (from list_profiles), text content, and optional media/scheduling. Vector uses this to route niche content to correct channels with minimum 1 post/day/channel cadence.",
+    description: "[Buffer] Schedule or publish a post to a social media channel via Buffer GraphQL API. Requires channel_id (from list_profiles), text content, and optional media/scheduling. Vector uses this to route niche content to correct channels with minimum 1 post/day/channel cadence.",
     parameters: {
-      profile_ids: {
+      channel_ids: {
         type: "string",
-        description: "Comma-separated Buffer profile IDs to post to. Get IDs from social_scheduler_list_profiles.",
+        description: "Comma-separated Buffer channel IDs to post to. Get IDs from social_scheduler_list_profiles.",
       },
       text: {
         type: "string",
@@ -103,7 +111,7 @@ export class SocialSchedulerPostTool implements Tool {
       },
       media_url: {
         type: "string",
-        description: "Optional URL to an image or video to attach to the post.",
+        description: "Optional URL to an image to attach to the post. Buffer GraphQL supports image URLs.",
       },
       niche: {
         type: "string",
@@ -114,47 +122,90 @@ export class SocialSchedulerPostTool implements Tool {
         description: "Set to 'true' to share immediately instead of adding to queue.",
       },
     },
-    required: ["profile_ids", "text"],
+    required: ["channel_ids", "text"],
   };
 
   async execute(args: Record<string, unknown>): Promise<string> {
     try {
-      const profileIds = String(args.profile_ids).split(",").map((s) => s.trim());
+      const channelIds = String(args.channel_ids).split(",").map((s) => s.trim());
       const text = String(args.text);
       const scheduledAt = args.scheduled_at ? String(args.scheduled_at) : undefined;
       const mediaUrl = args.media_url ? String(args.media_url) : undefined;
       const now = args.now === "true" || args.now === true;
       const niche = args.niche ? String(args.niche) : "unknown";
 
-      const body: Record<string, unknown> = {
-        text,
-        profile_ids: profileIds,
-        now: now,
-      };
-
-      if (scheduledAt) {
-        body.scheduled_at = scheduledAt;
-      }
-
+      // ── VIDEO DETECTION — Buffer cannot handle video via API ──
       if (mediaUrl) {
-        // ── VIDEO DETECTION — Buffer v1 API CANNOT handle video ──
-        // media[photo] only accepts image URLs. Video URLs cause Error 1030.
-        // Route video content through publish_video tool instead.
         const isVideoUrl = /\.(mp4|mov|avi|webm|mkv)(\?|$)/i.test(mediaUrl) ||
           mediaUrl.includes("/video/") || mediaUrl.includes("video_url");
 
         if (isVideoUrl) {
-          return `⚠️ Buffer cannot publish video content (API limitation — media[photo] only accepts images).\n` +
+          return `⚠️ Buffer cannot publish video content (API limitation — images only).\n` +
             `Use the publish_video tool instead to post video to TikTok, Instagram Reels, and YouTube Shorts.\n` +
             `Video URL: ${mediaUrl}\n` +
             `Text content can still be posted via this tool (just remove the media_url parameter).`;
         }
-
-        body["media[link]"] = mediaUrl;
-        body["media[photo]"] = mediaUrl;
       }
 
-      const result = await bufferRequest("/updates/create.json", "POST", body);
+      // Determine scheduling mode
+      // mode options: queue (add to queue), now (share immediately), customSchedule (specific time)
+      let mode = "queue";
+      if (now) mode = "now";
+      else if (scheduledAt) mode = "customSchedule";
+
+      const results: string[] = [];
+
+      // Buffer GraphQL createPost works per-channel, so loop
+      for (const channelId of channelIds) {
+        try {
+          // Build the input dynamically
+          let assetsBlock = "";
+          if (mediaUrl) {
+            assetsBlock = `assets: { images: [{ url: "${mediaUrl.replace(/"/g, '\\"')}" }] }`;
+          }
+
+          let dueAtBlock = "";
+          if (scheduledAt) {
+            dueAtBlock = `dueAt: "${scheduledAt}"`;
+          }
+
+          const query = `
+            mutation CreatePost {
+              createPost(input: {
+                text: ${JSON.stringify(text)},
+                channelId: "${channelId}",
+                schedulingType: automatic,
+                mode: ${mode}
+                ${dueAtBlock ? `, ${dueAtBlock}` : ""}
+                ${assetsBlock ? `, ${assetsBlock}` : ""}
+              }) {
+                ... on PostActionSuccess {
+                  post {
+                    id
+                    text
+                  }
+                }
+                ... on MutationError {
+                  message
+                }
+              }
+            }
+          `;
+
+          const data = await bufferGraphQL(query);
+          const result = data?.createPost;
+
+          if (result?.post) {
+            results.push(`✅ ${channelId}: Post created (ID: ${result.post.id})`);
+          } else if (result?.message) {
+            results.push(`❌ ${channelId}: ${result.message}`);
+          } else {
+            results.push(`⚠️ ${channelId}: Unknown response — ${JSON.stringify(result)}`);
+          }
+        } catch (err: any) {
+          results.push(`❌ ${channelId}: ${err.message}`);
+        }
+      }
 
       // Log to Supabase if available
       try {
@@ -174,9 +225,9 @@ export class SocialSchedulerPostTool implements Tool {
               intent_tag: niche,
               status: now ? "published" : "scheduled",
               strategy_json: {
-                profile_ids: profileIds,
-                scheduled_at: scheduledAt || "queued",
-                buffer_update_id: result?.updates?.[0]?.id || "unknown",
+                channel_ids: channelIds,
+                scheduled_at: scheduledAt || (now ? "immediate" : "queued"),
+                mode,
               },
               linkedin_post: text.slice(0, 500),
             }),
@@ -186,51 +237,74 @@ export class SocialSchedulerPostTool implements Tool {
         // Non-critical — log failure doesn't block posting
       }
 
-      const updateIds = result?.updates?.map((u: any) => u.id) || [];
-      return `✅ Post ${now ? "published" : "scheduled"} to ${profileIds.length} profile(s).\n` +
+      return `Buffer GraphQL Post Results (${mode}):\n` +
         `Niche: ${niche}\n` +
-        `Buffer update IDs: ${updateIds.join(", ")}\n` +
-        `Text preview: ${text.slice(0, 100)}...`;
+        results.join("\n") +
+        `\nText preview: ${text.slice(0, 100)}...`;
     } catch (err: any) {
       return `Error creating post: ${err.message}`;
     }
   }
 }
 
-// ── Get Pending Posts Tool ──
+// ── Get Scheduled Posts Tool ──
 export class SocialSchedulerPendingTool implements Tool {
   definition: ToolDefinition = {
     name: "social_scheduler_pending_posts",
-    description: "[Buffer] List pending/scheduled posts for a profile. Use to check queue status and posting cadence.",
+    description: "[Buffer] List scheduled/pending posts. Use to check queue status and posting cadence.",
     parameters: {
-      profile_id: {
+      channel_id: {
         type: "string",
-        description: "Buffer profile ID to check pending posts for.",
+        description: "Optional Buffer channel ID to filter. If omitted, shows all scheduled posts for the organization.",
       },
     },
-    required: ["profile_id"],
+    required: [],
   };
 
   async execute(args: Record<string, unknown>): Promise<string> {
     try {
-      const profileId = String(args.profile_id);
-      const result = await bufferRequest(`/profiles/${profileId}/updates/pending.json`);
-      const updates = result?.updates || [];
-
-      if (updates.length === 0) {
-        return `No pending posts for profile ${profileId}. Consider scheduling content.`;
+      // Buffer GraphQL uses organization-level post queries with optional channel filter
+      let filterBlock = `filter: { status: [scheduled] }`;
+      if (args.channel_id) {
+        filterBlock = `filter: { status: [scheduled], channelIds: ["${String(args.channel_id)}"] }`;
       }
 
-      const summary = updates.slice(0, 10).map((u: any) => ({
-        id: u.id,
-        text: (u.text || "").slice(0, 80),
-        scheduled_at: u.scheduled_at,
-        due_at: u.due_at,
+      const query = `
+        query GetScheduledPosts {
+          posts(
+            input: {
+              organizationId: "${BUFFER_ORG_ID}",
+              sort: [{ field: dueAt, direction: asc }],
+              ${filterBlock}
+            }
+          ) {
+            edges {
+              node {
+                id
+                text
+                createdAt
+              }
+            }
+          }
+        }
+      `;
+
+      const data = await bufferGraphQL(query);
+      const edges = data?.posts?.edges || [];
+
+      if (edges.length === 0) {
+        return `No scheduled posts found. Consider scheduling content to maintain cadence.`;
+      }
+
+      const summary = edges.slice(0, 15).map((e: any) => ({
+        id: e.node.id,
+        text: (e.node.text || "").slice(0, 80),
+        createdAt: e.node.createdAt,
       }));
 
-      return `${updates.length} pending post(s) for profile ${profileId}:\n${JSON.stringify(summary, null, 2)}`;
+      return `${edges.length} scheduled post(s):\n${JSON.stringify(summary, null, 2)}`;
     } catch (err: any) {
-      return `Error fetching pending posts: ${err.message}`;
+      return `Error fetching scheduled posts: ${err.message}`;
     }
   }
 }

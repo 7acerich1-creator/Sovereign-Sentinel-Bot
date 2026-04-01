@@ -264,6 +264,7 @@ export interface GravityClawConfig {
     makeScenarioEWebhook: string;
     makeScenarioFWebhook: string;
     bufferApiKey: string;
+    bufferOrgId: string;
   };
   security: {
     maxAgentIterations: number;

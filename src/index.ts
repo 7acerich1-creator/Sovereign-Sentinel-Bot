@@ -1691,7 +1691,8 @@ async function main() {
                 } catch { /* silent */ }
 
                 // TIER 2: Pipeline completion detection — Sapphire full-picture summary
-                if (task.parent_id) {
+                // Guard: summary tasks must NOT trigger new summaries (prevents feedback loop spam)
+                if (task.parent_id && task.task_type !== "pipeline_completion_summary") {
                   try {
                     const completedChain = await checkPipelineComplete(task.id, task.parent_id);
                     if (completedChain && completedChain.length > 1) {

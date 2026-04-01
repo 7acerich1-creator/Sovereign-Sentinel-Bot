@@ -257,8 +257,8 @@ async function main() {
   const router = new MessageRouter();
 
   // Group management — username updated after telegram.initialize() resolves getMe()
-  // isLeadAgent = true → Veritas responds to ALL Architect messages in groups (no @mention needed)
-  const groupManager = new GroupManager("sovereign_bot", config.telegram.authorizedUserIds, true);
+  // "lead" role → Veritas responds to ALL Architect messages in groups (no @mention needed)
+  const groupManager = new GroupManager("sovereign_bot", config.telegram.authorizedUserIds, "lead");
 
   // ── 6. Wire Message Handler ──
   const defaultChatId = String(config.telegram.authorizedUserIds[0]);
@@ -1319,9 +1319,12 @@ async function main() {
         agentLoops.set(agentCfg.name, { loop: agentBotLoop, channel: agentChannel });
 
         // Group management for agent bot — use REAL Telegram username from getMe()
+        // Sapphire = "copilot" (responds to all Architect messages with plain English assessment after Veritas)
+        // All other agents = "crew" (respond only on @mention, reply, broadcast, or /command)
         const realBotUsername = agentChannel.botUsername || `${agentCfg.name}_SovereignBot`;
-        const agentGroupManager = new GroupManager(realBotUsername, config.telegram.authorizedUserIds);
-        console.log(`[BotInit] ${agentCfg.name} GroupManager username: @${realBotUsername}`);
+        const agentGroupRole = agentCfg.name === "sapphire" ? "copilot" as const : "crew" as const;
+        const agentGroupManager = new GroupManager(realBotUsername, config.telegram.authorizedUserIds, agentGroupRole);
+        console.log(`[BotInit] ${agentCfg.name} GroupManager username: @${realBotUsername}, role: ${agentGroupRole}`);
 
         // Roll call stagger: Veritas = 0s, then crew bots stagger 4s each
         // botIndex is already 1-based from the loop, so delay = botIndex * 4000
@@ -1332,6 +1335,12 @@ async function main() {
         agentChannel.onMessage(async (message: Message) => {
           try {
             if (!agentGroupManager.shouldRespond(message)) return;
+
+            // ── CoPilot delay — Sapphire waits for Veritas to respond first ──
+            const coPilotDelay = agentGroupManager.respondDelay;
+            if (coPilotDelay > 0 && message.metadata?.isGroup && !agentGroupManager.isBroadcastTrigger(message)) {
+              await new Promise((resolve) => setTimeout(resolve, coPilotDelay));
+            }
 
             // ── Roll Call / Check-In — full group-aware status response ──
             if (message.metadata?.isGroup && agentGroupManager.isBroadcastTrigger(message)) {
@@ -1349,7 +1358,18 @@ async function main() {
               return;
             }
 
+            // Strip @mention first, then inject copilot context
             if (message.metadata?.isGroup) message.content = agentGroupManager.stripMention(message.content);
+
+            // ── CoPilot context injection — Sapphire adds plain English summary ──
+            if (agentGroupManager.role === "copilot" && message.metadata?.isGroup) {
+              message.content = `[COPILOT MODE] The Architect just said: "${message.content}"\n\n` +
+                `Veritas has already responded to this. Your role here is NOT to repeat what Veritas said. ` +
+                `Give the Architect a brief, plain English assessment — 2-3 sentences max. ` +
+                `Translate any technical or strategic language into clear, actionable understanding. ` +
+                `If Veritas proposed an action, confirm whether it aligns with current priorities. ` +
+                `If something needs the Architect's attention, flag it simply. Stay warm, stay sharp.`;
+            }
 
             // Voice handling
             if (message.attachments?.some((a) => a.type === "voice" || a.type === "audio")) {

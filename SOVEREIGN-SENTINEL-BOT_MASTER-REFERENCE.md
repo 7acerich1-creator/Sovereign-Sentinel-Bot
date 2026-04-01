@@ -117,17 +117,81 @@ These six agents are locked. Never create new agents. Never rename existing ones
 | 5 | **Anita** | @Anita_SovereignBot | Propagandist, Email, Community | `ANITA_TOKEN` |
 | 6 | **Vector** | @Vector_SovereignBot | Funnel & Content Ops, Metrics | `VECTOR_TOKEN` |
 
-### Agent Architecture
-- Each agent has a **personality blueprint** stored in Supabase `personality_config` table
-- Blueprints contain: system prompt, tone, tools, behavioral protocols
-- All agents share the same TypeScript runtime on Railway
-- **Veritas** is the lead agent on Telegram (primary bot token)
-- Other agents are reached via **crew_dispatch** system — Veritas routes tasks to them
-- **Stasis Detection Protocol** injected into all 6 blueprints — agents self-report if they detect they're looping without producing real output
+### Agent Architecture — How Multi-Bot Init Works
 
-### Telegram Group Chat — CURRENTLY DOWN
-- The Maven Crew group chat where all agents interact is non-functional
-- Needs investigation and repair — group should allow all 6 agents to respond contextually
+**Personality Blueprints (Supabase `personality_config` table — VERIFIED):**
+All 6 agents have personality configs stored in Supabase. These are loaded at boot time. If an agent's personality is missing, that agent silently skips initialization (logs `⚠️ Could not find personality for [name]`).
+
+| Agent | Blueprint Size | Last Updated |
+|-------|---------------|--------------|
+| veritas | 18,003 chars | 2026-03-27 |
+| sapphire | 17,088 chars | 2026-03-27 |
+| alfred | 16,849 chars | 2026-03-27 |
+| yuki | 18,739 chars | 2026-03-27 |
+| anita | 17,308 chars | 2026-03-27 |
+| vector | 16,830 chars | 2026-03-27 |
+
+**Boot Sequence (index.ts):**
+1. Memory providers init (SQLite, Markdown, Supabase, Pinecone)
+2. LLM failover chain init (Gemini → Anthropic → OpenAI → DeepSeek → Groq)
+3. Tools registered (40+ tools total)
+4. Veritas AgentLoop created with full tool set
+5. Veritas TelegramChannel created with `TELEGRAM_BOT_TOKEN`, starts long-polling
+6. Veritas GroupManager created with role `"lead"`
+7. **Multi-Bot Init Loop** — for each of the 5 crew agents:
+   - Token swap trick: temporarily swaps `config.telegram.botToken` → agent's token
+   - Creates new `TelegramChannel` (gets its own grammY `Bot` instance)
+   - Calls `initialize()` → `getMe()` to fetch real Telegram username → starts long-polling
+   - Fetches personality blueprint from Supabase `personality_config`
+   - Creates agent-specific LLM wrapper that injects the blueprint as system prompt
+   - Builds agent-specific tool set (shared tools + role-specific tools)
+   - Creates agent-specific AgentLoop with Pinecone identity/namespace
+   - Creates GroupManager with appropriate role (`"copilot"` for Sapphire, `"crew"` for others)
+   - Wires message handler (independent from Veritas's router)
+   - Stagger: 4s delay between each bot init to prevent rate limits
+8. Dispatch poller starts (checks `crew_dispatch` table every 15s for all agents)
+9. Scheduled jobs registered (Vector 10AM, Alfred 8AM, Veritas Monday 9AM, Stasis 2PM)
+10. Webhook server starts (if `WEBHOOKS_ENABLED=true`)
+
+**If any agent fails to initialize**, it logs the error and continues — other agents still come online. Check Railway logs for `❌ Failed to initialize [name] bot:` to diagnose.
+
+**Per-Agent Tool Sets:**
+| Agent | Unique Tools | Pinecone Namespace |
+|-------|-------------|-------------------|
+| Veritas | All base tools | brand |
+| Sapphire | ProtocolWriter, RelationshipContext, FileBriefing | brand |
+| Alfred | ProtocolReader, SaveContentDraft, YouTube interceptor | hooks |
+| Yuki | ProtocolReader, SaveContentDraft, Buffer posting, Video publisher | clips |
+| Anita | ProtocolReader, SaveContentDraft | content |
+| Vector | StripeMetrics, FileBriefing | funnels |
+
+**Standing Directive Injections:**
+- Content crew (Alfred, Yuki, Anita) get `[STANDING ORDER]` to call `read_protocols` before content tasks
+- Sapphire gets `[STANDING ORDER]` to save new protocols and write relationship context observations
+- All agents get `[INSTITUTIONAL MEMORY]` directive to use `write_knowledge` for significant outputs (when Pinecone is ready)
+
+### Telegram Group Chat — OPERATIONAL (Fixed 2026-04-01)
+
+**How Group Routing Works (`src/ux/groups.ts`):**
+Each bot has a `GroupManager` with one of three roles:
+
+| Role | Agent | Behavior in Group |
+|------|-------|-------------------|
+| `lead` | Veritas | Responds to ALL Architect messages — no @mention needed |
+| `copilot` | Sapphire | Responds to ALL Architect messages after 8s delay — gives plain English assessment |
+| `crew` | Alfred, Yuki, Anita, Vector | Responds ONLY on @mention, reply to their message, broadcast trigger, or /command |
+
+**Broadcast Triggers** (all 6 respond, staggered): `roll call`, `rollcall`, `check in`, `checkin`, `check-in`, `maven crew`
+
+**How to Talk to the Group:**
+- Just type anything → Veritas responds + Sapphire follows up with plain English summary
+- Say "roll call" → all 6 agents report in (staggered 4s apart)
+- @mention a specific agent → that agent responds directly
+- Reply to an agent's message → that agent responds
+
+**Auth Guard:** All bots check `ctx.from.id` against `config.telegram.authorizedUserIds` (Ace's ID: 8593700720). Messages from anyone else are silently dropped.
+
+**Privacy Mode:** Must be DISABLED for all 6 bots via @BotFather (`/setprivacy` → Disable). If privacy mode is ON, bots won't see plain text messages in groups — only @mentions, replies, and /commands.
 
 ### Agent Tools (Action Surface Layer)
 All agents have access to:
@@ -345,9 +409,10 @@ src/
 - **Fix (commit bbffa6a):** Removed `openai-whisper` from Dockerfile. Kept `yt-dlp` (actively used by clip pipeline).
 - **Build dropped from ~20 min to under 5 min.**
 
-### Telegram Group Chat Down
-- Maven Crew group chat on Telegram is non-functional
-- Needs investigation
+### Telegram Group Chat — ✅ FIXED (2026-04-01)
+- **Root cause:** `shouldRespond()` in `groups.ts` dropped all plain text messages in groups — bots only responded to @mentions, /commands, replies, and broadcast triggers. The Architect couldn't just talk naturally.
+- **Fix:** Added `GroupRole` system (`lead` / `copilot` / `crew`). Veritas (lead) responds to all Architect messages. Sapphire (copilot) responds after 8s delay with plain English assessment. Other agents respond on @mention/broadcast/reply.
+- **Commit:** `9234a08` + follow-up commit (Sapphire copilot + master reference documentation)
 
 ### Agents — NOW OPERATIONAL via Dispatch
 - Dispatch pipeline is FIXED. Agents can receive and process tasks.
@@ -701,7 +766,7 @@ Architect sets weekly directive (Veritas Weekly Monday 9AM)
 | 1C | Confirm crew_dispatch poller is running | None (already coded) | Logs show `📡 [DispatchPoller] Starting...` every 30s |
 | 1D | Confirm task approval poller is running | None (already coded) | Logs show `📋 [TaskPoller] Starting...` |
 | 1E | Confirm scheduled jobs fire (Vector 10AM, Alfred 8AM, Veritas Monday 9AM) | None (already coded) | Check Railway logs at those times |
-| 1F | Fix Telegram group chat | Investigation needed | All 6 agents can respond in shared Telegram group |
+| 1F | Fix Telegram group chat | ✅ DONE (2026-04-01) | Veritas = lead (always responds), Sapphire = copilot (plain English summary), others = @mention/broadcast. Commit `9234a08` + follow-up. |
 
 **Audit note (2026-03-31):** Code audit confirmed crew_dispatch, task approval poller, and pipeline handoffs are ALL fully implemented. The content pipeline routing (Alfred → Yuki → Anita → Vector) is defined in `PIPELINE_ROUTES` and auto-fires via `triggerPipelineHandoffs`. This was NOT reflected in the previous master reference. Phase 1 is verification, not building.
 

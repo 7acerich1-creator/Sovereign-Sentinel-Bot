@@ -49,6 +49,7 @@ Three domains exist. **Never cross-contaminate.**
 - **Briefings truncated** — agent reports are longer than what's displayed. Need ability to read full transmission (expand/modal/scroll)
 - **Briefings lack operational depth** — currently read-only status. Need to be actionable (mark read, archive, trigger follow-ups). Valuable for Architect to see what agents are doing at a glance
 - **Maven Crew group chat on dashboard is down** — needs to work like Telegram group chat (all agents responding in shared thread)
+- **Dashboard chat send UX broken** — When user sends a message, it stays grayed out in the input bar with no processing indicator. User has to refresh the page to see it sent. Needs: (1) clear input immediately on send, (2) show a "processing..." or typing indicator, (3) display confirmation when agent responds.
 - **Dashboard agents are now REAL agents** — As of 2026-04-01, Mission Control chat routes through Railway `/api/chat-bridge`, hitting the full AgentLoop with personality blueprints, tools, Pinecone, and memory. Both individual and group chat routes updated.
 
 ---
@@ -789,14 +790,17 @@ Architect sets weekly directive (Veritas Weekly Monday 9AM)
 
 ### PHASE 2 — NOTIFICATION SYSTEM OVERHAUL ✅ CORE DONE (2026-04-01)
 
-**What was built (commits `568423d` + `3181918`):**
-- 2A/2D DONE: Per-dispatch Telegram spam eliminated. Pipeline dispatches (those with `parent_id`) now trigger pipeline completion detection via `checkPipelineComplete()` in `crew-dispatch.ts`. When the full chain finishes, ONE summary task is dispatched to Sapphire, and her plain-English response is the only message sent to chat.
-- Standalone dispatches (no `parent_id`) still get a single notification — not spam, just one message.
-- **Dashboard routing fix:** Added `notifyChat()` router that checks if `chat_id` starts with `"dashboard-"`. Dashboard dispatches write to `activity_log` table instead of failing on Telegram. Real Telegram numeric IDs still go through the bot.
-- New exports in `crew-dispatch.ts`: `getFullPipelineChain()` (walks full ancestor tree), `checkPipelineComplete()` (returns completed chain or null).
+**What was built (commits `568423d` → `991c7f5`):**
+- **Two-tier notification system (commit `991c7f5`):**
+  - TIER 1 — Per-agent Telegram DM: Every agent sends a short plain-English recap of their specific vector to Ace's real Telegram (`defaultChatId`). Extracts first meaningful sentence from agent response (150 char cap). Always routes to Telegram, never dashboard string.
+  - TIER 2 — Sapphire full-picture summary: When the full pipeline chain completes (detected via `checkPipelineComplete()`), dispatches a `pipeline_completion_summary` task to Sapphire. Her plain-English summary hits Telegram as the final message.
+  - Every dispatch also writes to `activity_log` table for dashboard visibility.
+- **Dashboard routing fix (commit `3181918`):** Added `isDashboardChat()` check + `notifyChat()` router. Dashboard dispatches (`chat_id: "dashboard-*"`) write to `activity_log` instead of crashing on Telegram. Root cause of all "failed" dispatches in the 2026-04-01 morning test.
+- **Pipeline chain tracking (commit `568423d`):** New exports in `crew-dispatch.ts`: `getFullPipelineChain()` (walks full ancestor tree via Supabase), `checkPipelineComplete()` (returns completed chain or null).
+- Proactive agent actions also route through the same notification path — any dispatch completion triggers a Telegram DM.
 
 **Still TODO:**
-- 2B: Telegram briefing relay (push condensed briefing summaries to Telegram DM)
+- 2B: Telegram briefing relay (push condensed briefing summaries to Telegram DM when agents write to `briefings` table)
 - 2C: `/briefings` command for on-demand briefing pull
 
 ---

@@ -1643,9 +1643,12 @@ async function main() {
                   continue;
                 }
 
-                // Cap dispatch tasks at 3 iterations to conserve LLM quota
-                // (full 10 iterations reserved for direct user conversations)
-                const response = await agentLoop.processMessage(dispatchMessage, undefined, 3);
+                // Cap dispatch tasks to conserve LLM quota.
+                // Distribution tasks need more iterations (list profiles → post → post → save).
+                // Other tasks (caption writing, synthesis) can finish in fewer.
+                const isHeavyTask = ["funnel_distribution", "content_scheduling"].includes(task.task_type);
+                const iterCap = isHeavyTask ? 6 : 4;
+                const response = await agentLoop.processMessage(dispatchMessage, undefined, iterCap);
                 await completeDispatch(task.id, "completed", response.slice(0, 4000));
 
                 // Auto-trigger pipeline handoffs if this agent has downstream routes

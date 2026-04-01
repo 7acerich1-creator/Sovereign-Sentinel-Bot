@@ -134,11 +134,42 @@ export class GeminiProvider implements LLMProvider {
 
     const model = this.genAI.getGenerativeModel(modelConfig);
 
-    // Convert messages to Gemini format
-    const history: Content[] = chatMessages.slice(0, -1).map((m) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
+    // Convert messages to Gemini format — including proper functionCall/functionResponse pairs
+    const history: Content[] = [];
+    const pendingToolCalls: Map<string, string> = new Map(); // toolCallId → functionName
+    const messagesForHistory = chatMessages.slice(0, -1);
+
+    for (const m of messagesForHistory) {
+      if (m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
+        // Model turn with function calls — emit as functionCall parts
+        const parts: Part[] = [];
+        if (m.content) parts.push({ text: m.content });
+        for (const tc of m.toolCalls) {
+          parts.push({ functionCall: { name: tc.name, args: tc.arguments || {} } } as any);
+          pendingToolCalls.set(tc.id, tc.name);
+        }
+        history.push({ role: "model", parts });
+      } else if (m.role === "tool" && m.toolCallId) {
+        // Tool result — emit as functionResponse part in a user turn
+        const fnName = pendingToolCalls.get(m.toolCallId) || "unknown_function";
+        pendingToolCalls.delete(m.toolCallId);
+        // Gemini groups consecutive functionResponse parts into one user turn
+        const lastEntry = history[history.length - 1];
+        const responsePart = { functionResponse: { name: fnName, response: { result: m.content } } } as any;
+        if (lastEntry && lastEntry.role === "user" && lastEntry.parts.some((p: any) => p.functionResponse)) {
+          // Merge into existing functionResponse user turn
+          lastEntry.parts.push(responsePart);
+        } else {
+          history.push({ role: "user", parts: [responsePart] });
+        }
+      } else {
+        // Regular text message
+        history.push({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content || "" }],
+        });
+      }
+    }
 
     const lastMessage = chatMessages[chatMessages.length - 1];
     const chat = model.startChat({ history });

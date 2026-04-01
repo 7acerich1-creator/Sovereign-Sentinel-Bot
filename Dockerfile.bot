@@ -33,10 +33,8 @@ COPY soul.md ./soul.md
 COPY claude.md ./claude.md
 COPY skills ./skills
 
-# Install Python deps for sovereign clip pipeline (yt-dlp + whisper)
-RUN pip3 install --no-cache-dir --break-system-packages \
-    yt-dlp \
-    openai-whisper
+# Install Python deps for sovereign clip pipeline (yt-dlp only — whisper uses OpenAI API)
+RUN pip3 install --no-cache-dir --break-system-packages yt-dlp
 
 # Create persistent data directories
 RUN mkdir -p /app/data /app/memory /app/.agent/logs

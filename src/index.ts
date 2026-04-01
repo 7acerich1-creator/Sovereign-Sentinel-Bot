@@ -1615,13 +1615,48 @@ async function main() {
                   console.error(`[Pipeline] Handoff error for ${agentName}: ${handoffErr.message}`);
                 }
 
-                // Pipeline completion detection — suppress per-dispatch spam,
-                // send a single Sapphire summary when the full chain finishes.
-                if (task.chat_id && task.parent_id) {
+                // ── Two-tier notification: per-agent brief recap + Sapphire full summary ──
+
+                // TIER 1: Every agent sends a short plain-English DM to Ace's Telegram
+                // Always routes to defaultChatId (real Telegram), never dashboard string
+                if (task.task_type !== "pipeline_completion_summary") {
+                  try {
+                    const agentLabel = agentName.charAt(0).toUpperCase() + agentName.slice(1);
+                    // Extract a 1-line summary from the agent's response (first sentence or 150 chars)
+                    const briefRecap = response.split(/[.!?\n]/).filter(s => s.trim().length > 10)[0]?.trim().slice(0, 150) || "Task processed.";
+                    await telegram.sendMessage(
+                      defaultChatId,
+                      `🔹 *${agentLabel}*: ${briefRecap}`,
+                      { parseMode: "Markdown" }
+                    );
+                  } catch (dmErr: any) {
+                    console.error(`[AgentDM] Failed to send ${agentName} recap: ${dmErr.message}`);
+                  }
+                }
+
+                // Also log to activity_log for dashboard visibility
+                try {
+                  await fetch(`${process.env.SUPABASE_URL}/rest/v1/activity_log`, {
+                    method: "POST",
+                    headers: {
+                      apikey: process.env.SUPABASE_ANON_KEY!,
+                      Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY!}`,
+                      "Content-Type": "application/json",
+                      Prefer: "return=minimal",
+                    },
+                    body: JSON.stringify({
+                      agent: agentName,
+                      type: "dispatch_complete",
+                      body: `Completed ${task.task_type.replace(/_/g, " ")} (from ${task.from_agent}). ${response.slice(0, 300)}`,
+                    }),
+                  });
+                } catch { /* silent */ }
+
+                // TIER 2: Pipeline completion detection — Sapphire full-picture summary
+                if (task.parent_id) {
                   try {
                     const completedChain = await checkPipelineComplete(task.id, task.parent_id);
                     if (completedChain && completedChain.length > 1) {
-                      // Full pipeline is done — build a summary payload for Sapphire
                       const chainSummary = completedChain.map(d => ({
                         agent: d.to_agent,
                         task: d.task_type.replace(/_/g, " "),
@@ -1631,7 +1666,6 @@ async function main() {
                       const successCount = completedChain.filter(d => d.status === "completed").length;
                       const failCount = completedChain.filter(d => d.status === "failed").length;
 
-                      // Dispatch summary task to Sapphire
                       const summaryId = await dispatchTask({
                         from_agent: "system",
                         to_agent: "sapphire",
@@ -1643,7 +1677,7 @@ async function main() {
                           chain: chainSummary,
                           pipeline: true,
                         },
-                        chat_id: task.chat_id,
+                        chat_id: defaultChatId, // Always route summary to real Telegram
                         priority: 2,
                       });
                       if (summaryId) {
@@ -1653,27 +1687,20 @@ async function main() {
                   } catch (summaryErr: any) {
                     console.error(`[Pipeline] Summary dispatch error: ${summaryErr.message}`);
                   }
-                } else if (task.chat_id && !task.parent_id) {
-                  // This is a standalone dispatch (not part of a pipeline chain) — still notify
-                  const agentLabel = agentName.charAt(0).toUpperCase() + agentName.slice(1);
-                  const taskLabel = task.task_type
-                    .replace(/_/g, " ")
-                    .replace(/\b\w/g, (c: string) => c.toUpperCase());
-                  await notifyChat(
-                    task.chat_id,
-                    `✅ *${agentLabel}* completed: ${taskLabel}`,
-                    channel
-                  );
                 }
 
-                // When Sapphire completes a pipeline_completion_summary, send HER response to chat
-                if (agentName === "sapphire" && task.task_type === "pipeline_completion_summary" && task.chat_id) {
-                  const summaryText = response.slice(0, 3000);
-                  await notifyChat(
-                    task.chat_id,
-                    `📋 *Pipeline Complete*\n\n${summaryText}`,
-                    channel
-                  );
+                // When Sapphire completes a pipeline_completion_summary, send the full picture to Telegram
+                if (agentName === "sapphire" && task.task_type === "pipeline_completion_summary") {
+                  try {
+                    const summaryText = response.slice(0, 3000);
+                    await telegram.sendMessage(
+                      defaultChatId,
+                      `📋 *Pipeline Complete*\n\n${summaryText}`,
+                      { parseMode: "Markdown" }
+                    );
+                  } catch (summaryDmErr: any) {
+                    console.error(`[Pipeline] Failed to send Sapphire summary DM: ${summaryDmErr.message}`);
+                  }
                 }
               } catch (processErr: any) {
                 console.error(`[DispatchPoller] ${agentName} failed on ${task.id}: ${processErr.message}`);

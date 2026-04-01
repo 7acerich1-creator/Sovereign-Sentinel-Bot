@@ -147,11 +147,18 @@ export class SocialSchedulerPostTool implements Tool {
         }
       }
 
-      // Determine scheduling mode
-      // mode options: queue (add to queue), now (share immediately), customSchedule (specific time)
-      let mode = "queue";
-      if (now) mode = "now";
-      else if (scheduledAt) mode = "customSchedule";
+      // Determine scheduling: Buffer GraphQL uses schedulingType enum + optional dueAt.
+      // schedulingType: automatic (Buffer picks slot) | fixed (use dueAt)
+      // shareMode: addToQueue | shareNow | schedule
+      let shareMode = "addToQueue";
+      let schedulingType = "automatic";
+      if (now) {
+        shareMode = "shareNow";
+        schedulingType = "automatic";
+      } else if (scheduledAt) {
+        shareMode = "schedule";
+        schedulingType = "fixed";
+      }
 
       const results: string[] = [];
 
@@ -174,8 +181,7 @@ export class SocialSchedulerPostTool implements Tool {
               createPost(input: {
                 text: ${JSON.stringify(text)},
                 channelId: "${channelId}",
-                schedulingType: automatic,
-                mode: ${mode}
+                schedulingType: ${schedulingType}
                 ${dueAtBlock ? `, ${dueAtBlock}` : ""}
                 ${assetsBlock ? `, ${assetsBlock}` : ""}
               }) {
@@ -227,7 +233,7 @@ export class SocialSchedulerPostTool implements Tool {
               strategy_json: {
                 channel_ids: channelIds,
                 scheduled_at: scheduledAt || (now ? "immediate" : "queued"),
-                mode,
+                shareMode,
               },
               linkedin_post: text.slice(0, 500),
             }),
@@ -237,7 +243,7 @@ export class SocialSchedulerPostTool implements Tool {
         // Non-critical — log failure doesn't block posting
       }
 
-      return `Buffer GraphQL Post Results (${mode}):\n` +
+      return `Buffer GraphQL Post Results (${shareMode}):\n` +
         `Niche: ${niche}\n` +
         results.join("\n") +
         `\nText preview: ${text.slice(0, 100)}...`;

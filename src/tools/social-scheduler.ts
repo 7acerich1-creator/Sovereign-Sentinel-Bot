@@ -11,7 +11,7 @@ const BUFFER_GRAPHQL_ENDPOINT = "https://api.buffer.com";
 const BUFFER_ORG_ID = process.env.BUFFER_ORG_ID || "69c613a244dbc563b3e05050";
 
 function getBufferToken(): string {
-  const token = process.env.BUFFER_API_KEY || process.env.BUFFER_ACCESS_TOKEN || process.env.SOCIAL_SCHEDULER_API_KEY;
+  const token = process.env.BUFFER_API_KEY;
   if (!token) throw new Error("Buffer API key not configured. Set BUFFER_API_KEY in Railway.");
   return token;
 }

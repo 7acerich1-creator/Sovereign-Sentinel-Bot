@@ -1577,11 +1577,43 @@ async function main() {
 
               // Build a synthetic message from the dispatch payload
               const payloadStr = JSON.stringify(task.payload, null, 2);
+
+              // ── Task-type-specific execution directives ──
+              // Without these, agents default to analysis/reporting instead of executing tools.
+              // These ensure the pipeline's final stages actually POST content to platforms.
+              const EXECUTION_DIRECTIVES: Record<string, string> = {
+                funnel_distribution: `EXECUTION ORDER: You MUST use the social_scheduler_create_post tool to post this content to Buffer channels. ` +
+                  `Step 1: Call social_scheduler_list_profiles to get channel IDs. ` +
+                  `Step 2: Take the content from the payload and call social_scheduler_create_post with appropriate channel_ids and the text. ` +
+                  `Post to ALL relevant channels (both Ace Richie and Containment Field accounts). ` +
+                  `If the payload contains video content, use publish_video instead. ` +
+                  `Do NOT just analyze or report — actually POST the content. After posting, save the draft via save_content_draft for the record.`,
+                content_scheduling: `EXECUTION ORDER: You MUST schedule this content for posting. ` +
+                  `Step 1: Call social_scheduler_list_profiles to get available Buffer channel IDs. ` +
+                  `Step 2: Use social_scheduler_create_post to queue the content on appropriate channels. ` +
+                  `If the payload includes video/clip metadata, use publish_video for video platforms (YouTube, TikTok, Instagram). ` +
+                  `Do NOT just file a briefing or analyze metrics — actually SCHEDULE the content using the posting tools.`,
+                caption_weaponization: `EXECUTION ORDER: Write platform-ready captions from the content provided. ` +
+                  `Create at least 3 variations optimized for different platforms (X/Twitter, Instagram, Threads). ` +
+                  `Each caption must include hooks, hashtags, and a CTA. ` +
+                  `Save ALL captions via save_content_draft so they're visible in Mission Control.`,
+                narrative_weaponization: `EXECUTION ORDER: Transform this content into publishable copy. ` +
+                  `Create platform-ready posts, email copy, or thread scripts from the source material. ` +
+                  `Save ALL outputs via save_content_draft with the correct platform and draft_type tags.`,
+                viral_clip_extraction: `EXECUTION ORDER: Identify the strongest hooks and viral moments from this content. ` +
+                  `Extract timestamped hooks with suggested clip boundaries. ` +
+                  `If a video URL is present, use clip_generator to extract clips. ` +
+                  `Save your hook analysis via save_content_draft.`,
+              };
+
+              const executionDirective = EXECUTION_DIRECTIVES[task.task_type] ||
+                `Process this task according to your role.`;
+
               const dispatchMessage: Message = {
                 id: `dispatch-${task.id}`,
                 role: "user",
                 content: `[DISPATCHED TASK from ${task.from_agent}]\nType: ${task.task_type}\nDispatch ID: ${task.id}\n\nPayload:\n${payloadStr}\n\n` +
-                  `Process this task according to your role. When done, use crew_dispatch tool with action "complete" and task_id "${task.id}" to mark it done.`,
+                  `${executionDirective}\n\nWhen done, use crew_dispatch tool with action "complete" and task_id "${task.id}" to mark it done.`,
                 timestamp: new Date(),
                 channel: "telegram",
                 chatId: task.chat_id || defaultChatId,

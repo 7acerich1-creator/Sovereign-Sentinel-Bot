@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-01 (Execution directives fix deployed — agents were analyzing instead of posting. funnel_distribution and content_scheduling dispatches now force agents to call Buffer/video posting tools. Root cause: generic dispatch message gave LLMs too much discretion. Pipeline needs clean end-to-end test.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-01 (Pipeline post-mortem fixes deployed: 3 commits today. (1) Agent DM routing fix — telegram→channel on lines 1659/1728. (2) Vid Rush Whisper CLI→API rewrite — eliminates openai-whisper dependency, uses OpenAI Whisper API with verbose_json for timestamps, mp3 compression for 25MB limit. (3) Rate-limit retry — exponential backoff with jitter on 429/529 for all 3 providers (Gemini SDK, OpenAI-compat, Anthropic). (4) Dispatch stagger — 2s delay between agent processing in poller loop to prevent simultaneous LLM hammering. Pipeline needs retest with gold mine video.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -291,7 +291,7 @@ src/
 ```
 
 ### Autonomous Pollers Running in index.ts
-1. **Crew Dispatch Poller** — checks `crew_dispatch` table for pending tasks every 15s
+1. **Crew Dispatch Poller** — checks `crew_dispatch` table for pending tasks every 15s. **2s stagger between agents** to prevent simultaneous LLM rate-limit hits (added 2026-04-01).
 2. **Task Approval Poller** — checks `tasks` table for Architect-approved tasks every 30s
 3. **Pipeline Handoff Trigger** — fires after dispatch completion to chain workflows
 
@@ -303,6 +303,30 @@ The dispatch poller injects task-type-specific execution directives into the syn
 - **narrative_weaponization** — Forces agent to produce publishable copy and save via `save_content_draft`.
 - **viral_clip_extraction** — Forces agent to extract timestamped hooks and use `clip_generator` if video URL present.
 - All other task types get generic "process according to your role" fallback.
+
+### Pipeline Post-Mortem Fixes (2026-04-01)
+Three infrastructure fixes deployed after full pipeline stall on "gold mine" video:
+
+**1. Vid Rush: Whisper CLI → API (commit 68e4a80)**
+- `src/tools/vid-rush.ts` Step 3 rewrote from shelling out to `whisper` CLI (openai-whisper pip package, NOT installed in Docker) to using the OpenAI Whisper API directly.
+- Audio extraction changed from WAV (huge files) to mp3 at 64kbps mono 16kHz — stays under Whisper API 25MB limit for most videos.
+- Uses `response_format: verbose_json` to get segment-level timestamps needed for scoring.
+- Cached to disk so re-runs don't re-transcribe.
+
+**2. LLM Rate-Limit Retry with Exponential Backoff (commit 68e4a80)**
+- `src/llm/providers.ts` — new `fetchWithRetry()` utility wraps all HTTP-based providers (OpenAI-compat, Anthropic).
+- Retries up to 3 times on 429 (rate limit) and 529 (Anthropic overload).
+- Backoff: 2s → 4s → 8s + random jitter. Respects `Retry-After` header when present.
+- Gemini SDK: separate retry loop around `chat.sendMessage()` catches 429/RESOURCE_EXHAUSTED.
+- **Root cause:** failover.ts tried each provider exactly once. When all 3 hit rate limits simultaneously (6 agents in parallel), raw error JSON became the "content" passed down the chain.
+
+**3. Dispatch Poller Stagger (commit 68e4a80)**
+- `src/index.ts` dispatch poller now waits 2s between each agent's processing cycle.
+- Prevents 6 agents from firing LLM calls in the same instant.
+- Total poll window: ~10s (6 agents × 2s) within the 15s poll interval.
+
+**4. Agent DM Routing Fix (commit 965b916)**
+- Lines 1659 and 1728: `telegram` → `channel`. Agent DMs now come from each agent's own bot handle instead of all routing through Veritas.
 
 ### Scheduled Jobs
 - **Vector Daily Metrics Sweep** — 10AM

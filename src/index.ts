@@ -1570,18 +1570,23 @@ async function main() {
       setInterval(async () => {
         let agentIndex = 0;
         for (const [agentName, { loop: agentLoop, channel }] of agentLoops) {
-          // Stagger agent processing to avoid simultaneous LLM rate-limit hits
-          // 5s gap gives each agent time to finish before the next one fires
+          // Stagger agent processing with generous gaps to conserve LLM quota.
+          // Each agent fully processes before the next one starts.
           if (agentIndex > 0) {
-            await new Promise((resolve) => setTimeout(resolve, 5000));
+            await new Promise((resolve) => setTimeout(resolve, 10_000));
           }
           agentIndex++;
           try {
-            const tasks = await claimTasks(agentName, 3);
+            // Claim 1 task at a time — prevents quota burn from parallel processing
+            const tasks = await claimTasks(agentName, 1);
             if (tasks.length === 0) continue;
 
             for (const task of tasks) {
               console.log(`🔄 [DispatchPoller] ${agentName} processing dispatch ${task.id} (type: ${task.task_type})`);
+              // 3s breather between consecutive tasks for the same agent
+              if (tasks.indexOf(task) > 0) {
+                await new Promise((resolve) => setTimeout(resolve, 3000));
+              }
 
               // Build a synthetic message from the dispatch payload
               const payloadStr = JSON.stringify(task.payload, null, 2);
@@ -1638,7 +1643,9 @@ async function main() {
                   continue;
                 }
 
-                const response = await agentLoop.processMessage(dispatchMessage);
+                // Cap dispatch tasks at 3 iterations to conserve LLM quota
+                // (full 10 iterations reserved for direct user conversations)
+                const response = await agentLoop.processMessage(dispatchMessage, undefined, 3);
                 await completeDispatch(task.id, "completed", response.slice(0, 4000));
 
                 // Auto-trigger pipeline handoffs if this agent has downstream routes

@@ -33,7 +33,9 @@ export const config: GravityClawConfig = {
 
   llm: {
     defaultProvider: process.env.LLM_DEFAULT_PROVIDER || "gemini",
-    failoverOrder: envList("LLM_FAILOVER_ORDER", ["gemini", "anthropic", "openai", "deepseek", "groq"]),
+    // Groq second — free tier with 14,400 req/day vs Gemini's 250/day.
+    // Anthropic/OpenAI as paid fallbacks after free tiers are exhausted.
+    failoverOrder: envList("LLM_FAILOVER_ORDER", ["gemini", "groq", "anthropic", "openai", "deepseek"]),
     maxIterations: envInt("LLM_MAX_ITERATIONS", 10),
     providers: {
       gemini: {

@@ -62,9 +62,12 @@ export class AgentLoop {
 
   async processMessage(
     message: Message,
-    sendTyping?: () => Promise<void>
+    sendTyping?: () => Promise<void>,
+    iterationCap?: number
   ): Promise<string> {
-    const maxIterations = config.security.maxAgentIterations;
+    // Dispatch tasks use a lower cap (3) to conserve LLM quota.
+    // Direct user messages use the full config limit (default 10).
+    const maxIterations = iterationCap ?? config.security.maxAgentIterations;
 
     // 0. Determine Persona
     const persona = this.determinePersona(message.content);

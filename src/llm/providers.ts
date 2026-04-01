@@ -17,11 +17,17 @@ async function fetchWithRetry(url: string, init: RequestInit, providerName: stri
     const resp = await fetch(url, init);
 
     if (resp.status === 429 || resp.status === 529) {
+      // CRITICAL: Check if this is a hard quota limit (don't retry) vs temporary rate limit (retry)
+      const bodyText = await resp.clone().text().catch(() => "");
+      const isQuotaExhausted = bodyText.includes("credit balance") || bodyText.includes("Quota exceeded") || bodyText.includes("per_day");
+      if (isQuotaExhausted) {
+        console.error(`🚫 ${providerName} QUOTA/CREDITS EXHAUSTED — failing over immediately`);
+        return resp; // Return immediately, don't waste time retrying
+      }
+
       if (attempt === MAX_RETRIES) {
-        // Final attempt — let the caller handle the error
         return resp;
       }
-      // Parse Retry-After header if present (seconds), otherwise use exponential backoff
       const retryAfter = resp.headers.get("retry-after");
       const delayMs = retryAfter
         ? Math.min(parseInt(retryAfter, 10) * 1000, 30_000)
@@ -33,7 +39,6 @@ async function fetchWithRetry(url: string, init: RequestInit, providerName: stri
 
     return resp;
   }
-  // Should never reach here, but satisfy TypeScript
   throw new Error(`${providerName}: exhausted retries`);
 }
 
@@ -231,6 +236,13 @@ export class GeminiProvider implements LLMProvider {
         break; // Success — exit retry loop
       } catch (retryErr: any) {
         const msg = retryErr.message || "";
+        // CRITICAL: Distinguish daily quota exhaustion from temporary rate limits.
+        // Daily quota ("Quota exceeded", "per_model_per_day") will NOT clear on retry — fail fast.
+        const isQuotaExhausted = msg.includes("Quota exceeded") || msg.includes("per_day") || msg.includes("per_model_per_day");
+        if (isQuotaExhausted) {
+          console.error(`🚫 gemini DAILY QUOTA EXHAUSTED — skipping retries, failing over immediately`);
+          throw retryErr; // Let failover handle it
+        }
         const isRateLimit = msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("Too Many Requests");
         if (isRateLimit && attempt < MAX_RETRIES) {
           const delayMs = BASE_DELAY_MS * Math.pow(2, attempt) + Math.random() * 1000;

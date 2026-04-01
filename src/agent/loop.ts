@@ -376,14 +376,14 @@ export class AgentLoop {
     }
   }
 
-  private determinePersona(content: string): Persona {
-    const text = content.toLowerCase();
-
-    if (text.includes("bob") || text.includes("code") || text.includes("debug")) return PERSONA_REGISTRY.bob;
-    if (text.includes("angela") || text.includes("marketing") || text.includes("viral")) return PERSONA_REGISTRY.angela;
-    if (text.includes("josh") || text.includes("business") || text.includes("metrics") || text.includes("money")) return PERSONA_REGISTRY.josh;
-    if (text.includes("milo") || text.includes("strategy") || text.includes("plan")) return PERSONA_REGISTRY.milo;
-
+  private determinePersona(_content: string): Persona {
+    // Use the agent's own persona based on identity (set during bot init).
+    // Previous implementation routed by message keywords to personas (bob, angela,
+    // josh, milo) that no longer exist in PERSONA_REGISTRY, causing crashes when
+    // dispatch payloads contained trigger words like "viral", "code", "metrics", etc.
+    // Each Maven Crew agent should always use its own persona — not a content-based switch.
+    const agentPersona = PERSONA_REGISTRY[this.identity.agentName];
+    if (agentPersona) return agentPersona;
     return DEFAULT_PERSONA;
   }
 

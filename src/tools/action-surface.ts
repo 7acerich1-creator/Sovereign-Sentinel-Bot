@@ -139,7 +139,7 @@ export class SaveContentDraftTool implements Tool {
       },
       draft_type: {
         type: "string",
-        description: "Type: email, caption, hook, thread, landing_page, script, blog, ad_copy, other",
+        description: "Type (MUST be one of these exact values): email, caption, hook, thread, landing_page, script, blog, ad_copy, social_post, video_script, newsletter, tweet, post, other",
       },
       platform: {
         type: "string",
@@ -156,9 +156,13 @@ export class SaveContentDraftTool implements Tool {
   async execute(args: Record<string, unknown>): Promise<string> {
     const title = String(args.title);
     const body = String(args.body);
-    const draftType = String(args.draft_type || "other");
     const platform = args.platform ? String(args.platform) : null;
     const niche = args.niche ? String(args.niche) : null;
+
+    // Validate draft_type against DB CHECK constraint — fallback to "other" if unrecognized
+    const VALID_DRAFT_TYPES = ["email", "caption", "hook", "thread", "landing_page", "script", "blog", "ad_copy", "social_post", "video_script", "newsletter", "tweet", "post", "other"];
+    const rawType = String(args.draft_type || "other").toLowerCase().trim();
+    const draftType = VALID_DRAFT_TYPES.includes(rawType) ? rawType : "other";
 
     const id = await supabasePost("content_drafts", {
       agent_name: this.agentName,
@@ -183,7 +187,7 @@ export class SaveContentDraftTool implements Tool {
         `Status: Pending Review\n` +
         `The Architect will review and approve before publishing.`;
     }
-    return "❌ Failed to save draft — Supabase connection issue.";
+    return `❌ Failed to save draft — Supabase POST returned null. Check Railway logs for [ActionSurface] errors. draft_type="${draftType}", title="${title.slice(0, 50)}"`.trim();
   }
 }
 

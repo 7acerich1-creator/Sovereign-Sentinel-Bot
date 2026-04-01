@@ -147,17 +147,14 @@ export class SocialSchedulerPostTool implements Tool {
         }
       }
 
-      // Determine scheduling: Buffer GraphQL uses schedulingType enum + optional dueAt.
-      // schedulingType: automatic (Buffer picks slot) | fixed (use dueAt)
-      // shareMode: addToQueue | shareNow | schedule
+      // Buffer GraphQL ShareMode enum: addToQueue | shareNext | shareNow | customScheduled
+      // schedulingType enum: automatic | notification
+      // Both mode and schedulingType are REQUIRED fields.
       let shareMode = "addToQueue";
-      let schedulingType = "automatic";
       if (now) {
         shareMode = "shareNow";
-        schedulingType = "automatic";
       } else if (scheduledAt) {
-        shareMode = "schedule";
-        schedulingType = "fixed";
+        shareMode = "customScheduled";
       }
 
       const results: string[] = [];
@@ -181,7 +178,8 @@ export class SocialSchedulerPostTool implements Tool {
               createPost(input: {
                 text: ${JSON.stringify(text)},
                 channelId: "${channelId}",
-                schedulingType: ${schedulingType}
+                schedulingType: automatic,
+                mode: ${shareMode}
                 ${dueAtBlock ? `, ${dueAtBlock}` : ""}
                 ${assetsBlock ? `, ${assetsBlock}` : ""}
               }) {

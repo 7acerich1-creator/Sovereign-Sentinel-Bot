@@ -202,14 +202,52 @@ export class GeminiProvider implements LLMProvider {
       }
     }
 
+    // ── Gemini History Sanitization ──
+    // Gemini has strict requirements:
+    //   1. First message in history MUST be role "user" (not "model")
+    //   2. First user message CANNOT contain functionResponse parts
+    //   3. Roles must alternate (no consecutive same-role turns)
+    // Fix: merge consecutive same-role turns, then ensure history starts with a clean user text turn.
+
+    // Step 1: Merge consecutive same-role entries
+    const merged: Content[] = [];
+    for (const entry of history) {
+      const last = merged[merged.length - 1];
+      if (last && last.role === entry.role) {
+        last.parts.push(...entry.parts);
+      } else {
+        merged.push({ role: entry.role, parts: [...entry.parts] });
+      }
+    }
+
+    // Step 2: Ensure first entry is a user turn with at least one text part
+    // (not a model turn or a functionResponse-only user turn)
+    let sanitized = merged;
+    if (sanitized.length > 0) {
+      const first = sanitized[0];
+      const hasFunctionResponse = first.parts.some((p: any) => p.functionResponse);
+      const hasText = first.parts.some((p: any) => p.text !== undefined);
+
+      if (first.role === "model") {
+        // Prepend a synthetic user message so Gemini sees user first
+        sanitized = [{ role: "user", parts: [{ text: "(context continues)" }] }, ...sanitized];
+      } else if (first.role === "user" && hasFunctionResponse && !hasText) {
+        // First user turn is ONLY functionResponse — Gemini rejects this.
+        // Prepend a text part so Gemini treats it as a valid user turn.
+        first.parts.unshift({ text: "(processing tool results)" });
+      }
+    }
+
     const lastMessage = chatMessages[chatMessages.length - 1];
-    const chat = model.startChat({ history });
+    const chat = model.startChat({ history: sanitized });
 
     // Gemini SDK retry — catches 429/RESOURCE_EXHAUSTED errors
     let result: any;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        result = await chat.sendMessage(lastMessage?.content || "");
+        // Ensure we always send a non-empty string — Gemini rejects empty messages
+        const sendText = lastMessage?.content || "(continue)";
+        result = await chat.sendMessage(sendText);
         break; // Success — exit retry loop
       } catch (retryErr: any) {
         const msg = retryErr.message || "";

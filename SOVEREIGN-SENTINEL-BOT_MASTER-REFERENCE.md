@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-03-31 Session 3 (4 critical bug fixes deployed, crew_dispatch OPERATIONAL, Gemini tool-calling FIXED, Docker build 5min, Pinecone VERIFIED 316 vectors, Buffer needs classic API token, YouTube tokens SET) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-01 (Phase 2 notification overhaul DONE — Sapphire pipeline completion summary replaces per-dispatch spam. Dashboard chat_id routing fix deployed. Phase 3 first live test ran — chain fires correctly, needs retest after Phase 2 fix.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -49,7 +49,7 @@ Three domains exist. **Never cross-contaminate.**
 - **Briefings truncated** — agent reports are longer than what's displayed. Need ability to read full transmission (expand/modal/scroll)
 - **Briefings lack operational depth** — currently read-only status. Need to be actionable (mark read, archive, trigger follow-ups). Valuable for Architect to see what agents are doing at a glance
 - **Maven Crew group chat on dashboard is down** — needs to work like Telegram group chat (all agents responding in shared thread)
-- **Yuki on Mission Control is NOT the real Yuki** — it's a raw LLM call with no personality, no tools, no memory. Same for all agents on the dashboard chat. The fix is the **Webhook Bridge** (see Section 10)
+- **Dashboard agents are now REAL agents** — As of 2026-04-01, Mission Control chat routes through Railway `/api/chat-bridge`, hitting the full AgentLoop with personality blueprints, tools, Pinecone, and memory. Both individual and group chat routes updated.
 
 ---
 
@@ -695,9 +695,24 @@ Anita needs to be able to:
 3. Not just create hundreds of emails — each sequence must have a conversion purpose tied to the product ladder
 
 **What needs building:**
+- `read_nurture_template` tool — read existing templates from `nurture_templates` table (so she can see what exists before writing new ones)
+- `update_nurture_template` tool — write new/updated HTML to `nurture_templates` table (so her approved drafts can go live)
 - Email scheduling tool (Make.com scenario or direct email API integration)
 - Sequence logic (drip timing, trigger-based sends)
 - Conversion tracking (which emails lead to which tier purchases)
+
+### EMAIL BRAND STANDARD — MANDATORY FOR ANITA (Added 2026-04-01)
+**Anita MUST follow the Email Brand Standard documented in MC Master Reference Section 9A when creating ANY email content.** This includes:
+1. Dark HTML wrapper with `prefers-color-scheme: light` CSS toggle
+2. Table-based layout (600px card, #121212 bg, #252525 border, 8px radius)
+3. Header: "SOVEREIGN SYNTHESIS" left, "Transmission NNN" right
+4. Gradient accent line: `linear-gradient(#E5850F → #5A9CF5 → #2ECC8F)`
+5. CSS class convention: `.ss-outer`, `.ss-card`, `.ss-header`, `.ss-body-text`, `.ss-heading`, `.ss-quote-box`, etc.
+6. Section label color coding by intent (Gold=welcome/scarcity, Blue=defense/blueprint, Green=activation)
+7. CTA button: #E5850F background, #000000 text, uppercase, 1.5px letter-spacing
+8. Footer with unsubscribe link to `https://sovereign-synthesis.com/unsubscribe`
+9. Signature: "— Ace" + "Sovereign Synthesis"
+**Reference template**: `email-templates/01-welcome-email.html` is the structural skeleton to clone from.
 
 ---
 
@@ -722,7 +737,7 @@ Architect sets weekly directive (Veritas Weekly Monday 9AM)
 2. **Sapphire** — Break directives into actionable tasks. Route to correct agents. Monitor completion.
 3. **Alfred** — Process YouTube URLs → hooks/scripts. Feed Yuki content.
 4. **Yuki** — Produce clips, post to Buffer (images), queue videos for when platform tokens are ready.
-5. **Anita** — Create email sequences with conversion purpose. Wait for email scheduling tools.
+5. **Anita** — Create email sequences with conversion purpose. MUST follow Email Brand Standard (Section 15). Wait for `read_nurture_template` + `update_nurture_template` tools before she can push live.
 6. **Vector** — Daily metrics sweeps. Revenue tracking. When Stripe key is set, actually pull real data.
 
 ### What Happened After Anita's Content Was Approved?
@@ -772,38 +787,35 @@ Architect sets weekly directive (Veritas Weekly Monday 9AM)
 
 ---
 
-### PHASE 2 — NOTIFICATION SYSTEM OVERHAUL (Fix what Ace actually sees)
+### PHASE 2 — NOTIFICATION SYSTEM OVERHAUL ✅ CORE DONE (2026-04-01)
 
-**The problem:** Two issues compound into blindness.
+**What was built (commits `568423d` + `3181918`):**
+- 2A/2D DONE: Per-dispatch Telegram spam eliminated. Pipeline dispatches (those with `parent_id`) now trigger pipeline completion detection via `checkPipelineComplete()` in `crew-dispatch.ts`. When the full chain finishes, ONE summary task is dispatched to Sapphire, and her plain-English response is the only message sent to chat.
+- Standalone dispatches (no `parent_id`) still get a single notification — not spam, just one message.
+- **Dashboard routing fix:** Added `notifyChat()` router that checks if `chat_id` starts with `"dashboard-"`. Dashboard dispatches write to `activity_log` table instead of failing on Telegram. Real Telegram numeric IDs still go through the bot.
+- New exports in `crew-dispatch.ts`: `getFullPipelineChain()` (walks full ancestor tree), `checkPipelineComplete()` (returns completed chain or null).
 
-**Issue A — Notification Spam:** Every crew_dispatch handoff sends a generic Telegram DM like `"✅ Sapphire — Architectural Sync ↳ Dispatched by Alfred"`. If a Vid Rush pipeline chains 4 agents, Ace gets 6-8 messages that say nothing about what actually happened. These notifications give the illusion of activity without conveying meaning.
-
-**Issue B — Mission Control Silence:** Briefings write to the `briefings` table and sit there. The dashboard has no push notifications, no realtime alerts. If Sapphire files a strategic brief at 2AM, Ace doesn't know until he opens the dashboard.
-
-| # | Task | Solution |
-|---|------|----------|
-| 2A | Replace dispatch spam with daily digest DM | Batch all dispatch activity into one Telegram message per day (or on-demand via `/digest` command). Include: what each agent did, outcomes, what's pending. One message, not twenty. |
-| 2B | Build Telegram briefing relay | When an agent writes to `briefings` table, send a condensed version to Ace via Telegram DM. Not the full briefing — a 2-3 line summary with a "Full report on Mission Control" note. This makes Mission Control the detail layer, Telegram the alert layer. |
-| 2C | Build `/briefings` command | Ace can type `/briefings` in Telegram to pull latest unread briefings from all agents on demand. |
-| 2D | Suppress individual dispatch notifications | Remove the per-task Telegram messages in the dispatch poller (lines 1529-1543 of index.ts). Replace with activity_log writes only. |
-
-**Why Phase 2 before content pipeline testing:** If we activate the content pipeline (Phase 3) before fixing notifications, Ace gets buried in 50 generic dispatch messages per Vid Rush run. Fix the signal before turning on the machine.
+**Still TODO:**
+- 2B: Telegram briefing relay (push condensed briefing summaries to Telegram DM)
+- 2C: `/briefings` command for on-demand briefing pull
 
 ---
 
-### PHASE 3 — CONTENT PIPELINE END-TO-END TEST
+### PHASE 3 — CONTENT PIPELINE END-TO-END TEST (IN PROGRESS)
 
-**Audit finding (2026-03-31):** The pipeline code IS built. `PIPELINE_ROUTES` defines the full chain. `triggerPipelineHandoffs` auto-chains them. What hasn't happened is a live end-to-end test with real content.
+**First live test (2026-04-01 ~07:19 UTC):** Ace fired the YouTube URL (`https://youtu.be/WhqdFNK58S8`) through the dashboard to Sapphire. Sapphire dispatched to Alfred via `multi_pass_hook_extraction`. Alfred completed and auto-chained to Yuki + Anita + Sapphire. Those completed and auto-chained to Vector. **The full 8-dispatch chain fired correctly.**
 
-| # | Task | What it proves |
-|---|------|---------------|
-| 3A | Feed a YouTube URL to Alfred in Telegram | Alfred's hook extraction + transcript processing works |
-| 3B | Verify auto-dispatch fires to Yuki | `triggerPipelineHandoffs` chains Alfred → Yuki with `viral_clip_extraction` task |
-| 3C | Verify Yuki produces clip scripts and auto-dispatches to Anita + Vector | Full downstream chain fires |
-| 3D | Check `content_drafts` table for output | Content actually lands in the database for review |
-| 3E | Fix any breaks found in the live test | Specific fixes identified by the test, not speculated in advance |
+**Why it showed as "failed":** The OLD notification code (pre-Phase 2 fix) tried to send Telegram messages using `chat_id: "dashboard-sapphire"`. Telegram rejected every one ("chat not found"), and the catch block overwrote each dispatch status from "completed" to "failed". The agents DID process the tasks — the failure was purely in the notification layer.
 
-**This may already work.** The code is there. The test proves it.
+**Status after Phase 2 fix:** Both the notification spam and the dashboard chat_id routing are now fixed. Next test should complete cleanly.
+
+| # | Task | Status |
+|---|------|--------|
+| 3A | Feed a YouTube URL through pipeline | ✅ DONE — chain fires, Alfred extracts |
+| 3B | Verify auto-dispatch fires downstream | ✅ DONE — all 8 handoffs fired correctly |
+| 3C | Verify full chain completes without errors | 🔄 NEEDS RETEST — Phase 2 fix now deployed, rerun should pass |
+| 3D | Check `content_drafts` table for output | 🔄 NEEDS RETEST — verify agents write output to DB |
+| 3E | Verify Sapphire completion summary fires | 🔄 NEEDS RETEST — new feature, first live test pending |
 
 ---
 
@@ -867,7 +879,7 @@ Video publisher code is fully written and registered. This is purely a credentia
 | 8A | Build funnel visualization page on Mission Control | Visual flowchart showing: landing page → email capture → Supabase → welcome email → nurture sequence → Stripe checkout → purchase email → course portal. Each node is a clickable block showing status. |
 | 8B | Build agent pipeline visualization | Visual flow showing: YouTube URL → Alfred → Yuki → Anita → Vector → platforms. Each agent is a block with status, last activity, queue depth. |
 | 8C | Mission Control goal sync | Goals/tasks from agent chat surface on dashboard instead of vanishing. |
-| 8D | Webhook Bridge | Route Mission Control chat to Railway agent loop so dashboard agents match Telegram agents. |
+| 8D | Webhook Bridge | ✅ **DONE (2026-04-01)** — `/api/chat-bridge` webhook on Railway accepts `{ agent_name, content }`, routes through the REAL AgentLoop (personality, tools, Pinecone, memory). Mission Control `/api/chat` and `/api/chat-group` routes rewritten to call Railway instead of direct Anthropic. Fallback templates retained for when Railway is unreachable. |
 
 ---
 

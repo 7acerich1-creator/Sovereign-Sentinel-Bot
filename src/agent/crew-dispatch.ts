@@ -259,6 +259,76 @@ export async function getPipelineStatus(parentId: string): Promise<DispatchRecor
   }
 }
 
+/**
+ * Walk the full pipeline chain for a given dispatch.
+ * Finds the root ancestor, then fetches ALL dispatches in the tree.
+ * Returns { rootId, chain } where chain includes every dispatch in the pipeline.
+ */
+export async function getFullPipelineChain(dispatchId: string, parentId?: string): Promise<{ rootId: string; chain: DispatchRecord[] }> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return { rootId: dispatchId, chain: [] };
+
+  // Walk up to the root: keep following parent_id until there is none
+  let rootId = parentId || dispatchId;
+  const seen = new Set<string>();
+  while (true) {
+    if (seen.has(rootId)) break; // safety against cycles
+    seen.add(rootId);
+    try {
+      const resp = await fetch(
+        `${SUPABASE_URL}/rest/v1/crew_dispatch?id=eq.${rootId}&select=parent_id`,
+        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+      );
+      if (!resp.ok) break;
+      const rows = await resp.json();
+      if (!rows[0]?.parent_id) break; // this IS the root
+      rootId = rows[0].parent_id;
+    } catch { break; }
+  }
+
+  // Now fetch every dispatch that shares this root (root itself + all descendants via recursive parent_id)
+  // Supabase doesn't do recursive CTEs via REST, so we fetch in waves
+  const chain: DispatchRecord[] = [];
+  const queue = [rootId];
+  const fetched = new Set<string>();
+
+  while (queue.length > 0) {
+    const currentId = queue.shift()!;
+    if (fetched.has(currentId)) continue;
+    fetched.add(currentId);
+
+    try {
+      // Fetch this node + its direct children
+      const resp = await fetch(
+        `${SUPABASE_URL}/rest/v1/crew_dispatch?or=(id.eq.${currentId},parent_id.eq.${currentId})&select=*&order=created_at.asc`,
+        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+      );
+      if (!resp.ok) continue;
+      const rows = (await resp.json()) as DispatchRecord[];
+      for (const row of rows) {
+        if (!chain.find(c => c.id === row.id)) {
+          chain.push(row);
+          // Queue children for the next wave
+          if (row.id !== currentId) queue.push(row.id);
+        }
+      }
+    } catch { continue; }
+  }
+
+  return { rootId, chain };
+}
+
+/**
+ * Check if a full pipeline chain is complete (all dispatches are completed or failed).
+ * Returns the chain if complete, null if still in progress.
+ */
+export async function checkPipelineComplete(dispatchId: string, parentId?: string): Promise<DispatchRecord[] | null> {
+  const { chain } = await getFullPipelineChain(dispatchId, parentId);
+  if (chain.length === 0) return null;
+
+  const allDone = chain.every(d => d.status === "completed" || d.status === "failed");
+  return allDone ? chain : null;
+}
+
 // ── LLM-Callable Tool ──
 
 export class CrewDispatchTool implements Tool {

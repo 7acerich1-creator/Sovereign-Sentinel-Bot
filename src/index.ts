@@ -43,7 +43,7 @@ import { SocialSchedulerListProfilesTool, SocialSchedulerPostTool, SocialSchedul
 import { ClipGeneratorTool } from "./tools/clip-generator";
 import { VidRushTool } from "./tools/vid-rush";
 import { logTask, updateTask, logAgentActivity } from "./tools/task-logger";
-import { CrewDispatchTool, claimTasks, completeDispatch, dispatchTask, triggerPipelineHandoffs } from "./agent/crew-dispatch";
+import { CrewDispatchTool, claimTasks, completeDispatch, dispatchTask, triggerPipelineHandoffs, checkPipelineComplete } from "./agent/crew-dispatch";
 import { ProtocolReaderTool, ProtocolWriterTool } from "./tools/protocol-reader";
 import { RelationshipContextTool } from "./tools/relationship-context";
 import { SapphireSentinel } from "./proactive/sapphire-sentinel";
@@ -1585,18 +1585,63 @@ async function main() {
                   console.error(`[Pipeline] Handoff error for ${agentName}: ${handoffErr.message}`);
                 }
 
-                // Notify the originating chat that dispatch was processed
-                if (task.chat_id) {
+                // Pipeline completion detection — suppress per-dispatch spam,
+                // send a single Sapphire summary when the full chain finishes.
+                if (task.chat_id && task.parent_id) {
+                  try {
+                    const completedChain = await checkPipelineComplete(task.id, task.parent_id);
+                    if (completedChain && completedChain.length > 1) {
+                      // Full pipeline is done — build a summary payload for Sapphire
+                      const chainSummary = completedChain.map(d => ({
+                        agent: d.to_agent,
+                        task: d.task_type.replace(/_/g, " "),
+                        status: d.status,
+                        result: d.result?.slice(0, 500) || "(no result)",
+                      }));
+                      const successCount = completedChain.filter(d => d.status === "completed").length;
+                      const failCount = completedChain.filter(d => d.status === "failed").length;
+
+                      // Dispatch summary task to Sapphire
+                      const summaryId = await dispatchTask({
+                        from_agent: "system",
+                        to_agent: "sapphire",
+                        task_type: "pipeline_completion_summary",
+                        payload: {
+                          directive: `The content pipeline just finished. ${successCount} tasks completed, ${failCount} failed. ` +
+                            `Write a concise plain-English summary (3-5 sentences max) of what was accomplished across the full chain. ` +
+                            `Mention which agents did what and whether the content is ready for posting. Be direct, no fluff.`,
+                          chain: chainSummary,
+                          pipeline: true,
+                        },
+                        chat_id: task.chat_id,
+                        priority: 2,
+                      });
+                      if (summaryId) {
+                        console.log(`📋 [Pipeline] Full chain complete (${completedChain.length} tasks) — dispatched summary to Sapphire: ${summaryId}`);
+                      }
+                    }
+                  } catch (summaryErr: any) {
+                    console.error(`[Pipeline] Summary dispatch error: ${summaryErr.message}`);
+                  }
+                } else if (task.chat_id && !task.parent_id) {
+                  // This is a standalone dispatch (not part of a pipeline chain) — still notify
                   const agentLabel = agentName.charAt(0).toUpperCase() + agentName.slice(1);
-                  const sourceLabel = task.from_agent.charAt(0).toUpperCase() + task.from_agent.slice(1);
                   const taskLabel = task.task_type
                     .replace(/_/g, " ")
                     .replace(/\b\w/g, (c: string) => c.toUpperCase());
-
                   await channel.sendMessage(
                     task.chat_id,
-                    `✅ *${agentLabel}* — ${taskLabel}\n` +
-                    `   ↳ _Dispatched by ${sourceLabel}_`,
+                    `✅ *${agentLabel}* completed: ${taskLabel}`,
+                    { parseMode: "Markdown" }
+                  );
+                }
+
+                // When Sapphire completes a pipeline_completion_summary, send HER response to chat
+                if (agentName === "sapphire" && task.task_type === "pipeline_completion_summary" && task.chat_id) {
+                  const summaryText = response.slice(0, 3000);
+                  await channel.sendMessage(
+                    task.chat_id,
+                    `📋 *Pipeline Complete*\n\n${summaryText}`,
                     { parseMode: "Markdown" }
                   );
                 }

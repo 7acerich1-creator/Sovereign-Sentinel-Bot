@@ -27,7 +27,7 @@ export interface Attachment {
   transcription?: string;
 }
 
-export type ChannelType = "telegram" | "gmail" | "webchat" | "api";
+export type ChannelType = "telegram" | "gmail" | "webchat" | "api" | "dashboard";
 
 // ── LLM Provider Interface ──
 export interface LLMProvider {

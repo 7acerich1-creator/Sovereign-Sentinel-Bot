@@ -1531,6 +1531,36 @@ async function main() {
       }
     }
 
+    // ── Notification Router — sends to Telegram or logs for dashboard ──
+    const isDashboardChat = (chatId: string) => chatId.startsWith("dashboard-");
+    const notifyChat = async (chatId: string, text: string, channel: any) => {
+      if (isDashboardChat(chatId)) {
+        // Dashboard-originated dispatch — log to Supabase activity_log so dashboard can read it
+        console.log(`📋 [Dashboard Notify] ${text.slice(0, 120)}`);
+        try {
+          await fetch(`${process.env.SUPABASE_URL}/rest/v1/activity_log`, {
+            method: "POST",
+            headers: {
+              apikey: process.env.SUPABASE_ANON_KEY!,
+              Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY!}`,
+              "Content-Type": "application/json",
+              Prefer: "return=minimal",
+            },
+            body: JSON.stringify({
+              agent: "system",
+              type: "pipeline_notification",
+              body: text,
+            }),
+          });
+        } catch (logErr: any) {
+          console.error(`[Dashboard Notify] Failed to log: ${logErr.message}`);
+        }
+      } else {
+        // Real Telegram chat ID — send via bot
+        await channel.sendMessage(chatId, text, { parseMode: "Markdown" });
+      }
+    };
+
     // ── Dispatch Poller — checks Supabase crew_dispatch for pending tasks every 15s ──
     const DISPATCH_POLL_MS = 15_000;
     if (agentLoops.size > 0) {
@@ -1629,20 +1659,20 @@ async function main() {
                   const taskLabel = task.task_type
                     .replace(/_/g, " ")
                     .replace(/\b\w/g, (c: string) => c.toUpperCase());
-                  await channel.sendMessage(
+                  await notifyChat(
                     task.chat_id,
                     `✅ *${agentLabel}* completed: ${taskLabel}`,
-                    { parseMode: "Markdown" }
+                    channel
                   );
                 }
 
                 // When Sapphire completes a pipeline_completion_summary, send HER response to chat
                 if (agentName === "sapphire" && task.task_type === "pipeline_completion_summary" && task.chat_id) {
                   const summaryText = response.slice(0, 3000);
-                  await channel.sendMessage(
+                  await notifyChat(
                     task.chat_id,
                     `📋 *Pipeline Complete*\n\n${summaryText}`,
-                    { parseMode: "Markdown" }
+                    channel
                   );
                 }
               } catch (processErr: any) {

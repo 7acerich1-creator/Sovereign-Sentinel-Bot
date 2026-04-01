@@ -121,7 +121,7 @@ export const config: GravityClawConfig = {
   vidRush: {
     makeScenarioEWebhook: process.env.MAKE_SCENARIO_E_WEBHOOK || "",
     makeScenarioFWebhook: process.env.MAKE_SCENARIO_F_WEBHOOK || "",
-    bufferApiKey: process.env.BUFFER_API_KEY || "",
+    bufferApiKey: process.env.BUFFER_API_KEY || process.env.BUFFER_ACCESS_TOKEN || "",
   },
 
   security: {

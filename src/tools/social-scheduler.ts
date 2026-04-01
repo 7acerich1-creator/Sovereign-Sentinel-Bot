@@ -15,8 +15,8 @@ interface NicheChannel {
 }
 
 async function bufferRequest(endpoint: string, method: string = "GET", body?: Record<string, unknown>): Promise<any> {
-  const token = process.env.BUFFER_API_KEY || process.env.SOCIAL_SCHEDULER_API_KEY;
-  if (!token) throw new Error("Buffer API key not configured. Set BUFFER_API_KEY in Railway.");
+  const token = process.env.BUFFER_API_KEY || process.env.BUFFER_ACCESS_TOKEN || process.env.SOCIAL_SCHEDULER_API_KEY;
+  if (!token) throw new Error("Buffer API key not configured. Set BUFFER_API_KEY or BUFFER_ACCESS_TOKEN in Railway.");
 
   const url = `${BUFFER_API_BASE}${endpoint}`;
 

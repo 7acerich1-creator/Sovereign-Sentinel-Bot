@@ -257,7 +257,8 @@ async function main() {
   const router = new MessageRouter();
 
   // Group management — username updated after telegram.initialize() resolves getMe()
-  const groupManager = new GroupManager("sovereign_bot", config.telegram.authorizedUserIds);
+  // isLeadAgent = true → Veritas responds to ALL Architect messages in groups (no @mention needed)
+  const groupManager = new GroupManager("sovereign_bot", config.telegram.authorizedUserIds, true);
 
   // ── 6. Wire Message Handler ──
   const defaultChatId = String(config.telegram.authorizedUserIds[0]);

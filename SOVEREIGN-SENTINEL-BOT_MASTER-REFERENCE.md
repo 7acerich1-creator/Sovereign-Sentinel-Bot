@@ -307,7 +307,7 @@ src/
 |----------|----------|--------|
 | **YouTube** | `YOUTUBE_REFRESH_TOKEN` + `_TCF` + client creds | ✅ ALL SET — both channels |
 | **Buffer** | `BUFFER_API_KEY` | ✅ GraphQL API key set — all 9 channels verified |
-| **Instagram** | `INSTAGRAM_ACCESS_TOKEN`, `INSTAGRAM_BUSINESS_ID` | ❌ BLOCKED — Meta Business Portfolio restriction |
+| **Instagram** | ~~`INSTAGRAM_ACCESS_TOKEN`, `INSTAGRAM_BUSINESS_ID`~~ | ❌ KILLED — Meta API integration permanently abandoned |
 | **TikTok** | `TIKTOK_ACCESS_TOKEN` | ❌ Not started |
 | **X/Twitter** | (routed through Buffer) | ✅ Via Buffer — AceRichie77 + ContainmentFld |
 
@@ -356,39 +356,17 @@ src/
 
 ---
 
-## 9. META / INSTAGRAM API STATUS (Active Work — 2026-03-31)
+## 9. META / INSTAGRAM API STATUS — ❌ KILLED (2026-03-31)
 
-### What's Done
-- Meta App "Sovereign Synthesis" created (App ID: `1620909559173376`)
-- App Secret: `f10b965c01a8496795a5dedf1be6be8f`
-- Configuration ID: `2040353133209625`
-- Facebook Login for Business OAuth completed with ALL 5 permissions:
-  - `pages_show_list`, `business_management`, `instagram_basic`, `instagram_content_publish`, `pages_read_engagement`
-- Facebook Page confirmed: **Sovereign Synthesis** (Page ID: `1036166246251468`)
-- Page has full admin tasks: MODERATE, MESSAGING, ANALYZE, ADVERTISE, CREATE_CONTENT, MANAGE
-- Meta Accounts Center verified: Richard Gonzales (Facebook, user ID `944063971413171`) + ace_richie_77 (Instagram, user ID `17841406463677551`) are linked at Meta account level
-- User Token preserved in Graph API Explorer (starts with `EAAXCNWp80QABRJS...`)
+**Decision:** Meta/Instagram direct API integration is permanently abandoned. Never worked, was blocked by Meta Business Portfolio restrictions, and the App Secret was exposed in this file (flagged by GitGuardian). All credentials have been scrubbed.
 
-### What's Blocking
-- `instagram_business_account` field does NOT return from Page API queries
-- Both `/{page-id}/instagram_accounts` and `/{page-id}/page_backed_instagram_accounts` return empty arrays
-- **Root cause:** @ace_richie_77 is a Business account (switched) BUT has not been **linked to the Sovereign Synthesis Facebook Page** from within Instagram settings
+**What was here:** Meta App "Sovereign Synthesis" with App ID, App Secret, Configuration ID, Facebook Page ID, user IDs, and OAuth token exchange instructions. All removed.
 
-### Next Steps (In Order)
-1. **Ace must link Instagram to Facebook Page:** Instagram app → Settings → Business tools → Connected accounts → Facebook → Select "Sovereign Synthesis" page
-2. Re-query `1036166246251468?fields=instagram_business_account,name` in Graph API Explorer
-3. Extract the Instagram Business Account ID from the response
-4. Switch to User Token in Graph API Explorer
-5. Exchange short-lived token for long-lived token via:
-   ```
-   GET https://graph.facebook.com/v25.0/oauth/access_token
-     ?grant_type=fb_exchange_token
-     &client_id=1620909559173376
-     &client_secret=f10b965c01a8496795a5dedf1be6be8f
-     &fb_exchange_token=SHORT_LIVED_TOKEN
-   ```
-6. Add `INSTAGRAM_ACCESS_TOKEN` (long-lived) + `INSTAGRAM_BUSINESS_ID` to Railway env vars
-7. Test end-to-end Instagram Reel publishing via API
+**Action taken:** Architect must rotate the App Secret at developers.facebook.com (the old value is in git history). Or just delete the Meta app entirely — it's not needed.
+
+**Instagram image+text posting still works via Buffer** — that uses Buffer's own OAuth, not the Meta API. Only direct Reel/video publishing via Graph API is dead.
+
+**If Instagram direct API is ever revisited:** Use a third-party bridge (ManyChat, GoHighLevel) instead of fighting Meta's API restrictions directly. Never store credentials in this file — use Railway env vars only.
 
 ---
 
@@ -707,9 +685,9 @@ Architect sets weekly directive (Veritas Weekly Monday 9AM)
 | 0A | Verify `PINECONE_API_KEY` in Railway | ✅ DONE | 2026-03-31 — API key confirmed valid (HTTP 200), index `gravity-claw` status: Ready |
 | 0B | Verify `PINECONE_HOST` in Railway | ✅ DONE | 2026-03-31 — Host confirmed: `gravity-claw-cpcpbz1.svc.aped-4627-b74a.pinecone.io` |
 | 0C | Add `STRIPE_SECRET_KEY` to Railway | ✅ DONE | 2026-03-31 — Stripe live, account `acct_1TBoTkRNyK9VQwla` responding, livemode: true |
-| 0D | Link Instagram to Facebook Page | ❌ BLOCKED BY META | Meta Business support not allowing IG→FB Page link. Escalation in progress. |
+| 0D | ~~Link Instagram to Facebook Page~~ | ❌ KILLED | Meta API integration permanently abandoned. See Section 9. |
 
-**Unblocks remaining:** Phase 4A (Instagram distribution) — blocked by Meta support on 0D.
+**Unblocks remaining:** None — 0D killed. Phase 4A (Instagram direct API) permanently abandoned.
 **Phases 1, 3, 5 are now UNBLOCKED** — 0A/0B/0C confirmed.
 
 ---
@@ -770,12 +748,12 @@ Video publisher code is fully written and registered. This is purely a credentia
 
 | # | Platform | Steps | Blocked by |
 |---|----------|-------|-----------|
-| 4A | **Instagram** | After Phase 0D: query Page API for `instagram_business_account` → exchange for long-lived token → add `INSTAGRAM_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ID` to Railway → test Reel publish | Phase 0D (Ace links IG to FB Page) |
+| 4A | ~~**Instagram**~~ | ❌ KILLED — Meta API integration permanently abandoned. Buffer image+text still works. | N/A |
 | 4B | **TikTok** | Upload app icon + demo video to TikTok developer portal → submit for review → get `TIKTOK_ACCESS_TOKEN` → add to Railway | App review (external timeline) |
 | 4C | **YouTube** | Set up OAuth → get refresh token + client credentials → add to Railway | OAuth setup |
 | 4D | **End-to-end test** | Yuki publishes one test video to each platform that has tokens | 4A, 4B, 4C (whichever are ready) |
 
-**Note:** Don't wait for all three platforms. Activate whichever clears first. Instagram is closest (just needs Phase 0D).
+**Note:** Don't wait for all three platforms. Activate whichever clears first. YouTube is priority. Instagram direct API is dead — Buffer handles image+text.
 
 ---
 
@@ -904,8 +882,8 @@ Video publisher code is fully written and registered. This is purely a credentia
 
 | Env Var | Blocker | Status |
 |---|---|---|
-| `INSTAGRAM_ACCESS_TOKEN` | Meta Business Portfolio restriction | ❌ BLOCKED |
-| `INSTAGRAM_BUSINESS_ID` | Same Meta issue | ❌ BLOCKED |
+| ~~`INSTAGRAM_ACCESS_TOKEN`~~ | Meta API KILLED | ❌ DEAD — will never be set |
+| ~~`INSTAGRAM_BUSINESS_ID`~~ | Meta API KILLED | ❌ DEAD — will never be set |
 | `TIKTOK_ACCESS_TOKEN` | TikTok app approval pending | ❌ DEFERRED |
 | `ELEVENLABS_API_KEY` | Voice features not prioritized | ⏸️ Optional |
 | `SEARCH_API_KEY` | Only needed if search provider != duckduckgo | ⏸️ Optional |
@@ -922,26 +900,24 @@ Video publisher code is fully written and registered. This is purely a credentia
 
 ---
 
-## 19. TIKTOK & INSTAGRAM — DEFERRED BYPASS STRATEGIES
+## 19. TIKTOK — DEFERRED / INSTAGRAM DIRECT API — KILLED
 
-**Decision (2026-03-31):** YouTube is the primary platform. TikTok and Instagram API access are physically blocked (Meta Business Portfolio restrictions, TikTok app review not started). These are NOT blocking the mission. All content automation is calibrated to YouTube first. These strategies are preserved for when we're ready to activate secondary channels.
+**Decision (2026-03-31):** YouTube is the primary platform. Instagram direct API (Meta Graph API) is permanently abandoned — never worked, credentials were leaked, not worth fighting Meta's restrictions. Instagram image+text posting still works fine through Buffer. TikTok app review has not started.
 
-### Instagram — Current Block
-- Meta Business Portfolio "Richard Gonzales" has restrictions preventing IG→FB Page link
-- Escalation submitted to Meta Business Support (48hr review window, status unknown)
-- All OAuth permissions are valid; the block is at the account linking step
-- Once resolved: query Page API for `instagram_business_account` → exchange for long-lived token → add to Railway
+### Instagram Direct API — ❌ KILLED
+- Meta API integration permanently abandoned as of 2026-03-31
+- All credentials scrubbed from this document (were exposed in git — GitGuardian alert)
+- Architect should rotate or delete the Meta App at developers.facebook.com
+- **Buffer still handles Instagram image+text posts** — no impact on content pipeline
 
-### TikTok — Current Block
+### TikTok — DEFERRED
 - TikTok Developer App created but needs: app icon upload, demo video, review submission
 - Content Posting API requires approved app to get `TIKTOK_ACCESS_TOKEN`
 - External timeline (TikTok reviews can take days to weeks)
 
-### Lateral Bypass Vectors (When Ready)
-1. **Third-Party Bridges (ManyChat / GoHighLevel):** These platforms already have whitelisted API access. Hook autonomous agents to them via webhooks. ManyChat specifically handles Instagram DM automation.
-2. **Browser Automation (Playwright/Selenium):** Phantom nodes that mimic human posting. Requires rotating residential proxies and human-like behavioral delays. Use for burner/feeder accounts only.
-3. **Unofficial APIs (instagrapi, TikTok Python wrappers):** Reverse-engineered mobile APIs. ToS violation risk — use only with disposable accounts that link back to primary transmission vectors.
-4. **YouTube-First Transfer:** Prove content on YouTube Shorts → manually cross-post top performers to TikTok/IG while waiting for API access. Human-in-the-loop until automation clears.
+### If Secondary Channels Are Revisited Later
+1. **Third-Party Bridges (ManyChat / GoHighLevel):** Already have whitelisted API access. Hook agents via webhooks.
+2. **YouTube-First Transfer:** Prove on YouTube Shorts → manually cross-post top performers.
 
 **Rule: Do NOT spend engineering time on these until YouTube pipeline is producing 50+ Shorts/week autonomously.**
 

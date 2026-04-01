@@ -21,10 +21,12 @@ const GROUP_BROADCAST_TRIGGERS = [
 export class GroupManager {
   private botUsername: string;
   private adminUserIds: number[];
+  private isLeadAgent: boolean;
 
-  constructor(botUsername: string, adminUserIds: number[]) {
+  constructor(botUsername: string, adminUserIds: number[], isLeadAgent: boolean = false) {
     this.botUsername = botUsername.toLowerCase().replace(/^@/, "");
     this.adminUserIds = adminUserIds;
+    this.isLeadAgent = isLeadAgent;
   }
 
   /**
@@ -51,6 +53,10 @@ export class GroupManager {
 
     // Broadcast triggers — all bots respond (roll call, check in, etc.)
     if (this.isBroadcastTrigger(message)) return true;
+
+    // Lead agent (Veritas) ALWAYS responds to the Architect in groups
+    // This lets the Architect speak naturally without needing @mentions or /commands
+    if (this.isLeadAgent && message.userId && this.isAdmin(message.userId)) return true;
 
     // Check Telegram entities for @mention (most reliable)
     const mentionedUsernames = meta.mentionedUsernames as string[] | undefined;

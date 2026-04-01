@@ -1571,8 +1571,9 @@ async function main() {
         let agentIndex = 0;
         for (const [agentName, { loop: agentLoop, channel }] of agentLoops) {
           // Stagger agent processing to avoid simultaneous LLM rate-limit hits
+          // 5s gap gives each agent time to finish before the next one fires
           if (agentIndex > 0) {
-            await new Promise((resolve) => setTimeout(resolve, 2000));
+            await new Promise((resolve) => setTimeout(resolve, 5000));
           }
           agentIndex++;
           try {

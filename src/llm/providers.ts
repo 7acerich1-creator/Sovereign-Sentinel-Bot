@@ -165,34 +165,30 @@ export class GeminiProvider implements LLMProvider {
 
     const model = this.genAI.getGenerativeModel(modelConfig);
 
-    // Convert messages to Gemini format — including proper functionCall/functionResponse pairs
+    // ── Convert messages to Gemini format ──
+    // NUCLEAR FIX: Convert ALL tool call/response pairs to plain text.
+    // Gemini's functionCall/functionResponse format has version-specific bugs
+    // that cause "Content with role 'user' can't contain 'functionResponse' part"
+    // and "First content should be with role 'user', got model" errors.
+    // By flattening tool interactions to text, we guarantee format compliance.
     const history: Content[] = [];
-    const pendingToolCalls: Map<string, string> = new Map(); // toolCallId → functionName
     const messagesForHistory = chatMessages.slice(0, -1);
 
     for (const m of messagesForHistory) {
       if (m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
-        // Model turn with function calls — emit as functionCall parts
-        const parts: Part[] = [];
-        if (m.content) parts.push({ text: m.content });
-        for (const tc of m.toolCalls) {
-          parts.push({ functionCall: { name: tc.name, args: tc.arguments || {} } } as any);
-          pendingToolCalls.set(tc.id, tc.name);
-        }
-        history.push({ role: "model", parts });
-      } else if (m.role === "tool" && m.toolCallId) {
-        // Tool result — emit as functionResponse part in a user turn
-        const fnName = pendingToolCalls.get(m.toolCallId) || "unknown_function";
-        pendingToolCalls.delete(m.toolCallId);
-        // Gemini groups consecutive functionResponse parts into one user turn
-        const lastEntry = history[history.length - 1];
-        const responsePart = { functionResponse: { name: fnName, response: { result: m.content } } } as any;
-        if (lastEntry && lastEntry.role === "user" && lastEntry.parts.some((p: any) => p.functionResponse)) {
-          // Merge into existing functionResponse user turn
-          lastEntry.parts.push(responsePart);
-        } else {
-          history.push({ role: "user", parts: [responsePart] });
-        }
+        // Model turn that made tool calls — flatten to text summary
+        const toolSummary = m.toolCalls.map(
+          (tc) => `[Called tool: ${tc.name}(${JSON.stringify(tc.arguments).slice(0, 200)})]`
+        ).join("\n");
+        const textContent = [m.content || "", toolSummary].filter(Boolean).join("\n");
+        history.push({ role: "model", parts: [{ text: textContent }] });
+      } else if (m.role === "tool") {
+        // Tool result — convert to plain text user message
+        const resultPreview = (m.content || "").slice(0, 500);
+        history.push({ role: "user", parts: [{ text: `[Tool result]: ${resultPreview}` }] });
+      } else if (m.role === "system") {
+        // System messages — inject as user context (Gemini uses systemInstruction separately)
+        history.push({ role: "user", parts: [{ text: `[Context]: ${m.content || ""}` }] });
       } else {
         // Regular text message
         history.push({
@@ -202,40 +198,24 @@ export class GeminiProvider implements LLMProvider {
       }
     }
 
-    // ── Gemini History Sanitization ──
-    // Gemini has strict requirements:
-    //   1. First message in history MUST be role "user" (not "model")
-    //   2. First user message CANNOT contain functionResponse parts
-    //   3. Roles must alternate (no consecutive same-role turns)
-    // Fix: merge consecutive same-role turns, then ensure history starts with a clean user text turn.
-
-    // Step 1: Merge consecutive same-role entries
+    // ── Merge consecutive same-role turns (Gemini requires alternation) ──
     const merged: Content[] = [];
     for (const entry of history) {
       const last = merged[merged.length - 1];
       if (last && last.role === entry.role) {
-        last.parts.push(...entry.parts);
+        // Merge text parts together
+        const existingText = last.parts.map((p: any) => p.text || "").join("\n");
+        const newText = entry.parts.map((p: any) => p.text || "").join("\n");
+        last.parts = [{ text: existingText + "\n" + newText }];
       } else {
         merged.push({ role: entry.role, parts: [...entry.parts] });
       }
     }
 
-    // Step 2: Ensure first entry is a user turn with at least one text part
-    // (not a model turn or a functionResponse-only user turn)
+    // ── Ensure history starts with user turn ──
     let sanitized = merged;
-    if (sanitized.length > 0) {
-      const first = sanitized[0];
-      const hasFunctionResponse = first.parts.some((p: any) => p.functionResponse);
-      const hasText = first.parts.some((p: any) => p.text !== undefined);
-
-      if (first.role === "model") {
-        // Prepend a synthetic user message so Gemini sees user first
-        sanitized = [{ role: "user", parts: [{ text: "(context continues)" }] }, ...sanitized];
-      } else if (first.role === "user" && hasFunctionResponse && !hasText) {
-        // First user turn is ONLY functionResponse — Gemini rejects this.
-        // Prepend a text part so Gemini treats it as a valid user turn.
-        first.parts.unshift({ text: "(processing tool results)" });
-      }
+    if (sanitized.length > 0 && sanitized[0].role === "model") {
+      sanitized = [{ role: "user", parts: [{ text: "(context)" }] }, ...sanitized];
     }
 
     const lastMessage = chatMessages[chatMessages.length - 1];

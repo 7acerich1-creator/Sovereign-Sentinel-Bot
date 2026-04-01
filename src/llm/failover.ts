@@ -5,7 +5,7 @@
 
 import type { LLMProvider, LLMMessage, LLMOptions, LLMResponse } from "../types";
 
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 export class FailoverLLM implements LLMProvider {
   name = "failover";

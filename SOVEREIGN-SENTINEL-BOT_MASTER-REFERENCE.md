@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-01 (Pipeline post-mortem fixes deployed: 3 commits today. (1) Agent DM routing fix — telegram→channel on lines 1659/1728. (2) Vid Rush Whisper CLI→API rewrite — eliminates openai-whisper dependency, uses OpenAI Whisper API with verbose_json for timestamps, mp3 compression for 25MB limit. (3) Rate-limit retry — exponential backoff with jitter on 429/529 for all 3 providers (Gemini SDK, OpenAI-compat, Anthropic). (4) Dispatch stagger — 2s delay between agent processing in poller loop to prevent simultaneous LLM hammering. Pipeline needs retest with gold mine video.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-01 (5 commits today. Pipeline post-mortem: (1) Agent DM routing telegram→channel. (2) Vid Rush Whisper CLI→API. (3) Rate-limit retry with backoff. (4) Dispatch stagger 2s. (5) Summary feedback loop fix — pipeline_completion_summary tasks no longer trigger checkPipelineComplete, preventing infinite summary→summary→summary spam. Pipeline partially ran — Anita produced real content + evergreen fallbacks, Vector intercepted all errors. Gemini has a conversation history bug: 'First content should be with role user, got model' — needs investigation in agent loop memory. Queue cleaned manually.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -327,6 +327,17 @@ Three infrastructure fixes deployed after full pipeline stall on "gold mine" vid
 
 **4. Agent DM Routing Fix (commit 965b916)**
 - Lines 1659 and 1728: `telegram` → `channel`. Agent DMs now come from each agent's own bot handle instead of all routing through Veritas.
+
+**5. Pipeline Summary Feedback Loop Fix (commit abb7541)**
+- `src/index.ts` line ~1694: Added guard `task.task_type !== "pipeline_completion_summary"` to Tier 2 completion detection.
+- **Root cause:** When Sapphire completed a `pipeline_completion_summary`, `checkPipelineComplete` fired again because the summary task had a `parent_id`. This dispatched *another* summary, creating an infinite loop of summary→summary→DM→summary.
+- Fix: summary tasks are now excluded from triggering pipeline completion checks.
+
+**OPEN BUG: Gemini Conversation History Format**
+- Gemini rejects dispatch calls with: `"First content should be with role 'user', got model"`.
+- This means the agent loop is feeding Gemini a conversation history where the first message has role `model` instead of `user`. Happens during dispatch processing, not direct Telegram chat.
+- **Impact:** Gemini always fails on dispatch tasks; failover catches it and tries Anthropic/OpenAI. Not blocking but wastes the first failover attempt every time.
+- **Fix needed:** Investigate `agentLoop.processMessage()` — likely the conversation history includes a stale model turn at position 0 when dispatching synthetic messages.
 
 ### Scheduled Jobs
 - **Vector Daily Metrics Sweep** — 10AM

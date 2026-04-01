@@ -6,6 +6,37 @@
 import { GoogleGenerativeAI, Content, Part, FunctionDeclarationSchema } from "@google/generative-ai";
 import type { LLMProvider, LLMMessage, LLMOptions, LLMResponse, ToolDefinition, ToolCall } from "../types";
 
+// ── Rate-limit retry with exponential backoff ──
+// Retries on 429 (and 529 for Anthropic overload) up to 3 times
+// with exponential backoff: 2s → 4s → 8s, plus jitter
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 2000;
+
+async function fetchWithRetry(url: string, init: RequestInit, providerName: string): Promise<Response> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const resp = await fetch(url, init);
+
+    if (resp.status === 429 || resp.status === 529) {
+      if (attempt === MAX_RETRIES) {
+        // Final attempt — let the caller handle the error
+        return resp;
+      }
+      // Parse Retry-After header if present (seconds), otherwise use exponential backoff
+      const retryAfter = resp.headers.get("retry-after");
+      const delayMs = retryAfter
+        ? Math.min(parseInt(retryAfter, 10) * 1000, 30_000)
+        : BASE_DELAY_MS * Math.pow(2, attempt) + Math.random() * 1000;
+      console.warn(`⏳ ${providerName} rate-limited (${resp.status}), retry ${attempt + 1}/${MAX_RETRIES} in ${Math.round(delayMs / 1000)}s...`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      continue;
+    }
+
+    return resp;
+  }
+  // Should never reach here, but satisfy TypeScript
+  throw new Error(`${providerName}: exhausted retries`);
+}
+
 // ── Gemini Schema Sanitizer ──
 // Gemini requires array types to have an "items" field and rejects
 // malformed schemas from MCP tool definitions. This recursively sanitizes
@@ -174,8 +205,26 @@ export class GeminiProvider implements LLMProvider {
     const lastMessage = chatMessages[chatMessages.length - 1];
     const chat = model.startChat({ history });
 
+    // Gemini SDK retry — catches 429/RESOURCE_EXHAUSTED errors
+    let result: any;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        result = await chat.sendMessage(lastMessage?.content || "");
+        break; // Success — exit retry loop
+      } catch (retryErr: any) {
+        const msg = retryErr.message || "";
+        const isRateLimit = msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("Too Many Requests");
+        if (isRateLimit && attempt < MAX_RETRIES) {
+          const delayMs = BASE_DELAY_MS * Math.pow(2, attempt) + Math.random() * 1000;
+          console.warn(`⏳ gemini rate-limited, retry ${attempt + 1}/${MAX_RETRIES} in ${Math.round(delayMs / 1000)}s...`);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+        throw retryErr; // Non-retryable or exhausted retries
+      }
+    }
+
     try {
-      const result = await chat.sendMessage(lastMessage?.content || "");
       const response = result.response;
       const candidate = response.candidates?.[0];
 
@@ -290,14 +339,18 @@ export class OpenAICompatibleProvider implements LLMProvider {
     }
 
     try {
-      const resp = await fetch(`${this.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
+      const resp = await fetchWithRetry(
+        `${this.baseUrl}/chat/completions`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+          body: JSON.stringify(body),
         },
-        body: JSON.stringify(body),
-      });
+        this.name
+      );
 
       if (!resp.ok) {
         const errText = await resp.text();
@@ -410,15 +463,19 @@ export class AnthropicProvider implements LLMProvider {
     }
 
     try {
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": this.apiKey,
-          "anthropic-version": "2023-06-01",
+      const resp = await fetchWithRetry(
+        "https://api.anthropic.com/v1/messages",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": this.apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify(body),
         },
-        body: JSON.stringify(body),
-      });
+        "anthropic"
+      );
 
       if (!resp.ok) {
         const errText = await resp.text();

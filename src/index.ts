@@ -1567,7 +1567,13 @@ async function main() {
       console.log(`📡 [CrewDispatch] Starting dispatch poller for ${agentLoops.size} agents (every ${DISPATCH_POLL_MS / 1000}s)`);
 
       setInterval(async () => {
+        let agentIndex = 0;
         for (const [agentName, { loop: agentLoop, channel }] of agentLoops) {
+          // Stagger agent processing to avoid simultaneous LLM rate-limit hits
+          if (agentIndex > 0) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
+          agentIndex++;
           try {
             const tasks = await claimTasks(agentName, 3);
             if (tasks.length === 0) continue;

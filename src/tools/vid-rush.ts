@@ -5,9 +5,10 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { execSync } from "child_process";
-import { existsSync, mkdirSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import type { Tool, ToolDefinition } from "../types";
 import { ClipGeneratorTool } from "./clip-generator";
+import { config } from "../config";
 
 const CLIP_DIR = "/tmp/sovereign_clips";
 
@@ -166,7 +167,7 @@ export class VidRushTool implements Tool {
 
     const videoId = youtubeUrl.match(/(?:v=|youtu\.be\/)([\w-]{11})/)?.[1] || "unknown";
     const sourcePath = `${CLIP_DIR}/source_${videoId}.mp4`;
-    const audioPath = `${CLIP_DIR}/audio_${videoId}.wav`;
+    const audioPath = `${CLIP_DIR}/audio_${videoId}.mp3`;
     const whisperOut = `${CLIP_DIR}/whisper_${videoId}.json`;
 
     // STEP 1 — Download
@@ -186,9 +187,9 @@ export class VidRushTool implements Tool {
     // STEP 2 — Extract audio for Whisper
     try {
       if (!existsSync(audioPath)) {
-        console.log(`🎵 [VidRush] Extracting audio...`);
+        console.log(`🎵 [VidRush] Extracting audio as mp3 (Whisper API compatible)...`);
         execSync(
-          `ffmpeg -i "${sourcePath}" -ar 16000 -ac 1 -c:a pcm_s16le -y "${audioPath}"`,
+          `ffmpeg -i "${sourcePath}" -ar 16000 -ac 1 -c:a libmp3lame -b:a 64k -y "${audioPath}"`,
           { timeout: 120_000, stdio: "pipe" }
         );
       }
@@ -196,28 +197,68 @@ export class VidRushTool implements Tool {
       return `❌ Audio extraction failed: ${err.message?.slice(0, 300)}`;
     }
 
-    // STEP 3 — Run Whisper transcription
+    // STEP 3 — Run Whisper transcription via OpenAI API (no local CLI needed)
     let segments: WhisperSegment[] = [];
     try {
       if (!existsSync(whisperOut)) {
-        console.log(`🗣️ [VidRush] Running Whisper transcription...`);
-        execSync(
-          `whisper "${audioPath}" --model small --output_format json ` +
-            `--output_dir "${CLIP_DIR}" --language en`,
-          { timeout: 600_000, stdio: "pipe" }
-        );
-
-        // Whisper outputs as audio_<id>.json
-        const whisperFile = `${CLIP_DIR}/audio_${videoId}.json`;
-        if (existsSync(whisperFile)) {
-          const raw = JSON.parse(readFileSync(whisperFile, "utf-8"));
-          segments = (raw.segments || []).map((s: any) => ({
-            start: s.start,
-            end: s.end,
-            text: s.text?.trim() || "",
-          }));
-          execSync(`cp "${whisperFile}" "${whisperOut}"`, { stdio: "pipe" });
+        const whisperApiKey = config.voice.whisperApiKey;
+        if (!whisperApiKey) {
+          return "❌ Whisper API key not configured (OPENAI_API_KEY). Cannot transcribe video.";
         }
+
+        console.log(`🗣️ [VidRush] Running Whisper transcription via OpenAI API...`);
+        const audioBuffer = readFileSync(audioPath);
+
+        // Build multipart form data for Whisper API with verbose_json for timestamps
+        const boundary = `----FormBoundary${Date.now()}`;
+        const header = Buffer.from(
+          `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="file"; filename="audio.mp3"\r\n` +
+          `Content-Type: audio/mpeg\r\n\r\n`
+        );
+        const modelPart = Buffer.from(
+          `\r\n--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="model"\r\n\r\n` +
+          `whisper-1`
+        );
+        const formatPart = Buffer.from(
+          `\r\n--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="response_format"\r\n\r\n` +
+          `verbose_json`
+        );
+        const langPart = Buffer.from(
+          `\r\n--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="language"\r\n\r\n` +
+          `en`
+        );
+        const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+
+        const body = Buffer.concat([header, audioBuffer, modelPart, formatPart, langPart, footer]);
+
+        const resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${whisperApiKey}`,
+            "Content-Type": `multipart/form-data; boundary=${boundary}`,
+          },
+          body,
+        });
+
+        if (!resp.ok) {
+          const errText = await resp.text();
+          return `❌ Whisper API error ${resp.status}: ${errText.slice(0, 300)}`;
+        }
+
+        const raw: any = await resp.json();
+        segments = (raw.segments || []).map((s: any) => ({
+          start: s.start,
+          end: s.end,
+          text: s.text?.trim() || "",
+        }));
+
+        // Cache for re-runs
+        writeFileSync(whisperOut, JSON.stringify(raw, null, 2));
+        console.log(`✅ [VidRush] Whisper API returned ${segments.length} segments`);
       } else {
         const raw = JSON.parse(readFileSync(whisperOut, "utf-8"));
         segments = (raw.segments || []).map((s: any) => ({

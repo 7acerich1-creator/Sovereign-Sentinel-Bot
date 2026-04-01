@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-01 (Phase 2 notification overhaul DONE — Sapphire pipeline completion summary replaces per-dispatch spam. Dashboard chat_id routing fix deployed. Phase 3 first live test ran — chain fires correctly, needs retest after Phase 2 fix.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-01 (Execution directives fix deployed — agents were analyzing instead of posting. funnel_distribution and content_scheduling dispatches now force agents to call Buffer/video posting tools. Root cause: generic dispatch message gave LLMs too much discretion. Pipeline needs clean end-to-end test.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -291,9 +291,18 @@ src/
 ```
 
 ### Autonomous Pollers Running in index.ts
-1. **Crew Dispatch Poller** — checks `crew_dispatch` table for pending tasks every 30s
+1. **Crew Dispatch Poller** — checks `crew_dispatch` table for pending tasks every 15s
 2. **Task Approval Poller** — checks `tasks` table for Architect-approved tasks every 30s
 3. **Pipeline Handoff Trigger** — fires after dispatch completion to chain workflows
+
+### Dispatch Execution Directives (Added 2026-04-01)
+The dispatch poller injects task-type-specific execution directives into the synthetic message. Without these, agents default to analysis/reporting and never call posting tools. Key directives:
+- **funnel_distribution** — Forces agent to call `social_scheduler_create_post` (Buffer) or `publish_video`. Step-by-step: list profiles → post to all channels.
+- **content_scheduling** — Forces agent to call Buffer posting tools or `publish_video` for video content. No metrics-only responses.
+- **caption_weaponization** — Forces agent to write 3+ platform-ready captions and save via `save_content_draft`.
+- **narrative_weaponization** — Forces agent to produce publishable copy and save via `save_content_draft`.
+- **viral_clip_extraction** — Forces agent to extract timestamped hooks and use `clip_generator` if video URL present.
+- All other task types get generic "process according to your role" fallback.
 
 ### Scheduled Jobs
 - **Vector Daily Metrics Sweep** — 10AM

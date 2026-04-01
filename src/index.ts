@@ -1656,7 +1656,7 @@ async function main() {
                     const agentLabel = agentName.charAt(0).toUpperCase() + agentName.slice(1);
                     // Extract a 1-line summary from the agent's response (first sentence or 150 chars)
                     const briefRecap = response.split(/[.!?\n]/).filter(s => s.trim().length > 10)[0]?.trim().slice(0, 150) || "Task processed.";
-                    await telegram.sendMessage(
+                    await channel.sendMessage(
                       defaultChatId,
                       `🔹 *${agentLabel}*: ${briefRecap}`,
                       { parseMode: "Markdown" }
@@ -1725,7 +1725,7 @@ async function main() {
                 if (agentName === "sapphire" && task.task_type === "pipeline_completion_summary") {
                   try {
                     const summaryText = response.slice(0, 3000);
-                    await telegram.sendMessage(
+                    await channel.sendMessage(
                       defaultChatId,
                       `📋 *Pipeline Complete*\n\n${summaryText}`,
                       { parseMode: "Markdown" }

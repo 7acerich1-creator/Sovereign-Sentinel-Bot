@@ -279,7 +279,7 @@ export async function getFullPipelineChain(dispatchId: string, parentId?: string
         { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
       );
       if (!resp.ok) break;
-      const rows = await resp.json();
+      const rows = (await resp.json()) as Array<{ parent_id?: string }>;
       if (!rows[0]?.parent_id) break; // this IS the root
       rootId = rows[0].parent_id;
     } catch { break; }

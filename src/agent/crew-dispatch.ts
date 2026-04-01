@@ -32,8 +32,10 @@ export interface DispatchRecord extends DispatchTask {
 
 // ── Predefined Pipeline Routes ──
 // Alfred → Yuki (timestamped hooks) + Anita (cleaned transcript) + Sapphire (summary)
-// Yuki → Anita (captions/hashtags) + Vector (content package for scheduling)
-// Anita → Vector (platform-ready posts for distribution)
+// Yuki → Anita ONLY (viral package for caption weaponization)
+// Anita → Vector ONLY (platform-ready posts + clip metadata for distribution)
+// Vector is the SOLE distribution endpoint — he posts to Buffer and publishes video.
+// No agent bypasses Anita to reach Vector. One path, no duplicates.
 
 export const PIPELINE_ROUTES: Record<string, Array<{ to: string; task_type: string; payloadKey: string }>> = {
   alfred: [
@@ -43,7 +45,6 @@ export const PIPELINE_ROUTES: Record<string, Array<{ to: string; task_type: stri
   ],
   yuki: [
     { to: "anita", task_type: "caption_weaponization", payloadKey: "viral_package" },
-    { to: "vector", task_type: "content_scheduling", payloadKey: "clip_metadata" },
   ],
   anita: [
     { to: "vector", task_type: "funnel_distribution", payloadKey: "platform_posts" },

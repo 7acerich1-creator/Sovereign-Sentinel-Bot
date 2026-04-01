@@ -1309,8 +1309,9 @@ async function main() {
         agentTools.push(new ProposeTaskTool(agentCfg.name));
         agentTools.push(new CheckApprovedTasksTool(agentCfg.name));
 
-        // Content crew (Alfred, Yuki, Anita) gets the draft tool
-        if (CONTENT_CREW.includes(agentCfg.name)) {
+        // Content crew (Alfred, Yuki, Anita) + Vector (distribution endpoint) get the draft tool
+        // Vector needs it to log what he posts to Buffer/YouTube
+        if (CONTENT_CREW.includes(agentCfg.name) || agentCfg.name === "vector") {
           agentTools.push(new SaveContentDraftTool(agentCfg.name));
         }
 
@@ -1588,12 +1589,13 @@ async function main() {
               // Without these, agents default to analysis/reporting instead of executing tools.
               // These ensure the pipeline's final stages actually POST content to platforms.
               const EXECUTION_DIRECTIVES: Record<string, string> = {
-                funnel_distribution: `EXECUTION ORDER: You MUST use the social_scheduler_create_post tool to post this content to Buffer channels. ` +
+                funnel_distribution: `EXECUTION ORDER: You are the SOLE distribution endpoint. You MUST use the social_scheduler_create_post tool to post this content to Buffer channels. ` +
                   `Step 1: Call social_scheduler_list_profiles to get channel IDs. ` +
                   `Step 2: Take the content from the payload and call social_scheduler_create_post with appropriate channel_ids and the text. ` +
                   `Post to ALL relevant channels (both Ace Richie and Containment Field accounts). ` +
                   `If the payload contains video content, use publish_video instead. ` +
-                  `Do NOT just analyze or report — actually POST the content. After posting, save the draft via save_content_draft for the record.`,
+                  `Step 3: After posting, call save_content_draft to log what you posted. ` +
+                  `Do NOT just analyze or report — actually POST the content.`,
                 content_scheduling: `EXECUTION ORDER: You MUST schedule this content for posting. ` +
                   `Step 1: Call social_scheduler_list_profiles to get available Buffer channel IDs. ` +
                   `Step 2: Use social_scheduler_create_post to queue the content on appropriate channels. ` +

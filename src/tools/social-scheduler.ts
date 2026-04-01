@@ -8,7 +8,7 @@ import type { Tool, ToolDefinition } from "../types";
 const BUFFER_GRAPHQL_ENDPOINT = "https://api.buffer.com";
 
 // Organization ID — from Buffer account settings
-const BUFFER_ORG_ID = process.env.BUFFER_ORG_ID || "69c613a244dbc563b3e05a50";
+const BUFFER_ORG_ID = process.env.BUFFER_ORG_ID || "69c613a244dbc563b3e05050";
 
 function getBufferToken(): string {
   const token = process.env.BUFFER_API_KEY || process.env.BUFFER_ACCESS_TOKEN || process.env.SOCIAL_SCHEDULER_API_KEY;

@@ -279,7 +279,8 @@ export class InstagramReelsPublishTool implements Tool {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 3. YOUTUBE SHORTS — Data API v3
 //    Flow: resumable upload → set metadata
-//    Requires: YOUTUBE_ACCESS_TOKEN + YOUTUBE_REFRESH_TOKEN + YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET
+//    Requires: YOUTUBE_REFRESH_TOKEN + YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET
+//    Dual-channel: YOUTUBE_REFRESH_TOKEN = Ace Richie 77, YOUTUBE_REFRESH_TOKEN_TCF = The Containment Field
 //    Shorts = any vertical video ≤60s uploaded normally
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -289,7 +290,8 @@ export class YouTubeShortsPublishTool implements Tool {
     description:
       "Upload a Short to YouTube via the Data API v3. " +
       "Requires a public video URL. Shorts are vertical videos ≤60 seconds. " +
-      "Include #Shorts in the title or description for YouTube to classify it as a Short.",
+      "Include #Shorts in the title or description for YouTube to classify it as a Short. " +
+      "Use brand parameter to choose channel: 'ace_richie' (default) or 'containment_field'.",
     parameters: {
       video_url: {
         type: "string",
@@ -311,17 +313,25 @@ export class YouTubeShortsPublishTool implements Tool {
         type: "string",
         description: "Content niche for logging: dark_psychology, self_improvement, burnout, quantum",
       },
+      brand: {
+        type: "string",
+        description: "Which brand/channel to publish to: 'ace_richie' (Ace Richie 77 channel) or 'containment_field' (The Containment Field channel). Defaults to 'ace_richie'.",
+      },
     },
     required: ["video_url", "title", "description"],
   };
 
-  private async getAccessToken(): Promise<string | null> {
-    // Try direct access token first
+  private async getAccessToken(brand: string = "ace_richie"): Promise<string | null> {
+    // Try direct access token first (legacy fallback)
     const directToken = process.env.YOUTUBE_ACCESS_TOKEN;
     if (directToken) return directToken;
 
-    // Try refresh token flow
-    const refreshToken = process.env.YOUTUBE_REFRESH_TOKEN;
+    // Select refresh token based on brand
+    // YOUTUBE_REFRESH_TOKEN = Ace Richie 77 (empoweredservices2013@gmail.com)
+    // YOUTUBE_REFRESH_TOKEN_TCF = The Containment Field (7ace.rich1@gmail.com)
+    const refreshToken = brand === "containment_field"
+      ? process.env.YOUTUBE_REFRESH_TOKEN_TCF
+      : process.env.YOUTUBE_REFRESH_TOKEN;
     const clientId = process.env.YOUTUBE_CLIENT_ID;
     const clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
 
@@ -348,9 +358,14 @@ export class YouTubeShortsPublishTool implements Tool {
   }
 
   async execute(args: Record<string, unknown>): Promise<string> {
-    const token = await this.getAccessToken();
+    const brand = args.brand ? String(args.brand) : "ace_richie";
+    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Ace Richie 77";
+    const token = await this.getAccessToken(brand);
     if (!token) {
-      return "❌ YouTube not configured. Set YOUTUBE_ACCESS_TOKEN (or YOUTUBE_REFRESH_TOKEN + YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET) in Railway env.\n" +
+      const envHint = brand === "containment_field"
+        ? "YOUTUBE_REFRESH_TOKEN_TCF"
+        : "YOUTUBE_REFRESH_TOKEN";
+      return `❌ YouTube not configured for ${channelLabel}. Set ${envHint} + YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET in Railway env.\n` +
         "To get these: Google Cloud Console → YouTube Data API v3 → OAuth2 credentials.";
     }
 
@@ -439,14 +454,17 @@ export class YouTubeShortsPublishTool implements Tool {
           video_url: videoUrl,
           youtube_url: `https://youtube.com/shorts/${videoId}`,
           platform: "youtube",
+          brand,
+          channel: channelLabel,
         },
         linkedin_post: description.slice(0, 500),
       });
 
-      return `✅ YouTube Short uploaded and published.\n` +
+      return `✅ YouTube Short uploaded to ${channelLabel}.\n` +
         `Video ID: ${videoId}\n` +
         `URL: https://youtube.com/shorts/${videoId}\n` +
         `Title: ${title}\n` +
+        `Brand: ${channelLabel}\n` +
         `Niche: ${niche}\n` +
         `Note: YouTube may take a few minutes to process the video before it's fully visible.`;
     } catch (err: any) {
@@ -498,6 +516,10 @@ export class VideoPublisherTool implements Tool {
         type: "string",
         description: "Content niche: dark_psychology, self_improvement, burnout, quantum",
       },
+      brand: {
+        type: "string",
+        description: "Which brand to publish as: 'ace_richie' (default) or 'containment_field'. Routes to the correct channel/account per platform.",
+      },
     },
     required: ["video_url", "platforms", "caption"],
   };
@@ -508,6 +530,7 @@ export class VideoPublisherTool implements Tool {
     const title = args.title ? String(args.title) : caption.split("\n")[0].slice(0, 100);
     const tags = args.tags ? String(args.tags) : "";
     const niche = args.niche ? String(args.niche) : "unknown";
+    const brand = args.brand ? String(args.brand) : "ace_richie";
 
     // Determine which platforms to target
     const platformInput = String(args.platforms).toLowerCase();
@@ -545,7 +568,7 @@ export class VideoPublisherTool implements Tool {
             result = await this.instagram.execute({ video_url: videoUrl, caption, niche });
             break;
           case "youtube":
-            result = await this.youtube.execute({ video_url: videoUrl, title, description: caption, tags, niche });
+            result = await this.youtube.execute({ video_url: videoUrl, title, description: caption, tags, niche, brand });
             break;
           default:
             result = `❌ Unknown platform: ${platform}`;

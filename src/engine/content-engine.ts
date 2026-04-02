@@ -735,10 +735,11 @@ export async function distributionSweep(): Promise<number> {
             assetsBlock = `assets: { images: [{ url: "${draft.media_url.replace(/"/g, '\\"')}" }] }`;
           }
 
-          // CE-5 FIX: Instagram requires explicit type: post for image posts (not reels)
-          let typeBlock = "";
-          if (service === "instagram" && draft.media_url) {
-            typeBlock = `type: post`;
+          // CE-5 FIX: Instagram requires metadata.type = post for image posts (not reels)
+          // Buffer GraphQL schema: type field lives inside metadata: { type: post }, NOT at top level
+          let metadataBlock = "";
+          if (service === "instagram") {
+            metadataBlock = `metadata: { type: post }`;
           }
 
           // CE-2 FIX: schedulingType enum is "automatic" or "notification" (NOT "scheduled")
@@ -750,7 +751,7 @@ export async function distributionSweep(): Promise<number> {
                 channelId: "${channel.id}",
                 schedulingType: automatic,
                 mode: addToQueue
-                ${typeBlock ? `, ${typeBlock}` : ""}
+                ${metadataBlock ? `, ${metadataBlock}` : ""}
                 ${assetsBlock ? `, ${assetsBlock}` : ""}
               }) {
                 ... on PostActionSuccess {

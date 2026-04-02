@@ -22,7 +22,6 @@ const NICHE_ROTATION: Record<number, { niche: string; hookStyle: string }> = {
   0: { niche: "top_performer_repost", hookStyle: "Data-driven repost" }, // Sunday
   6: { niche: "top_performer_repost", hookStyle: "Data-driven repost" }, // Saturday
 };
-
 // 6 posting time slots (UTC hours — adjust for Ace's timezone if needed)
 const TIME_SLOTS_UTC = [
   { hour: 12, label: "morning_hook" },       // 7AM ET
@@ -54,7 +53,6 @@ const IG_FREQUENCY_OVERRIDE: Record<Brand, { maxPerDay: number; allowedSlots: st
     allowedSlots: ["educational_panel", "afternoon_drop"], // 10AM, 4PM ET (staggered from Ace)
   },
 };
-
 // Platform-specific character/style notes for LLM
 const PLATFORM_NOTES: Record<string, string> = {
   x: "Max 280 chars. Punchy, direct. Hashtags: 1-2 max. End with a hook or question.",
@@ -85,8 +83,7 @@ interface ContentDraft {
   niche: string;
   time_slot: string;
   scheduled_hour_utc: number;
-  platform_variants: Record<string, string>; // service → adapted text
-  universal_text: string; // fallback if no variant
+  platform_variants: Record<string, string>;  universal_text: string;
   media_url?: string;
   status: "ready" | "posted" | "failed" | "skipped";
   created_at?: string;
@@ -95,6 +92,191 @@ interface ContentDraft {
   error?: string;
 }
 
+// ── Image Generation + Supabase Storage Upload ──
+
+const STORAGE_BUCKET = "public-assets";
+
+/** Niche-aware image prompt prefixes (mirrors image-generator.ts) */
+const IMAGE_NICHE_PREFIXES: Record<string, string> = {
+  dark_psychology:
+    "High contrast monochromatic, brutalist aesthetic, heavy shadows, single geometric element, cinematic, ",
+  self_improvement:
+    "Clean minimal, bright warm tones, forward momentum, architectural, ",
+  burnout:
+    "Muted desaturated palette, warm undertones, soft industrial, release energy, ",
+  quantum:
+    "Abstract geometric, deep blue shifted, high saturation, conceptual visualization, ",
+  brand:
+    "Sovereign Synthesis brand aesthetic, amber and teal accents, dark background, authoritative minimal, ",
+};
+/** Brand-specific visual style suffixes */
+const BRAND_IMAGE_STYLE: Record<Brand, string> = {
+  ace_richie:
+    "Gold and amber tones, sovereign iconography, empowering, liberation energy, dark midnight background. No text overlays.",
+  containment_field:
+    "Dark noir aesthetic, blood red and charcoal, ominous, clinical, high contrast shadows. No text overlays.",
+};
+
+/** DALL-E 3 aspect ratio mapping */
+const DALLE_SIZE_MAP: Record<string, string> = {
+  "16:9": "1792x1024",
+  "9:16": "1024x1792",
+  "1:1": "1024x1024",
+};
+
+/**
+ * Upload a buffer to Supabase Storage and return the public URL.
+ * Uses the same public-assets bucket as clip-generator.ts.
+ */
+async function uploadImageToStorage(
+  imageBuffer: Buffer,
+  storagePath: string
+): Promise<string | null> {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseKey) {
+    console.error("[ContentEngine] Cannot upload image — SUPABASE_URL or SUPABASE_ANON_KEY missing");
+    return null;
+  }
+  try {
+    const resp = await fetch(
+      `${supabaseUrl}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
+      {
+        method: "POST",
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+          "Content-Type": "image/png",
+          "x-upsert": "true",
+        },
+        body: imageBuffer,
+      }
+    );
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error(`[ContentEngine] Storage upload failed ${resp.status}: ${errText.slice(0, 200)}`);
+      return null;
+    }
+
+    const publicUrl = `${supabaseUrl}/storage/v1/object/public/${STORAGE_BUCKET}/${storagePath}`;
+    console.log(`🖼️ [ContentEngine] Image uploaded → ${publicUrl}`);
+    return publicUrl;
+  } catch (err: any) {
+    console.error(`[ContentEngine] Storage upload error: ${err.message}`);
+    return null;
+  }
+}
+/**
+ * Generate a branded image for a content post using Gemini Imagen 3 (primary) or DALL-E 3 (fallback).
+ * Returns the Supabase Storage public URL, or null if generation fails.
+ */
+async function generateContentImage(
+  postText: string,
+  niche: string,
+  brand: Brand,
+  dateStr: string,
+  slotLabel: string
+): Promise<string | null> {
+  // Build an enhanced image prompt from the post text + niche + brand
+  const nichePrefix = IMAGE_NICHE_PREFIXES[niche] || IMAGE_NICHE_PREFIXES.brand;
+  const brandSuffix = BRAND_IMAGE_STYLE[brand];
+
+  // Extract the core concept from the post text (first 120 chars) to seed the image
+  const conceptSeed = postText.replace(/[#@\n]/g, " ").slice(0, 120).trim();
+  const imagePrompt = `${nichePrefix}${conceptSeed}. ${brandSuffix} Social media post image, 1:1 square format, visually striking, no text.`;
+
+  let imageBuffer: Buffer | null = null;
+  let source = "none";
+
+  // ── STEP 1: Try Gemini Imagen 3 ──
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${geminiKey}`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },        body: JSON.stringify({
+          instances: [{ prompt: imagePrompt }],
+          parameters: {
+            sampleCount: 1,
+            aspectRatio: "1:1",
+            safetyFilterLevel: "block_only_high",
+          },
+        }),
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as any;
+        const b64 =
+          data.predictions?.[0]?.bytesBase64Encoded ||
+          data.predictions?.[0]?.image?.bytesBase64Encoded;
+        if (b64) {
+          imageBuffer = Buffer.from(b64, "base64");
+          source = "gemini_imagen_3";
+        }
+      } else {
+        const errText = await res.text();
+        console.warn(`[ContentEngine] Gemini Imagen ${res.status}: ${errText.slice(0, 200)}`);
+      }
+    } catch (err: any) {
+      console.warn(`[ContentEngine] Gemini Imagen error: ${err.message}`);
+    }
+  }
+  // ── STEP 2: Fallback to DALL-E 3 ──
+  if (!imageBuffer) {
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (openaiKey) {
+      try {
+        const res = await fetch("https://api.openai.com/v1/images/generations", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${openaiKey}`,
+          },
+          body: JSON.stringify({
+            model: "dall-e-3",
+            prompt: imagePrompt,
+            size: "1024x1024",
+            quality: "standard",
+            n: 1,
+            response_format: "b64_json",
+          }),
+        });
+
+        if (res.ok) {
+          const data = (await res.json()) as any;
+          const b64 = data.data?.[0]?.b64_json;
+          if (b64) {
+            imageBuffer = Buffer.from(b64, "base64");
+            source = "dalle_3";
+          }
+        } else {
+          const errText = await res.text();          console.warn(`[ContentEngine] DALL-E 3 ${res.status}: ${errText.slice(0, 200)}`);
+        }
+      } catch (err: any) {
+        console.warn(`[ContentEngine] DALL-E 3 error: ${err.message}`);
+      }
+    }
+  }
+
+  if (!imageBuffer) {
+    console.warn(`[ContentEngine] Image generation failed for ${brand}/${slotLabel} — both providers returned nothing`);
+    return null;
+  }
+
+  // ── STEP 3: Upload to Supabase Storage ──
+  const filename = `${brand}_${niche}_${slotLabel}_${Date.now()}.png`;
+  const storagePath = `content-images/${dateStr}/${filename}`;
+
+  const publicUrl = await uploadImageToStorage(imageBuffer, storagePath);
+
+  if (publicUrl) {
+    console.log(`🎨 [ContentEngine] Image ready: ${source} → ${publicUrl}`);
+  }
+
+  return publicUrl;
+}
 // ── Buffer GraphQL Helpers ──
 
 function getBufferToken(): string {
@@ -125,7 +307,6 @@ async function bufferGraphQL(query: string): Promise<any> {
   }
   return result.data;
 }
-
 // ── Channel Discovery & Caching ──
 
 let cachedChannelMap: BrandChannelMap | null = null;
@@ -155,10 +336,7 @@ export async function discoverChannels(): Promise<BrandChannelMap> {
   if (channels.length === 0) {
     throw new Error("No Buffer channels found. Check BUFFER_API_KEY and Buffer account.");
   }
-
   // Categorize by brand using known naming patterns
-  // Ace Richie channels contain: "ace", "richie", "77", "AceRichie"
-  // Containment Field channels contain: "containment", "ContainmentFld"
   const acePatterns = /ace|richie|77/i;
   const cfPatterns = /containment/i;
 
@@ -174,7 +352,6 @@ export async function discoverChannels(): Promise<BrandChannelMap> {
     } else if (acePatterns.test(nameCheck)) {
       map.ace_richie.push(ch);
     } else {
-      // Default unrecognized channels to Ace Richie (LinkedIn, Threads, etc. are Ace's)
       map.ace_richie.push(ch);
     }
   }
@@ -189,7 +366,6 @@ export async function discoverChannels(): Promise<BrandChannelMap> {
 
   return map;
 }
-
 /** Force refresh channel cache (call if channels change) */
 export function invalidateChannelCache(): void {
   cachedChannelMap = null;
@@ -219,7 +395,6 @@ async function supabasePost(table: string, data: Record<string, unknown>): Promi
       console.error(`[ContentEngine] Supabase POST ${table} failed: ${resp.status} — ${errText.slice(0, 200)}`);
       return null;
     }
-
     const rows = (await resp.json()) as any[];
     return rows?.[0]?.id || null;
   } catch (err: any) {
@@ -249,8 +424,7 @@ async function supabaseQuery(table: string, query: string): Promise<any[]> {
 
 async function supabasePatch(table: string, id: string, data: Record<string, unknown>): Promise<void> {
   const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_ANON_KEY;
-  if (!url || !key) return;
+  const key = process.env.SUPABASE_ANON_KEY;  if (!url || !key) return;
 
   try {
     await fetch(`${url}/rest/v1/${table}?id=eq.${id}`, {
@@ -279,8 +453,7 @@ async function generateContent(
   brand: Brand,
   niche: string,
   hookStyle: string,
-  timeSlot: string,
-  platforms: string[]
+  timeSlot: string,  platforms: string[]
 ): Promise<{ universal: string; variants: Record<string, string> }> {
   const brandVoice = brand === "ace_richie"
     ? "Sovereign Synthesis voice: empowering, liberating, gold-frequency. You are the System Architect showing people how to reclaim their sovereignty. Use the Sovereign Synthesis lexicon (Firmware Update, Escape Velocity, The Simulation, Protocol 77). Bold, direct, visionary."
@@ -308,7 +481,6 @@ RULES:
 - Sovereign Synthesis sign-off for Ace Richie brand: "— Ace Richie | Sovereign Synthesis"
 - Containment Field sign-off: "— The Containment Field"
 - Do NOT include platform labels in the actual post text
-
 Respond in EXACTLY this JSON format (no markdown, no code fences, just raw JSON):
 {
   "universal": "The main post text that works on any platform",
@@ -338,8 +510,7 @@ ${platforms.map((p) => `  "${p}": "Platform-adapted version for ${p}"`).join(",\
   } catch (err: any) {
     console.error(`[ContentEngine] LLM generation failed: ${err.message}`);
     // Fallback: return a simple post
-    const fallback = `${hookStyle} #${niche.replace(/_/g, "")}`;
-    const variants: Record<string, string> = {};
+    const fallback = `${hookStyle} #${niche.replace(/_/g, "")}`;    const variants: Record<string, string> = {};
     for (const p of platforms) variants[p] = fallback;
     return { universal: fallback, variants };
   }
@@ -369,7 +540,6 @@ export async function dailyContentProduction(llm: LLMProvider): Promise<number> 
     console.log("📊 [ContentEngine] Weekend — queueing top performer reposts instead of new content");
     return await queueWeekendReposts();
   }
-
   let channelMap: BrandChannelMap;
   try {
     channelMap = await discoverChannels();
@@ -398,8 +568,7 @@ export async function dailyContentProduction(llm: LLMProvider): Promise<number> 
           "content_engine_queue",
           `brand=eq.${brand}&time_slot=eq.${slot.label}&scheduled_date=eq.${dateStr}&select=id`
         );
-        if (existing.length > 0) {
-          console.log(`[ContentEngine] Skipping ${brand}/${slot.label} — already generated`);
+        if (existing.length > 0) {          console.log(`[ContentEngine] Skipping ${brand}/${slot.label} — already generated`);
           continue;
         }
 
@@ -409,6 +578,21 @@ export async function dailyContentProduction(llm: LLMProvider): Promise<number> 
           llm, brand, nicheConfig.niche, nicheConfig.hookStyle, slot.label, platforms
         );
 
+        // ── IMAGE GENERATION (Gap 12 fix) ──
+        // Generate a branded image for this post and upload to Supabase Storage.
+        // If generation fails, post goes out as text-only (IG/TikTok will be skipped by distribution sweep).
+        let mediaUrl: string | null = null;
+        try {
+          mediaUrl = await generateContentImage(universal, nicheConfig.niche, brand, dateStr, slot.label);
+          if (mediaUrl) {
+            console.log(`🖼️ [ContentEngine] Image attached: ${brand}/${slot.label} → ${mediaUrl.slice(-60)}`);
+          } else {
+            console.warn(`⚠️ [ContentEngine] No image for ${brand}/${slot.label} — text-only fallback`);
+          }
+        } catch (err: any) {
+          console.error(`[ContentEngine] Image generation crashed for ${brand}/${slot.label}: ${err.message}`);
+          // Continue without image — text-only is better than no post
+        }
         // Build scheduled_time for today at slot.hour UTC
         const scheduledTime = new Date(today);
         scheduledTime.setUTCHours(slot.hour, 0, 0, 0);
@@ -423,6 +607,7 @@ export async function dailyContentProduction(llm: LLMProvider): Promise<number> 
           scheduled_hour_utc: slot.hour,
           universal_text: universal,
           platform_variants: variants,
+          media_url: mediaUrl || undefined,
           status: "ready",
         });
 
@@ -437,8 +622,7 @@ export async function dailyContentProduction(llm: LLMProvider): Promise<number> 
     }
   }
 
-  console.log(`🏁 [ContentEngine] Daily production complete: ${generated} pieces generated`);
-  return generated;
+  console.log(`🏁 [ContentEngine] Daily production complete: ${generated} pieces generated`);  return generated;
 }
 
 /**
@@ -467,8 +651,7 @@ export async function distributionSweep(): Promise<number> {
   }
 
   for (const draft of drafts) {
-    const brand = draft.brand as Brand;
-    const channels = channelMap[brand];
+    const brand = draft.brand as Brand;    const channels = channelMap[brand];
     if (!channels || channels.length === 0) {
       await supabasePatch("content_engine_queue", draft.id, {
         status: "skipped",
@@ -498,7 +681,6 @@ export async function distributionSweep(): Promise<number> {
           postResults.push(`⏭️ ${channel.service}(${channel.id}): Skipped — platform requires image, none attached`);
           continue;
         }
-
         // IG Frequency Override: Skip Instagram channels for non-allowed time slots
         if (service === "instagram") {
           const igOverride = IG_FREQUENCY_OVERRIDE[brand];
@@ -516,8 +698,6 @@ export async function distributionSweep(): Promise<number> {
           }
 
           // CE-2 FIX: Use scheduled timing with explicit scheduledAt instead of automatic
-          // automatic = Buffer picks the time (clusters everything in morning)
-          // scheduled = we control the exact time from content_engine_queue.scheduled_time
           const scheduledAt = draft.scheduled_time || new Date().toISOString();
           const query = `
             mutation CreatePost {
@@ -529,8 +709,7 @@ export async function distributionSweep(): Promise<number> {
                 mode: addToQueue
                 ${assetsBlock ? `, ${assetsBlock}` : ""}
               }) {
-                ... on PostActionSuccess {
-                  post { id text scheduledAt }
+                ... on PostActionSuccess {                  post { id text scheduledAt }
                 }
                 ... on MutationError {
                   message
@@ -559,8 +738,7 @@ export async function distributionSweep(): Promise<number> {
       const allResults = postResults.join("\n");
 
       await supabasePatch("content_engine_queue", draft.id, {
-        status: successCount > 0 ? "posted" : "failed",
-        posted_at: new Date().toISOString(),
+        status: successCount > 0 ? "posted" : "failed",        posted_at: new Date().toISOString(),
         buffer_results: allResults,
         channels_hit: successCount,
         channels_total: channels.length,
@@ -589,8 +767,7 @@ export async function distributionSweep(): Promise<number> {
       console.error(`[ContentEngine] Distribution failed for ${draft.id}: ${err.message}`);
       await supabasePatch("content_engine_queue", draft.id, {
         status: "failed",
-        error: err.message,
-      });
+        error: err.message,      });
     }
   }
 
@@ -619,8 +796,7 @@ async function queueWeekendReposts(): Promise<number> {
   const today = new Date();
   const dateStr = today.toISOString().split("T")[0];
 
-  for (let i = 0; i < Math.min(topContent.length, TIME_SLOTS_UTC.length); i++) {
-    const original = topContent[i];
+  for (let i = 0; i < Math.min(topContent.length, TIME_SLOTS_UTC.length); i++) {    const original = topContent[i];
     const slot = TIME_SLOTS_UTC[i];
 
     const scheduledTime = new Date(today);
@@ -650,8 +826,7 @@ async function queueWeekendReposts(): Promise<number> {
 
 // ── Health Check ──
 
-export async function contentEngineStatus(): Promise<string> {
-  const today = new Date().toISOString().split("T")[0];
+export async function contentEngineStatus(): Promise<string> {  const today = new Date().toISOString().split("T")[0];
 
   const ready = await supabaseQuery("content_engine_queue", `status=eq.ready&scheduled_date=eq.${today}&select=id`);
   const posted = await supabaseQuery("content_engine_queue", `status=eq.posted&scheduled_date=eq.${today}&select=id`);

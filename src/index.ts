@@ -1026,7 +1026,7 @@ async function main() {
       const ceStatus = await contentEngineStatus();
       return JSON.stringify({ status: "ok", report: ceStatus });
     } catch (err: any) {
-      return { status: "error", message: err.message };
+      return JSON.stringify({ status: "error", message: err.message });
     }
   });
 

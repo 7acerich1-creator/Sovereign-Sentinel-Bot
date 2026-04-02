@@ -2153,7 +2153,7 @@ async function main() {
     await webhookServer.shutdown();
     await mcpBridge.shutdown();
     await router.shutdownAll();
-    
+
     // Shutdown agent channels
     for (const chan of agentChannels) {
       await chan.shutdown();
@@ -2184,3 +2184,4 @@ main().catch((err) => {
   console.error("❌ Fatal startup error:", err);
   process.exit(1);
 });
+        

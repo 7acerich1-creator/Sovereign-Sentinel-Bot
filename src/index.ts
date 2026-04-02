@@ -998,7 +998,7 @@ async function main() {
 
     // Allow force override of the daily guard
     if (!force && contentEngineFiredDate.production === dateKey) {
-      return { status: "already_fired", date: dateKey, message: "Production already ran today. Send {force: true} to override." };
+      return JSON.stringify({ status: "already_fired", date: dateKey, message: "Production already ran today. Send {force: true} to override." });
     }
 
     try {
@@ -1009,62 +1009,22 @@ async function main() {
 
       // Notify Architect
       if (defaultChatId && telegram) {
-        const status = await contentEngineStatus();
-        await telegram.sendMessage(defaultChatId, `🚀 *Content Engine — Manual Production Triggered*\n\n${status}`, { parseMode: "Markdown" });
+        const ceStatus = await contentEngineStatus();
+        await telegram.sendMessage(defaultChatId, `🚀 *Content Engine — Manual Production Triggered*\n\n${ceStatus}`, { parseMode: "Markdown" });
       }
 
-      return { status: "ok", produced: count, date: dateKey };
+      return JSON.stringify({ status: "ok", produced: count, date: dateKey });
     } catch (err: any) {
       console.error(`[ContentEngine] Manual production failed: ${err.message}`);
-      return { status: "error", message: err.message };
+      return JSON.stringify({ status: "error", message: err.message });
     }
   });
 
   // ── /api/content-engine/status — Check content engine queue status ──
   webhookServer.register("/api/content-engine/status", async () => {
     try {
-      const status = await contentEngineStatus();
-      return { status: "ok", report: status };
-    } catch (err: any) {
-      return { status: "error", message: err.message };
-    }
-  });
-
-  // ── /api/content-engine/produce — Manual trigger for daily content production ──
-  // Bypasses the cron time window. Use to fire production on demand.
-  webhookServer.register("/api/content-engine/produce", async (incoming: any) => {
-    const dateKey = new Date().toDateString();
-    const force = incoming?.force === true;
-
-    // Allow force override of the daily guard
-    if (!force && contentEngineFiredDate.production === dateKey) {
-      return { status: "already_fired", date: dateKey, message: "Production already ran today. Send {force: true} to override." };
-    }
-
-    try {
-      console.log(`🚀 [ContentEngine] MANUAL production trigger for ${dateKey} (force=${force})`);
-      contentEngineFiredDate.production = dateKey;
-      const count = await dailyContentProduction(failoverLLM);
-      console.log(`✅ [ContentEngine] Manual production complete: ${count} pieces`);
-
-      // Notify Architect
-      if (defaultChatId && telegram) {
-        const status = await contentEngineStatus();
-        await telegram.sendMessage(defaultChatId, `🚀 *Content Engine — Manual Production Triggered*\n\n${status}`, { parseMode: "Markdown" });
-      }
-
-      return { status: "ok", produced: count, date: dateKey };
-    } catch (err: any) {
-      console.error(`[ContentEngine] Manual production failed: ${err.message}`);
-      return { status: "error", message: err.message };
-    }
-  });
-
-  // ── /api/content-engine/status — Check content engine queue status ──
-  webhookServer.register("/api/content-engine/status", async () => {
-    try {
-      const status = await contentEngineStatus();
-      return { status: "ok", report: status };
+      const ceStatus = await contentEngineStatus();
+      return JSON.stringify({ status: "ok", report: ceStatus });
     } catch (err: any) {
       return { status: "error", message: err.message };
     }

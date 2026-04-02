@@ -62,6 +62,9 @@ import { textToSpeech } from "./voice/tts";
 import { ProactiveBriefings } from "./proactive/briefings";
 import { HeartbeatSystem } from "./proactive/heartbeat";
 
+// ── Content Engine ──
+import { dailyContentProduction, distributionSweep, contentEngineStatus, discoverChannels } from "./engine/content-engine";
+
 // ── Plugins ──
 import { PluginManager, MemoryTool, RecallTool } from "./plugins/system";
 
@@ -683,6 +686,69 @@ async function main() {
   });
 
   console.log("⚡ [AutoOps] Scheduled: Vector daily sweep (10AM), Alfred trend scan (8AM), Veritas weekly directive (Mon 9AM)");
+
+  // ── Deterministic Content Engine — Daily Production + Distribution ──
+  // Master ref Section 23. Posting guide: SOVEREIGN-POSTING-GUIDE.md
+  // LLM writes content, code handles the spray. No LLM decision-making in distribution.
+
+  const contentEngineFiredDate = { production: "" };
+
+  // Pre-warm channel cache at boot
+  discoverChannels().catch((err: any) =>
+    console.warn(`[ContentEngine] Boot channel discovery failed (will retry): ${err.message}`)
+  );
+
+  // Daily Content Production (6:30 AM ET = 11:30 UTC — before first posting slot at 7AM ET)
+  scheduler.add({
+    name: "Content Engine — Daily Production",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      const now = new Date();
+      const hour = now.getUTCHours();
+      const minute = now.getUTCMinutes();
+      const dateKey = now.toDateString();
+
+      // Fire at 11:30 UTC (6:30 AM ET) — gives 30min buffer before first slot at noon UTC
+      if (hour === 11 && minute >= 28 && minute <= 32 && contentEngineFiredDate.production !== dateKey) {
+        contentEngineFiredDate.production = dateKey;
+        console.log(`🚀 [ContentEngine] Daily production firing for ${dateKey}`);
+        try {
+          const count = await dailyContentProduction(failoverLLM);
+          console.log(`✅ [ContentEngine] Produced ${count} content pieces for today`);
+
+          // Notify Architect via Telegram
+          if (defaultChatId && telegram) {
+            const status = await contentEngineStatus();
+            await telegram.sendMessage(defaultChatId, `🚀 *Content Engine — Daily Production Complete*\n\n${status}`, { parseMode: "Markdown" });
+          }
+        } catch (err: any) {
+          console.error(`[ContentEngine] Daily production failed: ${err.message}`);
+        }
+      }
+    },
+  });
+
+  // Distribution Sweep (every 5 minutes — checks for ready content whose time has arrived)
+  scheduler.add({
+    name: "Content Engine — Distribution Sweep",
+    intervalMs: 300_000, // 5 minutes
+    nextRun: new Date(Date.now() + 60_000), // Start 1 min after boot
+    enabled: true,
+    handler: async () => {
+      try {
+        const posted = await distributionSweep();
+        if (posted > 0) {
+          console.log(`📤 [ContentEngine] Distribution sweep posted ${posted} piece(s)`);
+        }
+      } catch (err: any) {
+        console.error(`[ContentEngine] Distribution sweep failed: ${err.message}`);
+      }
+    },
+  });
+
+  console.log("⚡ [ContentEngine] Scheduled: Daily production (6:30AM ET), Distribution sweep (every 5min)");
 
   // ── Stasis Detection — Daily Agent Self-Check (2 PM) ──
   const stasisFiredDate = { value: "" };

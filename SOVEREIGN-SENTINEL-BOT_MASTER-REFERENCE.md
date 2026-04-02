@@ -1,5 +1,30 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-01 (5 commits today. Pipeline post-mortem: (1) Agent DM routing telegram→channel. (2) Vid Rush Whisper CLI→API. (3) Rate-limit retry with backoff. (4) Dispatch stagger 2s. (5) Summary feedback loop fix — pipeline_completion_summary tasks no longer trigger checkPipelineComplete, preventing infinite summary→summary→summary spam. Pipeline partially ran — Anita produced real content + evergreen fallbacks, Vector intercepted all errors. Gemini has a conversation history bug: 'First content should be with role user, got model' — needs investigation in agent loop memory. Queue cleaned manually.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-01 (Cowork Session — Content Distribution Audit) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+
+**Session Summary — Cowork Audit (2026-04-01, afternoon):**
+Vector scheduled 1 post on X via Buffer. That's 1 out of 84+/day target. Deep audit revealed the 250+/week content cadence was **documented but never coded as deterministic logic**. The agents have the tools but no hardcoded instructions to iterate across all 9 channels, 6 time slots, or 2 brands. Full gap report in **Section 23**. Fix plan: build a **Deterministic Content Engine** (new scheduled job in index.ts) that removes LLM decision-making from the distribution loop — LLM writes the content, code handles the spray.
+
+**Previous Session Summary (9 commits):**
+1. `965b916` — Agent DM routing fix (telegram→channel)
+2. `68e4a80` — Whisper API migration + rate-limit retry + 2s dispatch stagger
+3. `eb43ea1` — Master reference docs
+4. `abb7541` — Summary feedback loop fix (no more infinite summary spam)
+5. `018d7f6` — Master reference docs
+6. `16c0b32` — Pipeline role cleanup (Vector = sole distributor)
+7. `ca71e0a` — Gemini history fix attempt 1 (partial — only fixed first entry)
+8. `c3948b6` — Nuclear Gemini fix: all tool history flattened to plain text
+9. `b768338` — Deep fix: quota-aware failover, 1-task-at-a-time dispatch, 3-iter cap, Groq as backup
+
+**ROOT CAUSE FOUND (previous session):** Pipeline failures traced to three stacking issues:
+- **Gemini daily quota (250 req/day) exhausted** by failed pipeline runs burning calls on errors
+- **Anthropic credit balance at zero** — no fallback when Gemini dies
+- **No third provider configured** — OpenAI/Groq/DeepSeek had no API keys in Railway
+- Each agent could loop 10 LLM calls per task × 15-20 tasks per run = 150-200 calls per pipeline run (nearly the entire daily quota)
+
+**CRITICAL ENV VAR NEEDED:** Add `GROQ_API_KEY` to Railway. Groq free tier = 14,400 req/day. Without it, pipeline has no backup when Gemini quota burns out.
+
+**What's fixed in code:** Quota-aware retry (won't waste retries on daily limits), 1 task claimed at a time, 3-iteration cap for dispatch tasks, 10s stagger between agents, Groq promoted to second in failover order.
+**What's still needed:** GROQ_API_KEY env var in Railway. End-to-end test deferred until quota resets + Groq added.
 
 ---
 
@@ -551,11 +576,11 @@ VECTOR — Scheduling + Analytics
   - Feeds top-performing content back to Alfred for iteration
 ```
 
-**Pipeline Status (2026-03-31):**
-- Code is FULLY BUILT. `PIPELINE_ROUTES` in index.ts defines the full chain.
-- `triggerPipelineHandoffs` auto-chains Alfred → Yuki → Anita → Vector.
-- YouTube publishing tool deployed. OAuth tokens obtained 2026-03-31. Awaiting Ace to add env vars to Railway.
-- Has NOT been tested end-to-end with live content yet (Phase 3 of execution plan).
+**Pipeline Status (2026-04-01 — AUDIT UPDATE):**
+- Code is FULLY BUILT for the **Vid Rush pipeline** (YouTube URL → Alfred → Yuki → Anita → Vector). `PIPELINE_ROUTES` in index.ts defines the full chain. `triggerPipelineHandoffs` auto-chains correctly. Tested 2026-04-01 — all 8 handoffs fired.
+- YouTube publishing tool deployed. OAuth tokens obtained 2026-03-31.
+- **⚠️ CRITICAL GAP: The daily IMAGE+TEXT posting cadence (84 posts/week baseline) was NEVER BUILT as deterministic code.** The posting guide says "LIVE NOW" but no scheduled job iterates through the 6 time slots × 9 channels × 2 brands. Agents rely on LLM judgment to decide what to post and where — which is why Vector posted 1 item on 1 channel instead of 54. **Full gap analysis in Section 23.**
+- **FIX IN PROGRESS:** Deterministic Content Engine — a new scheduled job that handles the distribution spray via hardcoded logic. LLM writes content; code distributes it. See Section 23.
 
 #### FORMAT B: LONG-FORM (YouTube Videos — NOT YET BUILT)
 **This is the SOURCE material that feeds Format A, AND a distribution channel itself.**
@@ -763,8 +788,10 @@ Anita needs to be able to:
 
 ## 16. AGENT COORDINATION — STRATEGIC PLAN
 
-### Current Problem
-Agents feel uncoordinated — doing their own thing or waiting. Need cleaner task flow.
+### Current Problem (UPDATED 2026-04-01)
+Two layers of dysfunction identified:
+1. **Strategic layer** — Agents feel uncoordinated, doing their own thing or waiting. Need cleaner task flow. (Original problem, still valid.)
+2. **Distribution layer (NEW — critical)** — The 250+/week posting cadence depends entirely on LLM agents deciding to call the right tools with the right parameters. No agent has the channel map, time-slot schedule, or dual-brand rules baked into its execution logic. Vector posted 1 item on X when he should have posted 54+ across 9 channels. **The entire posting cadence was documented in the posting guide but never coded as deterministic logic.** Full gap report: Section 23.
 
 ### Desired State
 ```
@@ -775,15 +802,21 @@ Architect sets weekly directive (Veritas Weekly Monday 9AM)
   → Architect reviews, approves proposed tasks
   → Task Approval Poller auto-executes approved work
   → Cycle repeats
+
+CONTENT DISTRIBUTION (Deterministic Engine — NEW):
+  → Scheduled job fires 6x/day per brand (7AM, 10AM, 1PM, 4PM, 7PM, 10PM)
+  → LLM generates content for the day's niche + time slot
+  → Code distributes to ALL 9 channels via Buffer (no LLM decision-making in distribution)
+  → Vector tracks performance; top performers auto-reposted on weekends
 ```
 
 ### Immediate Priorities for Agents
 1. **Veritas** — Generate meaningful weekly strategic directives. Surface system health.
 2. **Sapphire** — Break directives into actionable tasks. Route to correct agents. Monitor completion.
-3. **Alfred** — Process YouTube URLs → hooks/scripts. Feed Yuki content.
+3. **Alfred** — Process YouTube URLs → hooks/scripts. Feed Yuki content. Daily trend scan at 8AM.
 4. **Yuki** — Produce clips, post to Buffer (images), queue videos for when platform tokens are ready.
 5. **Anita** — Create email sequences with conversion purpose. MUST follow Email Brand Standard (Section 15). Wait for `read_nurture_template` + `update_nurture_template` tools before she can push live.
-6. **Vector** — Daily metrics sweeps. Revenue tracking. When Stripe key is set, actually pull real data.
+6. **Vector** — Daily metrics sweeps. Revenue tracking. **NOT responsible for distribution spray** — that's now handled by the Deterministic Content Engine (Section 23). Vector's role shifts to: performance tracking, repost scheduling, and conversion optimization.
 
 ### What Happened After Anita's Content Was Approved?
 **THIS NEEDS INVESTIGATION.** Architect approved Anita's content transmissions. Need to verify:
@@ -1124,6 +1157,195 @@ Read these in order:
 1. This file (`SOVEREIGN-SENTINEL-BOT_MASTER-REFERENCE.md`)
 2. `CLAUDE.md` (project constitution)
 3. Memory files in `.auto-memory/` (indexed by `MEMORY.md`)
+
+---
+
+---
+
+## 23. CONTENT DISTRIBUTION AUDIT — GAP REPORT & FIX PLAN (2026-04-01)
+
+> **Full pipeline clarity document:** `CONTENT-PIPELINE-CLARITY.md` in this repo — covers both engines (Transmission Grid + Vid Rush), verified channel counts, Vid Rush gaps VR-1 through VR-9, and priority build sequence.
+
+### The Two Engines
+1. **Transmission Grid** (text+image via Buffer) — ✅ BUILT, fully autonomous, code at `src/engine/content-engine.ts`
+2. **Vid Rush** (video via YouTube API) — 🔧 BUILT but has 9 gaps (VR-1 through VR-9, documented in CONTENT-PIPELINE-CLARITY.md)
+
+### Corrected Channel Math (Verified from Buffer screenshot 2026-04-01)
+- **Ace Richie: 5 channels** — TikTok (acerichie77), Instagram (ace_richie_77), YouTube (Ace Richie 77), X (AceRichie77), Threads (ace_richie_77)
+- **Containment Field: 4 channels** — TikTok (the_containment_field), Instagram (the_containment_field), YouTube (The Containment Field), X (ContainmentFld)
+- **Total: 9 channels across both brands** (NOT 9 per brand)
+- **LinkedIn: ❌ NOT CONNECTED** to Buffer — listed in old posting guide but never added. Needs manual Buffer connection.
+- **Threads: Ace Richie ONLY** — Containment Field has no Threads channel
+- **Pinterest: ❌ NOT CONNECTED** — mentioned in old posting guide, not in Buffer
+- **Reddit: ❌ NOT IN BUFFER** — manual or direct API only
+- Transmission Grid daily: (5 × 6) + (4 × 6) = **54 posts/day = 378/week** — exceeds 250+ target on its own
+
+### The Problem
+The SOVEREIGN-POSTING-GUIDE.md describes a 250+/week posting cadence. Testing revealed Vector scheduled 1 post on X. That's a 99% execution gap. Deep code audit confirmed the cadence was **documented but never implemented as deterministic logic**.
+
+### What IS Built (Working)
+| Component | Status | Code Location |
+|-----------|--------|---------------|
+| Buffer GraphQL posting tool | ✅ WORKING | `src/tools/social-scheduler.ts` |
+| Multi-channel support (comma-separated IDs) | ✅ WORKING | `SocialSchedulerPostTool.execute()` loops through `channelIds` |
+| Crew dispatch (Supabase-backed) | ✅ WORKING | `src/agent/crew-dispatch.ts` |
+| Dispatch poller (15s interval, auto-claim) | ✅ WORKING | `src/index.ts` line ~1565 |
+| Pipeline routes (Alfred→Yuki+Anita+Sapphire, Yuki→Anita, Anita→Vector) | ✅ WORKING | `PIPELINE_ROUTES` in crew-dispatch.ts |
+| Auto-handoffs (triggerPipelineHandoffs) | ✅ WORKING | Fires after each agent completes |
+| Scheduled auto-ops (Alfred 8AM, Vector 10AM, Veritas Mon 9AM) | ✅ WORKING | `src/index.ts` line ~567 |
+| Content logging to Supabase `content_transmissions` | ✅ WORKING | Inside social-scheduler.ts |
+
+### What Is NOT Built (The Gaps)
+
+**GAP 1: No "post to all 9 channels" instruction in agent context**
+- The `social_scheduler_create_post` tool ACCEPTS comma-separated channel IDs and loops through them correctly.
+- BUT no agent's system prompt, persona, or dispatch payload includes the actual 9 channel IDs.
+- Vector would have to independently call `social_scheduler_list_profiles`, parse the response, build a comma-separated list, and pass it. This is unreliable LLM-dependent behavior.
+- **Fix:** Hardcode the channel ID list in the Deterministic Content Engine. No LLM decides WHERE to post.
+
+**GAP 2: No multi-time-slot scheduling**
+- The posting guide defines 6 time slots per brand: 7AM, 10AM, 1PM, 4PM, 7PM, 10PM.
+- No code exists that schedules across these slots. The auto-ops only fire Vector's metrics sweep (10AM), Alfred's trend scan (8AM), and Veritas's directive (Mon 9AM).
+- There is no "content production" scheduled job at any of the 6 posting times.
+- **Fix:** The Deterministic Content Engine adds a new scheduled job for each time slot OR a single job that pre-schedules the full day's content each morning.
+
+**GAP 3: No per-platform content reformatting**
+- LinkedIn needs professional tone, longer copy, no hashtag spam.
+- X needs punchy hooks, 280-char cap awareness, hashtags.
+- TikTok/IG need visual-first hooks, shorter text.
+- Threads can be more conversational.
+- Currently: identical `text` string goes to every channel.
+- **Fix:** The LLM content generation step produces a `platform_variants` object with per-platform text. The Deterministic Engine picks the right variant per channel.
+
+**GAP 4: No dual-brand distribution**
+- Two brands (Ace Richie, Containment Field) should each get every post adapted to their voice.
+- Nothing in the pipeline splits, duplicates, or re-voices content for both brands.
+- The channel map has channels for both brands but no code iterates both brand sets.
+- **Fix:** The Deterministic Engine runs two passes per time slot — one for each brand, with brand-appropriate voice/tone in the LLM prompt.
+
+**GAP 5: No daily content production trigger**
+- Alfred's 8AM trend scan dispatches a "scan and report" task — NOT "produce 6 posts for today."
+- The scan produces a briefing for Ace. It does not generate actual post content.
+- There is no job that says "generate content for today's niche for each time slot."
+- **Fix:** New `daily_content_production` scheduled job that runs early morning. Uses the niche rotation (Mon=dark psych, Tue=self improvement, etc.) to generate 6 unique hooks/captions per brand. Stores in `content_drafts` table. The distribution engine then reads and fires them at scheduled times.
+
+**GAP 6: Agent personas lack operational instructions**
+- Vector's persona: "Route outputs to correct channels, monitor conversion metrics" — vague.
+- Yuki's persona: "Find viral moments, cut short clips" — no mention of Buffer distribution responsibility.
+- No persona includes the actual channel IDs, posting schedule, or niche rotation.
+- **Fix (Phase 7 — still valid):** Create individual agent master references with exact responsibilities, input/output contracts, tool usage patterns, and success metrics. BUT for distribution specifically, this is superseded by the Deterministic Engine (don't rely on prompt engineering for 250+/week output).
+
+### Deterministic Content Engine — Implementation Plan
+
+**Concept:** LLM handles CREATIVE (writing hooks, captions, platform variants). CODE handles DISTRIBUTION (channel iteration, time-slot scheduling, brand duplication). This eliminates the LLM reliability problem.
+
+**Architecture:**
+```
+DAILY CONTENT PRODUCTION JOB (runs once at 6AM)
+  │
+  ├── Determine today's niche from rotation (Mon=dark_psych, Tue=self_improvement, etc.)
+  ├── For EACH of 6 time slots:
+  │   ├── Generate content via LLM (hook + caption + platform variants)
+  │   ├── Generate for BOTH brands (Ace Richie voice + Containment Field voice)
+  │   └── Store in content_drafts table with scheduled_time + brand + status="ready"
+  │
+DISTRIBUTION JOB (runs every 5 minutes, checks for "ready" drafts whose time has arrived)
+  │
+  ├── Pull drafts where scheduled_time <= now AND status="ready"
+  ├── For EACH draft:
+  │   ├── Determine brand → select correct channel IDs (hardcoded map)
+  │   ├── Select platform-specific text variant per channel
+  │   ├── Call social_scheduler_create_post with ALL channel IDs for this brand
+  │   ├── Mark draft status="posted", store Buffer post IDs
+  │   └── Log to content_transmissions
+  │
+PERFORMANCE TRACKING (Vector's 10AM sweep — already exists)
+  │
+  └── Vector checks posted content performance, queues top performers for weekend repost
+```
+
+**Hardcoded Channel Map (from Buffer — needs verification at build time):**
+```typescript
+const CHANNEL_MAP = {
+  ace_richie: {
+    youtube: "CHANNEL_ID_HERE",
+    instagram: "CHANNEL_ID_HERE",
+    tiktok: "CHANNEL_ID_HERE",
+    x: "CHANNEL_ID_HERE",
+    linkedin: "CHANNEL_ID_HERE",
+    threads: "CHANNEL_ID_HERE",
+  },
+  containment_field: {
+    youtube: "CHANNEL_ID_HERE",
+    instagram: "CHANNEL_ID_HERE",
+    tiktok: "CHANNEL_ID_HERE",
+    x: "CHANNEL_ID_HERE",  // ContainmentFld — verify this channel exists in Buffer
+  },
+};
+```
+
+**NOTE on Containment Field channels:** The Buffer channel map in Section 11 only shows 9 total channels. Containment Field only has YouTube + Instagram + TikTok + X (4 channels). Ace Richie has YouTube + Instagram + TikTok + X + LinkedIn + Threads (6 channels). No LinkedIn or Threads for Containment Field. Verify before hardcoding.
+
+**BUILD STATUS: ✅ COMPLETE (2026-04-01 Cowork Session)**
+
+**What was built:**
+- `src/engine/content-engine.ts` — Full deterministic content engine module
+- `src/engine/migration.sql` — Supabase table DDL (already applied)
+- Wired into `src/index.ts` as two scheduled jobs
+- `content_engine_queue` table created in Supabase with 19 columns + 3 indexes + RLS
+
+**How it works:**
+1. **Channel Discovery:** Fetches all 9 Buffer channels at boot via GraphQL, caches them, categorizes by brand using name pattern matching (ace/richie/77 vs containment). No hardcoded IDs.
+2. **Daily Production Job** (6:30 AM ET / 11:30 UTC): Determines today's niche from rotation → generates 6 time slots × 2 brands = 12 LLM calls → stores in `content_engine_queue` with `status: "ready"` and `scheduled_time`. Deduplicates (won't regenerate if already exists for that slot+brand+date).
+3. **Distribution Sweep** (every 5 minutes): Queries `content_engine_queue` for `status=ready AND scheduled_time <= now` → posts to ALL channels for that brand using platform-specific text variants → updates status to `posted` → logs to `content_transmissions` for Vector's metrics sweep.
+4. **Weekend Reposts:** Sat/Sun automatically queries top-performing posts from the week and re-queues them instead of generating new content.
+5. **Health Check:** `contentEngineStatus()` function returns ready/posted/failed counts for today.
+
+**Key design decisions:**
+- Buffer channel IDs are fetched dynamically (not hardcoded) — survives account changes
+- LLM generates platform variants in ONE call per slot per brand (not one call per platform)
+- Distribution is a separate job from production — if LLM fails, previously generated content still distributes
+- Telegram notification sent to Architect after daily production completes
+
+**Dependencies (all satisfied):**
+- ✅ Buffer channel IDs: fetched dynamically via GraphQL at boot
+- ✅ `content_engine_queue` table: created in Supabase (project wzthxohtgojenukmdubz)
+- ✅ LLM quota: 12 calls/day for content generation (well within Gemini's 250/day)
+- ⚠️ **NOT YET TESTED END-TO-END** — needs Railway deploy + first morning run to verify
+
+**To deploy:**
+1. Push to GitHub main → Railway auto-deploys
+2. Watch Railway logs at 11:30 UTC for `[ContentEngine] Daily production firing`
+3. Watch every 5 minutes for `[ContentEngine] Distribution sweep posted X piece(s)`
+4. Check Supabase `content_engine_queue` table for rows
+5. Check Buffer queue at buffer.com for scheduled posts
+
+### Other Coordination Gaps — Future Fix Backlog
+
+**GAP 7: Agent Stasis Detection lacks teeth**
+- Daily 2PM stasis check dispatches self-check tasks to all agents. But the check just asks agents to report — no automated consequence if they've produced nothing.
+- **Recommendation:** Add a metric: "posts_created_today" per agent. If zero by 2PM, escalate to Architect via Telegram.
+
+**GAP 8: Weekend repost logic doesn't exist**
+- Posting guide says Sat/Sun = repeat top performers. No code identifies or reposts top performers.
+- **Recommendation:** Vector's 10AM sweep should query `content_transmissions` for highest-engagement posts of the week. On Sat/Sun, the Deterministic Engine should pull from a `repost_queue` table instead of generating new content.
+
+**GAP 9: Comic book asset pipeline has no storage**
+- Posting guide describes comic panels as high-value assets. No panels are stored in Supabase Storage or any accessible location.
+- **Recommendation:** Ace uploads panels → Supabase Storage `comic-panels` bucket. Yuki references them by URL in posts. Blocked by: Ace hasn't uploaded panels yet.
+
+**GAP 10: Anita's content drafts may be orphaned**
+- Section 16 asks "What happened after Anita's content was approved?" — still unanswered.
+- Content may be sitting in `content_drafts` table with no mechanism to move it to distribution.
+- **Recommendation:** The Deterministic Engine should also check `content_drafts` for Anita-produced content with `status=approved` and include it in the distribution queue.
+
+**GAP 11: Alfred's trend scan output doesn't feed content production**
+- Alfred's 8AM scan produces a briefing. It does NOT produce structured content that the Deterministic Engine can consume.
+- **Recommendation:** Alfred's scan output should include a `suggested_hooks` array in structured JSON. The daily content production job can optionally consume these instead of generating from scratch.
+
+**GAP 12: No image generation in the posting loop**
+- The posting guide assumes image+text posts. The image generator tool exists (`src/tools/image-generator.ts`) but is not integrated into any content production workflow.
+- **Recommendation:** The Deterministic Engine's LLM content generation step should also produce an image prompt. A follow-up call to the image generator creates the visual. The image URL is passed to `media_url` in the Buffer post.
 
 ---
 

@@ -82,7 +82,7 @@ export class ImageGeneratorTool implements Tool {
     if (geminiKey) {
       try {
         imageBuffer = await this.tryGeminiImagen(geminiKey, enhancedPrompt, aspectRatio);
-        if (imageBuffer) source = "gemini_imagen_3";
+        if (imageBuffer) source = "gemini_imagen_4";
       } catch (err: any) {
         console.warn(`[ImageGen] Gemini Imagen failed: ${err.message}`);
       }
@@ -129,7 +129,7 @@ export class ImageGeneratorTool implements Tool {
     prompt: string,
     aspectRatio: string
   ): Promise<Buffer | null> {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`;
 
     const res = await fetch(url, {
       method: "POST",

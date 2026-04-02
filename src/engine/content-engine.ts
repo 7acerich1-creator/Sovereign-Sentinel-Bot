@@ -189,11 +189,11 @@ async function generateContentImage(
   let imageBuffer: Buffer | null = null;
   let source = "none";
 
-  // ── STEP 1: Try Gemini Imagen 3 ──
+  // ── STEP 1: Try Gemini Imagen 4 ──
   const geminiKey = process.env.GEMINI_API_KEY;
   if (geminiKey) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${geminiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${geminiKey}`;
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },        body: JSON.stringify({
@@ -213,7 +213,7 @@ async function generateContentImage(
           data.predictions?.[0]?.image?.bytesBase64Encoded;
         if (b64) {
           imageBuffer = Buffer.from(b64, "base64");
-          source = "gemini_imagen_3";
+          source = "gemini_imagen_4";
         }
       } else {
         const errText = await res.text();

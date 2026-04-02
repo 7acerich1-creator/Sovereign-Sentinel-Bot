@@ -1020,6 +1020,65 @@ async function main() {
     }
   });
 
+  // ── /api/content-engine/diag — Test image generation APIs ──
+  webhookServer.register("/api/content-engine/diag", async () => {
+    const diag: Record<string, unknown> = {};
+    const geminiKey = process.env.GEMINI_API_KEY;
+    const openaiKey = process.env.OPENAI_API_KEY;
+    diag.gemini_key_set = !!geminiKey;
+    diag.gemini_key_length = geminiKey?.length || 0;
+    diag.openai_key_set = !!openaiKey;
+    diag.openai_key_length = openaiKey?.length || 0;
+
+    // Test Gemini Imagen
+    if (geminiKey) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${geminiKey}`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            instances: [{ prompt: "A simple blue sphere on a white background" }],
+            parameters: { sampleCount: 1, aspectRatio: "1:1", safetyFilterLevel: "block_only_high" },
+          }),
+        });
+        diag.gemini_imagen_status = res.status;
+        if (!res.ok) {
+          diag.gemini_imagen_error = (await res.text()).slice(0, 500);
+        } else {
+          const data = (await res.json()) as any;
+          const b64 = data.predictions?.[0]?.bytesBase64Encoded || data.predictions?.[0]?.image?.bytesBase64Encoded;
+          diag.gemini_imagen_has_image = !!b64;
+          diag.gemini_imagen_bytes = b64 ? b64.length : 0;
+        }
+      } catch (err: any) {
+        diag.gemini_imagen_error = err.message;
+      }
+    }
+
+    // Test DALL-E 3
+    if (openaiKey) {
+      try {
+        const res = await fetch("https://api.openai.com/v1/images/generations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
+          body: JSON.stringify({ model: "dall-e-3", prompt: "A simple blue sphere on a white background", size: "1024x1024", quality: "standard", n: 1, response_format: "b64_json" }),
+        });
+        diag.dalle_status = res.status;
+        if (!res.ok) {
+          diag.dalle_error = (await res.text()).slice(0, 500);
+        } else {
+          const data = (await res.json()) as any;
+          diag.dalle_has_image = !!data.data?.[0]?.b64_json;
+        }
+      } catch (err: any) {
+        diag.dalle_error = err.message;
+      }
+    }
+
+    return JSON.stringify(diag);
+  });
+
   // ── /api/content-engine/status — Check content engine queue status ──
   webhookServer.register("/api/content-engine/status", async () => {
     try {

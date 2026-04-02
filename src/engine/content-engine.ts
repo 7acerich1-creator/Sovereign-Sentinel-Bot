@@ -709,7 +709,7 @@ export async function distributionSweep(): Promise<number> {
                 ${assetsBlock ? `, ${assetsBlock}` : ""}
               }) {
                 ... on PostActionSuccess {
-                  post { id text scheduledAt }
+                  post { id text }
                 }
                 ... on MutationError {
                   message

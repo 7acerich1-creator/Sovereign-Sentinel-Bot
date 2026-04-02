@@ -38,8 +38,9 @@ type Brand = typeof BRANDS[number];
 // ── CE-1 FIX: Platform image requirements ──
 // Platforms that REJECT text-only posts via Buffer API
 const IMAGE_REQUIRED_PLATFORMS = new Set(["instagram", "tiktok"]);
-// Platforms that accept text-only posts (YouTube = community posts, support images too)
-const TEXT_OK_PLATFORMS = new Set(["x", "twitter", "threads", "youtube", "linkedin"]);
+// Platforms that accept text-only posts
+// NOTE: YouTube excluded — Buffer API requires video, not images/text. LinkedIn not connected.
+const TEXT_OK_PLATFORMS = new Set(["x", "twitter", "threads"]);
 // Threads hard limit from Meta API (500 chars max)
 const THREADS_CHAR_LIMIT = 500;
 
@@ -58,11 +59,9 @@ const IG_FREQUENCY_OVERRIDE: Record<Brand, { maxPerDay: number; allowedSlots: st
 // Platform-specific character/style notes for LLM
 const PLATFORM_NOTES: Record<string, string> = {
   x: "Max 280 chars. Punchy, direct. Hashtags: 1-2 max. End with a hook or question.",
-  linkedin: "Professional but bold. 1-3 short paragraphs. No hashtag spam. Can be slightly longer.",
   threads: "Conversational, raw, authentic. Like talking to a friend who gets it. Medium length.",
   instagram: "Hook in first line (gets truncated). Use line breaks. 3-5 relevant hashtags at end.",
   tiktok: "Short, scroll-stopping. Speak like the viewer's internal voice. Under 150 chars ideal.",
-  youtube: "Community post style. Ask a question or drop a hot take. Medium length.",
 };
 
 // ── Types ──
@@ -630,15 +629,24 @@ export async function dailyContentProduction(llm: LLMProvider): Promise<number> 
 /**
  * DISTRIBUTION JOB — runs every 5 minutes.
  * Posts "ready" content whose scheduled_time has arrived.
+ * Also retries "partial" items (some channels succeeded, others failed).
  */
 export async function distributionSweep(): Promise<number> {
   const now = new Date().toISOString();
 
   // Fetch ready drafts whose time has come
-  const drafts = await supabaseQuery(
+  const readyDrafts = await supabaseQuery(
     "content_engine_queue",
     `status=eq.ready&scheduled_time=lte.${now}&order=scheduled_time.asc&limit=5`
   );
+
+  // CE-6 FIX: Also pick up "partial" items — channels that failed can be retried without duplicating successes
+  const partialDrafts = await supabaseQuery(
+    "content_engine_queue",
+    `status=eq.partial&order=scheduled_time.asc&limit=12`
+  );
+
+  const drafts = [...readyDrafts, ...partialDrafts];
 
   if (drafts.length === 0) return 0;
 
@@ -664,6 +672,15 @@ export async function distributionSweep(): Promise<number> {
 
     const variants = draft.platform_variants || {};
     const universalText = draft.universal_text || "";
+    // CE-6: Parse existing buffer_results to skip channels that already succeeded (no duplicates on retry)
+    const priorResults: string = draft.buffer_results || "";
+    const alreadySucceeded = new Set<string>();
+    for (const line of priorResults.split("\n")) {
+      if (line.startsWith("✅")) {
+        const match = line.match(/\(([^)]+)\)/);
+        if (match) alreadySucceeded.add(match[1]);
+      }
+    }
 
     try {
       const postResults: string[] = [];
@@ -678,9 +695,21 @@ export async function distributionSweep(): Promise<number> {
           continue;
         }
 
+        // CE-6: Skip channels that already succeeded in a prior sweep (prevents duplicates on retry)
+        if (alreadySucceeded.has(channel.id)) {
+          postResults.push(`✅ ${channel.service}(${channel.id}): Already posted (prior sweep)`);
+          continue;
+        }
+
         // CE-1 FIX: Skip image-required platforms when no image is attached
         if (IMAGE_REQUIRED_PLATFORMS.has(service) && !draft.media_url) {
           postResults.push(`⏭️ ${channel.service}(${channel.id}): Skipped — platform requires image, none attached`);
+          continue;
+        }
+        // CE-3 FIX: Buffer YouTube integration requires VIDEO — image posts are rejected.
+        // YouTube community posts not supported by Buffer API. Skip until video pipeline (Scenario F) is live.
+        if (service === "youtube") {
+          postResults.push(`⏭️ ${channel.service}(${channel.id}): Skipped — Buffer YouTube requires video (community image posts not supported by Buffer API)`);
           continue;
         }
         // IG Frequency Override: Skip Instagram channels for non-allowed time slots
@@ -751,10 +780,17 @@ export async function distributionSweep(): Promise<number> {
 
       // Update draft status
       const successCount = postResults.filter((r) => r.startsWith("✅")).length;
+      const failCount = postResults.filter((r) => r.startsWith("❌")).length;
       const allResults = postResults.join("\n");
 
+      // CE-6: "partial" = some succeeded, some failed (retryable). "posted" = all possible channels hit.
+      let finalStatus = "failed";
+      if (successCount > 0 && failCount === 0) finalStatus = "posted";
+      else if (successCount > 0 && failCount > 0) finalStatus = "partial";
+
       await supabasePatch("content_engine_queue", draft.id, {
-        status: successCount > 0 ? "posted" : "failed",        posted_at: new Date().toISOString(),
+        status: finalStatus,
+        posted_at: new Date().toISOString(),
         buffer_results: allResults,
         channels_hit: successCount,
         channels_total: channels.length,

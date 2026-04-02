@@ -38,8 +38,10 @@ type Brand = typeof BRANDS[number];
 // ── CE-1 FIX: Platform image requirements ──
 // Platforms that REJECT text-only posts via Buffer API
 const IMAGE_REQUIRED_PLATFORMS = new Set(["instagram", "tiktok"]);
-// Platforms that accept text-only posts
+// Platforms that accept text-only posts (YouTube = community posts, support images too)
 const TEXT_OK_PLATFORMS = new Set(["x", "twitter", "threads", "youtube", "linkedin"]);
+// Threads hard limit from Meta API (500 chars max)
+const THREADS_CHAR_LIMIT = 500;
 
 // ── IG Frequency Override (prevent shadowban) ──
 // Instagram accounts are capped to protect account health
@@ -690,6 +692,13 @@ export async function distributionSweep(): Promise<number> {
           }
         }
 
+        // CE-4 FIX: Threads has a 500-character hard limit from Meta
+        let postText = text;
+        if (service === "threads" && postText.length > THREADS_CHAR_LIMIT) {
+          // Truncate to 497 chars + "..." to stay under 500
+          postText = postText.slice(0, THREADS_CHAR_LIMIT - 3) + "...";
+        }
+
         try {
           // Build mutation
           let assetsBlock = "";
@@ -697,15 +706,22 @@ export async function distributionSweep(): Promise<number> {
             assetsBlock = `assets: { images: [{ url: "${draft.media_url.replace(/"/g, '\\"')}" }] }`;
           }
 
+          // CE-5 FIX: Instagram requires explicit type: post for image posts (not reels)
+          let typeBlock = "";
+          if (service === "instagram" && draft.media_url) {
+            typeBlock = `type: post`;
+          }
+
           // CE-2 FIX: schedulingType enum is "automatic" or "notification" (NOT "scheduled")
           // "automatic" = Buffer picks the optimal time from its queue
           const query = `
             mutation CreatePost {
               createPost(input: {
-                text: ${JSON.stringify(text)},
+                text: ${JSON.stringify(postText)},
                 channelId: "${channel.id}",
                 schedulingType: automatic,
                 mode: addToQueue
+                ${typeBlock ? `, ${typeBlock}` : ""}
                 ${assetsBlock ? `, ${assetsBlock}` : ""}
               }) {
                 ... on PostActionSuccess {

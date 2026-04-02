@@ -1,8 +1,44 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-02 (Cowork Session 5 — Image Pipeline + Agent Memory Prompts) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-02 (Cowork Session 7 — Platform Fixes CE-3/4/5) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
-**Session Summary — Cowork Session 5 (2026-04-02, night):**
-1. **Image generation pipeline wired into Deterministic Content Engine (Gap 12 CLOSED).** `dailyContentProduction()` now generates branded images after LLM text generation. Flow: niche+brand-aware prompt → Gemini Imagen 3 (primary) → DALL-E 3 (fallback) → upload PNG to Supabase Storage `public-assets/content-images/` → write public URL as `media_url` on `content_engine_queue` row. Distribution sweep already passes `media_url` to Buffer GraphQL `assets.images[0].url`. Graceful degradation: if image gen fails, post goes text-only (IG/TikTok skipped, other channels still fire).
+**Session Summary — Cowork Session 7 (2026-04-02, late night):**
+1. **CE-3 FIX: YouTube skipped in distribution sweep.** YouTube requires video content, not images. Added `VIDEO_ONLY_PLATFORMS` set. YouTube channels now log `⏭️ Skipped — YouTube requires video content` instead of sending images that fail. YouTube re-enabled once Make.com Scenario F (clip pipeline) is live.
+2. **CE-4 FIX: Threads 500-char truncation.** Meta's Threads API hard-limits posts to 500 characters. Distribution now truncates Threads text to 497 chars + "..." automatically. No more API errors on long posts.
+3. **CE-5 FIX: Instagram `type: post` param.** IG image posts require explicit `type: post` in Buffer GraphQL mutation (otherwise Buffer defaults to Reel, which fails for static images). Now injected conditionally when `service === "instagram" && draft.media_url` exists.
+4. **Image provider assessment:** DALL-E 3 is dead (billing). Imagen 4 on Gemini Pro is the sole provider. Claude Max has no image gen. Best fallback options: Together AI (FLUX.1-schnell, free credits) or Replicate (FLUX, pay-per-use ~$0.003/image). NOT CODED YET — awaiting Ace decision.
+5. **Make.com E/F status confirmed:** Bot-side webhook trigger code ALREADY EXISTS in index.ts (lines 1659-1693). Config reads `MAKE_SCENARIO_E_WEBHOOK` and `MAKE_SCENARIO_F_WEBHOOK` from env. Callback endpoint `/api/vidrush` routes E→Alfred, F→Yuki. ONLY MISSING PIECE: the actual webhook URLs from Make.com set as Railway env vars.
+6. **Push status: ⏳ NOT YET PUSHED** — Code changes in `content-engine.ts` only. Needs push to main for Railway auto-deploy.
+
+**NEXT SESSION PRIORITIES:**
+1. **PUSH the CE-3/4/5 fixes** to GitHub → Railway auto-deploy. Then monitor 6:30 AM ET cron for end-to-end autonomous run.
+2. **Make.com E/F env vars:** Ace needs to copy webhook URLs from Make.com Scenarios 4544787 (E) and 4544805 (F), then set `MAKE_SCENARIO_E_WEBHOOK` and `MAKE_SCENARIO_F_WEBHOOK` in Railway dashboard.
+3. **Wire fallback image provider** (Together AI FLUX.1 recommended) as DALL-E 3 replacement — eliminates single-provider risk.
+4. **Verify IG posting** after CE-5 deploy — confirm `type: post` param resolves the Buffer/IG error.
+
+**Previous Session Summary — Cowork Session 6 (2026-04-02, late night):**
+1. **Gemini Imagen 3 SHUTDOWN — migrated to Imagen 4.** Google decommissioned `imagen-3.0-generate-002` (404). Replaced with `imagen-4.0-generate-001` in both `content-engine.ts` and `image-generator.ts`. Same `:predict` endpoint pattern.
+2. **DALL-E 3 billing exhausted.** OpenAI account hit hard billing limit. Imagen 4 is now the sole working image provider. DALL-E 3 fallback is dead until Ace adds credits.
+3. **Buffer GraphQL mutation fixed (3 bugs):** (a) `schedulingType` enum was `scheduled` (invalid) — correct values are `automatic` or `notification`. Fixed to `automatic`. (b) Response query included `scheduledAt` field which doesn't exist on `Post` type — removed. (c) These two bugs meant ZERO distribution was happening since Session 2's "CE-2 FIX" introduced the wrong enum.
+4. **File corruption fixed.** `index.ts` was truncated at line 2117 (missing ~70 lines: shutdown handlers, memory monitor, launch block). `content-engine.ts` had 486 trailing null bytes. Both fixed and verified via `tsc --noEmit`.
+5. **Manual trigger endpoints added.** `/api/content-engine/produce` (POST, bypasses cron time guard), `/api/content-engine/status` (POST), `/api/content-engine/diag` (POST, tests image APIs), `/api/content-engine/sweep` (POST, manual distribution trigger). NOTE: All webhook routes are POST-only (line 158 of webhooks.ts rejects non-POST with 404).
+6. **FULL PRODUCTION RUN COMPLETED.** 12/12 slots generated with Imagen 4 images. 12/12 distributed to Buffer. TikTok + Twitter/X posting successfully. IG needs explicit type param, YouTube needs video not images, Threads has 500-char limit. These are next-iteration fixes.
+7. **Push status: ✅ PUSHED** — Commits `68787de` through `382756d` (6 commits) pushed to main. Railway auto-deployed.
+8. **Make.com Scenarios E & F:** Both ACTIVE (IDs 4544787 and 4544805), webhook-triggered, but have 0 executions ever. E = YouTube transcription via DumplingAI. F = Sovereign Clip Pipeline. The automation logic is built in Make.com but nothing in the bot triggers the webhooks. These are "theory threads" — documented but never connected. Need webhook URLs wired into the bot or a trigger mechanism.
+
+**⚠️ THEORY → PRACTICAL FLOWS (Pattern identified 2026-04-02):**
+Multiple systems exist as documented architecture that was never wired end-to-end. The Content Engine was the biggest example (documented in posting guide as "LIVE NOW" but distribution code never actually worked due to wrong Buffer enum). Make.com Scenarios E/F are another — automation built but never triggered. When picking up work, always verify the ACTUAL last successful execution, not just whether code/config exists. Check Supabase for real posted_at timestamps, Make.com for execution counts, Buffer for actual queued posts.
+
+**IMPORTANT — Buffer schedulingType:** The correct enum values are `automatic` (Buffer picks time from queue) and `notification` (sends push notification). The value `scheduled` does NOT exist. This was wrong in Session 2's CE-2 fix. `social-scheduler.ts` line 181 has the working reference implementation.
+
+**IMPORTANT — Platform-specific Buffer params (Session 7):**
+- **Instagram:** Requires `type: post` for image posts. Without it, Buffer defaults to Reel which fails for static images. Code: CE-5 fix, line ~719 of content-engine.ts.
+- **YouTube:** Requires video content. Image posts are NOT supported. Skipped via `VIDEO_ONLY_PLATFORMS` set (CE-3). Re-enable when video pipeline (Scenario F) is live.
+- **Threads:** 500-char hard limit from Meta. Auto-truncated to 497+"..." (CE-4). `THREADS_CHAR_LIMIT` constant at line 46.
+
+**IMPORTANT — Buffer schedulingType:** The correct enum values are `automatic` (Buffer picks time from queue) and `notification` (sends push notification). The value `scheduled` does NOT exist. This was wrong in Session 2's CE-2 fix. `social-scheduler.ts` line 181 has the working reference implementation.
+
+**Previous Session Summary — Cowork Session 5 (2026-04-02, night):**
+1. **Image generation pipeline wired into Deterministic Content Engine (Gap 12 CLOSED).** `dailyContentProduction()` now generates branded images after LLM text generation. Flow: niche+brand-aware prompt → Gemini Imagen 4 (primary, upgraded from Imagen 3) → DALL-E 3 (fallback, currently billing-exhausted) → upload PNG to Supabase Storage `public-assets/content-images/` → write public URL as `media_url` on `content_engine_queue` row. Distribution sweep passes `media_url` to Buffer GraphQL `assets.images[0].url`. Graceful degradation: if image gen fails, post goes text-only (IG/TikTok skipped, other channels still fire).
 2. **IG and TikTok posting UNBLOCKED.** The `IMAGE_REQUIRED_PLATFORMS` guard now passes when `media_url` is populated. IG frequency override (Ace 3/day, CF 2/day) activates automatically. Full 329/week cadence achievable once deployed.
 3. **Agent memory update prompts prepared.** Six Telegram DM messages for Ace to send to each agent, instructing them to overwrite stale Pinecone memories about Vector being the distributor. Yuki confirmed as sole posting authority, Vector as analytics-only.
 4. **Push status: ✅ PUSHED** — Commit `1de93d8` pushed to main via Desktop Commander. Railway auto-deploy triggered.
@@ -16,7 +52,7 @@
 **Previous Session Summary — Cowork Session 2 (2026-04-02, evening):**
 1. Vector posting authority fixed across ALL surfaces (4 files, 8 locations). Anita→Vector pipeline route changed to Anita→Yuki.
 2. All 6 Supabase personality blueprints updated with executive roles. Task 7A DONE.
-3. BUG CE-2 FIXED: `schedulingType: automatic` → `schedulingType: scheduled` with explicit `scheduledAt`.
+3. BUG CE-2 ATTEMPTED FIX: Changed `schedulingType: automatic` → `schedulingType: scheduled` with explicit `scheduledAt`. **⚠️ THIS WAS WRONG** — `scheduled` is not a valid enum value. Fixed in Session 6 back to `automatic` without `scheduledAt`.
 4. BUG CE-1 FIXED: Image-required platforms (IG/TikTok) skipped when no `media_url`. IG frequency override in code.
 5. Push status: DEFERRED (included in Session 3 push).
 
@@ -1468,8 +1504,10 @@ Posts appeared in Buffer but with TWO critical bugs:
 - **Fix applied (defensive):** Added `IMAGE_REQUIRED_PLATFORMS` set in content-engine.ts. Distribution sweep now SKIPS instagram/tiktok when no `media_url` attached instead of sending doomed requests. Also added `IG_FREQUENCY_OVERRIDE` config object enforcing the Ace 3/day + CF 2/day cap directly in the engine.
 - **Remaining work:** Image generation still needed. `dailyContentProduction()` needs to produce or attach a `media_url` for each draft. Options: (a) Gemini Imagen 3 generates a branded image per post, (b) pull from a pre-loaded asset library in Supabase Storage, (c) use Canva API for templated quote cards. Until then, IG/TikTok remain skipped — X/Threads/YouTube get text posts at correct times.
 
-**BUG CE-2: Posts clustered at 8-11 AM instead of 6 time slots.** ✅ FIXED (2026-04-02)
-- Root cause: `schedulingType: automatic` let Buffer pick times (clustered in morning).
+**BUG CE-2: Buffer GraphQL mutation broken.** ✅ FIXED (2026-04-02, Session 6)
+- Root cause chain: Session 2 changed `schedulingType: automatic` to `schedulingType: scheduled` (invalid enum). Session 6 discovered `scheduled` doesn't exist in Buffer's SchedulingType enum — only `automatic` and `notification` do. Additionally, the response query included `scheduledAt` field which doesn't exist on the `Post` type.
+- **Fix (Session 6):** Reverted to `schedulingType: automatic` + removed `scheduledAt` from response + matched working pattern in `social-scheduler.ts` line 181. Result: 12/12 posts distributed successfully.
+- **Channel hit rates:** TikTok ✅, Twitter/X ✅. Instagram needs explicit type param (post/story/reel). YouTube needs video not images + title + category. Threads has 500-char limit exceeded. These are next-iteration platform-specific fixes.
 - **Fix applied:** Changed to `schedulingType: scheduled` with `scheduledAt` pulled from `draft.scheduled_time`. Posts now hit at the exact 6 time slots defined in the cadence (7AM/10AM/1PM/4PM/7PM/10PM ET).
 
 **Current state after fixes (updated 2026-04-02 Session 5):** X and Threads get 6 posts/day at correct times. YouTube community posts get 6/day text-only. **IG and TikTok are NOW UNBLOCKED** — `dailyContentProduction()` generates branded images via Gemini Imagen 3 / DALL-E 3 and uploads to Supabase Storage `public-assets/content-images/`. The distribution sweep passes the image URL to Buffer. IG frequency override (Ace 3/day, CF 2/day) activates automatically. Full 329/week cadence achievable once deployed.

@@ -735,11 +735,11 @@ export async function distributionSweep(): Promise<number> {
             assetsBlock = `assets: { images: [{ url: "${draft.media_url.replace(/"/g, '\\"')}" }] }`;
           }
 
-          // CE-5 FIX: Instagram requires metadata.type = post for image posts (not reels)
-          // Buffer GraphQL schema: type field lives inside metadata: { type: post }, NOT at top level
+          // CE-5 FIX: Instagram requires metadata.instagram.type = post for image posts
+          // Buffer GraphQL schema: PostInputMetaData → instagram: InstagramPostMetadataInput → type: PostType
           let metadataBlock = "";
           if (service === "instagram") {
-            metadataBlock = `metadata: { type: post }`;
+            metadataBlock = `metadata: { instagram: { type: post, shouldShareToFeed: true } }`;
           }
 
           // CE-2 FIX: schedulingType enum is "automatic" or "notification" (NOT "scheduled")

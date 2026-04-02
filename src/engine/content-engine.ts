@@ -697,19 +697,14 @@ export async function distributionSweep(): Promise<number> {
             assetsBlock = `assets: { images: [{ url: "${draft.media_url.replace(/"/g, '\\"')}" }] }`;
           }
 
-          // CE-2 FIX: Use Buffer queue with optional scheduledAt for future slots
-          const slotTime = draft.scheduled_time ? new Date(draft.scheduled_time) : null;
-          const now = new Date();
-          // Only include scheduledAt if the slot time is in the future
-          const scheduledAtBlock = slotTime && slotTime > now
-            ? `scheduledAt: "${slotTime.toISOString()}",`
-            : "";
+          // CE-2 FIX: schedulingType enum is "automatic" or "notification" (NOT "scheduled")
+          // "automatic" = Buffer picks the optimal time from its queue
           const query = `
             mutation CreatePost {
               createPost(input: {
                 text: ${JSON.stringify(text)},
                 channelId: "${channel.id}",
-                ${scheduledAtBlock}
+                schedulingType: automatic,
                 mode: addToQueue
                 ${assetsBlock ? `, ${assetsBlock}` : ""}
               }) {

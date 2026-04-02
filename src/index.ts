@@ -1089,6 +1089,16 @@ async function main() {
     }
   });
 
+  // ── /api/content-engine/sweep — Manual distribution sweep trigger ──
+  webhookServer.register("/api/content-engine/sweep", async () => {
+    try {
+      const posted = await distributionSweep();
+      return JSON.stringify({ status: "ok", posted });
+    } catch (err: any) {
+      return JSON.stringify({ status: "error", message: err.message, stack: err.stack?.slice(0, 500) });
+    }
+  });
+
   // ── /api/glitch — Log errors/incidents from external systems ──
   webhookServer.register("/api/glitch", async (incoming: any) => {
     const { severity, description, agent_name, stack_trace } = incoming as any;

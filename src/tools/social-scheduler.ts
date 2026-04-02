@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Social Scheduler (Buffer GraphQL API)
-// Vector routes content to niche channels via Buffer
+// Yuki is the SOLE Buffer posting authority. Deterministic Content Engine also posts via Buffer.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { Tool, ToolDefinition } from "../types";
@@ -95,7 +95,7 @@ export class SocialSchedulerListProfilesTool implements Tool {
 export class SocialSchedulerPostTool implements Tool {
   definition: ToolDefinition = {
     name: "social_scheduler_create_post",
-    description: "[Buffer] Schedule or publish a post to a social media channel via Buffer GraphQL API. Requires channel_id (from list_profiles), text content, and optional media/scheduling. Vector uses this to route niche content to correct channels with minimum 1 post/day/channel cadence.",
+    description: "[Buffer] Schedule or publish a post to a social media channel via Buffer GraphQL API. Requires channel_id (from list_profiles), text content, and optional media/scheduling. Yuki is the SOLE posting authority — only Yuki and the Deterministic Content Engine should call this tool.",
     parameters: {
       channel_ids: {
         type: "string",

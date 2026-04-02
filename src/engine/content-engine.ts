@@ -2,7 +2,7 @@
 // GRAVITY CLAW v3.0 — THE TRANSMISSION GRID
 // Deterministic text+image content engine via Buffer.
 // LLM writes the content. Code handles the spray.
-// 9 channels (5 Ace + 4 CF) × 6 time slots = 54 posts/day = 378/week
+// 9 channels (5 Ace + 4 CF) × 6 time slots = 47 posts/day = 329/week (with IG override)
 // Master ref: Section 23. Pipeline clarity: CONTENT-PIPELINE-CLARITY.md
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -35,6 +35,25 @@ const TIME_SLOTS_UTC = [
 
 const BRANDS = ["ace_richie", "containment_field"] as const;
 type Brand = typeof BRANDS[number];
+
+// ── CE-1 FIX: Platform image requirements ──
+// Platforms that REJECT text-only posts via Buffer API
+const IMAGE_REQUIRED_PLATFORMS = new Set(["instagram", "tiktok"]);
+// Platforms that accept text-only posts
+const TEXT_OK_PLATFORMS = new Set(["x", "twitter", "threads", "youtube", "linkedin"]);
+
+// ── IG Frequency Override (prevent shadowban) ──
+// Instagram accounts are capped to protect account health
+const IG_FREQUENCY_OVERRIDE: Record<Brand, { maxPerDay: number; allowedSlots: string[] }> = {
+  ace_richie: {
+    maxPerDay: 3,
+    allowedSlots: ["morning_hook", "midday_trigger", "evening_anchor"], // 7AM, 1PM, 7PM ET
+  },
+  containment_field: {
+    maxPerDay: 2,
+    allowedSlots: ["educational_panel", "afternoon_drop"], // 10AM, 4PM ET (staggered from Ace)
+  },
+};
 
 // Platform-specific character/style notes for LLM
 const PLATFORM_NOTES: Record<string, string> = {
@@ -474,6 +493,21 @@ export async function distributionSweep(): Promise<number> {
           continue;
         }
 
+        // CE-1 FIX: Skip image-required platforms when no image is attached
+        if (IMAGE_REQUIRED_PLATFORMS.has(service) && !draft.media_url) {
+          postResults.push(`⏭️ ${channel.service}(${channel.id}): Skipped — platform requires image, none attached`);
+          continue;
+        }
+
+        // IG Frequency Override: Skip Instagram channels for non-allowed time slots
+        if (service === "instagram") {
+          const igOverride = IG_FREQUENCY_OVERRIDE[brand];
+          if (igOverride && draft.time_slot && !igOverride.allowedSlots.includes(draft.time_slot)) {
+            postResults.push(`⏭️ ${channel.service}(${channel.id}): Skipped — IG frequency override (slot ${draft.time_slot} not allowed for ${brand})`);
+            continue;
+          }
+        }
+
         try {
           // Build mutation
           let assetsBlock = "";
@@ -481,17 +515,22 @@ export async function distributionSweep(): Promise<number> {
             assetsBlock = `assets: { images: [{ url: "${draft.media_url.replace(/"/g, '\\"')}" }] }`;
           }
 
+          // CE-2 FIX: Use scheduled timing with explicit scheduledAt instead of automatic
+          // automatic = Buffer picks the time (clusters everything in morning)
+          // scheduled = we control the exact time from content_engine_queue.scheduled_time
+          const scheduledAt = draft.scheduled_time || new Date().toISOString();
           const query = `
             mutation CreatePost {
               createPost(input: {
                 text: ${JSON.stringify(text)},
                 channelId: "${channel.id}",
-                schedulingType: automatic,
+                schedulingType: scheduled,
+                scheduledAt: "${scheduledAt}",
                 mode: addToQueue
                 ${assetsBlock ? `, ${assetsBlock}` : ""}
               }) {
                 ... on PostActionSuccess {
-                  post { id text }
+                  post { id text scheduledAt }
                 }
                 ... on MutationError {
                   message

@@ -149,6 +149,43 @@ async function main() {
 
   const failoverLLM = new FailoverLLM(llmProviders);
 
+  // ── 2B. Per-Agent LLM Provider Teams ──
+  // Split providers across agents to prevent quota stampedes.
+  // When all agents share one chain, a Gemini quota hit cascades to ALL agents simultaneously.
+  // This gives each team its own primary, with the others as failover.
+  const providersByName: Record<string, LLMProvider> = {};
+  for (const p of llmProviders) providersByName[p.name] = p;
+
+  function buildTeamLLM(primaryOrder: string[]): FailoverLLM {
+    const chain: LLMProvider[] = [];
+    for (const name of primaryOrder) {
+      if (providersByName[name]) chain.push(providersByName[name]);
+    }
+    // Add any remaining providers not in the explicit order as fallback
+    for (const p of llmProviders) {
+      if (!chain.includes(p)) chain.push(p);
+    }
+    return new FailoverLLM(chain);
+  }
+
+  // Team assignments:
+  // Alfred + Anita → Gemini primary (low rate, research/writing tasks)
+  // Sapphire + Veritas → Anthropic primary (strategic, less frequent, high quality)
+  // Vector + Yuki → Groq primary (Yuki = most tool calls, Groq = 14,400/day free tier)
+  const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
+    alfred: buildTeamLLM(["gemini", "groq", "anthropic"]),
+    anita: buildTeamLLM(["gemini", "groq", "anthropic"]),
+    sapphire: buildTeamLLM(["anthropic", "gemini", "groq"]),
+    veritas: buildTeamLLM(["anthropic", "gemini", "groq"]),
+    vector: buildTeamLLM(["groq", "anthropic", "gemini"]),
+    yuki: buildTeamLLM(["groq", "anthropic", "gemini"]),
+  };
+
+  console.log("🔀 [LLM Teams] Provider split active:");
+  for (const [agent, team] of Object.entries(AGENT_LLM_TEAMS)) {
+    console.log(`   ${agent}: ${team.listProviders().join(" → ")}`);
+  }
+
   // ── 3. Initialize Tools ──
   const tools: Tool[] = [
     // Core tools
@@ -195,7 +232,7 @@ async function main() {
   // System Utilities
   tools.push(new SystemTool());
 
-  // Social Scheduler (Buffer) — Vector's content distribution tools
+  // Social Scheduler (Buffer) — Yuki's distribution tools (Yuki = SOLE posting authority)
   tools.push(new SocialSchedulerListProfilesTool());
   tools.push(new SocialSchedulerPostTool());
   tools.push(new SocialSchedulerPendingTool());
@@ -1352,10 +1389,12 @@ async function main() {
             ? "\n\n[STANDING ORDER] When you receive a message containing 'standing directive' or 'new protocol', extract the protocol name, niche, and directive. Use the write_protocol tool to save it. Confirm: 'Protocol [name] locked. All crew members will execute this on every [niche] task going forward.'\n\n[RELATIONSHIP AWARENESS] You have the write_relationship_context tool. When you notice patterns in how Ace works — what he asks for repeatedly, what frustrates him, what he celebrates — write a brief observation. Categories: preference, frustration, pattern, win. These observations help you calibrate your tone."
             : "";
 
+        // Per-agent LLM team — each agent gets its own failover chain to prevent quota stampedes
+        const agentTeamLLM = AGENT_LLM_TEAMS[agentCfg.name] || failoverLLM;
         const injectedLLM: LLMProvider = {
-          ...failoverLLM,
+          ...agentTeamLLM,
           generate: (messages, options) =>
-            failoverLLM.generate(messages, { ...options, systemPrompt: blueprint + protocolDirective + knowledgeDirective }),
+            agentTeamLLM.generate(messages, { ...options, systemPrompt: blueprint + protocolDirective + knowledgeDirective }),
         };
 
         // Build per-agent tool set: shared tools + agent-specific tools
@@ -1375,8 +1414,8 @@ async function main() {
         agentTools.push(new ProposeTaskTool(agentCfg.name));
         agentTools.push(new CheckApprovedTasksTool(agentCfg.name));
 
-        // Content crew (Alfred, Yuki, Anita) + Vector (distribution endpoint) get the draft tool
-        // Vector needs it to log what he posts to Buffer/YouTube
+        // Content crew (Alfred, Yuki, Anita) + Vector (analytics logging) get the draft tool
+        // Vector uses it to log metrics observations, NOT to post content
         if (CONTENT_CREW.includes(agentCfg.name) || agentCfg.name === "vector") {
           agentTools.push(new SaveContentDraftTool(agentCfg.name));
         }
@@ -1661,14 +1700,15 @@ async function main() {
               // Without these, agents default to analysis/reporting instead of executing tools.
               // These ensure the pipeline's final stages actually POST content to platforms.
               const EXECUTION_DIRECTIVES: Record<string, string> = {
-                funnel_distribution: `EXECUTION ORDER: You are the SOLE distribution endpoint. You MUST use the social_scheduler_create_post tool to post this content to Buffer channels. ` +
+                content_for_distribution: `EXECUTION ORDER: You (Yuki) are the SOLE distribution authority. You MUST use the social_scheduler_create_post tool to post this content to Buffer channels. ` +
                   `Step 1: Call social_scheduler_list_profiles to get channel IDs. ` +
                   `Step 2: Take the content from the payload and call social_scheduler_create_post with appropriate channel_ids and the text. ` +
                   `Post to ALL relevant channels (both Ace Richie and Containment Field accounts). ` +
+                  `Respect IG frequency override: Ace IG max 3/day (7AM/1PM/7PM), CF IG max 2/day (10AM/4PM). ` +
                   `If the payload contains video content, use publish_video instead. ` +
                   `Step 3: After posting, call save_content_draft to log what you posted. ` +
                   `Do NOT just analyze or report — actually POST the content.`,
-                content_scheduling: `EXECUTION ORDER: You MUST schedule this content for posting. ` +
+                content_scheduling: `EXECUTION ORDER: You (Yuki) MUST schedule this content for posting. ` +
                   `Step 1: Call social_scheduler_list_profiles to get available Buffer channel IDs. ` +
                   `Step 2: Use social_scheduler_create_post to queue the content on appropriate channels. ` +
                   `If the payload includes video/clip metadata, use publish_video for video platforms (YouTube, TikTok, Instagram). ` +
@@ -1712,7 +1752,11 @@ async function main() {
                 // Cap dispatch tasks to conserve LLM quota.
                 // Distribution tasks need more iterations (list profiles → post → post → save).
                 // Other tasks (caption writing, synthesis) can finish in fewer.
-                const isHeavyTask = ["funnel_distribution", "content_scheduling"].includes(task.task_type);
+                // Iteration caps per task type — balances LLM quota vs task completion
+                // Heavy tasks (distribution, scheduling) need more tool call rounds
+                // Light tasks (analysis, captions) can finish in fewer
+                const HEAVY_TASKS = new Set(["content_for_distribution", "content_scheduling", "daily_metrics_sweep", "daily_trend_scan"]);
+                const isHeavyTask = HEAVY_TASKS.has(task.task_type);
                 const iterCap = isHeavyTask ? 6 : 4;
                 const response = await agentLoop.processMessage(dispatchMessage, undefined, iterCap);
                 await completeDispatch(task.id, "completed", response.slice(0, 4000));
@@ -1733,14 +1777,23 @@ async function main() {
                 }
 
                 // ── Two-tier notification: per-agent brief recap + Sapphire full summary ──
+                // THROTTLED: Max 7 DMs per hour (1 per agent + 1 Sapphire summary).
+                // Pipeline-internal tasks (non-terminal) are SILENT — only log to activity_log.
+                // Stasis checks are SILENT unless they detect a problem.
+                const SILENT_TASK_TYPES = new Set([
+                  "viral_clip_extraction", "narrative_weaponization", "caption_weaponization",
+                  "content_for_distribution", "architectural_sync", "stasis_self_check",
+                ]);
+                const isStasisNominal = task.task_type === "stasis_self_check" &&
+                  (response.toLowerCase().includes("nominal") || response.toLowerCase().includes("no trigger"));
+                const isSilentTask = SILENT_TASK_TYPES.has(task.task_type) || isStasisNominal;
 
-                // TIER 1: Every agent sends a short plain-English DM to Ace's Telegram
-                // Always routes to defaultChatId (real Telegram), never dashboard string
-                if (task.task_type !== "pipeline_completion_summary") {
+                // TIER 1: Terminal/notable tasks get a brief DM. Pipeline-internal tasks are silent.
+                if (task.task_type !== "pipeline_completion_summary" && !isSilentTask) {
                   try {
                     const agentLabel = agentName.charAt(0).toUpperCase() + agentName.slice(1);
-                    // Extract a 1-line summary from the agent's response (first sentence or 150 chars)
-                    const briefRecap = response.split(/[.!?\n]/).filter(s => s.trim().length > 10)[0]?.trim().slice(0, 150) || "Task processed.";
+                    // Extract a 1-line summary from the agent's response (first meaningful sentence)
+                    const briefRecap = response.split(/[.!?\n]/).filter(s => s.trim().length > 10)[0]?.trim().slice(0, 300) || "Task processed.";
                     await channel.sendMessage(
                       defaultChatId,
                       `🔹 *${agentLabel}*: ${briefRecap}`,
@@ -1749,6 +1802,8 @@ async function main() {
                   } catch (dmErr: any) {
                     console.error(`[AgentDM] Failed to send ${agentName} recap: ${dmErr.message}`);
                   }
+                } else {
+                  console.log(`🔇 [AgentDM] Suppressed DM for ${agentName}/${task.task_type} (pipeline-internal or nominal stasis)`);
                 }
 
                 // Also log to activity_log for dashboard visibility

@@ -142,7 +142,7 @@ export class AgentLoop {
       const response = await activeLLM.generate(context, {
         systemPrompt: systemPrompt,
         tools: toolDefs.length > 0 ? toolDefs : undefined,
-        maxTokens: 4096,
+        maxTokens: 8192,
       });
       console.log(`✅ [AgentLoop] LLM responded — finishReason: ${response.finishReason}, toolCalls: ${response.toolCalls?.length || 0}`);
 

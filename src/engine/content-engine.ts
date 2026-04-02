@@ -697,19 +697,24 @@ export async function distributionSweep(): Promise<number> {
             assetsBlock = `assets: { images: [{ url: "${draft.media_url.replace(/"/g, '\\"')}" }] }`;
           }
 
-          // CE-2 FIX: Use scheduled timing with explicit scheduledAt instead of automatic
-          const scheduledAt = draft.scheduled_time || new Date().toISOString();
+          // CE-2 FIX: Use Buffer queue with optional scheduledAt for future slots
+          const slotTime = draft.scheduled_time ? new Date(draft.scheduled_time) : null;
+          const now = new Date();
+          // Only include scheduledAt if the slot time is in the future
+          const scheduledAtBlock = slotTime && slotTime > now
+            ? `scheduledAt: "${slotTime.toISOString()}",`
+            : "";
           const query = `
             mutation CreatePost {
               createPost(input: {
                 text: ${JSON.stringify(text)},
                 channelId: "${channel.id}",
-                schedulingType: scheduled,
-                scheduledAt: "${scheduledAt}",
+                ${scheduledAtBlock}
                 mode: addToQueue
                 ${assetsBlock ? `, ${assetsBlock}` : ""}
               }) {
-                ... on PostActionSuccess {                  post { id text scheduledAt }
+                ... on PostActionSuccess {
+                  post { id text scheduledAt }
                 }
                 ... on MutationError {
                   message
@@ -847,4 +852,4 @@ export async function contentEngineStatus(): Promise<string> {  const today = ne
     `Channels: ${channelInfo}\n` +
     `Niche today: ${NICHE_ROTATION[new Date().getDay()]?.niche || "unknown"}`
   );
-}
+}                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       

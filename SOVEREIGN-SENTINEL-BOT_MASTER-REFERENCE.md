@@ -1,7 +1,31 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-03 (Cowork Session 11 — Browser Automation Overhaul COMPLETE) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-03 (Cowork Session 12 — Deploy + Cookie Import COMPLETE) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
-**Session Summary — Cowork Session 11 (2026-04-03):**
+**Session Summary — Cowork Session 12 (2026-04-03):**
+1. **GIT PUSH + RAILWAY DEPLOY.** Session 11 code (Chromium, Puppeteer, browser tools, TikTok/IG upload tools, login endpoints, agent browser directives) pushed to main. Commit includes all Session 11 files. Railway auto-deployed successfully with `BROWSER_ENABLED=true` set in env vars.
+2. **COOKIE IMPORT ENDPOINT BUILT + DEPLOYED.** New `POST /api/browser/import-cookies` endpoint. Accepts `{domain, cookies[]}` — validates domain against allowlist (tiktok, instagram, youtube, twitter, threads), normalizes cookie format for Puppeteer (handles `expirationDate` from Chrome extension and `expires` from DevTools), saves via `saveCookies()`, verifies by loading back, sends Telegram notification. Companion `POST /api/browser/cookie-status` reports cookie counts for all 5 domains. Commit `1212595`.
+3. **SUPABASE AGENT BLUEPRINTS UPDATED.** All 6 agent `personality_config` rows updated via direct Supabase SQL with permanent browser scope sections (Alfred=research, Veritas=fact-check, Vector=analytics, Anita=trends, Yuki=PRIMARY distribution, Sapphire=intel).
+4. **CHROME EXTENSION COOKIE EXTRACTION.** Built `C:\Users\richi\cookie-ext` — Manifest V3 extension with popup UI using `chrome.cookies.getAll()` API to extract all cookies (including httpOnly session cookies) for TikTok and Instagram. Downloads as JSON files. Solved Chrome v20 app-bound encryption barrier that blocked all external decryption approaches (direct DB, CDP, Cookie Store API).
+5. **COOKIES IMPORTED TO RAILWAY.** TikTok: 71 cookies (including `sessionid=ed7a676e...`). Instagram: 11 cookies (including `sessionid=6460415455%3ACLMmyg9vS1nQ7Y...`). Both verified via `/api/browser/cookie-status`. Browser uploads are ARMED.
+6. **Push status: ✅ PUSHED** — Multiple commits pushed to main. Railway deployed and verified live.
+
+**POST-DEPLOY CHECKLIST (Session 12) — STATUS:**
+1. ✅ Git push + Railway deploy
+2. ✅ `BROWSER_ENABLED=true` set in Railway env
+3. ✅ Supabase agent blueprint browser scopes updated
+4. ✅ TikTok + Instagram cookies extracted and imported
+5. ⏳ VidRush E2E test — Still needs full pipeline test: YouTube URL → clips → publish to all 3 platforms
+6. ⏳ Cookie resilience monitoring — Auto-detect expiry + re-login notification
+7. ⏳ Content Engine → VidRush bridge — Connect content output to `vid_rush_queue`
+
+**NEXT SESSION PRIORITIES (Session 13):**
+1. **VIDRUSH END-TO-END TEST** — Full pipeline: YouTube URL in → Groq Whisper transcription → clip generation → publish to YouTube Shorts + TikTok (browser) + Instagram (browser)
+2. **COOKIE RESILIENCE** — Monitor if TikTok/IG cookies expire, build auto-detection + Telegram re-login notification
+3. **CONTENT ENGINE → VIDRUSH BRIDGE** — Connect content engine output to `vid_rush_queue` for automated distribution
+4. **PINECONE AUTH FIX** — Still blocked on API key rotation (from Session 10 backlog)
+5. **COOKIE RE-EXPORT WORKFLOW** — When cookies expire, user re-opens Chrome extension popup, clicks EXTRACT BOTH, re-POSTs via `curl -d @file` to Railway endpoint
+
+**Previous Session Summary — Cowork Session 11 (2026-04-03):**
 1. **CHROMIUM + PUPPETEER IN DOCKER.** `Dockerfile.bot` production stage now installs `chromium` via apt-get. `puppeteer-core` (v24.x) added to package.json dependencies. Env vars set in Dockerfile: `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`, `PUPPETEER_SKIP_DOWNLOAD=true`. System Chromium used — no duplicate download.
 2. **BROWSER.TS FULL REWRITE — FROM TOY TO WEAPON.** Replaced 3-action toy tool with 12-action arsenal: navigate, click, type, wait, screenshot, extract, evaluate, login, upload_video, cookies_save, cookies_load, close. Singleton browser instance with auto-idle shutdown (5 min). Cookie persistence to filesystem (`/app/data/browser-cookies/`). Mobile viewport emulation support. Exports `getBrowser`, `saveCookies`, `loadCookies` for use by upload tools.
 3. **TIKTOK BROWSER UPLOAD TOOL.** New `src/tools/tiktok-browser-upload.ts`. Puppeteer workflow: download video from Supabase URL → restore TikTok session cookies → navigate to upload page → attach file → fill caption → click Post → save updated cookies → log to Supabase `content_transmissions`. Includes `tiktokLoginFlow()` for one-time manual login (120s window).
@@ -20,13 +44,13 @@
 5. Hit `POST /api/browser/instagram-login` → same manual login flow
 6. VidRush E2E test: YouTube URL → Groq Whisper → clips → sweep → YouTube Shorts + TikTok browser + IG browser
 
-**NEXT SESSION PRIORITIES (Session 12):**
-1. **GIT PUSH + DEPLOY** — Push Session 11 code, verify Railway builds with Chromium successfully
-2. **TIKTOK + INSTAGRAM MANUAL LOGIN** — Hit the login endpoints, complete manual auth, save cookies
-3. **VIDRUSH END-TO-END TEST** — Full pipeline: YouTube URL in → Shorts published on all 3 platforms
-4. **COOKIE RESILIENCE** — Monitor if TikTok/IG cookies expire, build auto-detection + re-login notification
-5. **CONTENT ENGINE → VIDRUSH BRIDGE** — Connect content engine output to vid_rush_queue for automated distribution
-6. **PINECONE AUTH FIX** — Still blocked on API key rotation (from Session 10 backlog)
+**Session 12 Priorities — COMPLETED (see Session 12 summary above):**
+1. ✅ GIT PUSH + DEPLOY — Pushed, Railway built with Chromium
+2. ✅ COOKIE IMPORT (replaced manual login) — Built import endpoint + Chrome extension, cookies extracted and imported
+3. ⏳ VIDRUSH E2E TEST — Deferred to Session 13
+4. ⏳ COOKIE RESILIENCE — Deferred to Session 13
+5. ⏳ CONTENT ENGINE → VIDRUSH BRIDGE — Deferred to Session 13
+6. ⏳ PINECONE AUTH FIX — Still blocked
 
 **Previous Session Summary — Cowork Session 10 (2026-04-03):**
 1. **GROQ WHISPER SWAP — OpenAI billing dependency ELIMINATED.** `vid-rush.ts` now uses Groq Whisper API (`whisper-large-v3-turbo`) as primary transcription provider. `GROQ_API_KEY` already set in Railway (14,400 req/day free tier). OpenAI Whisper is automatic fallback if Groq fails. 25MB file size check added. VidRush can now transcribe without OpenAI credits.

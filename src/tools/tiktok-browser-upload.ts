@@ -59,9 +59,18 @@ export class TikTokBrowserUploadTool implements Tool {
         type: "string",
         description: "Content niche for logging: dark_psychology, self_improvement, burnout, quantum",
       },
+      brand: {
+        type: "string",
+        description: "Which brand account to use: 'ace_richie' (default) or 'containment_field'. Maps to the correct cookie set.",
+      },
     },
     required: ["video_url", "caption"],
   };
+
+  // Map brand label to cookie account identifier
+  private static brandToAccount(brand: string): string {
+    return brand === "containment_field" ? "tcf" : "acerichie";
+  }
 
   async execute(args: Record<string, unknown>): Promise<string> {
     if (!config.tools.browserEnabled) {
@@ -71,6 +80,8 @@ export class TikTokBrowserUploadTool implements Tool {
     const videoUrl = String(args.video_url);
     const caption = String(args.caption);
     const niche = args.niche ? String(args.niche) : "unknown";
+    const brand = args.brand ? String(args.brand) : "ace_richie";
+    const account = TikTokBrowserUploadTool.brandToAccount(brand);
     let tmpPath = "";
 
     try {
@@ -89,11 +100,11 @@ export class TikTokBrowserUploadTool implements Tool {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
       );
 
-      // Restore TikTok cookies
-      const cookies = loadCookies(COOKIE_DOMAIN);
+      // Restore TikTok cookies for the correct account
+      const cookies = loadCookies(COOKIE_DOMAIN, account);
       if (cookies && cookies.length > 0) {
         await page.setCookie(...cookies);
-        console.log(`[TikTok Upload] Restored ${cookies.length} session cookies`);
+        console.log(`[TikTok Upload] Restored ${cookies.length} session cookies for account: ${account}`);
       } else {
         await page.close();
         return (
@@ -212,9 +223,9 @@ export class TikTokBrowserUploadTool implements Tool {
       // Step 9: Wait for confirmation
       await new Promise((r) => setTimeout(r, 8_000));
 
-      // Save cookies for next session
+      // Save cookies for next session (account-aware)
       const updatedCookies = await page.cookies();
-      saveCookies(COOKIE_DOMAIN, updatedCookies);
+      saveCookies(COOKIE_DOMAIN, updatedCookies, account);
 
       // Screenshot for verification
       const confirmSS = await page.screenshot({ type: "png" }) as Buffer;
@@ -320,7 +331,7 @@ export async function tiktokLoginFlow(): Promise<string> {
       }
     }
 
-    // Save cookies regardless
+    // Save cookies regardless (login flow saves to default account)
     const cookies = await page.cookies();
     saveCookies(COOKIE_DOMAIN, cookies);
 

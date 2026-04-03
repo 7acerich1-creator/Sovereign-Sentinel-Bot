@@ -568,7 +568,7 @@ export class VideoPublisherTool implements Tool {
             if (configured.tiktok) {
               result = await this.tiktok.execute({ video_url: videoUrl, caption, niche });
             } else if (browserEnabled) {
-              result = await this.tiktokBrowser.execute({ video_url: videoUrl, caption, niche });
+              result = await this.tiktokBrowser.execute({ video_url: videoUrl, caption, niche, brand });
               result = `[BROWSER FALLBACK]\n${result}`;
             } else {
               result = "⬚ Not configured (API token missing, browser disabled)";
@@ -578,7 +578,7 @@ export class VideoPublisherTool implements Tool {
             if (configured.instagram) {
               result = await this.instagram.execute({ video_url: videoUrl, caption, niche });
             } else if (browserEnabled) {
-              result = await this.instagramBrowser.execute({ video_url: videoUrl, caption, niche });
+              result = await this.instagramBrowser.execute({ video_url: videoUrl, caption, niche, brand });
               result = `[BROWSER FALLBACK]\n${result}`;
             } else {
               result = "⬚ Not configured (API token missing, browser disabled)";

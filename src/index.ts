@@ -1298,11 +1298,10 @@ async function main() {
   });
 
   // ── /api/browser/import-cookies — Import cookies from external browser ──
-  // Accepts: { domain: "tiktok" | "instagram" | string, cookies: Cookie[] }
-  // Use when headless login fails: export cookies from a real browser (EditThisCookie, DevTools, etc.)
-  // and POST them here. The bot will use these cookies for future browser uploads.
+  // Accepts: { domain: "tiktok" | "instagram", account?: "acerichie" | "tcf", cookies: Cookie[] }
+  // Multi-account: pass "account" to store cookies per-brand. Defaults to "acerichie".
   webhookServer.register("/api/browser/import-cookies", async (incoming: any) => {
-    const { domain, cookies } = incoming as { domain?: string; cookies?: any[] };
+    const { domain, cookies, account: rawAccount } = incoming as { domain?: string; cookies?: any[]; account?: string };
 
     // ── Validate domain ──
     if (!domain || typeof domain !== "string") {
@@ -1312,6 +1311,13 @@ async function main() {
     const normalizedDomain = domain.toLowerCase().trim();
     if (!allowedDomains.includes(normalizedDomain)) {
       return JSON.stringify({ status: "error", message: `Invalid domain '${domain}'. Allowed: ${allowedDomains.join(", ")}` });
+    }
+
+    // ── Account (multi-brand support) ──
+    const allowedAccounts = ["acerichie", "tcf"];
+    const account = rawAccount ? rawAccount.toLowerCase().trim() : "acerichie";
+    if (!allowedAccounts.includes(account)) {
+      return JSON.stringify({ status: "error", message: `Invalid account '${rawAccount}'. Allowed: ${allowedAccounts.join(", ")}` });
     }
 
     // ── Validate cookies array ──
@@ -1353,13 +1359,13 @@ async function main() {
 
     // ── Save to disk ──
     try {
-      saveCookies(normalizedDomain, normalized as any);
+      saveCookies(normalizedDomain, normalized as any, account);
 
       // Verify the save by loading back
-      const verification = loadCookies(normalizedDomain);
+      const verification = loadCookies(normalizedDomain, account);
       const savedCount = verification ? verification.length : 0;
 
-      console.log(`🍪 [Cookie Import] Saved ${savedCount} cookies for ${normalizedDomain}`);
+      console.log(`🍪 [Cookie Import] Saved ${savedCount} cookies for ${normalizedDomain}/${account}`);
 
       // Notify Architect via Telegram
       const ARCHITECT_CHAT_ID = config.telegram.authorizedUserIds[0];
@@ -1371,7 +1377,7 @@ async function main() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               chat_id: ARCHITECT_CHAT_ID,
-              text: `🍪 **Cookie Import Successful**\n\nDomain: \`${normalizedDomain}\`\nCookies saved: ${savedCount}\nBrowser uploads for ${normalizedDomain} are now armed.`,
+              text: `🍪 **Cookie Import Successful**\n\nDomain: \`${normalizedDomain}\`\nAccount: \`${account}\`\nCookies saved: ${savedCount}\nBrowser uploads for ${normalizedDomain}/${account} are now armed.`,
               parse_mode: "Markdown",
             }),
           });
@@ -1381,26 +1387,31 @@ async function main() {
       return JSON.stringify({
         status: "ok",
         domain: normalizedDomain,
+        account,
         cookies_saved: savedCount,
-        cookie_path: `${COOKIE_DIR}/${normalizedDomain}.json`,
-        message: `${savedCount} cookies imported for ${normalizedDomain}. Browser uploads are now armed.`,
+        cookie_path: `${COOKIE_DIR}/${normalizedDomain}_${account}.json`,
+        message: `${savedCount} cookies imported for ${normalizedDomain}/${account}. Browser uploads are now armed.`,
       });
     } catch (err: any) {
       return JSON.stringify({ status: "error", message: `Failed to save cookies: ${err.message}` });
     }
   });
 
-  // ── /api/browser/cookie-status — Check which domains have cookies saved ──
+  // ── /api/browser/cookie-status — Check which domains have cookies saved (multi-account) ──
   webhookServer.register("/api/browser/cookie-status", async () => {
     const domains = ["tiktok", "instagram", "youtube", "twitter", "threads"];
-    const status: Record<string, { has_cookies: boolean; cookie_count: number }> = {};
+    const accounts = ["acerichie", "tcf"];
+    const status: Record<string, Record<string, { has_cookies: boolean; cookie_count: number }>> = {};
 
     for (const d of domains) {
-      const cookies = loadCookies(d);
-      status[d] = {
-        has_cookies: cookies !== null && cookies.length > 0,
-        cookie_count: cookies ? cookies.length : 0,
-      };
+      status[d] = {};
+      for (const acct of accounts) {
+        const cookies = loadCookies(d, acct);
+        status[d][acct] = {
+          has_cookies: cookies !== null && cookies.length > 0,
+          cookie_count: cookies ? cookies.length : 0,
+        };
+      }
     }
 
     return JSON.stringify({ status: "ok", domains: status });

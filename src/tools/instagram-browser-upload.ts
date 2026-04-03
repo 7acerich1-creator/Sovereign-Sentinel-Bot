@@ -62,9 +62,18 @@ export class InstagramBrowserUploadTool implements Tool {
         type: "string",
         description: "Content niche for logging: dark_psychology, self_improvement, burnout, quantum",
       },
+      brand: {
+        type: "string",
+        description: "Which brand account to use: 'ace_richie' (default) or 'containment_field'. Maps to the correct cookie set.",
+      },
     },
     required: ["video_url", "caption"],
   };
+
+  // Map brand label to cookie account identifier
+  private static brandToAccount(brand: string): string {
+    return brand === "containment_field" ? "tcf" : "acerichie";
+  }
 
   async execute(args: Record<string, unknown>): Promise<string> {
     if (!config.tools.browserEnabled) {
@@ -74,6 +83,8 @@ export class InstagramBrowserUploadTool implements Tool {
     const videoUrl = String(args.video_url);
     const caption = String(args.caption);
     const niche = args.niche ? String(args.niche) : "unknown";
+    const brand = args.brand ? String(args.brand) : "ace_richie";
+    const account = InstagramBrowserUploadTool.brandToAccount(brand);
     let tmpPath = "";
 
     try {
@@ -87,11 +98,11 @@ export class InstagramBrowserUploadTool implements Tool {
       const page = await browser.newPage();
       await setupMobilePage(page);
 
-      // Restore Instagram cookies
-      const cookies = loadCookies(COOKIE_DOMAIN);
+      // Restore Instagram cookies for the correct account
+      const cookies = loadCookies(COOKIE_DOMAIN, account);
       if (cookies && cookies.length > 0) {
         await page.setCookie(...cookies);
-        console.log(`[IG Upload] Restored ${cookies.length} session cookies`);
+        console.log(`[IG Upload] Restored ${cookies.length} session cookies for account: ${account}`);
       } else {
         await page.close();
         return (
@@ -305,9 +316,9 @@ export class InstagramBrowserUploadTool implements Tool {
       // Step 9: Wait for post confirmation
       await new Promise((r) => setTimeout(r, 10_000));
 
-      // Save cookies
+      // Save cookies (account-aware)
       const updatedCookies = await page.cookies();
-      saveCookies(COOKIE_DOMAIN, updatedCookies);
+      saveCookies(COOKIE_DOMAIN, updatedCookies, account);
 
       // Screenshot for verification
       const confirmSS = await page.screenshot({ type: "png" }) as Buffer;

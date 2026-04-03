@@ -60,25 +60,46 @@ async function closeBrowser(): Promise<void> {
 // ── Cookie persistence (filesystem-based) ──
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from "fs";
 
-function cookiePath(domain: string): string {
+// Account-aware cookie paths: tiktok_acerichie.json, tiktok_tcf.json, etc.
+// Legacy: loadCookies("tiktok") still works (defaults to acerichie).
+const DEFAULT_ACCOUNT = "acerichie";
+
+function cookiePath(domain: string, account?: string): string {
+  const cleanDomain = domain.replace(/[^a-zA-Z0-9]/g, "_");
+  const acct = account ? account.replace(/[^a-zA-Z0-9]/g, "_") : DEFAULT_ACCOUNT;
+  return `${COOKIE_DIR}/${cleanDomain}_${acct}.json`;
+}
+
+// Legacy path for migration: check if old-style file exists (e.g., tiktok.json)
+function legacyCookiePath(domain: string): string {
   return `${COOKIE_DIR}/${domain.replace(/[^a-zA-Z0-9]/g, "_")}.json`;
 }
 
-function saveCookies(domain: string, cookies: Cookie[]): void {
+function saveCookies(domain: string, cookies: Cookie[], account?: string): void {
   try {
     if (!existsSync(COOKIE_DIR)) mkdirSync(COOKIE_DIR, { recursive: true });
-    writeFileSync(cookiePath(domain), JSON.stringify(cookies, null, 2));
+    writeFileSync(cookiePath(domain, account), JSON.stringify(cookies, null, 2));
   } catch (err: any) {
-    console.error(`[Browser] Cookie save failed for ${domain}: ${err.message}`);
+    console.error(`[Browser] Cookie save failed for ${domain}/${account || DEFAULT_ACCOUNT}: ${err.message}`);
   }
 }
 
-function loadCookies(domain: string): Cookie[] | null {
+function loadCookies(domain: string, account?: string): Cookie[] | null {
   try {
-    const path = cookiePath(domain);
-    if (!existsSync(path)) return null;
-    const raw = readFileSync(path, "utf8");
-    return JSON.parse(raw);
+    const path = cookiePath(domain, account);
+    if (existsSync(path)) {
+      const raw = readFileSync(path, "utf8");
+      return JSON.parse(raw);
+    }
+    // Fallback: try legacy path (pre-multi-account) if no account specified
+    if (!account) {
+      const legacy = legacyCookiePath(domain);
+      if (existsSync(legacy)) {
+        const raw = readFileSync(legacy, "utf8");
+        return JSON.parse(raw);
+      }
+    }
+    return null;
   } catch {
     return null;
   }
@@ -317,4 +338,4 @@ export class BrowserTool implements Tool {
 }
 
 // ── Export helpers for use by TikTok/Instagram upload tools ──
-export { getBrowser, closeBrowser, saveCookies, loadCookies, EXEC_PATH, COOKIE_DIR };
+export { getBrowser, closeBrowser, saveCookies, loadCookies, EXEC_PATH, COOKIE_DIR, DEFAULT_ACCOUNT };

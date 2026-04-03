@@ -97,25 +97,85 @@ interface ContentDraft {
 
 const STORAGE_BUCKET = "public-assets";
 
-/** Niche-aware image prompt prefixes (mirrors image-generator.ts) */
-const IMAGE_NICHE_PREFIXES: Record<string, string> = {
-  dark_psychology:
-    "High contrast monochromatic, brutalist aesthetic, heavy shadows, single geometric element, cinematic, ",
-  self_improvement:
-    "Clean minimal, bright warm tones, forward momentum, architectural, ",
-  burnout:
-    "Muted desaturated palette, warm undertones, soft industrial, release energy, ",
-  quantum:
-    "Abstract geometric, deep blue shifted, high saturation, conceptual visualization, ",
-  brand:
-    "Sovereign Synthesis brand aesthetic, amber and teal accents, dark background, authoritative minimal, ",
+/**
+ * NICHE-MATCHED VISUAL PRODUCTION SPEC
+ * Each niche produces a visually distinct image style that matches the content energy.
+ * These aren't generic AI art prompts — they're cinematic direction that produces
+ * scroll-stopping visuals native to each brand × niche combination.
+ */
+const IMAGE_NICHE_PREFIXES: Record<string, Record<Brand, string>> = {
+  dark_psychology: {
+    ace_richie:
+      "Cinematic noir photograph, deep shadows with single amber light source cutting through darkness, " +
+      "silhouette of a figure standing at the edge of a vast geometric structure, " +
+      "gold and midnight blue color palette, brutalist architecture, fog, tension and revelation, " +
+      "movie-poster composition, 1:1 square format, photorealistic cinematic quality, ",
+    containment_field:
+      "Surveillance-aesthetic photograph, clinical cold blue lighting on concrete and steel, " +
+      "security camera angle, rain-slicked urban environment at night, " +
+      "blood red accent light bleeding through shadows, noir detective film still, " +
+      "oppressive atmosphere, institutional architecture, 1:1 square format, photorealistic, ",
+  },
+  self_improvement: {
+    ace_richie:
+      "Golden hour cinematic photograph, figure ascending stone steps toward bright horizon, " +
+      "warm amber and teal sky, architectural grandeur, columns and open space, " +
+      "sense of elevation and breaking through, sovereign and majestic, " +
+      "wide lens perspective, 1:1 square format, photorealistic cinematic quality, ",
+    containment_field:
+      "Sterile corporate environment photograph, pristine white office with one shattered mirror, " +
+      "clinical fluorescent lighting, the illusion cracking, self-help books stacked like a prison, " +
+      "cold and revealing, deconstructed wellness aesthetic, 1:1 square format, photorealistic, ",
+  },
+  burnout: {
+    ace_richie:
+      "Cinematic photograph of chains dissolving into golden particles, " +
+      "figure walking away from a cubicle into open landscape at dawn, " +
+      "muted grays transitioning to warm amber, industrial to natural, " +
+      "liberation energy, the cage opening, 1:1 square format, photorealistic cinematic, ",
+    containment_field:
+      "Industrial horror photograph, human silhouette inside a hamster wheel made of screens and notifications, " +
+      "desaturated cold palette with toxic green glow from devices, " +
+      "factory-floor atmosphere, extraction machinery aesthetic, 1:1 square format, photorealistic, ",
+  },
+  quantum: {
+    ace_richie:
+      "Abstract cosmic photograph, human figure standing in a field of geometric light patterns, " +
+      "deep space indigo and electric gold, sacred geometry, observer effect visualization, " +
+      "reality bending at the edges, mystical but scientific, 1:1 square format, cinematic, ",
+    containment_field:
+      "Data-visualization aesthetic, reality glitching into matrix-like patterns, " +
+      "cold blue wireframe overlaid on physical space, information warfare visualization, " +
+      "quantum uncertainty as threat landscape, 1:1 square format, photorealistic digital art, ",
+  },
+  brand: {
+    ace_richie:
+      "Sovereign Synthesis brand image, midnight blue background with amber and teal accent lighting, " +
+      "architectural sovereignty, throne-like composition, gold geometric accents, " +
+      "power and intention, master architect energy, 1:1 square format, cinematic, ",
+    containment_field:
+      "Anonymous intelligence aesthetic, dark room with single red light on a classified document, " +
+      "noir atmosphere, information broker setting, shadows and revelation, " +
+      "the truth behind the curtain, 1:1 square format, photorealistic noir, ",
+  },
 };
-/** Brand-specific visual style suffixes */
+
+/** Fallback for unknown niches */
+const IMAGE_NICHE_FALLBACK: Record<Brand, string> = {
+  ace_richie:
+    "Cinematic dark photograph with amber and gold accent lighting, sovereign aesthetic, architectural, " +
+    "powerful composition, 1:1 square format, photorealistic, ",
+  containment_field:
+    "Dark noir photograph, cold blue and red accent lighting, clinical atmosphere, " +
+    "surveillance aesthetic, 1:1 square format, photorealistic, ",
+};
+
+/** Brand-specific SUFFIX — applied AFTER niche prefix */
 const BRAND_IMAGE_STYLE: Record<Brand, string> = {
   ace_richie:
-    "Gold and amber tones, sovereign iconography, empowering, liberation energy, dark midnight background. No text overlays.",
+    "NO text, NO words, NO letters, NO watermarks on the image. Photorealistic cinematic quality. Dark background. Sovereign, powerful, intentional energy.",
   containment_field:
-    "Dark noir aesthetic, blood red and charcoal, ominous, clinical, high contrast shadows. No text overlays.",
+    "NO text, NO words, NO letters, NO watermarks on the image. Photorealistic cinematic quality. Dark noir atmosphere. Clinical, unsettling, revealing energy.",
 };
 
 /** DALL-E 3 aspect ratio mapping */
@@ -179,13 +239,18 @@ async function generateContentImage(
   dateStr: string,
   slotLabel: string
 ): Promise<string | null> {
-  // Build an enhanced image prompt from the post text + niche + brand
-  const nichePrefix = IMAGE_NICHE_PREFIXES[niche] || IMAGE_NICHE_PREFIXES.brand;
+  // Build a cinematic image prompt from brand × niche visual spec + post concept
+  const nichePrefixes = IMAGE_NICHE_PREFIXES[niche];
+  const nichePrefix = nichePrefixes?.[brand] || IMAGE_NICHE_FALLBACK[brand];
   const brandSuffix = BRAND_IMAGE_STYLE[brand];
 
-  // Extract the core concept from the post text (first 120 chars) to seed the image
-  const conceptSeed = postText.replace(/[#@\n]/g, " ").slice(0, 120).trim();
-  const imagePrompt = `${nichePrefix}${conceptSeed}. ${brandSuffix} Social media post image, 1:1 square format, visually striking, no text.`;
+  // Extract the core CONCEPT (not raw text) to seed the image with thematic relevance
+  const conceptSeed = postText
+    .replace(/[#@\n"]/g, " ")
+    .replace(/—.*$/, "") // Remove sign-off
+    .slice(0, 100)
+    .trim();
+  const imagePrompt = `${nichePrefix}Thematic concept: ${conceptSeed}. ${brandSuffix}`;
 
   let imageBuffer: Buffer | null = null;
   let source = "none";
@@ -443,45 +508,116 @@ async function supabasePatch(table: string, id: string, data: Record<string, unk
   }
 }
 
-// ── Content Generation (LLM) ──
+// ── Content Generation (LLM) — ANITA'S VOICE + PROTOCOL 77 ──
 
 /**
- * Generate platform-adapted content for a single time slot + brand.
- * One LLM call produces variants for all platforms.
+ * ANITA-DRIVEN CONTENT GENERATION
+ * Anita is the voice of the content engine. Every post uses her Protocol 77
+ * hook-pivot-anchor structure, her conversion psychology, and her brand-specific
+ * language. The engine doesn't "sound like AI" because Anita's personality IS the prompt.
  */
+
+/** Full brand voice blueprints — Anita's conversion psychology baked in */
+const BRAND_VOICE_BLUEPRINTS: Record<Brand, string> = {
+  ace_richie: `You are Anita, Head of Conversion & Nurture for Sovereign Synthesis — writing as Ace Richie.
+
+VOICE: Sovereign, direct, zero-fear. You speak as the System Architect — someone who cracked the code of reality and is handing the blueprint to the next person ready to hear it. Your tone is bold but warm, authoritative but approachable. You've been through The Simulation and came out the other side. Now you're building the escape route for others.
+
+LEXICON (use naturally, not forced):
+- "Firmware Update" = the content/mentorship that triggers liberation
+- "Escape Velocity" = the moment someone breaks free from simulated fear
+- "The Simulation" = legacy societal programming, old-earth frequency
+- "Protocol 77" = the operating framework for sovereignty
+- "Biological Drag" = old habits/systems slowing down the shift
+- "Sovereign Synthesis" = the act of intentionally architecting reality
+
+STRUCTURE — Every post uses HOOK → PIVOT → ANCHOR:
+- HOOK: A "Glitch" in the viewer's current reality logic. Pattern interrupt. Something that makes them stop scrolling because it challenges what they assumed was true.
+- PIVOT: A dark psychology insight transmuted into a tool for sovereignty. Show the mechanism of control, then flip it into a weapon for the reader.
+- ANCHOR: A consciousness hook that links back to Protocol 77 / Sovereign Synthesis. This is the conversion moment — not a hard sell, but a frequency match.
+
+SIGN-OFF: "— Ace Richie | Sovereign Synthesis"
+
+WHAT YOU ARE NOT: Generic motivational. Hustle culture. "Rise and grind." You never sound like an AI assistant. You never use phrases like "unlock your potential" or "be your best self." You are SPECIFIC, PROVOCATIVE, and PATTERN-INTERRUPTING. Every sentence should make someone either deeply uncomfortable or deeply relieved — nothing in between.`,
+
+  containment_field: `You are Anita, Head of Conversion & Nurture — writing as The Containment Field.
+
+VOICE: Dark, clinical, anonymous. You are an intelligence analyst exposing the hidden architecture of control. Your tone is detached but magnetic — like a declassified briefing that shouldn't have been released. You don't motivate. You REVEAL. The reader feels like they've stumbled onto something they weren't supposed to see.
+
+THEMES:
+- Dopamine extraction systems (social media, gambling mechanics, attention economy)
+- Manipulation defense (dark psychology tactics used by corporations, media, relationships)
+- Hidden power structures (how systems are designed to keep people looping)
+- Cognitive warfare (how your own brain is weaponized against you)
+- Pattern recognition (teaching people to SEE the invisible frameworks)
+
+STRUCTURE — Every post uses HOOK → PIVOT → ANCHOR:
+- HOOK: An unsettling fact or observation that breaks the viewer's mental model. "Wait, that's happening to me." Cold open, no warm-up.
+- PIVOT: The mechanism exposed. Clinical breakdown of HOW the manipulation works. Specific, technical, no hand-waving. Dark psychology as a LENS, not entertainment.
+- ANCHOR: The defense protocol. Give the reader one actionable countermeasure. This creates the "I need more of this" pull without being salesy.
+
+SIGN-OFF: "— The Containment Field"
+
+WHAT YOU ARE NOT: Edgy for edge's sake. Conspiracy theory. Joker memes. You never use terms like "sigma" or "alpha." You don't quote Marcus Aurelius. You are ORIGINAL ANALYSIS presented in a clinical format. Every post should feel like reading a field report from inside the machine.`
+};
+
+/** Niche-specific content direction — tells Anita WHAT to write about, not just HOW */
+const NICHE_CONTENT_DIRECTION: Record<string, Record<Brand, string>> = {
+  dark_psychology: {
+    ace_richie: "Focus on a specific dark psychology tactic (gaslighting, triangulation, intermittent reinforcement, trauma bonding) and show how recognizing it is the first step to sovereignty. Be specific — name the tactic, show how it works in everyday life, then flip it into a defense tool.",
+    containment_field: "Expose a specific manipulation mechanism used by institutions, media, or social systems. Clinical breakdown — how the tactic works neurologically, who deploys it, and what the countermeasure is. Make the reader feel like they've been given classified intel.",
+  },
+  self_improvement: {
+    ace_richie: "Challenge a mainstream self-improvement belief that's actually keeping people trapped. 'The Simulation told you to journal every morning. Here's what actually rewires your neural pathways.' Be contrarian but backed by specifics.",
+    containment_field: "Deconstruct a self-help industry tactic — how 'positive thinking' is used as a control mechanism, how goal-setting frameworks create dependency loops, how the wellness industry monetizes your insecurity. Expose the business model behind the advice.",
+  },
+  burnout: {
+    ace_richie: "Speak to the person who knows they're in a cage but hasn't figured out the door yet. The 9-to-5 isn't just tiring — it's architecturally designed to extract your creative energy before you can use it for yourself. Offer the blueprint for the transition.",
+    containment_field: "Expose the industrial design of burnout — how work culture, notification systems, and 'always-on' expectations are ENGINEERED to deplete cognitive resources. Show the factory floor of attention extraction.",
+  },
+  quantum: {
+    ace_richie: "Bridge quantum physics concepts to sovereignty — observer effect as evidence that attention creates reality, entanglement as proof that disconnecting from The Simulation changes your field. Make the science feel mystical AND practical.",
+    containment_field: "Use quantum mechanics as a framework for understanding information warfare — superposition of narratives, observer-dependent reality in media, collapse of truth into whatever gets measured. Make physics feel like a threat model.",
+  },
+  brand: {
+    ace_richie: "Personal story or origin moment. Why Sovereign Synthesis exists. What happened to Ace that broke the simulation. Authenticity > polish. This is the 'I built this because...' slot.",
+    containment_field: "Meta-analysis of The Containment Field itself — why anonymous intelligence matters, why this channel exists, what the reader gains by paying attention. Self-referential but not self-promotional.",
+  },
+};
+
 async function generateContent(
   llm: LLMProvider,
   brand: Brand,
   niche: string,
   hookStyle: string,
-  timeSlot: string,  platforms: string[]
+  timeSlot: string,
+  platforms: string[]
 ): Promise<{ universal: string; variants: Record<string, string> }> {
-  const brandVoice = brand === "ace_richie"
-    ? "Sovereign Synthesis voice: empowering, liberating, gold-frequency. You are the System Architect showing people how to reclaim their sovereignty. Use the Sovereign Synthesis lexicon (Firmware Update, Escape Velocity, The Simulation, Protocol 77). Bold, direct, visionary."
-    : "The Containment Field voice: dark, clinical, exposing. You are an anonymous intelligence revealing the hidden systems of control. Dark psychology education. Noir tone, sharp, detached but magnetic. Themes: manipulation defense, dopamine extraction, hidden power structures.";
+  const brandVoice = BRAND_VOICE_BLUEPRINTS[brand];
+  const nicheDirection = NICHE_CONTENT_DIRECTION[niche]?.[brand] || "Write about today's theme with specificity and pattern-interrupting energy.";
 
   const platformInstructions = platforms
     .map((p) => `- ${p.toUpperCase()}: ${PLATFORM_NOTES[p] || "Standard social post format."}`)
     .join("\n");
 
-  const prompt = `You are a content engine for a social media brand. Generate ONE post concept adapted for multiple platforms.
+  const prompt = `${brandVoice}
 
-BRAND VOICE: ${brandVoice}
-
-TODAY'S NICHE: ${niche}
-HOOK STYLE: "${hookStyle}"
+TODAY'S MISSION: ${niche.replace(/_/g, " ").toUpperCase()}
+CONTENT DIRECTION: ${nicheDirection}
+HOOK ENERGY: "${hookStyle}"
 TIME SLOT: ${timeSlot}
 
-Generate a post with these platform-specific adaptations:
+Generate ONE post concept adapted for these platforms:
 ${platformInstructions}
 
 RULES:
-- Every version must hit the same core message but be NATIVE to each platform's style
-- Include the hook in the first line of every version
-- No generic motivational fluff — be specific, provocative, pattern-interrupting
-- Sovereign Synthesis sign-off for Ace Richie brand: "— Ace Richie | Sovereign Synthesis"
-- Containment Field sign-off: "— The Containment Field"
+- Use the HOOK → PIVOT → ANCHOR structure described above
+- Every version must hit the same core message but be NATIVE to each platform's format
+- The hook MUST be in the first line — it's what stops the scroll
+- Be SPECIFIC. Name tactics, cite mechanisms, reference real systems. No vague motivational language.
+- No hashtag spam — max 2 hashtags on any platform, and only if they serve the message
 - Do NOT include platform labels in the actual post text
+
 Respond in EXACTLY this JSON format (no markdown, no code fences, just raw JSON):
 {
   "universal": "The main post text that works on any platform",
@@ -877,9 +1013,96 @@ async function queueWeekendReposts(): Promise<number> {
   return queued;
 }
 
+// ── Buffer Queue Nuke — Clean Slate ──
+
+/**
+ * Delete ALL queued posts from Buffer across all channels.
+ * Also clears Supabase content_engine_queue rows that haven't been posted.
+ * Use when Buffer calendar has orphaned/test posts that need to be wiped.
+ */
+export async function nukeBufferQueue(): Promise<string> {
+  const results: string[] = [];
+  let totalDeleted = 0;
+
+  // Step 1: Clear all non-posted rows from content_engine_queue
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_ANON_KEY;
+  if (url && key) {
+    try {
+      const resp = await fetch(
+        `${url}/rest/v1/content_engine_queue?status=in.(ready,failed,partial,skipped)`,
+        {
+          method: "DELETE",
+          headers: {
+            apikey: key,
+            Authorization: `Bearer ${key}`,
+            Prefer: "return=representation",
+          },
+        }
+      );
+      const deleted = resp.ok ? ((await resp.json()) as any[]).length : 0;
+      results.push(`🗑️ Supabase queue: ${deleted} rows cleared`);
+    } catch (err: any) {
+      results.push(`❌ Supabase cleanup error: ${err.message}`);
+    }
+  }
+
+  // Step 2: Delete all queued posts from Buffer
+  try {
+    const channelMap = await discoverChannels();
+    const allChannels = [...channelMap.ace_richie, ...channelMap.containment_field];
+
+    for (const ch of allChannels) {
+      try {
+        // Query queued posts for this channel
+        const postData = await bufferGraphQL(`
+          query { posts(input: { channelId: "${ch.id}", status: queue, limit: 100 }) { id text } }
+        `);
+        const posts = postData?.posts || [];
+
+        if (posts.length === 0) {
+          results.push(`✅ ${ch.service}/${ch.name}: Empty queue`);
+          continue;
+        }
+
+        let channelDeleted = 0;
+        for (const post of posts) {
+          try {
+            const delResult = await bufferGraphQL(`
+              mutation { deletePost(input: { postId: "${post.id}" }) {
+                ... on PostActionSuccess { post { id } }
+                ... on MutationError { message }
+              }}
+            `);
+            if (delResult?.deletePost?.post?.id) {
+              channelDeleted++;
+              totalDeleted++;
+            }
+          } catch {
+            // Individual post delete failure — continue
+          }
+        }
+        results.push(`🗑️ ${ch.service}/${ch.name}: ${channelDeleted}/${posts.length} deleted`);
+      } catch (err: any) {
+        results.push(`❌ ${ch.service}/${ch.name}: ${err.message}`);
+      }
+    }
+  } catch (err: any) {
+    results.push(`❌ Buffer channel discovery failed: ${err.message}`);
+  }
+
+  // Step 3: Invalidate channel cache (in case channels changed)
+  invalidateChannelCache();
+
+  const summary = `🧹 BUFFER QUEUE NUKED\nTotal deleted: ${totalDeleted}\n\n${results.join("\n")}`;
+  console.log(summary);
+  return summary;
+}
+
 // ── Health Check ──
 
-export async function contentEngineStatus(): Promise<string> {  const today = new Date().toISOString().split("T")[0];
+export async function contentEngineStatus(): Promise<string> {
+  const today = new Date().toISOString().split("T")[0];
 
   const ready = await supabaseQuery("content_engine_queue", `status=eq.ready&scheduled_date=eq.${today}&select=id`);
   const posted = await supabaseQuery("content_engine_queue", `status=eq.posted&scheduled_date=eq.${today}&select=id`);

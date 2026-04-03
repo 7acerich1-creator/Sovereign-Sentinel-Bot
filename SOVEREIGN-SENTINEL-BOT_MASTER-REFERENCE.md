@@ -1,26 +1,29 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-02 (Cowork Session 7 — Content Engine 100% End-to-End VERIFIED) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-02 (Cowork Session 8 — Unified Content Engine Overhaul + VidRush Routing Fix) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
-**Session Summary — Cowork Session 7 (2026-04-02, late night):**
+**Session Summary — Cowork Session 8 (2026-04-02, night):**
+1. **CONTENT ENGINE VOICE OVERHAUL — Anita is now the engine.** Replaced the generic 2-paragraph brand voice prompt with full Anita-driven Protocol 77 blueprints per brand. Every post now uses HOOK → PIVOT → ANCHOR structure with Sovereign Synthesis lexicon (Ace Richie) or clinical dark intelligence framing (Containment Field). `BRAND_VOICE_BLUEPRINTS` constant contains ~500-word personality blueprints per brand. `NICHE_CONTENT_DIRECTION` gives Anita specific content guidance per niche × brand combination (10 unique direction prompts). The engine no longer sounds like "an AI wrote this" — it sounds like Anita wrote it.
+2. **IMAGE GENERATION OVERHAUL — Niche × brand cinematic visual spec.** Replaced generic image prompts ("High contrast monochromatic, brutalist aesthetic") with 10 cinematic visual direction prompts (5 niches × 2 brands). Each produces visually distinct imagery: Ace dark_psych = noir cinema with amber light, CF dark_psych = surveillance-aesthetic rain-slicked noir. Images now include explicit "NO text, NO words, NO letters" instructions to prevent AI text artifacts. `IMAGE_NICHE_PREFIXES` is now `Record<string, Record<Brand, string>>` instead of flat string map.
+3. **BUFFER QUEUE NUKE ENDPOINT.** New `/api/content-engine/nuke-queue` (POST) — deletes ALL queued Buffer posts across all 9 channels AND clears non-posted Supabase `content_engine_queue` rows. Sends Telegram notification to Architect when complete. New export: `nukeBufferQueue()` from content-engine.ts.
+4. **YOUTUBE URL ROUTING FIX — ALL agents now intercept.** Previously only Alfred's DM handler matched YouTube URLs. Now ANY agent (Sapphire, Veritas, Yuki, Anita, Vector) intercepting a YouTube URL will: (a) fire Make.com Scenarios E+F webhooks, (b) auto-dispatch to Alfred via `crew_dispatch`, (c) acknowledge the routing to the user. Alfred still processes directly when he receives the URL. URL regex also updated to match `/live/` and `/shorts/` paths (Ace was sharing YouTube Live URLs that wouldn't match the old regex).
+5. **Push status: ⏳ PUSH NEEDED** — Ace must run `git push origin main` from terminal. All changes are on disk in the mounted repo.
+
+**NEXT SESSION PRIORITIES:**
+1. **Push + deploy + nuke** — Push the code, wait for Railway deploy, then hit `/api/content-engine/nuke-queue` to wipe all stale Buffer posts. Then trigger `/api/content-engine/produce` to generate fresh content with Anita's voice.
+2. **VidRush end-to-end test** — Drop a YouTube URL to Alfred's DM and verify: (a) Make.com Scenarios E+F fire (check execution count), (b) callback hits `/api/vidrush`, (c) downstream dispatches to Yuki/Anita/Sapphire chain. Webhook URLs are already in Railway.
+3. **Content quality review** — After first Anita-voiced production run, review the actual content in Supabase `content_engine_queue`. Compare to the generic content from Sessions 6-7. If voice still needs tuning, adjust `BRAND_VOICE_BLUEPRINTS`.
+4. **Video production spec document** — The visual production spec for faceless video Shorts was defined but not yet saved to a reference file. Save to SOVEREIGN-POSTING-GUIDE.md or create VISUAL-PRODUCTION-SPEC.md.
+5. **Imagen 4 diag endpoint using wrong model** — `/api/content-engine/diag` still tests `imagen-3.0-generate-002` (404). Production code uses Imagen 4 correctly, but diag is stale. Low priority.
+
+**Previous Session Summary — Cowork Session 7 (2026-04-02, late night):**
 1. **CE-3 FIX: YouTube skipped in distribution.** Buffer YouTube integration requires VIDEO only — image+text posts explicitly rejected by Buffer API ("YouTube posts do not support image attachments", "YouTube posts require a video"). Community posts via Buffer are not supported. YouTube skipped with clear log message until video pipeline (Make.com Scenario F) is operational.
 2. **CE-4 FIX: Threads 500-char truncation.** Meta's Threads API hard-limits posts to 500 characters. Distribution now truncates Threads text to 497 chars + "..." automatically. `THREADS_CHAR_LIMIT` constant. **VERIFIED: Threads posts flowing to Buffer ✅**
 3. **CE-5 FIX: Instagram metadata.instagram.type = post.** Buffer GraphQL schema nests IG post type inside `metadata: { instagram: { type: post, shouldShareToFeed: true } }`. Two wrong attempts (`type: post` at top level, then `metadata: { type: post }`) before finding correct nesting via Buffer API docs. **VERIFIED: IG posts flowing to Buffer ✅**
 4. **CE-6 FIX: Smart retry (no duplicates).** Distribution sweep now also picks up `status = "partial"` items. Parses `buffer_results` to build `alreadySucceeded` set of channel IDs — skips channels that already have ✅ from prior sweeps. Status logic: "posted" = all possible channels hit, "partial" = some succeeded + some failed (retryable), "failed" = zero success. Added `partial` to Supabase check constraint.
 5. **LinkedIn removed.** Not connected in Buffer, was never posting. Removed from `TEXT_OK_PLATFORMS` and `PLATFORM_NOTES`.
-6. **FULL END-TO-END VERIFICATION COMPLETE.** 12/12 queue items status = "posted". Actual production sweep results verified in Supabase:
-   - X/Twitter: ✅ 12/12 (all slots, both brands)
-   - TikTok: ✅ 12/12 (all slots, both brands)
-   - Instagram: ✅ 5/12 posted (3 Ace morning/midday/evening + 2 CF educational/afternoon), 7/12 correctly frequency-limited
-   - Threads: ✅ 6/6 Ace slots posted (CF has no Threads channel)
-   - YouTube: ⏭️ Skipped (Buffer requires video — not a code bug, platform limitation)
+6. **FULL END-TO-END VERIFICATION COMPLETE.** 12/12 queue items status = "posted". All platform fixes deployed and verified.
 7. **Push status: ✅ PUSHED** — Commits `e218e1d` through `9eb6db9` (5 commits) pushed to main. Railway auto-deployed and verified live.
-8. **Railway URL confirmed:** `gravity-claw-production-d849.up.railway.app`. Manual endpoints: `/api/content-engine/sweep` (POST) triggers distribution, `/api/content-engine/produce` (POST) triggers production.
-
-**NEXT SESSION PRIORITIES:**
-1. **VidRush pipeline end-to-end verification** — Make.com Scenarios E (YouTube transcription) + F (Clip Pipeline). Get webhook URLs from Make.com, set `MAKE_SCENARIO_E_WEBHOOK` and `MAKE_SCENARIO_F_WEBHOOK` in Railway. Bot-side trigger code already exists in index.ts lines 1659-1693. Callback endpoint `/api/vidrush` already built.
-2. **YouTube strategy decision** — Buffer can't do YouTube community posts (image+text). Options: (a) Direct YouTube API posting bypassing Buffer, (b) Wait for Scenario F video pipeline, (c) Accept YouTube gap for now. Ace's call.
-3. **Monitor 6:30 AM ET cron** — verify tomorrow's autonomous production run works end-to-end without manual intervention. All platform fixes are now deployed.
-4. **Imagen 4 diag endpoint using wrong model** — `/api/content-engine/diag` still tests `imagen-3.0-generate-002` (404). Production code uses Imagen 4 correctly, but diag is stale. Low priority.
+8. **Railway URL confirmed:** `gravity-claw-production-d849.up.railway.app`. Manual endpoints: `/api/content-engine/sweep` (POST) triggers distribution, `/api/content-engine/produce` (POST) triggers production, `/api/content-engine/nuke-queue` (POST, NEW) nukes all Buffer queued posts.
 
 **Previous Session Summary — Cowork Session 6 (2026-04-02, late night):**
 1. **Gemini Imagen 3 SHUTDOWN — migrated to Imagen 4.** Google decommissioned `imagen-3.0-generate-002` (404). Replaced with `imagen-4.0-generate-001` in both `content-engine.ts` and `image-generator.ts`. Same `:predict` endpoint pattern.
@@ -688,11 +691,12 @@ VECTOR — Scheduling + Analytics
   - Feeds top-performing content back to Alfred for iteration
 ```
 
-**Pipeline Status (2026-04-01 — AUDIT UPDATE):**
-- Code is FULLY BUILT for the **Vid Rush pipeline** (YouTube URL → Alfred → Yuki → Anita → Vector). `PIPELINE_ROUTES` in index.ts defines the full chain. `triggerPipelineHandoffs` auto-chains correctly. Tested 2026-04-01 — all 8 handoffs fired.
+**Pipeline Status (2026-04-02 — SESSION 8 UPDATE):**
+- Code is FULLY BUILT for the **Vid Rush pipeline** (YouTube URL → ANY agent → Alfred → Yuki → Anita → Vector). `PIPELINE_ROUTES` in index.ts defines the full chain. `triggerPipelineHandoffs` auto-chains correctly. Tested 2026-04-01 — all 8 handoffs fired. **Session 8: YouTube URL interception now works from ANY agent DM, not just Alfred.**
 - YouTube publishing tool deployed. OAuth tokens obtained 2026-03-31.
-- **⚠️ CRITICAL GAP: The daily IMAGE+TEXT posting cadence (84 posts/week baseline) was NEVER BUILT as deterministic code.** The posting guide says "LIVE NOW" but no scheduled job iterates through the 6 time slots × 9 channels × 2 brands. Agents rely on LLM judgment to decide what to post and where — which is why Vector posted 1 item on 1 channel instead of 54. **Full gap analysis in Section 23.**
-- **FIX IN PROGRESS:** Deterministic Content Engine — a new scheduled job that handles the distribution spray via hardcoded logic. LLM writes content; code distributes it. See Section 23.
+- **Deterministic Content Engine ✅ BUILT + ANITA-VOICED.** 12 pieces/day (6 slots × 2 brands), distributed to 9 Buffer channels. Content uses Anita's Protocol 77 HOOK→PIVOT→ANCHOR structure with per-brand voice blueprints (~500 words each). Image generation uses cinematic niche×brand visual spec (10 unique direction prompts). Cron: 6:30AM ET daily production, 5-min distribution sweep.
+- **New endpoint:** `/api/content-engine/nuke-queue` — wipes ALL queued Buffer posts + Supabase queue for clean slate.
+- **VidRush Make.com Scenarios E/F: NEED END-TO-END TEST** after Session 8 code deploys.
 
 #### FORMAT B: LONG-FORM (YouTube Videos — NOT YET BUILT)
 **This is the SOURCE material that feeds Format A, AND a distribution channel itself.**

@@ -63,7 +63,7 @@ import { ProactiveBriefings } from "./proactive/briefings";
 import { HeartbeatSystem } from "./proactive/heartbeat";
 
 // ── Content Engine ──
-import { dailyContentProduction, distributionSweep, contentEngineStatus, discoverChannels } from "./engine/content-engine";
+import { dailyContentProduction, distributionSweep, contentEngineStatus, discoverChannels, nukeBufferQueue } from "./engine/content-engine";
 
 // ── Plugins ──
 import { PluginManager, MemoryTool, RecallTool } from "./plugins/system";
@@ -1099,6 +1099,22 @@ async function main() {
     }
   });
 
+  // ── /api/content-engine/nuke-queue — Delete ALL queued Buffer posts + clear Supabase queue ──
+  webhookServer.register("/api/content-engine/nuke-queue", async () => {
+    try {
+      const report = await nukeBufferQueue();
+
+      // Notify Architect via Telegram
+      if (defaultChatId && telegram) {
+        await telegram.sendMessage(defaultChatId, `🧹 *Buffer Queue Nuked — Clean Slate*\n\n${report.slice(0, 3000)}`, { parseMode: "Markdown" });
+      }
+
+      return JSON.stringify({ status: "ok", report });
+    } catch (err: any) {
+      return JSON.stringify({ status: "error", message: err.message });
+    }
+  });
+
   // ── /api/glitch — Log errors/incidents from external systems ──
   webhookServer.register("/api/glitch", async (incoming: any) => {
     const { severity, description, agent_name, stack_trace } = incoming as any;
@@ -1636,33 +1652,28 @@ async function main() {
               }
             }
 
-            // ── ALFRED: YouTube URL Pipeline Interceptor ──
-            // Fires two parallel streams:
-            //   1. Scenario E — DumplingAI transcript → dispatches back to Alfred via /api/vidrush
-            //   2. Scenario F — Sovereign clip pipeline (yt-dlp + ffmpeg) → Yuki via /api/vidrush
-            //   3. Alfred's own LLM processes the URL with injected pipeline context
-            const YOUTUBE_URL_RE = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11})/i;
-            if (agentCfg.name === "alfred" && YOUTUBE_URL_RE.test(message.content)) {
+            // ── YOUTUBE URL PIPELINE INTERCEPTOR — ALL AGENTS ──
+            // ANY agent receiving a YouTube URL triggers the Vid Rush pipeline.
+            // If the receiving agent is Alfred → he processes it directly.
+            // If it's any OTHER agent → auto-dispatch to Alfred via crew_dispatch + fire Make.com webhooks.
+            // This fixes the routing gap where Ace was dropping URLs to Sapphire but only Alfred had the interceptor.
+            const YOUTUBE_URL_RE = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|live\/|shorts\/)|youtu\.be\/)([\w-]{11})/i;
+            if (YOUTUBE_URL_RE.test(message.content)) {
               const match = message.content.match(YOUTUBE_URL_RE);
               const videoId = match?.[1];
               const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+              const receivingAgent = agentCfg.name;
 
               await agentChannel.sendTyping(message.chatId);
-              await agentChannel.sendMessage(message.chatId,
-                `🎯 _YouTube URL detected. Activating Vid Rush Pipeline..._\n` +
-                `Video ID: \`${videoId}\`\n` +
-                `📡 _Scenario E (Transcript) + Scenario F (Sovereign Clip Pipeline) firing in parallel..._`,
-                { parseMode: "Markdown" }
-              );
 
-              // Fire Make.com webhooks in parallel — Scenario E (transcript) + Scenario F (sovereign clips)
+              // ── Fire Make.com webhooks (Scenarios E + F) regardless of which agent received the URL ──
               const SCENARIO_E_WEBHOOK = config.vidRush.makeScenarioEWebhook;
               const SCENARIO_F_WEBHOOK = config.vidRush.makeScenarioFWebhook;
               const webhookPayload = {
                 youtube_url: youtubeUrl,
                 video_id: videoId,
                 chat_id: String(message.chatId),
-                triggered_by: "alfred",
+                triggered_by: receivingAgent,
               };
 
               const webhookFires: Promise<void>[] = [];
@@ -1673,11 +1684,11 @@ async function main() {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(webhookPayload),
-                  }).then(() => console.log(`📡 [Alfred] Scenario E webhook fired for ${youtubeUrl}`))
-                    .catch((err: any) => console.error(`[Alfred] Scenario E webhook error: ${err.message}`))
+                  }).then(() => console.log(`📡 [VidRush] Scenario E webhook fired via ${receivingAgent} for ${youtubeUrl}`))
+                    .catch((err: any) => console.error(`[VidRush] Scenario E webhook error: ${err.message}`))
                 );
               } else {
-                console.warn("[Alfred] MAKE_SCENARIO_E_WEBHOOK not set — transcript pipeline skipped");
+                console.warn("[VidRush] MAKE_SCENARIO_E_WEBHOOK not set — transcript pipeline skipped");
               }
 
               if (SCENARIO_F_WEBHOOK) {
@@ -1686,25 +1697,81 @@ async function main() {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(webhookPayload),
-                  }).then(() => console.log(`📡 [Alfred] Scenario F webhook fired for ${youtubeUrl}`))
-                    .catch((err: any) => console.error(`[Alfred] Scenario F webhook error: ${err.message}`))
+                  }).then(() => console.log(`📡 [VidRush] Scenario F webhook fired via ${receivingAgent} for ${youtubeUrl}`))
+                    .catch((err: any) => console.error(`[VidRush] Scenario F webhook error: ${err.message}`))
                 );
               } else {
-                console.warn("[Alfred] MAKE_SCENARIO_F_WEBHOOK not set — sovereign clip pipeline skipped");
+                console.warn("[VidRush] MAKE_SCENARIO_F_WEBHOOK not set — sovereign clip pipeline skipped");
               }
 
-              // Fire all webhooks in parallel (don't block the main flow)
               Promise.all(webhookFires).catch(() => {});
 
-              // Inject pipeline context into the message so Alfred's LLM processes it
-              message.content = `[VID RUSH PIPELINE ACTIVATED] Content Factory triggered for: ${youtubeUrl}\n\n` +
-                `Your task: Process this YouTube URL. Auto-detect the niche (dark psychology, self-improvement, burnout, or quantum physics). ` +
-                `Extract 3 timestamped hooks: (1) 0:00 scroll-stopping opening, (2) ~30% escalation, (3) ~70% solution/reveal. ` +
-                `Generate a cleaned transcript summary and 1 core transmission sentence. Apply Sovereign Synthesis lexicon. ` +
-                `Use the crew_dispatch tool to send your outputs downstream: ` +
-                `dispatch timestamped_hooks to yuki, cleaned_transcript to anita, and core_summary to sapphire.\n` +
-                `NOTE: DumplingAI transcript (Scenario E) and sovereign clip pipeline (Scenario F) are being processed in parallel via Make.com.\n` +
-                `Original message: ${message.content}`;
+              if (receivingAgent === "alfred") {
+                // ── ALFRED: Process directly — he IS the content intelligence agent ──
+                await agentChannel.sendMessage(message.chatId,
+                  `🎯 _YouTube URL detected. Activating Vid Rush Pipeline..._\n` +
+                  `Video ID: \`${videoId}\`\n` +
+                  `📡 _Scenario E (Transcript) + Scenario F (Sovereign Clip Pipeline) firing in parallel..._`,
+                  { parseMode: "Markdown" }
+                );
+
+                message.content = `[VID RUSH PIPELINE ACTIVATED] Content Factory triggered for: ${youtubeUrl}\n\n` +
+                  `Your task: Process this YouTube URL. Auto-detect the niche (dark psychology, self-improvement, burnout, or quantum physics). ` +
+                  `Extract 3 timestamped hooks: (1) 0:00 scroll-stopping opening, (2) ~30% escalation, (3) ~70% solution/reveal. ` +
+                  `Generate a cleaned transcript summary and 1 core transmission sentence. Apply Sovereign Synthesis lexicon. ` +
+                  `Use the crew_dispatch tool to send your outputs downstream: ` +
+                  `dispatch timestamped_hooks to yuki, cleaned_transcript to anita, and core_summary to sapphire.\n` +
+                  `NOTE: DumplingAI transcript (Scenario E) and sovereign clip pipeline (Scenario F) are being processed in parallel via Make.com.\n` +
+                  `Original message: ${message.content}`;
+              } else {
+                // ── ANY OTHER AGENT: Auto-dispatch to Alfred + acknowledge to user ──
+                await agentChannel.sendMessage(message.chatId,
+                  `🎯 _YouTube URL detected! Routing to Alfred for Vid Rush Pipeline..._\n` +
+                  `Video ID: \`${videoId}\`\n` +
+                  `📡 _Make.com Scenarios E + F also firing in parallel._\n` +
+                  `_Alfred will process the hook extraction and dispatch downstream to Yuki, Anita, and Sapphire._`,
+                  { parseMode: "Markdown" }
+                );
+
+                // Dispatch to Alfred via crew_dispatch (Supabase)
+                const supabaseUrl = process.env.SUPABASE_URL;
+                const supabaseKey = process.env.SUPABASE_ANON_KEY;
+                if (supabaseUrl && supabaseKey) {
+                  try {
+                    await fetch(`${supabaseUrl}/rest/v1/crew_dispatch`, {
+                      method: "POST",
+                      headers: {
+                        apikey: supabaseKey,
+                        Authorization: `Bearer ${supabaseKey}`,
+                        "Content-Type": "application/json",
+                        Prefer: "return=minimal",
+                      },
+                      body: JSON.stringify({
+                        target_agent: "alfred",
+                        from_agent: receivingAgent,
+                        task_type: "multi_pass_hook_extraction",
+                        payload: JSON.stringify({
+                          youtube_url: youtubeUrl,
+                          video_id: videoId,
+                          source: `Routed from ${receivingAgent} — Architect dropped URL in ${receivingAgent}'s DM`,
+                        }),
+                        status: "pending",
+                        chat_id: String(message.chatId),
+                      }),
+                    });
+                    console.log(`📡 [VidRush] ${receivingAgent} → Alfred dispatch created for ${youtubeUrl}`);
+                  } catch (err: any) {
+                    console.error(`[VidRush] Failed to dispatch to Alfred: ${err.message}`);
+                  }
+                }
+
+                // Let the receiving agent respond naturally about the routing
+                message.content = `The Architect sent a YouTube URL: ${youtubeUrl}\n` +
+                  `I've already routed this to Alfred for full Vid Rush processing (hook extraction, transcript, clip pipeline). ` +
+                  `Make.com Scenarios E and F are also firing in parallel. ` +
+                  `Acknowledge the routing to the Architect and let them know Alfred is on it. ` +
+                  `Original message: ${message.content}`;
+              }
             }
 
             // Log task to Supabase command_queue

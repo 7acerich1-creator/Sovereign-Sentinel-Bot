@@ -14,11 +14,13 @@
     "@supabase/supabase-js": "^2.49.0",
     "better-sqlite3": "^11.0.0",
     "dotenv": "^16.4.7",
-    "grammy": "^1.30.0"
+    "grammy": "^1.30.0",
+    "puppeteer-core": "^24.40.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.0.0",
+    "@types/yauzl": "^2.10.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },

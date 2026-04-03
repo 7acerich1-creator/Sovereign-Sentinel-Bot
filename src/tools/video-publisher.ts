@@ -10,6 +10,9 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { Tool, ToolDefinition } from "../types";
+import { config } from "../config";
+import { TikTokBrowserUploadTool } from "./tiktok-browser-upload";
+import { InstagramBrowserUploadTool } from "./instagram-browser-upload";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
@@ -483,6 +486,8 @@ export class VideoPublisherTool implements Tool {
   private tiktok = new TikTokPublishTool();
   private instagram = new InstagramReelsPublishTool();
   private youtube = new YouTubeShortsPublishTool();
+  private tiktokBrowser = new TikTokBrowserUploadTool();
+  private instagramBrowser = new InstagramBrowserUploadTool();
 
   definition: ToolDefinition = {
     name: "publish_video",
@@ -542,40 +547,56 @@ export class VideoPublisherTool implements Tool {
       targetPlatforms = platformInput.split(",").map((p) => p.trim());
     }
 
-    // Check which platforms are configured
+    // Check which platforms are configured (API tokens)
     const configured: Record<string, boolean> = {
       tiktok: !!process.env.TIKTOK_ACCESS_TOKEN,
       instagram: !!(process.env.INSTAGRAM_ACCESS_TOKEN && process.env.INSTAGRAM_BUSINESS_ID),
       youtube: !!(process.env.YOUTUBE_ACCESS_TOKEN || process.env.YOUTUBE_REFRESH_TOKEN),
     };
 
+    // Browser fallback available when API tokens are missing
+    const browserEnabled = config.tools.browserEnabled;
+
     const results: string[] = [];
     let successCount = 0;
 
     for (const platform of targetPlatforms) {
-      if (!configured[platform]) {
-        results.push(`⬚ ${platform.toUpperCase()}: Not configured (token missing)`);
-        continue;
-      }
-
       try {
         let result: string;
         switch (platform) {
           case "tiktok":
-            result = await this.tiktok.execute({ video_url: videoUrl, caption, niche });
+            if (configured.tiktok) {
+              result = await this.tiktok.execute({ video_url: videoUrl, caption, niche });
+            } else if (browserEnabled) {
+              result = await this.tiktokBrowser.execute({ video_url: videoUrl, caption, niche });
+              result = `[BROWSER FALLBACK]\n${result}`;
+            } else {
+              result = "⬚ Not configured (API token missing, browser disabled)";
+            }
             break;
           case "instagram":
-            result = await this.instagram.execute({ video_url: videoUrl, caption, niche });
+            if (configured.instagram) {
+              result = await this.instagram.execute({ video_url: videoUrl, caption, niche });
+            } else if (browserEnabled) {
+              result = await this.instagramBrowser.execute({ video_url: videoUrl, caption, niche });
+              result = `[BROWSER FALLBACK]\n${result}`;
+            } else {
+              result = "⬚ Not configured (API token missing, browser disabled)";
+            }
             break;
           case "youtube":
-            result = await this.youtube.execute({ video_url: videoUrl, title, description: caption, tags, niche, brand });
+            if (configured.youtube) {
+              result = await this.youtube.execute({ video_url: videoUrl, title, description: caption, tags, niche, brand });
+            } else {
+              result = "⬚ Not configured (YouTube OAuth tokens missing)";
+            }
             break;
           default:
             result = `❌ Unknown platform: ${platform}`;
         }
 
         results.push(`${platform.toUpperCase()}:\n${result}`);
-        if (result.startsWith("✅")) successCount++;
+        if (result.includes("✅")) successCount++;
       } catch (err: any) {
         results.push(`❌ ${platform.toUpperCase()}: ${err.message}`);
       }
@@ -590,13 +611,17 @@ export class VideoPublisherTool implements Tool {
       .filter(([, v]) => !v)
       .map(([k]) => k)
       .join(", ");
+    const browserFallbackPlatforms = ["tiktok", "instagram"]
+      .filter((p) => !configured[p] && browserEnabled)
+      .join(", ");
 
     return `📹 VIDEO PUBLISH RESULTS (${successCount}/${targetPlatforms.length} succeeded)\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
       results.join("\n\n") +
       `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `Configured: ${configuredList || "none"}\n` +
+      `API configured: ${configuredList || "none"}\n` +
       `Not configured: ${unconfiguredList || "none"}\n` +
+      (browserFallbackPlatforms ? `Browser fallback active: ${browserFallbackPlatforms}\n` : "") +
       `Video: ${videoUrl}`;
   }
 }

@@ -42,6 +42,8 @@ import { SystemTool } from "./tools/system";
 import { SocialSchedulerListProfilesTool, SocialSchedulerPostTool, SocialSchedulerPendingTool } from "./tools/social-scheduler";
 import { ClipGeneratorTool } from "./tools/clip-generator";
 import { VidRushTool } from "./tools/vid-rush";
+import { TikTokBrowserUploadTool, tiktokLoginFlow } from "./tools/tiktok-browser-upload";
+import { InstagramBrowserUploadTool, instagramLoginFlow } from "./tools/instagram-browser-upload";
 import { logTask, updateTask, logAgentActivity } from "./tools/task-logger";
 import { CrewDispatchTool, claimTasks, completeDispatch, dispatchTask, triggerPipelineHandoffs, checkPipelineComplete } from "./agent/crew-dispatch";
 import { ProtocolReaderTool, ProtocolWriterTool } from "./tools/protocol-reader";
@@ -198,6 +200,8 @@ async function main() {
     new WebSearchTool(),
     new WebFetchTool(),
     new BrowserTool(),
+    new TikTokBrowserUploadTool(),
+    new InstagramBrowserUploadTool(),
 
     // Memory tools
     new MemoryTool(memoryProviders),
@@ -1268,15 +1272,29 @@ async function main() {
         youtube: !!(process.env.YOUTUBE_REFRESH_TOKEN || process.env.YOUTUBE_ACCESS_TOKEN),
         youtube_tcf: !!process.env.YOUTUBE_REFRESH_TOKEN_TCF,
         tiktok: !!process.env.TIKTOK_ACCESS_TOKEN,
+        tiktok_browser: process.env.BROWSER_ENABLED === "true",
         instagram: !!(process.env.INSTAGRAM_ACCESS_TOKEN && process.env.INSTAGRAM_BUSINESS_ID),
+        instagram_browser: process.env.BROWSER_ENABLED === "true",
         groq_whisper: !!process.env.GROQ_API_KEY,
         openai_whisper: !!process.env.OPENAI_API_KEY,
+        browser_enabled: process.env.BROWSER_ENABLED === "true",
       };
 
       return JSON.stringify({ status: "ok", queue: counts, total: rows.length, platforms });
     } catch (err: any) {
       return JSON.stringify({ status: "error", message: err.message });
     }
+  });
+
+  // ── /api/browser/tiktok-login — One-time TikTok manual login flow ──
+  // Launches Chromium, navigates to TikTok login, waits 120s for manual auth, saves cookies.
+  webhookServer.register("/api/browser/tiktok-login", async () => {
+    return await tiktokLoginFlow();
+  });
+
+  // ── /api/browser/instagram-login — One-time Instagram manual login flow ──
+  webhookServer.register("/api/browser/instagram-login", async () => {
+    return await instagramLoginFlow();
   });
 
   // ── /api/glitch — Log errors/incidents from external systems ──
@@ -1678,12 +1696,26 @@ async function main() {
             ? "\n\n[STANDING ORDER] When you receive a message containing 'standing directive' or 'new protocol', extract the protocol name, niche, and directive. Use the write_protocol tool to save it. Confirm: 'Protocol [name] locked. All crew members will execute this on every [niche] task going forward.'\n\n[RELATIONSHIP AWARENESS] You have the write_relationship_context tool. When you notice patterns in how Ace works — what he asks for repeatedly, what frustrates him, what he celebrates — write a brief observation. Categories: preference, frustration, pattern, win. These observations help you calibrate your tone."
             : "";
 
+        // Browser capability directives — per-agent use cases
+        const BROWSER_DIRECTIVES: Record<string, string> = {
+          alfred: "[BROWSER CAPABILITY] You have the `browser` tool for web research. USE IT ACTIVELY: navigate to URLs to pull source material, extract quotes from articles, verify external links, research topics for content creation. When given a URL or topic to research, open it in the browser rather than relying on web_search alone. You can navigate, extract text, take screenshots, and evaluate JavaScript on any page.",
+          veritas: "[BROWSER CAPABILITY] You have the `browser` tool. USE IT ACTIVELY: fact-check claims by browsing source URLs directly, run competitive analysis by scraping competitor landing pages, verify that live sites/links are working. When verifying information, open the actual source URL in the browser and extract the relevant text. Screenshots can provide visual proof.",
+          vector: "[BROWSER CAPABILITY] You have the `browser` tool. USE IT ACTIVELY: scrape analytics dashboards (Buffer, Stripe dashboard) when APIs are rate-limited, pull social metrics from platform pages, extract data from web-based tools. When metrics tools are unavailable, fall back to browser scraping of the dashboard pages.",
+          anita: "[BROWSER CAPABILITY] You have the `browser` tool. USE IT ACTIVELY: research trending topics by browsing platform pages, scrape subreddits and forums for content inspiration, extract viral hook patterns from trending posts. When looking for content angles, browse actual platform pages (Reddit, Twitter/X, TikTok trending) to find what's working NOW.",
+          yuki: "[BROWSER CAPABILITY — PRIMARY DISTRIBUTION] You have `tiktok_browser_upload` and `instagram_browser_upload` tools. These are your PRIMARY methods for posting to TikTok and Instagram (API access is blocked). When asked to publish video content to TikTok or IG, use these browser upload tools directly. You also have the base `browser` tool to verify posts went live by checking platform pages. After uploading, navigate to the profile page and confirm the post is visible.",
+          sapphire: "[BROWSER CAPABILITY] You have the `browser` tool. USE IT ACTIVELY: gather strategic intelligence by browsing industry news sites, pull market data from public sources, research competitors and trends. When analyzing the competitive landscape or gathering market intelligence, open relevant pages in the browser and extract structured data.",
+        };
+
+        const browserDirective = config.tools.browserEnabled && BROWSER_DIRECTIVES[agentCfg.name]
+          ? `\n\n${BROWSER_DIRECTIVES[agentCfg.name]}`
+          : "";
+
         // Per-agent LLM team — each agent gets its own failover chain to prevent quota stampedes
         const agentTeamLLM = AGENT_LLM_TEAMS[agentCfg.name] || failoverLLM;
         const injectedLLM: LLMProvider = {
           ...agentTeamLLM,
           generate: (messages, options) =>
-            agentTeamLLM.generate(messages, { ...options, systemPrompt: blueprint + protocolDirective + knowledgeDirective }),
+            agentTeamLLM.generate(messages, { ...options, systemPrompt: blueprint + protocolDirective + knowledgeDirective + browserDirective }),
         };
 
         // Build per-agent tool set: shared tools + agent-specific tools

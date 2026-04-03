@@ -1,23 +1,41 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-03 (Cowork Session 10 — Groq Whisper Swap + VidRush Distribution Pipeline + Browser Automation Scope) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-03 (Cowork Session 11 — Browser Automation Overhaul COMPLETE) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
-**Session Summary — Cowork Session 10 (2026-04-03):**
+**Session Summary — Cowork Session 11 (2026-04-03):**
+1. **CHROMIUM + PUPPETEER IN DOCKER.** `Dockerfile.bot` production stage now installs `chromium` via apt-get. `puppeteer-core` (v24.x) added to package.json dependencies. Env vars set in Dockerfile: `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`, `PUPPETEER_SKIP_DOWNLOAD=true`. System Chromium used — no duplicate download.
+2. **BROWSER.TS FULL REWRITE — FROM TOY TO WEAPON.** Replaced 3-action toy tool with 12-action arsenal: navigate, click, type, wait, screenshot, extract, evaluate, login, upload_video, cookies_save, cookies_load, close. Singleton browser instance with auto-idle shutdown (5 min). Cookie persistence to filesystem (`/app/data/browser-cookies/`). Mobile viewport emulation support. Exports `getBrowser`, `saveCookies`, `loadCookies` for use by upload tools.
+3. **TIKTOK BROWSER UPLOAD TOOL.** New `src/tools/tiktok-browser-upload.ts`. Puppeteer workflow: download video from Supabase URL → restore TikTok session cookies → navigate to upload page → attach file → fill caption → click Post → save updated cookies → log to Supabase `content_transmissions`. Includes `tiktokLoginFlow()` for one-time manual login (120s window).
+4. **INSTAGRAM BROWSER UPLOAD TOOL.** New `src/tools/instagram-browser-upload.ts`. Same pattern as TikTok but with mobile viewport emulation (390×844, iPhone UA, deviceScaleFactor 3). Multi-step flow navigation (Next → Next → Share). Includes `instagramLoginFlow()` for one-time manual login.
+5. **BROWSER FALLBACK WIRED INTO VIDEO PUBLISHER.** `VideoPublisherTool.execute()` now checks: if TikTok API token missing but `browserEnabled` → use `TikTokBrowserUploadTool`. Same for Instagram. YouTube stays on direct API. Summary output shows "Browser fallback active" for affected platforms.
+6. **LOGIN ENDPOINTS REGISTERED.** New API endpoints: `POST /api/browser/tiktok-login` and `POST /api/browser/instagram-login`. One-time setup flows that launch Chromium, navigate to login page, wait 120s for manual auth, save cookies. `/api/vid-rush/status` now reports `browser_enabled`, `tiktok_browser`, `instagram_browser` fields.
+7. **ALL 6 AGENT PERSONALITIES UPDATED WITH BROWSER DIRECTIVES.** Browser capability directives injected per-agent alongside protocol/knowledge directives at boot: Alfred = research/verify, Veritas = fact-check/competitor scrape, Vector = analytics scraping, Anita = trend research, Yuki = PRIMARY TikTok+IG distribution, Sapphire = strategic intel. Plus `scripts/update-agent-browser-scopes.ts` to update Supabase `personality_config` blueprints with permanent browser scope sections.
+8. **BUILD VERIFIED.** TypeScript compiles clean (`tsc --noEmit` = 0 errors). `@types/yauzl` added as dev dep (puppeteer-core transitive).
+9. **Push status: ⏳ NOT PUSHED** — All code written and compiled. Needs git push to trigger Railway deploy.
+
+**POST-DEPLOY CHECKLIST (Session 11):**
+1. Set in Railway env: `BROWSER_ENABLED=true`
+2. Run `scripts/update-agent-browser-scopes.ts` to update Supabase personality blueprints
+3. Deploy → verify Railway build succeeds (Chromium install adds ~200MB to image)
+4. Hit `POST /api/browser/tiktok-login` → manually log in within 120s window → cookies saved
+5. Hit `POST /api/browser/instagram-login` → same manual login flow
+6. VidRush E2E test: YouTube URL → Groq Whisper → clips → sweep → YouTube Shorts + TikTok browser + IG browser
+
+**NEXT SESSION PRIORITIES (Session 12):**
+1. **GIT PUSH + DEPLOY** — Push Session 11 code, verify Railway builds with Chromium successfully
+2. **TIKTOK + INSTAGRAM MANUAL LOGIN** — Hit the login endpoints, complete manual auth, save cookies
+3. **VIDRUSH END-TO-END TEST** — Full pipeline: YouTube URL in → Shorts published on all 3 platforms
+4. **COOKIE RESILIENCE** — Monitor if TikTok/IG cookies expire, build auto-detection + re-login notification
+5. **CONTENT ENGINE → VIDRUSH BRIDGE** — Connect content engine output to vid_rush_queue for automated distribution
+6. **PINECONE AUTH FIX** — Still blocked on API key rotation (from Session 10 backlog)
+
+**Previous Session Summary — Cowork Session 10 (2026-04-03):**
 1. **GROQ WHISPER SWAP — OpenAI billing dependency ELIMINATED.** `vid-rush.ts` now uses Groq Whisper API (`whisper-large-v3-turbo`) as primary transcription provider. `GROQ_API_KEY` already set in Railway (14,400 req/day free tier). OpenAI Whisper is automatic fallback if Groq fails. 25MB file size check added. VidRush can now transcribe without OpenAI credits.
 2. **VID-RUSH DISTRIBUTION SWEEP ENDPOINT.** New `/api/vid-rush/sweep` (POST) — reads `vid_rush_queue` where status = "ready" → publishes each clip to YouTube Shorts, TikTok, and Instagram Reels via `VideoPublisherTool` (direct API, bypasses Buffer). Updates status to "published" or "publish_failed". Sends Telegram notification with results. This is the missing link between clip generation and platform distribution.
 3. **VID-RUSH STATUS ENDPOINT.** New `/api/vid-rush/status` (POST) — reports queue state (counts by status) AND which platform tokens are detected (youtube, youtube_tcf, tiktok, instagram, groq_whisper, openai_whisper). Use this to verify credential state instead of guessing.
 4. **YOUTUBE OAUTH TOKENS CONFIRMED SET.** All four YouTube credentials verified in Railway: `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN` (Ace Richie 77), `YOUTUBE_REFRESH_TOKEN_TCF` (The Containment Field). YouTube Shorts publishing has ZERO credential blockers.
-5. **TIKTOK + INSTAGRAM API ACCESS BLOCKED.** TikTok Content Posting API and Instagram Graph API require app review/approval that has been rejected. Browser automation (Puppeteer) identified as the workaround — upload videos through web interfaces. Requires: Chromium in Docker, upgraded browser tool, agent scope updates. DEFERRED TO SESSION 11.
+5. **TIKTOK + INSTAGRAM API ACCESS BLOCKED.** TikTok Content Posting API and Instagram Graph API require app review/approval that has been rejected. Browser automation (Puppeteer) identified as the workaround — upload videos through web interfaces. EXECUTED IN SESSION 11.
 6. **CONTENT ENGINE QUEUE VERIFIED.** All 16 posts from Sessions 9+10 confirmed posted. Queue clean. Distribution sweep working.
 7. **Push status: ✅ PUSHED** — Commit `cb605a8` pushed to main. Railway auto-deploying.
-
-**NEXT SESSION PRIORITIES (Session 11 — Browser Automation Overhaul):**
-1. **Add Chromium + Puppeteer to Dockerfile.** Install `chromium` and `puppeteer-core` in production stage. Set `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`. Expect ~200MB Docker image size increase.
-2. **Upgrade `browser.ts` from toy to weapon.** Current tool only has navigate/extract/screenshot. Needs: login with cookie persistence, file upload, click, type, wait, multi-step workflow chains, session management (reuse logged-in sessions).
-3. **Build `tiktok-browser-upload.ts` and `instagram-browser-upload.ts`.** New tools that use Puppeteer to: (a) login to TikTok/IG web via saved cookies, (b) navigate to upload page, (c) upload video file from Supabase Storage URL, (d) fill caption/tags, (e) publish. Store session cookies in SQLite or Supabase for reuse.
-4. **Wire browser upload into `/api/vid-rush/sweep`.** VideoPublisherTool should fall back to browser upload when API tokens aren't set (TikTok, IG) but browser is enabled.
-5. **Update agent scopes with browser use cases.** Each agent gets specific browser tasks beyond just upload: Alfred = research/verify links, Veritas = fact-check/competitor scrape, Vector = analytics scraping, Anita = content research, Yuki = distribution via browser upload, Sapphire = strategic intel gathering.
-6. **Set `BROWSER_ENABLED=true` in Railway** after Chromium is in Docker.
-7. **VidRush end-to-end test.** Drop a YouTube URL → verify full chain: Groq Whisper transcription → clip scoring → ffmpeg cut → Supabase upload → vid_rush_queue → sweep → YouTube Shorts published.
 
 **Previous Session Summary — Cowork Session 9 (2026-04-03):**
 1. **FIRST LIVE ANITA-VOICED PRODUCTION RUN — 12/12 SUCCESS.** Triggered `/api/content-engine/produce` on the deployed Session 8 code. All 12 posts generated (6 Ace Richie, 6 Containment Field — but only 3 CF slots had content due to time_slot distribution). Every post uses Protocol 77 HOOK → PIVOT → ANCHOR. Voice is clearly differentiated between brands. Quantum niche today: Observer Effect × attention warfare × consciousness rendering. All 12 have Imagen 4 images attached. Content is sitting in `content_engine_queue` with status = "ready", awaiting distribution sweep.

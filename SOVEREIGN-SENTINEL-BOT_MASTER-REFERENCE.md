@@ -1,13 +1,14 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-03 (Cowork Session 12 — Deploy + Cookie Import COMPLETE) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-03 (Cowork Session 12 — Deploy + Multi-Account Cookie System COMPLETE) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 **Session Summary — Cowork Session 12 (2026-04-03):**
 1. **GIT PUSH + RAILWAY DEPLOY.** Session 11 code (Chromium, Puppeteer, browser tools, TikTok/IG upload tools, login endpoints, agent browser directives) pushed to main. Commit includes all Session 11 files. Railway auto-deployed successfully with `BROWSER_ENABLED=true` set in env vars.
-2. **COOKIE IMPORT ENDPOINT BUILT + DEPLOYED.** New `POST /api/browser/import-cookies` endpoint. Accepts `{domain, cookies[]}` — validates domain against allowlist (tiktok, instagram, youtube, twitter, threads), normalizes cookie format for Puppeteer (handles `expirationDate` from Chrome extension and `expires` from DevTools), saves via `saveCookies()`, verifies by loading back, sends Telegram notification. Companion `POST /api/browser/cookie-status` reports cookie counts for all 5 domains. Commit `1212595`.
+2. **COOKIE IMPORT ENDPOINT BUILT + DEPLOYED.** New `POST /api/browser/import-cookies` endpoint. Accepts `{domain, account?, cookies[]}` — validates domain against allowlist (tiktok, instagram, youtube, twitter, threads), validates account (acerichie, tcf), normalizes cookie format for Puppeteer, saves via account-aware `saveCookies()`, verifies by loading back, sends Telegram notification. Companion `POST /api/browser/cookie-status` reports per-account cookie counts. Commits `1212595` + `07b9dba`.
 3. **SUPABASE AGENT BLUEPRINTS UPDATED.** All 6 agent `personality_config` rows updated via direct Supabase SQL with permanent browser scope sections (Alfred=research, Veritas=fact-check, Vector=analytics, Anita=trends, Yuki=PRIMARY distribution, Sapphire=intel).
 4. **CHROME EXTENSION COOKIE EXTRACTION.** Built `C:\Users\richi\cookie-ext` — Manifest V3 extension with popup UI using `chrome.cookies.getAll()` API to extract all cookies (including httpOnly session cookies) for TikTok and Instagram. Downloads as JSON files. Solved Chrome v20 app-bound encryption barrier that blocked all external decryption approaches (direct DB, CDP, Cookie Store API).
-5. **COOKIES IMPORTED TO RAILWAY.** TikTok: 71 cookies (including `sessionid=ed7a676e...`). Instagram: 11 cookies (including `sessionid=6460415455%3ACLMmyg9vS1nQ7Y...`). Both verified via `/api/browser/cookie-status`. Browser uploads are ARMED.
-6. **Push status: ✅ PUSHED** — Multiple commits pushed to main. Railway deployed and verified live.
+5. **MULTI-ACCOUNT COOKIE SYSTEM.** Upgraded from single-account to dual-brand cookie storage. `saveCookies(domain, cookies, account?)` and `loadCookies(domain, account?)` now store per-account files: `tiktok_acerichie.json`, `tiktok_tcf.json`, etc. Legacy fallback: old single-file cookies still load if no account-specific file found. TikTok + Instagram browser upload tools accept `brand` param, map `ace_richie` → `acerichie`, `containment_field` → `tcf`. Video publisher passes brand through to browser upload tools automatically.
+6. **BOTH BRANDS ARMED.** Ace Richie: TikTok 71 cookies + Instagram 11 cookies. The Containment Field: TikTok 71 cookies + Instagram 11 cookies. All four cookie sets verified via `/api/browser/cookie-status`. Yuki now auto-selects the correct cookie jar based on which brand she's distributing for.
+7. **Push status: ✅ PUSHED** — Commits `1212595` + `07b9dba` pushed to main. Railway deployed and verified live.
 
 **POST-DEPLOY CHECKLIST (Session 12) — STATUS:**
 1. ✅ Git push + Railway deploy
@@ -19,11 +20,11 @@
 7. ⏳ Content Engine → VidRush bridge — Connect content output to `vid_rush_queue`
 
 **NEXT SESSION PRIORITIES (Session 13):**
-1. **VIDRUSH END-TO-END TEST** — Full pipeline: YouTube URL in → Groq Whisper transcription → clip generation → publish to YouTube Shorts + TikTok (browser) + Instagram (browser)
+1. **VIDRUSH END-TO-END TEST** — Full pipeline: YouTube URL in → Groq Whisper transcription → clip generation → publish to YouTube Shorts + TikTok (browser, both brands) + Instagram (browser, both brands)
 2. **COOKIE RESILIENCE** — Monitor if TikTok/IG cookies expire, build auto-detection + Telegram re-login notification
 3. **CONTENT ENGINE → VIDRUSH BRIDGE** — Connect content engine output to `vid_rush_queue` for automated distribution
 4. **PINECONE AUTH FIX** — Still blocked on API key rotation (from Session 10 backlog)
-5. **COOKIE RE-EXPORT WORKFLOW** — When cookies expire, user re-opens Chrome extension popup, clicks EXTRACT BOTH, re-POSTs via `curl -d @file` to Railway endpoint
+5. **COOKIE RE-EXPORT WORKFLOW** — When cookies expire: open Chrome extension popup → EXTRACT BOTH → rebuild payloads via `build_tcf_payloads.ps1` or `reimport_ar.ps1` → `curl -d @file` to Railway. Scripts live in `C:\Users\richi\cookie-ext\`.
 
 **Previous Session Summary — Cowork Session 11 (2026-04-03):**
 1. **CHROMIUM + PUPPETEER IN DOCKER.** `Dockerfile.bot` production stage now installs `chromium` via apt-get. `puppeteer-core` (v24.x) added to package.json dependencies. Env vars set in Dockerfile: `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`, `PUPPETEER_SKIP_DOWNLOAD=true`. System Chromium used — no duplicate download.

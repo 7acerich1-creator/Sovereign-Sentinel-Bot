@@ -52,6 +52,8 @@ import { SapphireSentinel } from "./proactive/sapphire-sentinel";
 import { PineconeMemory } from "./memory/pinecone";
 import { KnowledgeWriterTool } from "./tools/knowledge-writer";
 import { ImageGeneratorTool } from "./tools/image-generator";
+import { produceFacelessBatch } from "./engine/faceless-factory";
+import { existsSync, readFileSync } from "fs";
 import { ProposeTaskTool, SaveContentDraftTool, FileBriefingTool, CheckApprovedTasksTool } from "./tools/action-surface";
 import { StripeMetricsTool } from "./tools/stripe-metrics";
 import { VideoPublisherTool, TikTokPublishTool, InstagramReelsPublishTool, YouTubeShortsPublishTool } from "./tools/video-publisher";
@@ -1119,6 +1121,54 @@ async function main() {
     }
   });
 
+  // ── /api/faceless/produce — Manual trigger for faceless video production ──
+  // POST body: { source_intelligence: string, niche?: string, brands?: string[] }
+  // Or: { youtube_url: string } — will fetch transcript from cache if available
+  webhookServer.register("/api/faceless/produce", async (incoming: any) => {
+    try {
+      const { source_intelligence, youtube_url, niche, brands } = incoming as any;
+
+      let sourceIntel = source_intelligence || "";
+      let detectedNiche = niche || "dark_psychology";
+
+      // If YouTube URL provided, try to read cached Whisper transcript
+      if (youtube_url && !sourceIntel) {
+        const vidMatch = String(youtube_url).match(/(?:v=|youtu\.be\/)([\w-]{11})/);
+        if (vidMatch) {
+          const whisperPath = `/tmp/sovereign_clips/whisper_${vidMatch[1]}.json`;
+          if (existsSync(whisperPath)) {
+            const whisperData = JSON.parse(readFileSync(whisperPath, "utf-8"));
+            sourceIntel = (whisperData.segments || []).map((s: any) => s.text).join(" ");
+          }
+        }
+      }
+
+      if (!sourceIntel) {
+        return JSON.stringify({ status: "error", message: "No source_intelligence or cached transcript found" });
+      }
+
+      const brandList = brands || ["ace_richie", "containment_field"];
+      console.log(`📡 [FacelessFactory] Manual trigger — niche: ${detectedNiche}, brands: ${brandList.join(", ")}`);
+
+      const results = await produceFacelessBatch(failoverLLM, sourceIntel.slice(0, 3000), detectedNiche, brandList);
+
+      return JSON.stringify({
+        status: "ok",
+        videos_produced: results.length,
+        results: results.map(r => ({
+          brand: r.brand,
+          title: r.title,
+          duration: r.duration,
+          segments: r.segmentCount,
+          video_url: r.videoUrl,
+        })),
+      });
+    } catch (err: any) {
+      console.error(`[FacelessFactory] Manual trigger error: ${err.message}`);
+      return JSON.stringify({ status: "error", message: err.message?.slice(0, 500) });
+    }
+  });
+
   // ── /api/vid-rush/sweep — Distribute ready clips from vid_rush_queue to video platforms ──
   // Reads clips with status = "ready" and video_url populated → publishes via VideoPublisherTool
   // to YouTube Shorts, TikTok, and Instagram Reels (bypasses Buffer entirely)
@@ -2027,47 +2077,101 @@ async function main() {
                 // Fire the bot-native VidRush pipeline immediately (download → Whisper → clips → Supabase)
                 // This runs in background while Alfred's LLM analysis proceeds in parallel
                 await agentChannel.sendMessage(message.chatId,
-                  `🎯 _YouTube URL detected. Activating Bot-Native Vid Rush Pipeline..._\n` +
+                  `🎯 _YouTube URL detected. Dual Pipeline Activated..._\n` +
                   `Video ID: \`${videoId}\`\n` +
-                  `🔥 _Downloading → Whisper transcription → Clip generation → Supabase queue..._\n` +
-                  `_This runs in background. I'll notify you when clips are ready._`,
+                  `🔪 _Pipeline 1: Clip Ripper (source video clips)_\n` +
+                  `🎬 _Pipeline 2: Faceless Factory (original videos from extracted intelligence)_\n` +
+                  `_Both run in background. Notifications when each completes._`,
                   { parseMode: "Markdown" }
                 );
 
-                // Fire vid_rush tool directly — no Make.com dependency
+                // ── PIPELINE 1: Clip Ripper (chops source video — the 5% use case) ──
                 const vidRushTool = new VidRushTool();
                 vidRushTool.execute({
                   youtube_url: youtubeUrl,
-                  target_clip_count: 10,
+                  target_clip_count: 5,
                 }).then(async (result) => {
-                  console.log(`✅ [VidRush] Bot-native pipeline complete for ${youtubeUrl}`);
-                  // Notify Architect via Telegram
+                  console.log(`✅ [VidRush] Clip ripper complete for ${youtubeUrl}`);
                   try {
                     await agentChannel.sendMessage(message.chatId,
-                      `🔥 *VID RUSH PIPELINE — COMPLETE*\n\n${result.slice(0, 3500)}`,
+                      `🔪 *CLIP RIPPER — COMPLETE*\n\n${result.slice(0, 2000)}`,
                       { parseMode: "Markdown" }
                     );
                   } catch (e: any) {
-                    // Retry without markdown if parse fails
                     await agentChannel.sendMessage(message.chatId,
-                      `VID RUSH PIPELINE — COMPLETE\n\n${result.slice(0, 3500)}`
+                      `CLIP RIPPER — COMPLETE\n\n${result.slice(0, 2000)}`
                     );
                   }
-                  // Auto-trigger sweep to publish ready clips
+
+                  // ── PIPELINE 2: Faceless Factory (fires AFTER clip ripper, using its Whisper transcript) ──
+                  // Read the cached Whisper transcript from the clip ripper run
+                  const whisperPath = `/tmp/sovereign_clips/whisper_${videoId}.json`;
+                  let sourceIntel = "";
                   try {
-                    const sweepResp = await fetch(`http://localhost:${config.webhooks.port || 3000}/api/vid-rush/sweep`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                    });
-                    const sweepResult = await sweepResp.text();
-                    console.log(`📡 [VidRush] Auto-sweep result: ${sweepResult.slice(0, 500)}`);
-                  } catch (sweepErr: any) {
-                    console.warn(`[VidRush] Auto-sweep failed: ${sweepErr.message}`);
+                    if (existsSync(whisperPath)) {
+                      const whisperData = JSON.parse(readFileSync(whisperPath, "utf-8"));
+                      sourceIntel = (whisperData.segments || []).map((s: any) => s.text).join(" ");
+                    }
+                  } catch { /* fallback below */ }
+
+                  if (!sourceIntel) {
+                    sourceIntel = `YouTube video ${youtubeUrl} about topics related to sovereignty, psychology, and personal transformation. Generate compelling faceless content based on these themes.`;
+                  }
+
+                  // Detect niche from transcript
+                  const lowerIntel = sourceIntel.toLowerCase();
+                  let detectedNiche = "dark_psychology";
+                  if (lowerIntel.includes("burnout") || lowerIntel.includes("exhaustion") || lowerIntel.includes("overwhelm")) detectedNiche = "burnout";
+                  else if (lowerIntel.includes("quantum") || lowerIntel.includes("frequency") || lowerIntel.includes("vibration")) detectedNiche = "quantum";
+                  else if (lowerIntel.includes("growth") || lowerIntel.includes("discipline") || lowerIntel.includes("habit")) detectedNiche = "self_improvement";
+
+                  console.log(`🎬 [FacelessFactory] Starting faceless production (niche: ${detectedNiche}) from transcript...`);
+                  await agentChannel.sendMessage(message.chatId,
+                    `🎬 _Faceless Factory starting — generating original videos from extracted intelligence..._\n` +
+                    `_Niche: ${detectedNiche} | Brands: Ace Richie + Containment Field_`,
+                    { parseMode: "Markdown" }
+                  );
+
+                  try {
+                    const facelessResults = await produceFacelessBatch(
+                      failoverLLM,
+                      sourceIntel.slice(0, 3000),
+                      detectedNiche,
+                      ["ace_richie", "containment_field"]
+                    );
+
+                    const summary = facelessResults.map(r =>
+                      `${r.brand}: "${r.title}" (${r.duration.toFixed(0)}s, ${r.segmentCount} scenes) — ${r.videoUrl ? "✅ queued" : "❌ upload failed"}`
+                    ).join("\n");
+
+                    try {
+                      await agentChannel.sendMessage(message.chatId,
+                        `🎬 *FACELESS FACTORY — COMPLETE*\n\n${summary}`,
+                        { parseMode: "Markdown" }
+                      );
+                    } catch {
+                      await agentChannel.sendMessage(message.chatId,
+                        `FACELESS FACTORY — COMPLETE\n\n${summary}`
+                      );
+                    }
+
+                    // Auto-sweep to publish all ready videos
+                    try {
+                      await fetch(`http://localhost:${config.webhooks.port || 3000}/api/vid-rush/sweep`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                      });
+                    } catch { /* non-critical */ }
+                  } catch (facelessErr: any) {
+                    console.error(`❌ [FacelessFactory] Failed: ${facelessErr.message}`);
+                    await agentChannel.sendMessage(message.chatId,
+                      `❌ Faceless Factory failed: ${facelessErr.message?.slice(0, 500)}`
+                    );
                   }
                 }).catch(async (err) => {
-                  console.error(`❌ [VidRush] Bot-native pipeline failed: ${err.message}`);
+                  console.error(`❌ [VidRush] Clip ripper failed: ${err.message}`);
                   await agentChannel.sendMessage(message.chatId,
-                    `❌ Vid Rush pipeline failed: ${err.message?.slice(0, 500)}`
+                    `❌ Clip ripper failed: ${err.message?.slice(0, 500)}`
                   );
                 });
 

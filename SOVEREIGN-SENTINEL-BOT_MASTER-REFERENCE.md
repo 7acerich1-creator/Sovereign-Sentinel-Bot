@@ -1,7 +1,23 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-03 (Cowork Session 12 — Deploy + Multi-Account Cookie System COMPLETE) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-03 (Cowork Session 13 — Supabase Security Hardening + Retention Policy) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
-**Session Summary — Cowork Session 12 (2026-04-03):**
+**Session Summary — Cowork Session 13 (2026-04-03):**
+1. **SUPABASE SECURITY HARDENING — ZERO ADVISORIES REMAINING.** Full security audit and remediation of Supabase project `wzthxohtgojenukmdubz`. 4 critical tables (`products`, `payment_history`, `market_research`, `lexical_extraction`) had RLS completely disabled — now enabled with `service_role` ALL + `anon` SELECT-only policies. `users` table had RLS enabled but zero policies — fixed. 4 functions (`increment_fiscal_sum`, `unsubscribe_email`, `get_pending_nurture`, `set_nurture_defaults`) had mutable `search_path` — pinned to `public`. ~40 anon INSERT/UPDATE policies dropped across all tables. ~12 wide-open `{public}` ALL policies replaced. **New security model: `service_role` = full access (bot writes), `anon` = SELECT-only (dashboard reads).** Supabase security advisor returns zero lints.
+2. **DISK IO ROOT CAUSE FOUND + FIXED.** `sync_log` exploded from 558 to 19,237 rows in one week due to blueprint seeder running on every Railway restart (~75 restarts) without dedup. Each restart logged ~250 blueprint chunks. `crew_dispatch` accumulated 3,307 completed tasks. **Purged sync_log from 19,734 → 3,784 rows.** Added unique index on `sync_log.vector_id`.
+3. **BLUEPRINT SEEDER FIX.** `src/memory/pinecone.ts` — `writeSyncLog()` changed from blind `.insert()` to `.upsert()` with `onConflict: "vector_id"`. `seedBlueprints()` now checks if any `blueprint-*` entries exist in `sync_log` before running — skips entirely if already seeded. This prevents the 75x duplicate writes that caused the IO budget depletion.
+4. **RETENTION CLEANUP POLICY DEPLOYED.** `pg_cron` extension enabled. Function `run_retention_cleanup()` runs daily at 3 AM UTC. It deduplicates `sync_log` (keeps latest per `vector_id`), prunes completed `crew_dispatch` older than 7 days, and prunes `messages_log` older than 30 days. Returns JSON with purge counts.
+5. **DASHBOARD LOCKED TO READ-ONLY.** All anon write policies removed. Mission Control dashboard (using `NEXT_PUBLIC_SUPABASE_ANON_KEY` in browser) can now only SELECT. Bot uses `service_role` key which bypasses RLS — completely unaffected. **Architectural note:** The anon key is visible in Vercel frontend source. Anyone who extracts it can read (but no longer write) public tables. Full fix requires adding Supabase Auth to Mission Control (future task).
+6. **Push status: ⏳ NOT PUSHED** — Code changes to `src/memory/pinecone.ts` need git push to deploy the seeder fix.
+
+**NEXT SESSION PRIORITIES (Session 14):**
+1. **GIT PUSH SEEDER FIX** — Push the `pinecone.ts` changes to main for Railway deploy
+2. **VIDRUSH END-TO-END TEST** — Full pipeline test (carried from Session 12)
+3. **COOKIE RESILIENCE** — Monitor cookie expiry (carried from Session 12)
+4. **CONTENT ENGINE → VIDRUSH BRIDGE** — Connect content output to `vid_rush_queue` (carried from Session 12)
+5. **PINECONE AUTH FIX** — Still blocked on API key rotation
+6. **MISSION CONTROL AUTH** — Future: Add Supabase Auth to dashboard so anon key can be fully locked down
+
+**Previous Session Summary — Cowork Session 12 (2026-04-03):**
 1. **GIT PUSH + RAILWAY DEPLOY.** Session 11 code (Chromium, Puppeteer, browser tools, TikTok/IG upload tools, login endpoints, agent browser directives) pushed to main. Commit includes all Session 11 files. Railway auto-deployed successfully with `BROWSER_ENABLED=true` set in env vars.
 2. **COOKIE IMPORT ENDPOINT BUILT + DEPLOYED.** New `POST /api/browser/import-cookies` endpoint. Accepts `{domain, account?, cookies[]}` — validates domain against allowlist (tiktok, instagram, youtube, twitter, threads), validates account (acerichie, tcf), normalizes cookie format for Puppeteer, saves via account-aware `saveCookies()`, verifies by loading back, sends Telegram notification. Companion `POST /api/browser/cookie-status` reports per-account cookie counts. Commits `1212595` + `07b9dba`.
 3. **SUPABASE AGENT BLUEPRINTS UPDATED.** All 6 agent `personality_config` rows updated via direct Supabase SQL with permanent browser scope sections (Alfred=research, Veritas=fact-check, Vector=analytics, Anita=trends, Yuki=PRIMARY distribution, Sapphire=intel).
@@ -550,17 +566,34 @@ Three infrastructure fixes deployed after full pipeline stall on "gold mine" vid
 
 ## 7. SUPABASE TABLES (KEY ONES)
 
+### RLS Security Model (Hardened 2026-04-03, Session 13)
+**All tables now follow: `service_role` = full CRUD (bot), `anon` = SELECT-only (dashboard).** No table allows anon INSERT, UPDATE, or DELETE. The `anon` key is exposed in Mission Control's frontend source — anyone can read but cannot write. Bot uses `service_role` key which bypasses RLS entirely.
+
+### Retention Policy (pg_cron, daily 3 AM UTC)
+Function `run_retention_cleanup()` runs automatically:
+- `sync_log`: Deduplicates (keeps latest entry per `vector_id`)
+- `crew_dispatch`: Purges completed records older than 7 days
+- `messages_log`: Purges records older than 30 days
+
+### RPC Functions (search_path pinned to `public` as of Session 13)
+- `increment_fiscal_sum` — Atomic counter for fiscal_sum metric
+- `unsubscribe_email(target_email text)` — Email unsubscribe (SECURITY DEFINER)
+- `get_pending_nurture` — Nurture sequence query (SECURITY DEFINER)
+- `set_nurture_defaults` — Nurture template defaults
+
 | Table | Purpose | Who Writes | Who Reads |
 |-------|---------|-----------|-----------|
 | `personality_config` | Agent blueprints/system prompts | Dev (manual) | All agents at boot |
-| `crew_dispatch` | Inter-agent task routing | Any agent | Dispatch poller |
+| `crew_dispatch` | Inter-agent task routing (bot-only, NOT used by dashboard) | Any agent | Dispatch poller |
+| `sync_log` | Pinecone vector sync tracking (bot-only, NOT used by dashboard) | Pinecone sync | Boot sync check |
 | `tasks` | Proposed tasks, approval workflow | Agents (propose_task) + Dashboard (manual) | Approval poller + Dashboard |
 | `content_drafts` | Generated content for review | Anita, Alfred, Yuki | Dashboard + Architect |
 | `briefings` | Strategic reports/analysis | Sapphire, Vector, Veritas | Dashboard + Architect |
 | `activity_log` | Agent activity feed | All agents | Dashboard |
 | `vid_rush_queue` | Video pipeline queue | Clip pipeline | Yuki/Vector |
 | `content_transmissions` | Published content log | Video publisher | Dashboard |
-| `knowledge_nodes` | Shared knowledge base (75 entries) | Knowledge writer | Pinecone sync |
+| `knowledge_nodes` | Shared knowledge base (3,595 entries) | Knowledge writer | Pinecone sync |
+| `messages_log` | Chat message history (largest table, ~7K rows) | All agents | Dashboard |
 | `product_tiers` | Stripe product ladder (6 tiers) | Dev | Dashboard + agents |
 | `stripe_metrics` | Revenue data | Vector | Dashboard |
 | `sovereign_metrics` | Master KPIs ($1.2M, 100k minds) | Various | Dashboard |
@@ -1263,7 +1296,8 @@ Video publisher code is fully written and registered. This is purely a credentia
 | `TZ` | (system) | ✅ SET |
 | `PORT` | 3000 | Set by Railway automatically |
 | `BUFFER_ORG_ID` | "69c613a244dbc563b3e05050" (hardcoded) | Not needed in Railway |
-| `LLM_DEFAULT_PROVIDER` | "gemini" | Not needed |
+| `LLM_DEFAULT_PROVIDER` | "anthropic" (changed 2026-04-03) | Not needed — hardcoded default updated |
+| `LLM_FAILOVER_ORDER` | "anthropic,gemini,groq,openai,deepseek" | Not needed — hardcoded default updated |
 | `GEMINI_MODEL` | "gemini-3.1-pro-preview" | Not needed |
 | `BROWSER_ENABLED` | "false" | NOT SET — see Browser section below |
 | `SHELL_ENABLED` | "true" (default) | Not needed |

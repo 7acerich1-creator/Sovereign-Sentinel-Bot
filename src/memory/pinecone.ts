@@ -282,14 +282,14 @@ export class PineconeMemory {
       const { createClient } = await import("@supabase/supabase-js");
       const supabase = createClient(config.memory.supabaseUrl, config.memory.supabaseKey);
 
-      await supabase.from("sync_log").insert({
+      await supabase.from("sync_log").upsert({
         vector_id: vectorId,
         agent_name: agentName,
         namespace,
         status,
         error_message: errorMsg || null,
         synced_at: new Date().toISOString(),
-      });
+      }, { onConflict: "vector_id" });
     } catch (err: any) {
       // Non-critical
       console.error(`[Pinecone→Supabase] sync_log write error: ${err.message}`);
@@ -311,6 +311,18 @@ export class PineconeMemory {
     try {
       const { createClient } = await import("@supabase/supabase-js");
       const supabase = createClient(config.memory.supabaseUrl, config.memory.supabaseKey);
+
+      // Pre-check: skip entirely if blueprints are already seeded
+      const { data: existingSeeds } = await supabase
+        .from("sync_log")
+        .select("vector_id")
+        .like("vector_id", "blueprint-%")
+        .limit(1);
+
+      if (existingSeeds && existingSeeds.length > 0) {
+        console.log("✅ [Pinecone Seeder] Blueprints already seeded — skipping (found existing sync_log entries)");
+        return 0;
+      }
 
       const { data: blueprints, error } = await supabase
         .from("personality_config")

@@ -1052,37 +1052,60 @@ export async function nukeBufferQueue(): Promise<string> {
     const channelMap = await discoverChannels();
     const allChannels = [...channelMap.ace_richie, ...channelMap.containment_field];
 
+    const orgId = process.env.BUFFER_ORG_ID || "69c613a244dbc563b3e05050";
+
     for (const ch of allChannels) {
       try {
-        // Query queued posts for this channel
-        const postData = await bufferGraphQL(`
-          query { posts(input: { channelId: "${ch.id}", status: queue, limit: 100 }) { id text } }
-        `);
-        const posts = postData?.posts || [];
-
-        if (posts.length === 0) {
-          results.push(`✅ ${ch.service}/${ch.name}: Empty queue`);
-          continue;
-        }
-
+        // Query queued posts for this channel (Buffer GraphQL Relay-style pagination)
+        let hasMore = true;
+        let cursor: string | null = null;
         let channelDeleted = 0;
-        for (const post of posts) {
-          try {
-            const delResult = await bufferGraphQL(`
-              mutation { deletePost(input: { postId: "${post.id}" }) {
-                ... on PostActionSuccess { post { id } }
-                ... on MutationError { message }
-              }}
-            `);
-            if (delResult?.deletePost?.post?.id) {
-              channelDeleted++;
-              totalDeleted++;
+        let channelTotal = 0;
+
+        while (hasMore) {
+          const afterClause = cursor ? `, after: "${cursor}"` : "";
+          const postData = await bufferGraphQL(`
+            query {
+              posts(input: {
+                organizationId: "${orgId}"
+                filter: { channelIds: ["${ch.id}"], status: [draft, buffer] }
+              }, first: 50${afterClause}) {
+                edges { node { id text } cursor }
+                pageInfo { hasNextPage endCursor }
+              }
             }
-          } catch {
-            // Individual post delete failure — continue
+          `);
+          const edges = postData?.posts?.edges || [];
+          const pageInfo = postData?.posts?.pageInfo;
+
+          for (const edge of edges) {
+            const post = edge.node;
+            channelTotal++;
+            try {
+              const delResult = await bufferGraphQL(`
+                mutation { deletePost(input: { postId: "${post.id}" }) {
+                  ... on PostActionSuccess { post { id } }
+                  ... on MutationError { message }
+                }}
+              `);
+              if (delResult?.deletePost?.post?.id) {
+                channelDeleted++;
+                totalDeleted++;
+              }
+            } catch {
+              // Individual post delete failure — continue
+            }
           }
+
+          hasMore = pageInfo?.hasNextPage === true && edges.length > 0;
+          cursor = pageInfo?.endCursor || null;
         }
-        results.push(`🗑️ ${ch.service}/${ch.name}: ${channelDeleted}/${posts.length} deleted`);
+
+        if (channelTotal === 0) {
+          results.push(`✅ ${ch.service}/${ch.name}: Empty queue`);
+        } else {
+          results.push(`🗑️ ${ch.service}/${ch.name}: ${channelDeleted}/${channelTotal} deleted`);
+        }
       } catch (err: any) {
         results.push(`❌ ${ch.service}/${ch.name}: ${err.message}`);
       }

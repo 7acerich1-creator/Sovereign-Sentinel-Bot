@@ -2024,27 +2024,67 @@ async function main() {
 
               if (receivingAgent === "alfred") {
                 // ── ALFRED: Process directly — he IS the content intelligence agent ──
+                // Fire the bot-native VidRush pipeline immediately (download → Whisper → clips → Supabase)
+                // This runs in background while Alfred's LLM analysis proceeds in parallel
                 await agentChannel.sendMessage(message.chatId,
-                  `🎯 _YouTube URL detected. Activating Vid Rush Pipeline..._\n` +
+                  `🎯 _YouTube URL detected. Activating Bot-Native Vid Rush Pipeline..._\n` +
                   `Video ID: \`${videoId}\`\n` +
-                  `📡 _Scenario E (Transcript) + Scenario F (Sovereign Clip Pipeline) firing in parallel..._`,
+                  `🔥 _Downloading → Whisper transcription → Clip generation → Supabase queue..._\n` +
+                  `_This runs in background. I'll notify you when clips are ready._`,
                   { parseMode: "Markdown" }
                 );
 
-                message.content = `[VID RUSH PIPELINE ACTIVATED] Content Factory triggered for: ${youtubeUrl}\n\n` +
-                  `Your task: Process this YouTube URL. Auto-detect the niche (dark psychology, self-improvement, burnout, or quantum physics). ` +
+                // Fire vid_rush tool directly — no Make.com dependency
+                const vidRushTool = new VidRushTool();
+                vidRushTool.execute({
+                  youtube_url: youtubeUrl,
+                  target_clip_count: 10,
+                }).then(async (result) => {
+                  console.log(`✅ [VidRush] Bot-native pipeline complete for ${youtubeUrl}`);
+                  // Notify Architect via Telegram
+                  try {
+                    await agentChannel.sendMessage(message.chatId,
+                      `🔥 *VID RUSH PIPELINE — COMPLETE*\n\n${result.slice(0, 3500)}`,
+                      { parseMode: "Markdown" }
+                    );
+                  } catch (e: any) {
+                    // Retry without markdown if parse fails
+                    await agentChannel.sendMessage(message.chatId,
+                      `VID RUSH PIPELINE — COMPLETE\n\n${result.slice(0, 3500)}`
+                    );
+                  }
+                  // Auto-trigger sweep to publish ready clips
+                  try {
+                    const sweepResp = await fetch(`http://localhost:${config.webhooks.port || 3000}/api/vid-rush/sweep`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                    });
+                    const sweepResult = await sweepResp.text();
+                    console.log(`📡 [VidRush] Auto-sweep result: ${sweepResult.slice(0, 500)}`);
+                  } catch (sweepErr: any) {
+                    console.warn(`[VidRush] Auto-sweep failed: ${sweepErr.message}`);
+                  }
+                }).catch(async (err) => {
+                  console.error(`❌ [VidRush] Bot-native pipeline failed: ${err.message}`);
+                  await agentChannel.sendMessage(message.chatId,
+                    `❌ Vid Rush pipeline failed: ${err.message?.slice(0, 500)}`
+                  );
+                });
+
+                message.content = `[VID RUSH PIPELINE ACTIVATED — BOT-NATIVE] Content Factory triggered for: ${youtubeUrl}\n\n` +
+                  `The bot-native clip pipeline is running in background (download → Groq Whisper → ffmpeg clips → Supabase → auto-sweep to platforms).\n\n` +
+                  `Your task: Process this YouTube URL in parallel. Auto-detect the niche (dark psychology, self-improvement, burnout, or quantum physics). ` +
                   `Extract 3 timestamped hooks: (1) 0:00 scroll-stopping opening, (2) ~30% escalation, (3) ~70% solution/reveal. ` +
                   `Generate a cleaned transcript summary and 1 core transmission sentence. Apply Sovereign Synthesis lexicon. ` +
                   `Use the crew_dispatch tool to send your outputs downstream: ` +
                   `dispatch timestamped_hooks to yuki, cleaned_transcript to anita, and core_summary to sapphire.\n` +
-                  `NOTE: DumplingAI transcript (Scenario E) and sovereign clip pipeline (Scenario F) are being processed in parallel via Make.com.\n` +
                   `Original message: ${message.content}`;
               } else {
-                // ── ANY OTHER AGENT: Auto-dispatch to Alfred + acknowledge to user ──
+                // ── ANY OTHER AGENT: Auto-dispatch to Alfred + fire bot-native pipeline ──
                 await agentChannel.sendMessage(message.chatId,
                   `🎯 _YouTube URL detected! Routing to Alfred for Vid Rush Pipeline..._\n` +
                   `Video ID: \`${videoId}\`\n` +
-                  `📡 _Make.com Scenarios E + F also firing in parallel._\n` +
+                  `🔥 _Bot-native clip pipeline firing in background._\n` +
                   `_Alfred will process the hook extraction and dispatch downstream to Yuki, Anita, and Sapphire._`,
                   { parseMode: "Markdown" }
                 );

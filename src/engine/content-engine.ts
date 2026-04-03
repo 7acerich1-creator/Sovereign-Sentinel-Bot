@@ -1068,7 +1068,7 @@ export async function nukeBufferQueue(): Promise<string> {
             query {
               posts(input: {
                 organizationId: "${orgId}"
-                filter: { channelIds: ["${ch.id}"], status: [draft, buffer] }
+                filter: { channelIds: ["${ch.id}"] }
               }, first: 50${afterClause}) {
                 edges { node { id text } cursor }
                 pageInfo { hasNextPage endCursor }

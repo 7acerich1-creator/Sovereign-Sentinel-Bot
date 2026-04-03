@@ -1115,6 +1115,170 @@ async function main() {
     }
   });
 
+  // ── /api/vid-rush/sweep — Distribute ready clips from vid_rush_queue to video platforms ──
+  // Reads clips with status = "ready" and video_url populated → publishes via VideoPublisherTool
+  // to YouTube Shorts, TikTok, and Instagram Reels (bypasses Buffer entirely)
+  webhookServer.register("/api/vid-rush/sweep", async (incoming: any) => {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseKey) {
+      return JSON.stringify({ status: "error", message: "Supabase not configured" });
+    }
+
+    try {
+      // Fetch ready clips
+      const queueResp = await fetch(
+        `${supabaseUrl}/rest/v1/vid_rush_queue?status=eq.ready&video_url=not.is.null&order=created_at.asc&limit=20`,
+        {
+          headers: {
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+          },
+        }
+      );
+
+      if (!queueResp.ok) {
+        const err = await queueResp.text();
+        return JSON.stringify({ status: "error", message: `Queue fetch failed: ${err.slice(0, 300)}` });
+      }
+
+      const clips = (await queueResp.json()) as any[];
+
+      if (clips.length === 0) {
+        return JSON.stringify({ status: "ok", published: 0, message: "No ready clips in vid_rush_queue" });
+      }
+
+      console.log(`🎬 [VidRush Sweep] Found ${clips.length} ready clips. Publishing...`);
+
+      const videoPublisher = new VideoPublisherTool();
+      const results: Array<{ id: string; title: string; status: string; detail: string }> = [];
+
+      for (const clip of clips) {
+        // Determine brand from metadata or default to ace_richie
+        const brand = clip.metadata?.brand || "ace_richie";
+        const niche = clip.niche || clip.topic || "dark_psychology";
+        const caption = clip.script || clip.title || `Sovereign Synthesis — ${niche}`;
+        const title = clip.title || `${caption.slice(0, 80)} #Shorts`;
+
+        // Mark as publishing
+        await fetch(`${supabaseUrl}/rest/v1/vid_rush_queue?id=eq.${clip.id}`, {
+          method: "PATCH",
+          headers: {
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+            "Content-Type": "application/json",
+            Prefer: "return=minimal",
+          },
+          body: JSON.stringify({ status: "publishing" }),
+        });
+
+        try {
+          const publishResult = await videoPublisher.execute({
+            video_url: clip.video_url,
+            platforms: "all",
+            caption,
+            title,
+            tags: `${niche},sovereign synthesis,dark psychology,mindset,protocol 77`,
+            niche,
+            brand,
+          });
+
+          const succeeded = publishResult.includes("✅");
+          const newStatus = succeeded ? "published" : "publish_failed";
+
+          // Update status + store results
+          await fetch(`${supabaseUrl}/rest/v1/vid_rush_queue?id=eq.${clip.id}`, {
+            method: "PATCH",
+            headers: {
+              apikey: supabaseKey,
+              Authorization: `Bearer ${supabaseKey}`,
+              "Content-Type": "application/json",
+              Prefer: "return=minimal",
+            },
+            body: JSON.stringify({
+              status: newStatus,
+              scheduled_at: new Date().toISOString(),
+              metadata: {
+                ...clip.metadata,
+                publish_result: publishResult.slice(0, 2000),
+                published_at: new Date().toISOString(),
+              },
+            }),
+          });
+
+          results.push({ id: clip.id, title: clip.title || "untitled", status: newStatus, detail: publishResult.slice(0, 200) });
+          console.log(`✅ [VidRush Sweep] Clip ${clip.id} → ${newStatus}`);
+        } catch (err: any) {
+          // Mark failed
+          await fetch(`${supabaseUrl}/rest/v1/vid_rush_queue?id=eq.${clip.id}`, {
+            method: "PATCH",
+            headers: {
+              apikey: supabaseKey,
+              Authorization: `Bearer ${supabaseKey}`,
+              "Content-Type": "application/json",
+              Prefer: "return=minimal",
+            },
+            body: JSON.stringify({ status: "publish_failed", metadata: { ...clip.metadata, error: err.message } }),
+          });
+          results.push({ id: clip.id, title: clip.title || "untitled", status: "error", detail: err.message });
+          console.error(`❌ [VidRush Sweep] Clip ${clip.id} failed: ${err.message}`);
+        }
+      }
+
+      const successCount = results.filter(r => r.status === "published").length;
+
+      // Notify Architect
+      if (defaultChatId && telegram) {
+        await telegram.sendMessage(
+          defaultChatId,
+          `🎬 *VidRush Sweep Complete*\n\n` +
+          `Published: ${successCount}/${clips.length}\n` +
+          results.map(r => `${r.status === "published" ? "✅" : "❌"} ${r.title?.slice(0, 40)}`).join("\n"),
+          { parseMode: "Markdown" }
+        );
+      }
+
+      return JSON.stringify({ status: "ok", published: successCount, total: clips.length, results });
+    } catch (err: any) {
+      return JSON.stringify({ status: "error", message: err.message, stack: err.stack?.slice(0, 500) });
+    }
+  });
+
+  // ── /api/vid-rush/status — Check vid_rush_queue state ──
+  webhookServer.register("/api/vid-rush/status", async () => {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseKey) {
+      return JSON.stringify({ status: "error", message: "Supabase not configured" });
+    }
+
+    try {
+      const resp = await fetch(
+        `${supabaseUrl}/rest/v1/vid_rush_queue?select=status&order=created_at.desc&limit=100`,
+        { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }
+      );
+      const rows = (await resp.json()) as any[];
+      const counts: Record<string, number> = {};
+      for (const row of rows) {
+        counts[row.status] = (counts[row.status] || 0) + 1;
+      }
+
+      // Check which video platform tokens are configured
+      const platforms = {
+        youtube: !!(process.env.YOUTUBE_REFRESH_TOKEN || process.env.YOUTUBE_ACCESS_TOKEN),
+        youtube_tcf: !!process.env.YOUTUBE_REFRESH_TOKEN_TCF,
+        tiktok: !!process.env.TIKTOK_ACCESS_TOKEN,
+        instagram: !!(process.env.INSTAGRAM_ACCESS_TOKEN && process.env.INSTAGRAM_BUSINESS_ID),
+        groq_whisper: !!process.env.GROQ_API_KEY,
+        openai_whisper: !!process.env.OPENAI_API_KEY,
+      };
+
+      return JSON.stringify({ status: "ok", queue: counts, total: rows.length, platforms });
+    } catch (err: any) {
+      return JSON.stringify({ status: "error", message: err.message });
+    }
+  });
+
   // ── /api/glitch — Log errors/incidents from external systems ──
   webhookServer.register("/api/glitch", async (incoming: any) => {
     const { severity, description, agent_name, stack_trace } = incoming as any;

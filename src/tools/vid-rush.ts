@@ -197,17 +197,43 @@ export class VidRushTool implements Tool {
       return `❌ Audio extraction failed: ${err.message?.slice(0, 300)}`;
     }
 
-    // STEP 3 — Run Whisper transcription via OpenAI API (no local CLI needed)
+    // STEP 3 — Run Whisper transcription via Groq API (primary) or OpenAI API (fallback)
+    // Groq offers whisper-large-v3-turbo with same API format, free tier 14,400 req/day
     let segments: WhisperSegment[] = [];
     try {
       if (!existsSync(whisperOut)) {
-        const whisperApiKey = config.voice.whisperApiKey;
-        if (!whisperApiKey) {
-          return "❌ Whisper API key not configured (OPENAI_API_KEY). Cannot transcribe video.";
+        // Provider selection: Groq primary (free tier, fast), OpenAI fallback
+        const groqKey = process.env.GROQ_API_KEY;
+        const openaiKey = config.voice.whisperApiKey;
+
+        let whisperApiKey: string;
+        let whisperEndpoint: string;
+        let whisperModel: string;
+        let providerName: string;
+
+        if (groqKey) {
+          whisperApiKey = groqKey;
+          whisperEndpoint = "https://api.groq.com/openai/v1/audio/transcriptions";
+          whisperModel = "whisper-large-v3-turbo";
+          providerName = "Groq";
+        } else if (openaiKey) {
+          whisperApiKey = openaiKey;
+          whisperEndpoint = "https://api.openai.com/v1/audio/transcriptions";
+          whisperModel = "whisper-1";
+          providerName = "OpenAI";
+        } else {
+          return "❌ No Whisper API key configured. Set GROQ_API_KEY (preferred) or OPENAI_API_KEY in Railway env.";
         }
 
-        console.log(`🗣️ [VidRush] Running Whisper transcription via OpenAI API...`);
+        console.log(`🗣️ [VidRush] Running Whisper transcription via ${providerName} (${whisperModel})...`);
         const audioBuffer = readFileSync(audioPath);
+
+        // Groq has a 25MB file size limit — check before sending
+        const fileSizeMB = audioBuffer.length / (1024 * 1024);
+        if (fileSizeMB > 25) {
+          console.log(`⚠️ [VidRush] Audio file is ${fileSizeMB.toFixed(1)}MB (limit 25MB). Chunking not yet implemented.`);
+          return `❌ Audio file too large (${fileSizeMB.toFixed(1)}MB). Groq/OpenAI Whisper limit is 25MB. Video may be too long — try a shorter source.`;
+        }
 
         // Build multipart form data for Whisper API with verbose_json for timestamps
         const boundary = `----FormBoundary${Date.now()}`;
@@ -219,7 +245,7 @@ export class VidRushTool implements Tool {
         const modelPart = Buffer.from(
           `\r\n--${boundary}\r\n` +
           `Content-Disposition: form-data; name="model"\r\n\r\n` +
-          `whisper-1`
+          whisperModel
         );
         const formatPart = Buffer.from(
           `\r\n--${boundary}\r\n` +
@@ -235,7 +261,7 @@ export class VidRushTool implements Tool {
 
         const body = Buffer.concat([header, audioBuffer, modelPart, formatPart, langPart, footer]);
 
-        const resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+        let resp = await fetch(whisperEndpoint, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${whisperApiKey}`,
@@ -244,9 +270,33 @@ export class VidRushTool implements Tool {
           body,
         });
 
+        // If Groq fails, try OpenAI fallback
+        if (!resp.ok && providerName === "Groq" && openaiKey) {
+          const groqErr = await resp.text();
+          console.warn(`⚠️ [VidRush] Groq Whisper failed (${resp.status}): ${groqErr.slice(0, 200)}. Falling back to OpenAI...`);
+
+          // Rebuild body with OpenAI model
+          const oaiModelPart = Buffer.from(
+            `\r\n--${boundary}\r\n` +
+            `Content-Disposition: form-data; name="model"\r\n\r\n` +
+            `whisper-1`
+          );
+          const oaiBody = Buffer.concat([header, audioBuffer, oaiModelPart, formatPart, langPart, footer]);
+
+          resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${openaiKey}`,
+              "Content-Type": `multipart/form-data; boundary=${boundary}`,
+            },
+            body: oaiBody,
+          });
+          providerName = "OpenAI (fallback)";
+        }
+
         if (!resp.ok) {
           const errText = await resp.text();
-          return `❌ Whisper API error ${resp.status}: ${errText.slice(0, 300)}`;
+          return `❌ Whisper API error (${providerName}) ${resp.status}: ${errText.slice(0, 300)}`;
         }
 
         const raw: any = await resp.json();
@@ -258,7 +308,7 @@ export class VidRushTool implements Tool {
 
         // Cache for re-runs
         writeFileSync(whisperOut, JSON.stringify(raw, null, 2));
-        console.log(`✅ [VidRush] Whisper API returned ${segments.length} segments`);
+        console.log(`✅ [VidRush] ${providerName} Whisper returned ${segments.length} segments`);
       } else {
         const raw = JSON.parse(readFileSync(whisperOut, "utf-8"));
         segments = (raw.segments || []).map((s: any) => ({

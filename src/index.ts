@@ -32,7 +32,7 @@ import { MessageRouter } from "./channels/router";
 import { ShellTool } from "./tools/shell";
 import { FileReadTool, FileWriteTool, FileListTool, FileDeleteTool, FileSearchTool } from "./tools/files";
 import { WebSearchTool, WebFetchTool } from "./tools/search";
-import { BrowserTool } from "./tools/browser";
+import { BrowserTool, saveCookies, loadCookies, COOKIE_DIR } from "./tools/browser";
 import { Scheduler, SchedulerTool } from "./tools/scheduler";
 import { WebhookServer } from "./tools/webhooks";
 import { MCPBridge } from "./tools/mcp-bridge";
@@ -1295,6 +1295,115 @@ async function main() {
   // ── /api/browser/instagram-login — One-time Instagram manual login flow ──
   webhookServer.register("/api/browser/instagram-login", async () => {
     return await instagramLoginFlow();
+  });
+
+  // ── /api/browser/import-cookies — Import cookies from external browser ──
+  // Accepts: { domain: "tiktok" | "instagram" | string, cookies: Cookie[] }
+  // Use when headless login fails: export cookies from a real browser (EditThisCookie, DevTools, etc.)
+  // and POST them here. The bot will use these cookies for future browser uploads.
+  webhookServer.register("/api/browser/import-cookies", async (incoming: any) => {
+    const { domain, cookies } = incoming as { domain?: string; cookies?: any[] };
+
+    // ── Validate domain ──
+    if (!domain || typeof domain !== "string") {
+      return JSON.stringify({ status: "error", message: "Missing or invalid 'domain'. Expected 'tiktok' or 'instagram'." });
+    }
+    const allowedDomains = ["tiktok", "instagram", "youtube", "twitter", "threads"];
+    const normalizedDomain = domain.toLowerCase().trim();
+    if (!allowedDomains.includes(normalizedDomain)) {
+      return JSON.stringify({ status: "error", message: `Invalid domain '${domain}'. Allowed: ${allowedDomains.join(", ")}` });
+    }
+
+    // ── Validate cookies array ──
+    if (!cookies || !Array.isArray(cookies) || cookies.length === 0) {
+      return JSON.stringify({ status: "error", message: "Missing or empty 'cookies' array." });
+    }
+
+    // Validate each cookie has at minimum: name, value, domain
+    const invalidCookies = cookies.filter((c, i) => {
+      if (!c || typeof c !== "object") return true;
+      if (!c.name || typeof c.name !== "string") return true;
+      if (c.value === undefined || c.value === null) return true;
+      return false;
+    });
+    if (invalidCookies.length > 0) {
+      return JSON.stringify({
+        status: "error",
+        message: `${invalidCookies.length} cookies are invalid. Each cookie must have at least 'name' (string) and 'value'.`,
+      });
+    }
+
+    // ── Normalize cookies to Puppeteer-compatible format ──
+    // EditThisCookie / DevTools exports may use different field names.
+    // We cast to any[] for saveCookies since imported cookies won't have all
+    // Puppeteer Cookie fields (size, session) — Puppeteer tolerates this when
+    // cookies are set via page.setCookie() which is how they're consumed.
+    const normalized: any[] = cookies.map((c: any) => ({
+      name: String(c.name),
+      value: String(c.value ?? ""),
+      domain: c.domain || `.${normalizedDomain}.com`,
+      path: c.path || "/",
+      expires: typeof c.expires === "number" ? c.expires
+             : typeof c.expirationDate === "number" ? c.expirationDate
+             : -1,
+      httpOnly: Boolean(c.httpOnly ?? false),
+      secure: Boolean(c.secure ?? true),
+      sameSite: c.sameSite || "Lax",
+    }));
+
+    // ── Save to disk ──
+    try {
+      saveCookies(normalizedDomain, normalized as any);
+
+      // Verify the save by loading back
+      const verification = loadCookies(normalizedDomain);
+      const savedCount = verification ? verification.length : 0;
+
+      console.log(`🍪 [Cookie Import] Saved ${savedCount} cookies for ${normalizedDomain}`);
+
+      // Notify Architect via Telegram
+      const ARCHITECT_CHAT_ID = config.telegram.authorizedUserIds[0];
+      if (ARCHITECT_CHAT_ID) {
+        try {
+          const botToken = config.telegram.botToken;
+          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: ARCHITECT_CHAT_ID,
+              text: `🍪 **Cookie Import Successful**\n\nDomain: \`${normalizedDomain}\`\nCookies saved: ${savedCount}\nBrowser uploads for ${normalizedDomain} are now armed.`,
+              parse_mode: "Markdown",
+            }),
+          });
+        } catch { /* Telegram notification is best-effort */ }
+      }
+
+      return JSON.stringify({
+        status: "ok",
+        domain: normalizedDomain,
+        cookies_saved: savedCount,
+        cookie_path: `${COOKIE_DIR}/${normalizedDomain}.json`,
+        message: `${savedCount} cookies imported for ${normalizedDomain}. Browser uploads are now armed.`,
+      });
+    } catch (err: any) {
+      return JSON.stringify({ status: "error", message: `Failed to save cookies: ${err.message}` });
+    }
+  });
+
+  // ── /api/browser/cookie-status — Check which domains have cookies saved ──
+  webhookServer.register("/api/browser/cookie-status", async () => {
+    const domains = ["tiktok", "instagram", "youtube", "twitter", "threads"];
+    const status: Record<string, { has_cookies: boolean; cookie_count: number }> = {};
+
+    for (const d of domains) {
+      const cookies = loadCookies(d);
+      status[d] = {
+        has_cookies: cookies !== null && cookies.length > 0,
+        cookie_count: cookies ? cookies.length : 0,
+      };
+    }
+
+    return JSON.stringify({ status: "ok", domains: status });
   });
 
   // ── /api/glitch — Log errors/incidents from external systems ──

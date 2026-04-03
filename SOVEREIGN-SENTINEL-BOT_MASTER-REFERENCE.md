@@ -1,19 +1,43 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-02 (Cowork Session 8 — Unified Content Engine Overhaul + VidRush Routing Fix) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-03 (Cowork Session 10 — Groq Whisper Swap + VidRush Distribution Pipeline + Browser Automation Scope) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
-**Session Summary — Cowork Session 8 (2026-04-02, night):**
+**Session Summary — Cowork Session 10 (2026-04-03):**
+1. **GROQ WHISPER SWAP — OpenAI billing dependency ELIMINATED.** `vid-rush.ts` now uses Groq Whisper API (`whisper-large-v3-turbo`) as primary transcription provider. `GROQ_API_KEY` already set in Railway (14,400 req/day free tier). OpenAI Whisper is automatic fallback if Groq fails. 25MB file size check added. VidRush can now transcribe without OpenAI credits.
+2. **VID-RUSH DISTRIBUTION SWEEP ENDPOINT.** New `/api/vid-rush/sweep` (POST) — reads `vid_rush_queue` where status = "ready" → publishes each clip to YouTube Shorts, TikTok, and Instagram Reels via `VideoPublisherTool` (direct API, bypasses Buffer). Updates status to "published" or "publish_failed". Sends Telegram notification with results. This is the missing link between clip generation and platform distribution.
+3. **VID-RUSH STATUS ENDPOINT.** New `/api/vid-rush/status` (POST) — reports queue state (counts by status) AND which platform tokens are detected (youtube, youtube_tcf, tiktok, instagram, groq_whisper, openai_whisper). Use this to verify credential state instead of guessing.
+4. **YOUTUBE OAUTH TOKENS CONFIRMED SET.** All four YouTube credentials verified in Railway: `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN` (Ace Richie 77), `YOUTUBE_REFRESH_TOKEN_TCF` (The Containment Field). YouTube Shorts publishing has ZERO credential blockers.
+5. **TIKTOK + INSTAGRAM API ACCESS BLOCKED.** TikTok Content Posting API and Instagram Graph API require app review/approval that has been rejected. Browser automation (Puppeteer) identified as the workaround — upload videos through web interfaces. Requires: Chromium in Docker, upgraded browser tool, agent scope updates. DEFERRED TO SESSION 11.
+6. **CONTENT ENGINE QUEUE VERIFIED.** All 16 posts from Sessions 9+10 confirmed posted. Queue clean. Distribution sweep working.
+7. **Push status: ✅ PUSHED** — Commit `cb605a8` pushed to main. Railway auto-deploying.
+
+**NEXT SESSION PRIORITIES (Session 11 — Browser Automation Overhaul):**
+1. **Add Chromium + Puppeteer to Dockerfile.** Install `chromium` and `puppeteer-core` in production stage. Set `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`. Expect ~200MB Docker image size increase.
+2. **Upgrade `browser.ts` from toy to weapon.** Current tool only has navigate/extract/screenshot. Needs: login with cookie persistence, file upload, click, type, wait, multi-step workflow chains, session management (reuse logged-in sessions).
+3. **Build `tiktok-browser-upload.ts` and `instagram-browser-upload.ts`.** New tools that use Puppeteer to: (a) login to TikTok/IG web via saved cookies, (b) navigate to upload page, (c) upload video file from Supabase Storage URL, (d) fill caption/tags, (e) publish. Store session cookies in SQLite or Supabase for reuse.
+4. **Wire browser upload into `/api/vid-rush/sweep`.** VideoPublisherTool should fall back to browser upload when API tokens aren't set (TikTok, IG) but browser is enabled.
+5. **Update agent scopes with browser use cases.** Each agent gets specific browser tasks beyond just upload: Alfred = research/verify links, Veritas = fact-check/competitor scrape, Vector = analytics scraping, Anita = content research, Yuki = distribution via browser upload, Sapphire = strategic intel gathering.
+6. **Set `BROWSER_ENABLED=true` in Railway** after Chromium is in Docker.
+7. **VidRush end-to-end test.** Drop a YouTube URL → verify full chain: Groq Whisper transcription → clip scoring → ffmpeg cut → Supabase upload → vid_rush_queue → sweep → YouTube Shorts published.
+
+**Previous Session Summary — Cowork Session 9 (2026-04-03):**
+1. **FIRST LIVE ANITA-VOICED PRODUCTION RUN — 12/12 SUCCESS.** Triggered `/api/content-engine/produce` on the deployed Session 8 code. All 12 posts generated (6 Ace Richie, 6 Containment Field — but only 3 CF slots had content due to time_slot distribution). Every post uses Protocol 77 HOOK → PIVOT → ANCHOR. Voice is clearly differentiated between brands. Quantum niche today: Observer Effect × attention warfare × consciousness rendering. All 12 have Imagen 4 images attached. Content is sitting in `content_engine_queue` with status = "ready", awaiting distribution sweep.
+2. **BUFFER NUKE QUERY FIX.** The `nukeBufferQueue()` function had wrong Buffer GraphQL schema — used `channelId` and `status` directly on `PostsInput` but Buffer requires `organizationId` (required), `filter.channelIds` (array), `filter.status` (array of enums: `draft`, `buffer`). Also needed Relay-style pagination (`first`/`after` + `edges[].node` + `pageInfo`). Fixed with proper schema and pagination loop.
+3. **DIAG ENDPOINT MODEL FIX.** `/api/content-engine/diag` was testing `imagen-3.0-generate-002` (404 — decommissioned). Updated to `imagen-4.0-generate-001` to match production code. Gemini Imagen 4 confirmed working (12/12 images generated).
+4. **DALL-E 3 STILL DOWN.** OpenAI billing hard limit still hit. Imagen 4 is sole image provider. Not blocking — all 12 images generated fine.
+5. **Push status: ✅ PUSHED** — Commit `c306866` pushed to main. Railway auto-deploying.
+
+**NEXT SESSION PRIORITIES:**
+1. **Fire distribution sweep** — 12 posts sitting in "ready" status. Need to trigger `/api/content-engine/sweep` to push them into Buffer's queue for scheduled posting. Do this after Railway finishes deploying Session 9 code.
+2. **VidRush end-to-end test** — Still untested. Drop a YouTube URL to Alfred's DM and verify: (a) Make.com Scenarios E+F fire (check execution count), (b) callback hits `/api/vidrush`, (c) downstream dispatches to Yuki/Anita/Sapphire chain.
+3. **Content quality tuning** — Review the 12 posts in Buffer after distribution. Some posts are slightly repetitive on the quantum × observer effect theme (same niche across all 6 slots). Consider whether niche rotation should vary within a day or if single-niche-per-day is the right strategy.
+4. **OpenAI billing** — Add credits to restore DALL-E 3 as fallback image provider. Low priority while Imagen 4 works.
+
+**Previous Session Summary — Cowork Session 8 (2026-04-02, night):**
 1. **CONTENT ENGINE VOICE OVERHAUL — Anita is now the engine.** Replaced the generic 2-paragraph brand voice prompt with full Anita-driven Protocol 77 blueprints per brand. Every post now uses HOOK → PIVOT → ANCHOR structure with Sovereign Synthesis lexicon (Ace Richie) or clinical dark intelligence framing (Containment Field). `BRAND_VOICE_BLUEPRINTS` constant contains ~500-word personality blueprints per brand. `NICHE_CONTENT_DIRECTION` gives Anita specific content guidance per niche × brand combination (10 unique direction prompts). The engine no longer sounds like "an AI wrote this" — it sounds like Anita wrote it.
 2. **IMAGE GENERATION OVERHAUL — Niche × brand cinematic visual spec.** Replaced generic image prompts ("High contrast monochromatic, brutalist aesthetic") with 10 cinematic visual direction prompts (5 niches × 2 brands). Each produces visually distinct imagery: Ace dark_psych = noir cinema with amber light, CF dark_psych = surveillance-aesthetic rain-slicked noir. Images now include explicit "NO text, NO words, NO letters" instructions to prevent AI text artifacts. `IMAGE_NICHE_PREFIXES` is now `Record<string, Record<Brand, string>>` instead of flat string map.
 3. **BUFFER QUEUE NUKE ENDPOINT.** New `/api/content-engine/nuke-queue` (POST) — deletes ALL queued Buffer posts across all 9 channels AND clears non-posted Supabase `content_engine_queue` rows. Sends Telegram notification to Architect when complete. New export: `nukeBufferQueue()` from content-engine.ts.
 4. **YOUTUBE URL ROUTING FIX — ALL agents now intercept.** Previously only Alfred's DM handler matched YouTube URLs. Now ANY agent (Sapphire, Veritas, Yuki, Anita, Vector) intercepting a YouTube URL will: (a) fire Make.com Scenarios E+F webhooks, (b) auto-dispatch to Alfred via `crew_dispatch`, (c) acknowledge the routing to the user. Alfred still processes directly when he receives the URL. URL regex also updated to match `/live/` and `/shorts/` paths (Ace was sharing YouTube Live URLs that wouldn't match the old regex).
-5. **Push status: ⏳ PUSH NEEDED** — Ace must run `git push origin main` from terminal. All changes are on disk in the mounted repo.
-
-**NEXT SESSION PRIORITIES:**
-1. **Push + deploy + nuke** — Push the code, wait for Railway deploy, then hit `/api/content-engine/nuke-queue` to wipe all stale Buffer posts. Then trigger `/api/content-engine/produce` to generate fresh content with Anita's voice.
-2. **VidRush end-to-end test** — Drop a YouTube URL to Alfred's DM and verify: (a) Make.com Scenarios E+F fire (check execution count), (b) callback hits `/api/vidrush`, (c) downstream dispatches to Yuki/Anita/Sapphire chain. Webhook URLs are already in Railway.
-3. **Content quality review** — After first Anita-voiced production run, review the actual content in Supabase `content_engine_queue`. Compare to the generic content from Sessions 6-7. If voice still needs tuning, adjust `BRAND_VOICE_BLUEPRINTS`.
-4. **Video production spec document** — The visual production spec for faceless video Shorts was defined but not yet saved to a reference file. Save to SOVEREIGN-POSTING-GUIDE.md or create VISUAL-PRODUCTION-SPEC.md.
-5. **Imagen 4 diag endpoint using wrong model** — `/api/content-engine/diag` still tests `imagen-3.0-generate-002` (404). Production code uses Imagen 4 correctly, but diag is stale. Low priority.
+5. **Push status: ✅ PUSHED** — Commit `e72cac1` pushed to main. Railway auto-deployed.
 
 **Previous Session Summary — Cowork Session 7 (2026-04-02, late night):**
 1. **CE-3 FIX: YouTube skipped in distribution.** Buffer YouTube integration requires VIDEO only — image+text posts explicitly rejected by Buffer API ("YouTube posts do not support image attachments", "YouTube posts require a video"). Community posts via Buffer are not supported. YouTube skipped with clear log message until video pipeline (Make.com Scenario F) is operational.

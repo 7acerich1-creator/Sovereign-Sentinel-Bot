@@ -53,6 +53,7 @@ import { PineconeMemory } from "./memory/pinecone";
 import { KnowledgeWriterTool } from "./tools/knowledge-writer";
 import { ImageGeneratorTool } from "./tools/image-generator";
 import { produceFacelessBatch } from "./engine/faceless-factory";
+import { extractWhisperIntel } from "./engine/whisper-extract";
 import { existsSync, readFileSync } from "fs";
 import { ProposeTaskTool, SaveContentDraftTool, FileBriefingTool, CheckApprovedTasksTool } from "./tools/action-surface";
 import { StripeMetricsTool } from "./tools/stripe-metrics";
@@ -177,8 +178,8 @@ async function main() {
   // Sapphire + Veritas → Anthropic primary (strategic, less frequent, high quality)
   // Vector + Yuki → Groq primary (Yuki = most tool calls, Groq = 14,400/day free tier)
   const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
-    alfred: buildTeamLLM(["gemini", "groq", "anthropic"]),
-    anita: buildTeamLLM(["gemini", "groq", "anthropic"]),
+    alfred: buildTeamLLM(["anthropic", "gemini", "groq"]),
+    anita: buildTeamLLM(["anthropic", "gemini", "groq"]),
     sapphire: buildTeamLLM(["anthropic", "gemini", "groq"]),
     veritas: buildTeamLLM(["anthropic", "gemini", "groq"]),
     vector: buildTeamLLM(["groq", "anthropic", "gemini"]),
@@ -2018,13 +2019,56 @@ async function main() {
               }
             }
 
-            // ── YOUTUBE URL PIPELINE INTERCEPTOR — ALL AGENTS ──
-            // ANY agent receiving a YouTube URL triggers the Vid Rush pipeline.
-            // If the receiving agent is Alfred → he processes it directly.
-            // If it's any OTHER agent → auto-dispatch to Alfred via crew_dispatch + fire Make.com webhooks.
-            // This fixes the routing gap where Ace was dropping URLs to Sapphire but only Alfred had the interceptor.
+            // ── CLIP RIPPER — ON-DEMAND ONLY ──
+            // Fires ONLY when Ace explicitly says "clip this", "clip ripper", "rip clips", etc.
+            // alongside a YouTube URL. Otherwise the Faceless Factory handles URLs by default.
+            const CLIP_TRIGGER_RE = /\b(clip\s*this|clip\s*ripper|rip\s*clips?|cut\s*clips?|chop\s*this)\b/i;
             const YOUTUBE_URL_RE = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|live\/|shorts\/)|youtu\.be\/)([\w-]{11})/i;
-            if (YOUTUBE_URL_RE.test(message.content)) {
+
+            if (CLIP_TRIGGER_RE.test(message.content) && YOUTUBE_URL_RE.test(message.content)) {
+              const match = message.content.match(YOUTUBE_URL_RE);
+              const videoId = match?.[1];
+              const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
+              await agentChannel.sendMessage(message.chatId,
+                `🔪 _Clip Ripper activated for \`${videoId}\`..._\n` +
+                `_Downloading → Whisper → Scoring → Cutting clips → Supabase_`,
+                { parseMode: "Markdown" }
+              );
+
+              const vidRushTool = new VidRushTool();
+              vidRushTool.execute({
+                youtube_url: youtubeUrl,
+                target_clip_count: 5,
+              }).then(async (result) => {
+                console.log(`✅ [ClipRipper] Complete for ${youtubeUrl}`);
+                try {
+                  await agentChannel.sendMessage(message.chatId,
+                    `🔪 *CLIP RIPPER — COMPLETE*\n\n${result.slice(0, 2000)}`,
+                    { parseMode: "Markdown" }
+                  );
+                } catch {
+                  await agentChannel.sendMessage(message.chatId,
+                    `CLIP RIPPER — COMPLETE\n\n${result.slice(0, 2000)}`
+                  );
+                }
+              }).catch(async (err) => {
+                console.error(`❌ [ClipRipper] Failed: ${err.message}`);
+                await agentChannel.sendMessage(message.chatId,
+                  `❌ Clip Ripper failed: ${err.message?.slice(0, 500)}`
+                );
+              });
+
+              message.content = `[CLIP RIPPER ACTIVATED] Cutting source video clips for: ${youtubeUrl}\n` +
+                `The clip ripper is running in background. Original message: ${message.content}`;
+            }
+
+            // ── YOUTUBE URL PIPELINE INTERCEPTOR — ALL AGENTS ──
+            // Default pipeline: Faceless Factory (generates ORIGINAL videos from extracted intelligence).
+            // Clip Ripper is separated — only fires with explicit "clip this" trigger above.
+            // If the receiving agent is Alfred → he processes it directly.
+            // If it's any OTHER agent → auto-dispatch to Alfred via crew_dispatch.
+            else if (YOUTUBE_URL_RE.test(message.content)) {
               const match = message.content.match(YOUTUBE_URL_RE);
               const videoId = match?.[1];
               const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
@@ -2073,66 +2117,37 @@ async function main() {
               Promise.all(webhookFires).catch(() => {});
 
               if (receivingAgent === "alfred") {
-                // ── ALFRED: Process directly — he IS the content intelligence agent ──
-                // Fire the bot-native VidRush pipeline immediately (download → Whisper → clips → Supabase)
-                // This runs in background while Alfred's LLM analysis proceeds in parallel
+                // ── ALFRED: Process directly — Faceless Factory is the DEFAULT pipeline ──
+                // Clip Ripper is ON-DEMAND ONLY (use "clip this" or the vid_rush tool explicitly)
                 await agentChannel.sendMessage(message.chatId,
-                  `🎯 _YouTube URL detected. Dual Pipeline Activated..._\n` +
+                  `🎯 _YouTube URL detected. Faceless Factory Pipeline Activated..._\n` +
                   `Video ID: \`${videoId}\`\n` +
-                  `🔪 _Pipeline 1: Clip Ripper (source video clips)_\n` +
-                  `🎬 _Pipeline 2: Faceless Factory (original videos from extracted intelligence)_\n` +
-                  `_Both run in background. Notifications when each completes._`,
+                  `🎬 _Extracting intelligence → generating original faceless videos_\n` +
+                  `_Running in background. Notification when complete._\n` +
+                  `_💡 Need source clips? Say "clip this" to activate Clip Ripper separately._`,
                   { parseMode: "Markdown" }
                 );
 
-                // ── PIPELINE 1: Clip Ripper (chops source video — the 5% use case) ──
-                const vidRushTool = new VidRushTool();
-                vidRushTool.execute({
-                  youtube_url: youtubeUrl,
-                  target_clip_count: 5,
-                }).then(async (result) => {
-                  console.log(`✅ [VidRush] Clip ripper complete for ${youtubeUrl}`);
+                // ── FACELESS FACTORY PIPELINE (default) ──
+                // Step 1: Download + Whisper transcription (lightweight, ~30s)
+                // Step 2: Faceless Factory generates original videos from extracted intelligence
+                // Clip Ripper does NOT run unless explicitly requested
+                (async () => {
                   try {
+                    // Extract intelligence via Whisper
+                    console.log(`🔊 [FacelessPipeline] Starting Whisper extraction for ${youtubeUrl}...`);
+                    const whisperResult = await extractWhisperIntel(youtubeUrl);
+                    const sourceIntel = whisperResult.transcript ||
+                      `YouTube video ${youtubeUrl} about topics related to sovereignty, psychology, and personal transformation.`;
+                    const detectedNiche = whisperResult.niche;
+
+                    console.log(`🎬 [FacelessFactory] Starting faceless production (niche: ${detectedNiche}) from ${whisperResult.segments.length} Whisper segments...`);
                     await agentChannel.sendMessage(message.chatId,
-                      `🔪 *CLIP RIPPER — COMPLETE*\n\n${result.slice(0, 2000)}`,
+                      `🎬 _Faceless Factory starting — ${whisperResult.segments.length} segments extracted_\n` +
+                      `_Niche: ${detectedNiche} | Brands: Ace Richie + Containment Field_`,
                       { parseMode: "Markdown" }
                     );
-                  } catch (e: any) {
-                    await agentChannel.sendMessage(message.chatId,
-                      `CLIP RIPPER — COMPLETE\n\n${result.slice(0, 2000)}`
-                    );
-                  }
 
-                  // ── PIPELINE 2: Faceless Factory (fires AFTER clip ripper, using its Whisper transcript) ──
-                  // Read the cached Whisper transcript from the clip ripper run
-                  const whisperPath = `/tmp/sovereign_clips/whisper_${videoId}.json`;
-                  let sourceIntel = "";
-                  try {
-                    if (existsSync(whisperPath)) {
-                      const whisperData = JSON.parse(readFileSync(whisperPath, "utf-8"));
-                      sourceIntel = (whisperData.segments || []).map((s: any) => s.text).join(" ");
-                    }
-                  } catch { /* fallback below */ }
-
-                  if (!sourceIntel) {
-                    sourceIntel = `YouTube video ${youtubeUrl} about topics related to sovereignty, psychology, and personal transformation. Generate compelling faceless content based on these themes.`;
-                  }
-
-                  // Detect niche from transcript
-                  const lowerIntel = sourceIntel.toLowerCase();
-                  let detectedNiche = "dark_psychology";
-                  if (lowerIntel.includes("burnout") || lowerIntel.includes("exhaustion") || lowerIntel.includes("overwhelm")) detectedNiche = "burnout";
-                  else if (lowerIntel.includes("quantum") || lowerIntel.includes("frequency") || lowerIntel.includes("vibration")) detectedNiche = "quantum";
-                  else if (lowerIntel.includes("growth") || lowerIntel.includes("discipline") || lowerIntel.includes("habit")) detectedNiche = "self_improvement";
-
-                  console.log(`🎬 [FacelessFactory] Starting faceless production (niche: ${detectedNiche}) from transcript...`);
-                  await agentChannel.sendMessage(message.chatId,
-                    `🎬 _Faceless Factory starting — generating original videos from extracted intelligence..._\n` +
-                    `_Niche: ${detectedNiche} | Brands: Ace Richie + Containment Field_`,
-                    { parseMode: "Markdown" }
-                  );
-
-                  try {
                     const facelessResults = await produceFacelessBatch(
                       failoverLLM,
                       sourceIntel.slice(0, 3000),
@@ -2162,21 +2177,16 @@ async function main() {
                         headers: { "Content-Type": "application/json" },
                       });
                     } catch { /* non-critical */ }
-                  } catch (facelessErr: any) {
-                    console.error(`❌ [FacelessFactory] Failed: ${facelessErr.message}`);
+                  } catch (err: any) {
+                    console.error(`❌ [FacelessPipeline] Failed: ${err.message}`);
                     await agentChannel.sendMessage(message.chatId,
-                      `❌ Faceless Factory failed: ${facelessErr.message?.slice(0, 500)}`
+                      `❌ Faceless Factory pipeline failed: ${err.message?.slice(0, 500)}`
                     );
                   }
-                }).catch(async (err) => {
-                  console.error(`❌ [VidRush] Clip ripper failed: ${err.message}`);
-                  await agentChannel.sendMessage(message.chatId,
-                    `❌ Clip ripper failed: ${err.message?.slice(0, 500)}`
-                  );
-                });
+                })();
 
-                message.content = `[VID RUSH PIPELINE ACTIVATED — BOT-NATIVE] Content Factory triggered for: ${youtubeUrl}\n\n` +
-                  `The bot-native clip pipeline is running in background (download → Groq Whisper → ffmpeg clips → Supabase → auto-sweep to platforms).\n\n` +
+                message.content = `[FACELESS FACTORY PIPELINE ACTIVATED] Content Factory triggered for: ${youtubeUrl}\n\n` +
+                  `The faceless video pipeline is running in background (download → Groq Whisper → LLM script → TTS → Imagen 4 → ffmpeg assembly → Supabase → auto-sweep to platforms).\n\n` +
                   `Your task: Process this YouTube URL in parallel. Auto-detect the niche (dark psychology, self-improvement, burnout, or quantum physics). ` +
                   `Extract 3 timestamped hooks: (1) 0:00 scroll-stopping opening, (2) ~30% escalation, (3) ~70% solution/reveal. ` +
                   `Generate a cleaned transcript summary and 1 core transmission sentence. Apply Sovereign Synthesis lexicon. ` +
@@ -2184,12 +2194,11 @@ async function main() {
                   `dispatch timestamped_hooks to yuki, cleaned_transcript to anita, and core_summary to sapphire.\n` +
                   `Original message: ${message.content}`;
               } else {
-                // ── ANY OTHER AGENT: Auto-dispatch to Alfred + fire bot-native pipeline ──
+                // ── ANY OTHER AGENT: Auto-dispatch to Alfred for Faceless Factory ──
                 await agentChannel.sendMessage(message.chatId,
-                  `🎯 _YouTube URL detected! Routing to Alfred for Vid Rush Pipeline..._\n` +
+                  `🎯 _YouTube URL detected! Routing to Alfred for Faceless Factory..._\n` +
                   `Video ID: \`${videoId}\`\n` +
-                  `🔥 _Bot-native clip pipeline firing in background._\n` +
-                  `_Alfred will process the hook extraction and dispatch downstream to Yuki, Anita, and Sapphire._`,
+                  `🎬 _Alfred will extract intelligence and generate original faceless videos._`,
                   { parseMode: "Markdown" }
                 );
 
@@ -2209,7 +2218,7 @@ async function main() {
                       body: JSON.stringify({
                         target_agent: "alfred",
                         from_agent: receivingAgent,
-                        task_type: "multi_pass_hook_extraction",
+                        task_type: "faceless_factory",
                         payload: JSON.stringify({
                           youtube_url: youtubeUrl,
                           video_id: videoId,
@@ -2219,16 +2228,15 @@ async function main() {
                         chat_id: String(message.chatId),
                       }),
                     });
-                    console.log(`📡 [VidRush] ${receivingAgent} → Alfred dispatch created for ${youtubeUrl}`);
+                    console.log(`📡 [FacelessFactory] ${receivingAgent} → Alfred dispatch created for ${youtubeUrl}`);
                   } catch (err: any) {
-                    console.error(`[VidRush] Failed to dispatch to Alfred: ${err.message}`);
+                    console.error(`[FacelessFactory] Failed to dispatch to Alfred: ${err.message}`);
                   }
                 }
 
                 // Let the receiving agent respond naturally about the routing
                 message.content = `The Architect sent a YouTube URL: ${youtubeUrl}\n` +
-                  `I've already routed this to Alfred for full Vid Rush processing (hook extraction, transcript, clip pipeline). ` +
-                  `Make.com Scenarios E and F are also firing in parallel. ` +
+                  `I've already routed this to Alfred for Faceless Factory processing (Whisper extraction → LLM script → TTS → image gen → video assembly). ` +
                   `Acknowledge the routing to the Architect and let them know Alfred is on it. ` +
                   `Original message: ${message.content}`;
               }

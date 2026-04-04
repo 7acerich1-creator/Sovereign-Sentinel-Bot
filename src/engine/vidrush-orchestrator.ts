@@ -456,11 +456,12 @@ export async function executeFullPipeline(
   let youtubeVideoId: string | null = null;
   let youtubeUrl2: string | null = null;
 
-  if (facelessResult.videoUrl) {
+  if (facelessResult.localPath || facelessResult.videoUrl) {
     const ytTool = new YouTubeLongFormPublishTool();
     try {
       const ytResult = await ytTool.execute({
-        video_url: facelessResult.videoUrl,
+        local_path: facelessResult.localPath,
+        video_url: facelessResult.videoUrl || "",
         title: facelessResult.title,
         description: `${facelessResult.title}\n\n` +
           `Extracted intelligence from the simulation. The Firmware Update continues.\n\n` +

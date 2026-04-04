@@ -239,27 +239,39 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<strin
     const segRaw = `${FACELESS_DIR}/${jobId}_seg_${i}_raw.opus`;
     const segMp3 = `${FACELESS_DIR}/${jobId}_seg_${i}.mp3`;
 
-    try {
-      console.log(`  🗣️ Segment ${i + 1}/${allSegmentTexts.length} (${segText.length} chars)...`);
-      const segBuffer = await textToSpeech(segText);
-      writeFileSync(segRaw, segBuffer);
+    // Retry logic: 3 attempts with exponential backoff. NO skipping — every segment is required.
+    const MAX_TTS_RETRIES = 3;
+    let segBuffer: Buffer | null = null;
 
-      // Convert to mp3
+    for (let attempt = 1; attempt <= MAX_TTS_RETRIES; attempt++) {
       try {
-        execSync(
-          `ffmpeg -i "${segRaw}" -ar 44100 -ac 1 -c:a libmp3lame -b:a 128k -y "${segMp3}"`,
-          { timeout: 30_000, stdio: "pipe" }
-        );
-      } catch {
-        // If ffmpeg conversion fails, write raw as mp3
-        writeFileSync(segMp3, segBuffer);
+        console.log(`  🗣️ Segment ${i + 1}/${allSegmentTexts.length} (${segText.length} chars) — attempt ${attempt}/${MAX_TTS_RETRIES}...`);
+        segBuffer = await textToSpeech(segText);
+        break; // Success — exit retry loop
+      } catch (err: any) {
+        console.error(`  ⚠️ TTS attempt ${attempt} failed for segment ${i + 1}: ${err.message?.slice(0, 200)}`);
+        if (attempt === MAX_TTS_RETRIES) {
+          throw new Error(`TTS FATAL: Segment ${i + 1}/${allSegmentTexts.length} failed after ${MAX_TTS_RETRIES} attempts. Cannot produce broken video. Last error: ${err.message?.slice(0, 300)}`);
+        }
+        // Exponential backoff: 2s, 4s
+        await new Promise(r => setTimeout(r, 2000 * attempt));
       }
-
-      segmentPaths.push(segMp3);
-    } catch (err: any) {
-      console.error(`  ❌ TTS failed for segment ${i + 1}: ${err.message?.slice(0, 200)}`);
-      // Continue — skip this segment rather than killing the whole pipeline
     }
+
+    writeFileSync(segRaw, segBuffer!);
+
+    // Convert to mp3
+    try {
+      execSync(
+        `ffmpeg -i "${segRaw}" -ar 44100 -ac 1 -c:a libmp3lame -b:a 128k -y "${segMp3}"`,
+        { timeout: 30_000, stdio: "pipe" }
+      );
+    } catch {
+      // If ffmpeg conversion fails, write raw as mp3
+      writeFileSync(segMp3, segBuffer!);
+    }
+
+    segmentPaths.push(segMp3);
 
     // Small delay between TTS calls to avoid rate limits
     if (i < allSegmentTexts.length - 1) {

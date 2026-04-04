@@ -492,7 +492,11 @@ export class YouTubeLongFormPublishTool implements Tool {
     parameters: {
       video_url: {
         type: "string",
-        description: "Public URL of the video file (MP4). Will be downloaded and uploaded to YouTube.",
+        description: "Public URL of the video file (MP4). Used as fallback if local_path not provided.",
+      },
+      local_path: {
+        type: "string",
+        description: "Local filesystem path to the video file (MP4). Preferred over video_url — skips download.",
       },
       title: {
         type: "string",
@@ -515,7 +519,7 @@ export class YouTubeLongFormPublishTool implements Tool {
         description: "Which brand/channel: 'ace_richie' (default) or 'containment_field'.",
       },
     },
-    required: ["video_url", "title", "description"],
+    required: ["title", "description"],
   };
 
   private async getAccessToken(brand: string = "ace_richie"): Promise<string | null> {
@@ -560,19 +564,38 @@ export class YouTubeLongFormPublishTool implements Tool {
       return `❌ YouTube not configured for ${channelLabel}. Set ${envHint} + YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET in Railway env.`;
     }
 
-    const videoUrl = String(args.video_url);
+    const localPath = args.local_path ? String(args.local_path) : null;
+    const videoUrl = args.video_url ? String(args.video_url) : null;
     const title = String(args.title).slice(0, 100);
     const description = String(args.description);
     const tags = args.tags ? String(args.tags).split(",").map((t) => t.trim()) : [];
     const niche = args.niche ? String(args.niche) : "unknown";
 
+    if (!localPath && !videoUrl) {
+      return "❌ Either local_path or video_url is required.";
+    }
+
     try {
-      // Download video from URL
-      const videoResp = await fetch(videoUrl);
-      if (!videoResp.ok) {
-        return `❌ Failed to download video from ${videoUrl}: ${videoResp.status}`;
+      let videoBuffer: Buffer;
+
+      // Prefer local file path — no download, no Supabase Storage dependency
+      if (localPath) {
+        const { existsSync, readFileSync } = await import("fs");
+        if (!existsSync(localPath)) {
+          return `❌ Local video file not found: ${localPath}`;
+        }
+        console.log(`📂 [YouTubeLongForm] Reading local file: ${localPath}`);
+        videoBuffer = readFileSync(localPath) as Buffer;
+      } else {
+        // Fallback: download from URL
+        console.log(`⬇️ [YouTubeLongForm] Downloading from URL: ${videoUrl}`);
+        const videoResp = await fetch(videoUrl!);
+        if (!videoResp.ok) {
+          return `❌ Failed to download video from ${videoUrl}: ${videoResp.status}`;
+        }
+        videoBuffer = Buffer.from(await videoResp.arrayBuffer());
       }
-      const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
+
       const videoSize = videoBuffer.length;
 
       // Long-form allows up to 128GB but practical limit ~2GB for API upload

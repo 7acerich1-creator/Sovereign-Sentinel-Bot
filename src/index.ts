@@ -1829,17 +1829,36 @@ async function main() {
       try {
         console.log(`[BotInit] ${agentCfg.name} token: ${token.substring(0, 8)}...`);
 
-        // Fetch personality from Supabase
+        // Fetch personality from Supabase — with retry for PostgREST cold-start (PGRST002)
         console.log(`[BotInit] Querying personality_config for agent_name = '${agentCfg.name}'`);
-        const { data: personality, error } = await supabase
-          .from("personality_config")
-          .select("prompt_blueprint, agent_name")
-          .eq("agent_name", agentCfg.name)
-          .maybeSingle();
+        let personality: { prompt_blueprint: string; agent_name: string } | null = null;
+        let lastError: any = null;
+        const MAX_RETRIES = 5;
+        const RETRY_DELAY_MS = 3000;
 
-        if (error || !personality) {
-          console.warn(`⚠️ Could not find personality for ${agentCfg.name} in Supabase`);
-          if (error) console.error(`[BotInit] Supabase Error for ${agentCfg.name}:`, JSON.stringify(error, null, 2));
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+          const { data, error } = await supabase
+            .from("personality_config")
+            .select("prompt_blueprint, agent_name")
+            .eq("agent_name", agentCfg.name)
+            .maybeSingle();
+
+          if (!error && data) {
+            personality = data;
+            if (attempt > 1) console.log(`[BotInit] ✅ ${agentCfg.name} personality loaded on attempt ${attempt}`);
+            break;
+          }
+
+          lastError = error;
+          if (attempt < MAX_RETRIES) {
+            console.warn(`[BotInit] ⏳ ${agentCfg.name} attempt ${attempt}/${MAX_RETRIES} failed (${error?.code || "no data"}). Retrying in ${RETRY_DELAY_MS / 1000}s...`);
+            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+          }
+        }
+
+        if (!personality) {
+          console.warn(`⚠️ Could not find personality for ${agentCfg.name} after ${MAX_RETRIES} attempts`);
+          if (lastError) console.error(`[BotInit] Supabase Error for ${agentCfg.name}:`, JSON.stringify(lastError, null, 2));
           else console.warn(`[BotInit] personality_config returned null for ${agentCfg.name}`);
           continue;
         }

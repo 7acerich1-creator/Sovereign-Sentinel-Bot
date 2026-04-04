@@ -74,6 +74,7 @@ export function ytdlpDownload(opts: YtdlpDownloadOpts): void {
 
   const baseCmd =
     `yt-dlp --js-runtimes node ` +
+    `--remote-components ejs:github ` +
     `--user-agent "${USER_AGENT}" ` +
     `--no-check-certificates ` +
     `--extractor-retries 3 ` +

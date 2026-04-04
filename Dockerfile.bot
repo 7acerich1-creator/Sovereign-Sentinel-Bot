@@ -41,6 +41,7 @@ RUN pip3 install --no-cache-dir --break-system-packages yt-dlp
 # YouTube 2025+ requires JS runtime for sig decryption + blocks datacenter IPs
 RUN mkdir -p /etc/yt-dlp && printf '%s\n' \
   '--js-runtimes node' \
+  '--remote-components ejs:github' \
   '--no-check-certificates' \
   '--extractor-retries 3' \
   > /etc/yt-dlp/config

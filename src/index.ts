@@ -55,6 +55,7 @@ import { ImageGeneratorTool } from "./tools/image-generator";
 import { produceFacelessBatch } from "./engine/faceless-factory";
 import { extractWhisperIntel } from "./engine/whisper-extract";
 import { existsSync, readFileSync, writeFileSync } from "fs";
+import { join } from "path";
 import { ProposeTaskTool, SaveContentDraftTool, FileBriefingTool, CheckApprovedTasksTool } from "./tools/action-surface";
 import { StripeMetricsTool } from "./tools/stripe-metrics";
 import { VideoPublisherTool, TikTokPublishTool, InstagramReelsPublishTool, YouTubeShortsPublishTool } from "./tools/video-publisher";
@@ -1814,17 +1815,28 @@ async function main() {
       process.env.SUPABASE_ANON_KEY
     );
 
-    // ── PERSONALITY CACHE: Bypass PostgREST PGRST002 failures ──
-    // PostgREST schema cache can be broken for MINUTES on free-tier Supabase.
-    // Strategy: Try PostgREST first → if it fails, use local JSON cache.
-    // On success, update the local cache for next deploy.
-    const PERSONALITY_CACHE_PATH = "/tmp/personality_cache.json";
+    // ── PERSONALITY LOADER: Bundled JSON (zero network dependency) ──
+    // PostgREST PGRST002 breaks ALL network paths (JS client, REST, cache).
+    // Solution: Ship personalities as a local JSON file in the repo.
+    // Supabase is optional — used to hot-update if PostgREST happens to work.
     type PersonalityMap = Record<string, { prompt_blueprint: string; agent_name: string }>;
     let personalityMap: PersonalityMap = {};
 
-    // Try to load from Supabase PostgREST (3 fast attempts)
-    console.log(`🧠 [PersonalityLoader] Loading agent personalities...`);
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    // PRIMARY: Load from bundled JSON (shipped in repo — always works)
+    const BUNDLED_PATH = join(__dirname, "data", "personalities.json");
+    console.log(`🧠 [PersonalityLoader] Loading from bundled JSON...`);
+    try {
+      const bundled: Record<string, string> = JSON.parse(readFileSync(BUNDLED_PATH, "utf-8"));
+      for (const [name, blueprint] of Object.entries(bundled)) {
+        personalityMap[name] = { agent_name: name, prompt_blueprint: blueprint };
+      }
+      console.log(`✅ [PersonalityLoader] Loaded ${Object.keys(personalityMap).length} personalities from bundled JSON`);
+    } catch (err: any) {
+      console.error(`❌ [PersonalityLoader] Bundled JSON failed: ${err.message}`);
+    }
+
+    // OPTIONAL: Try Supabase for hot-updates (non-blocking, single attempt)
+    if (Object.keys(personalityMap).length > 0) {
       try {
         const { data, error } = await supabase
           .from("personality_config")
@@ -1833,71 +1845,12 @@ async function main() {
           for (const row of data) {
             personalityMap[row.agent_name] = row;
           }
-          console.log(`✅ [PersonalityLoader] Loaded ${data.length} personalities from Supabase (attempt ${attempt})`);
-          // Cache to disk for next time
-          try {
-            writeFileSync(PERSONALITY_CACHE_PATH, JSON.stringify(personalityMap, null, 2));
-            console.log(`💾 [PersonalityLoader] Cached to ${PERSONALITY_CACHE_PATH}`);
-          } catch { /* non-critical */ }
-          break;
-        }
-        if (attempt < 3) {
-          console.warn(`[PersonalityLoader] Attempt ${attempt}/3 failed (${error?.code || "no data"}). Retrying in 3s...`);
-          await new Promise((resolve) => setTimeout(resolve, 3000));
-        }
-      } catch (err: any) {
-        console.warn(`[PersonalityLoader] Attempt ${attempt}/3 threw: ${err.message}`);
-        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 3000));
-      }
-    }
-
-    // If PostgREST failed, try local cache
-    if (Object.keys(personalityMap).length === 0) {
-      console.warn(`⚠️ [PersonalityLoader] PostgREST failed. Trying local cache...`);
-      try {
-        if (existsSync(PERSONALITY_CACHE_PATH)) {
-          personalityMap = JSON.parse(readFileSync(PERSONALITY_CACHE_PATH, "utf-8"));
-          console.log(`📦 [PersonalityLoader] Loaded ${Object.keys(personalityMap).length} personalities from local cache`);
+          console.log(`🔄 [PersonalityLoader] Hot-updated ${data.length} personalities from Supabase`);
         } else {
-          console.warn(`⚠️ [PersonalityLoader] No local cache found at ${PERSONALITY_CACHE_PATH}`);
+          console.log(`ℹ️ [PersonalityLoader] Supabase unavailable (${error?.code || "no data"}) — using bundled`);
         }
-      } catch (err: any) {
-        console.error(`❌ [PersonalityLoader] Cache read failed: ${err.message}`);
-      }
-    }
-
-    // Last resort: try direct REST fetch bypassing Supabase JS client
-    if (Object.keys(personalityMap).length === 0) {
-      console.warn(`🔧 [PersonalityLoader] Trying direct REST API fetch...`);
-      for (let attempt = 1; attempt <= 10; attempt++) {
-        try {
-          const resp = await fetch(
-            `${process.env.SUPABASE_URL}/rest/v1/personality_config?select=agent_name,prompt_blueprint`,
-            {
-              headers: {
-                apikey: process.env.SUPABASE_ANON_KEY!,
-                Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`,
-              },
-            }
-          );
-          if (resp.ok) {
-            const rows = (await resp.json()) as any[];
-            if (rows.length > 0) {
-              for (const row of rows) {
-                personalityMap[row.agent_name] = row;
-              }
-              console.log(`✅ [PersonalityLoader] Direct REST loaded ${rows.length} personalities (attempt ${attempt})`);
-              try { writeFileSync(PERSONALITY_CACHE_PATH, JSON.stringify(personalityMap, null, 2)); } catch {}
-              break;
-            }
-          }
-          const errText = await resp.text().catch(() => "");
-          console.warn(`[PersonalityLoader] Direct REST attempt ${attempt}/10 — ${resp.status}: ${errText.slice(0, 100)}`);
-          await new Promise((resolve) => setTimeout(resolve, 5000));
-        } catch (err: any) {
-          console.warn(`[PersonalityLoader] Direct REST attempt ${attempt}/10 threw: ${err.message}`);
-          await new Promise((resolve) => setTimeout(resolve, 5000));
-        }
+      } catch {
+        console.log(`ℹ️ [PersonalityLoader] Supabase unreachable — using bundled`);
       }
     }
 

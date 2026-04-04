@@ -4,7 +4,7 @@
   "description": "Gravity Claw v3.0 — Sovereign Synthesis AI Agent | Agentic Tool Loop + Multi-LLM + MCP Bridge",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -r src/data dist/data",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "typecheck": "tsc --noEmit"
@@ -19,7 +19,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
-    "@types/node": "^22.0.0",
+    "@types/node": "^22.19.15",
     "@types/yauzl": "^2.10.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"

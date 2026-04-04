@@ -10,7 +10,7 @@ COPY package.json package-lock.json* ./
 RUN npm ci || npm install
 COPY tsconfig.json ./
 COPY src/ ./src/
-RUN ./node_modules/.bin/tsc
+RUN ./node_modules/.bin/tsc && cp -r src/data dist/data
 
 # ── Production Stage ──
 FROM node:20-slim

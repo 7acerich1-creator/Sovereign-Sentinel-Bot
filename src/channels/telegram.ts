@@ -199,8 +199,6 @@ export class TelegramChannel implements Channel {
       if (err.ctx) console.error("🔥 Update context:", "from:", err.ctx.from?.id);
     });
 
-    // Start polling — drop_pending_updates forces Telegram to clear
-    // any queued updates and ensures THIS instance claims the connection
     // Fetch bot identity BEFORE polling — needed for GroupManager
     try {
       const me = await this.bot.api.getMe();
@@ -210,37 +208,58 @@ export class TelegramChannel implements Channel {
       console.error(`⚠️ getMe() failed — GroupManager will use fallback username: ${err.message}`);
     }
 
-    const pollingPromise = this.bot.start({
-      drop_pending_updates: true,
-      onStart: (info) => {
-        console.log(`⚡ GRAVITY CLAW ONLINE — @${info.username} — Sovereign Frequency Locked`);
-        console.log(`🔒 Authorized User IDs: ${config.telegram.authorizedUserIds.join(", ")}`);
-        console.log(`📡 Long polling ACTIVE — drop_pending_updates: true`);
-      },
-    });
+    // ── 409 DEFENSE: Kill any existing polling before we start ──
+    // During Railway rolling deploys, old + new containers overlap for ~10s.
+    // deleteWebhook clears the connection, then we delay to let the old container die.
+    try {
+      await this.bot.api.deleteWebhook({ drop_pending_updates: true });
+      console.log(`🔒 [409 Defense] Cleared webhook/pending updates`);
+    } catch (err: any) {
+      console.warn(`⚠️ [409 Defense] deleteWebhook failed (non-fatal): ${err.message}`);
+    }
+    // Wait for old container to release the polling connection
+    console.log(`⏳ [409 Defense] Waiting 12s for old container to die...`);
+    await new Promise((resolve) => setTimeout(resolve, 12000));
 
-    // CRITICAL: Catch polling loop death
-    pollingPromise
-      .then(() => {
+    const startPolling = async (attempt = 1): Promise<void> => {
+      try {
+        await this.bot.start({
+          drop_pending_updates: true,
+          onStart: (info) => {
+            console.log(`⚡ GRAVITY CLAW ONLINE — @${info.username} — Sovereign Frequency Locked`);
+            console.log(`🔒 Authorized User IDs: ${config.telegram.authorizedUserIds.join(", ")}`);
+            console.log(`📡 Long polling ACTIVE — drop_pending_updates: true`);
+          },
+        });
+        // bot.start() resolved = polling loop ended unexpectedly
         console.error("⚠️ bot.start() RESOLVED — polling loop ended unexpectedly!");
-        // Restart polling after 5s
-        setTimeout(() => {
-          console.log("🔄 Restarting polling...");
-          this.bot.start({ drop_pending_updates: true }).catch((err) =>
-            console.error("🔥 Polling restart failed:", err)
-          );
-        }, 5000);
-      })
-      .catch((err) => {
-        console.error("🔥 bot.start() CRASHED:", err.message || err);
-        // Restart polling after 5s
-        setTimeout(() => {
-          console.log("🔄 Restarting polling after crash...");
-          this.bot.start({ drop_pending_updates: true }).catch((err2) =>
-            console.error("🔥 Polling restart failed:", err2)
-          );
-        }, 5000);
-      });
+        if (attempt < 5) {
+          const delay = Math.min(attempt * 5000, 20000);
+          console.log(`🔄 Restarting polling in ${delay / 1000}s (attempt ${attempt + 1}/5)...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          return startPolling(attempt + 1);
+        }
+      } catch (err: any) {
+        const is409 = err.message?.includes("409") || err.error_code === 409;
+        if (is409 && attempt < 5) {
+          const delay = Math.min(attempt * 5000, 20000);
+          console.warn(`🔥 [409 Conflict] Attempt ${attempt}/5 — retrying in ${delay / 1000}s...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          return startPolling(attempt + 1);
+        }
+        console.error(`🔥 bot.start() CRASHED (attempt ${attempt}):`, err.message || err);
+        if (attempt < 5) {
+          const delay = Math.min(attempt * 5000, 20000);
+          console.log(`🔄 Restarting polling in ${delay / 1000}s...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          return startPolling(attempt + 1);
+        }
+        console.error(`❌ Polling failed after 5 attempts. Bot is dead.`);
+      }
+    };
+
+    // Fire-and-forget — don't block initialization
+    startPolling().catch((err) => console.error("🔥 startPolling fatal:", err));
   }
 
   async sendMessage(chatId: string, text: string, options?: SendOptions): Promise<Message> {

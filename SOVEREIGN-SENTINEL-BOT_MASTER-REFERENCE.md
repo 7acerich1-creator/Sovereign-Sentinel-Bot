@@ -82,7 +82,7 @@
    - Error handling: Wrapped all Telegram sendMessage calls in try-catch with plain text fallback. No more silent failures.
    - Duplicate code: Removed ~140 lines of duplicate `/dryrun`, `/pipeline`, and YouTube URL handlers from crew agent `onMessage` handler. Crew bots now redirect to Veritas for pipeline commands.
    - JSON parsing: Faceless Factory script parser replaced with 4-strategy `extractJSON()` function (direct parse, balanced brace matching, sanitized regex, common-mistake fixer). Prevents crash when LLM returns slightly malformed JSON.
-   - yt-dlp JS runtime: YouTube 2025+ requires explicit JS runtime declaration. Added `--js-runtimes nodejs` to all 3 yt-dlp call sites (whisper-extract.ts, vid-rush.ts, clip-generator.ts) AND global config in Dockerfile.bot (`/etc/yt-dlp/config`).
+   - yt-dlp JS runtime: YouTube 2025+ requires explicit JS runtime declaration. Added `--js-runtimes node` to all 3 yt-dlp call sites (whisper-extract.ts, vid-rush.ts, clip-generator.ts) AND global config in Dockerfile.bot (`/etc/yt-dlp/config`). NOTE: The valid runtime names are `deno, node, bun, quickjs` — NOT `nodejs`. Session 20 fixed this after `nodejs` caused pipeline failure.
    - Temp file cleanup: Added `cleanupJobFiles()` to faceless-factory.ts and `cleanupPipelineJob()` to vidrush-orchestrator.ts. Removes intermediate TTS segments, raw audio, scene images, concat lists, stale whisper files (>1hr). Runs on success and failure.
 3. **STILL BROKEN — CRITICAL (must fix next session):**
    - **yt-dlp JS runtime fix NOT YET DEPLOYED when last tested.** Commits b6d8970 + 34d1109 are pushed but Railway may not have rebuilt yet. The Dockerfile change (34d1109) forces a full Docker rebuild which takes longer. MUST verify this works before anything else.

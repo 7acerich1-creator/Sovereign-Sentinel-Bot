@@ -124,7 +124,7 @@ export class ClipGeneratorTool implements Tool {
       if (!existsSync(sourcePath)) {
         console.log(`📥 [ClipGen] Downloading ${youtubeUrl}...`);
         execSync(
-          `yt-dlp --js-runtimes nodejs -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]" ` +
+          `yt-dlp --js-runtimes node -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]" ` +
             `--merge-output-format mp4 ` +
             `-o "${sourcePath}" ` +
             `"${youtubeUrl}"`,

@@ -1814,6 +1814,32 @@ async function main() {
       process.env.SUPABASE_ANON_KEY
     );
 
+    // ── SUPABASE WARM-UP: Wait for PostgREST schema cache to be ready ──
+    // PGRST002 ("Could not query the database for the schema cache") can persist
+    // for 60-120s on cold starts. Warm up ONCE before attempting any agent init.
+    console.log(`🔥 [Supabase Warmup] Waiting for PostgREST schema cache...`);
+    const WARMUP_MAX_RETRIES = 30;
+    const WARMUP_DELAY_MS = 5000;
+    let supabaseReady = false;
+    for (let attempt = 1; attempt <= WARMUP_MAX_RETRIES; attempt++) {
+      const { data, error } = await supabase
+        .from("personality_config")
+        .select("agent_name")
+        .limit(1);
+      if (!error && data) {
+        console.log(`✅ [Supabase Warmup] PostgREST ready on attempt ${attempt} (${((attempt - 1) * WARMUP_DELAY_MS / 1000).toFixed(0)}s wait)`);
+        supabaseReady = true;
+        break;
+      }
+      if (attempt < WARMUP_MAX_RETRIES) {
+        console.warn(`[Supabase Warmup] Attempt ${attempt}/${WARMUP_MAX_RETRIES} — ${error?.code || "no data"}. Retrying in ${WARMUP_DELAY_MS / 1000}s...`);
+        await new Promise((resolve) => setTimeout(resolve, WARMUP_DELAY_MS));
+      }
+    }
+    if (!supabaseReady) {
+      console.error(`❌ [Supabase Warmup] PostgREST never came online after ${WARMUP_MAX_RETRIES} attempts. Agent init will fail.`);
+    }
+
     let botIndex = 0;
     for (const agentCfg of crewAgents) {
       const token = agentCfg.token;
@@ -1829,36 +1855,17 @@ async function main() {
       try {
         console.log(`[BotInit] ${agentCfg.name} token: ${token.substring(0, 8)}...`);
 
-        // Fetch personality from Supabase — with retry for PostgREST cold-start (PGRST002)
+        // Fetch personality from Supabase (PostgREST already warmed up above)
         console.log(`[BotInit] Querying personality_config for agent_name = '${agentCfg.name}'`);
-        let personality: { prompt_blueprint: string; agent_name: string } | null = null;
-        let lastError: any = null;
-        const MAX_RETRIES = 5;
-        const RETRY_DELAY_MS = 3000;
+        const { data: personality, error } = await supabase
+          .from("personality_config")
+          .select("prompt_blueprint, agent_name")
+          .eq("agent_name", agentCfg.name)
+          .maybeSingle();
 
-        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-          const { data, error } = await supabase
-            .from("personality_config")
-            .select("prompt_blueprint, agent_name")
-            .eq("agent_name", agentCfg.name)
-            .maybeSingle();
-
-          if (!error && data) {
-            personality = data;
-            if (attempt > 1) console.log(`[BotInit] ✅ ${agentCfg.name} personality loaded on attempt ${attempt}`);
-            break;
-          }
-
-          lastError = error;
-          if (attempt < MAX_RETRIES) {
-            console.warn(`[BotInit] ⏳ ${agentCfg.name} attempt ${attempt}/${MAX_RETRIES} failed (${error?.code || "no data"}). Retrying in ${RETRY_DELAY_MS / 1000}s...`);
-            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-          }
-        }
-
-        if (!personality) {
-          console.warn(`⚠️ Could not find personality for ${agentCfg.name} after ${MAX_RETRIES} attempts`);
-          if (lastError) console.error(`[BotInit] Supabase Error for ${agentCfg.name}:`, JSON.stringify(lastError, null, 2));
+        if (error || !personality) {
+          console.warn(`⚠️ Could not find personality for ${agentCfg.name} in Supabase`);
+          if (error) console.error(`[BotInit] Supabase Error for ${agentCfg.name}:`, JSON.stringify(error, null, 2));
           else console.warn(`[BotInit] personality_config returned null for ${agentCfg.name}`);
           continue;
         }

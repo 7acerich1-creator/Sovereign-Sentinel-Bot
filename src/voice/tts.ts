@@ -7,23 +7,32 @@ import { config } from "../config";
 
 export type TTSProvider = "openai" | "elevenlabs";
 
+export interface TTSOptions {
+  provider?: TTSProvider;
+  speed?: number; // 0.5-2.0 for OpenAI, maps to stability for ElevenLabs
+}
+
 export async function textToSpeech(
   text: string,
-  provider?: TTSProvider
+  providerOrOpts?: TTSProvider | TTSOptions
 ): Promise<Buffer> {
-  const selectedProvider = provider || (config.voice.elevenLabsApiKey ? "elevenlabs" : "openai");
+  const opts: TTSOptions = typeof providerOrOpts === "string"
+    ? { provider: providerOrOpts }
+    : providerOrOpts || {};
+
+  const selectedProvider = opts.provider || (config.voice.elevenLabsApiKey ? "elevenlabs" : "openai");
 
   switch (selectedProvider) {
     case "elevenlabs":
-      return elevenLabsTTS(text);
+      return elevenLabsTTS(text, opts.speed);
     case "openai":
-      return openaiTTS(text);
+      return openaiTTS(text, opts.speed);
     default:
       throw new Error(`Unknown TTS provider: ${selectedProvider}`);
   }
 }
 
-async function openaiTTS(text: string): Promise<Buffer> {
+async function openaiTTS(text: string, speed?: number): Promise<Buffer> {
   const apiKey = config.voice.whisperApiKey; // Same OpenAI key
   if (!apiKey) throw new Error("OpenAI API key not configured for TTS");
 
@@ -38,6 +47,7 @@ async function openaiTTS(text: string): Promise<Buffer> {
       input: text.slice(0, 4096),
       voice: "onyx", // Deep, authoritative voice for the sentinel
       response_format: "opus",
+      speed: speed || 1.0, // 0.25-4.0, lower = slower
     }),
   });
 
@@ -50,11 +60,15 @@ async function openaiTTS(text: string): Promise<Buffer> {
   return Buffer.from(arrayBuffer);
 }
 
-async function elevenLabsTTS(text: string): Promise<Buffer> {
+async function elevenLabsTTS(text: string, speed?: number): Promise<Buffer> {
   const apiKey = config.voice.elevenLabsApiKey;
   if (!apiKey) throw new Error("ElevenLabs API key not configured");
 
   const voiceId = config.voice.elevenLabsVoiceId || "21m00Tcm4TlvDq8ikWAM";
+
+  // Higher stability = more consistent, measured pacing (0.0 = variable, 1.0 = rigid)
+  // For documentary narration, we want high stability + moderate style for gravitas
+  const stability = speed && speed < 1.0 ? 0.80 : 0.65;
 
   const resp = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
@@ -70,10 +84,10 @@ async function elevenLabsTTS(text: string): Promise<Buffer> {
         model_id: "eleven_multilingual_v2",
         voice_settings: {
           // Sovereign Synthesis brand voice settings:
-          // Authoritative but dynamic, consistent, measured delivery
-          stability: 0.65,
+          // Authoritative, measured, documentary-style delivery
+          stability,
           similarity_boost: 0.80,
-          style: 0.45,
+          style: 0.35, // Reduced from 0.45 — less dramatic, more measured
           use_speaker_boost: true,
         },
       }),

@@ -37,6 +37,11 @@ export class SapphireSentinel {
   }
 
   private async scan(): Promise<void> {
+    // Skip if pipeline is running — preserve Supabase bandwidth
+    if ((globalThis as any).__isPipelineRunning?.()) {
+      console.log(`⏸️ [SapphireSentinel] Skipped scan — pipeline running`);
+      return;
+    }
     if (!config.memory.supabaseUrl || !config.memory.supabaseKey) return;
 
     try {

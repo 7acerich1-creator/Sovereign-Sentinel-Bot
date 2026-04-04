@@ -475,6 +475,7 @@ async function main() {
           `/voice — Toggle voice responses\n` +
           `/dryrun <url> — Validate pipeline (zero cost)\n` +
           `/pipeline <url> — Run full VidRush pipeline (LIVE)\n` +
+          `/buffer_audit — Audit Buffer channels + purge failed posts\n` +
           `/test_tts — Test TTS on one segment\n` +
           `/test_yt — Test YouTube upload with 5s clip`,
           { parseMode: "Markdown" }
@@ -710,6 +711,10 @@ async function main() {
           const liveBrand = liveBrandMatch ? "containment_field" as const : "ace_richie" as const;
 
           (async () => {
+            // Pause all pollers during pipeline execution to preserve Supabase bandwidth
+            const setPipelineRunning = (globalThis as any).__setPipelineRunning;
+            if (setPipelineRunning) setPipelineRunning(true);
+
             try {
               const result = await executeFullPipeline(
                 liveYoutubeUrl,
@@ -735,6 +740,9 @@ async function main() {
                   `Pipeline FAILED: ${err.message?.slice(0, 500)}`
                 );
               } catch { /* nothing */ }
+            } finally {
+              // Always resume pollers, even on failure
+              if (setPipelineRunning) setPipelineRunning(false);
             }
           })();
 
@@ -762,6 +770,57 @@ async function main() {
           return true;
         }
         return false;
+
+      case "/buffer_audit": {
+        try {
+          await telegram.sendMessage(message.chatId, "BUFFER AUDIT — scanning channels and purging failed posts...");
+
+          const { SocialSchedulerListProfilesTool } = await import("./tools/social-scheduler");
+          const listTool = new SocialSchedulerListProfilesTool();
+          const channelsRaw = await listTool.execute();
+          let channels: any[];
+          try { channels = JSON.parse(channelsRaw); } catch { channels = []; }
+
+          if (!Array.isArray(channels) || channels.length === 0) {
+            await telegram.sendMessage(message.chatId, "No Buffer channels found.");
+            return true;
+          }
+
+          // Detect duplicates by service+name
+          const serviceMap = new Map<string, any[]>();
+          for (const ch of channels) {
+            const key = `${ch.service}`;
+            if (!serviceMap.has(key)) serviceMap.set(key, []);
+            serviceMap.get(key)!.push(ch);
+          }
+
+          const dupeLines: string[] = [];
+          for (const [service, chs] of serviceMap) {
+            if (chs.length > 1) {
+              dupeLines.push(`${service}: ${chs.map((c: any) => `"${c.name}" (${c.id})`).join(", ")}`);
+            }
+          }
+
+          // Purge all queued posts via existing nukeBufferQueue
+          const nukeReport = await nukeBufferQueue();
+
+          const report =
+            `BUFFER AUDIT COMPLETE\n\n` +
+            `Total channels: ${channels.length}\n` +
+            `${channels.map((c: any) => `  ${c.service}: ${c.name} ${c.isQueuePaused ? "(PAUSED)" : ""}`).join("\n")}\n\n` +
+            `${dupeLines.length > 0 ? `DUPLICATE CHANNELS DETECTED:\n${dupeLines.join("\n")}\n\n` : "No duplicate channels.\n\n"}` +
+            `CLEANUP:\n${nukeReport}`;
+
+          try {
+            await telegram.sendMessage(message.chatId, report);
+          } catch {
+            await telegram.sendMessage(message.chatId, report.slice(0, 4000));
+          }
+        } catch (err: any) {
+          await telegram.sendMessage(message.chatId, `Buffer audit failed: ${err.message?.slice(0, 400)}`);
+        }
+        return true;
+      }
 
       default:
         // Unknown command — let agent loop handle it
@@ -2386,6 +2445,18 @@ async function main() {
       }
     };
 
+    // ── Pipeline Lock — pause all pollers during VidRush pipeline execution ──
+    // Supabase free tier can't handle poller traffic + pipeline traffic simultaneously.
+    // When pipeline is running, pollers skip their cycle entirely.
+    let pipelineRunning = false;
+    const setPipelineRunning = (val: boolean) => {
+      pipelineRunning = val;
+      console.log(`🔒 [PipelineLock] Pipeline ${val ? "STARTED — pollers paused" : "ENDED — pollers resumed"}`);
+    };
+    // Expose globally so /pipeline command can access it
+    (globalThis as any).__setPipelineRunning = setPipelineRunning;
+    (globalThis as any).__isPipelineRunning = () => pipelineRunning;
+
     // ── Dispatch Poller — BATCHED: one query for all agents, with 503 backoff ──
     const DISPATCH_POLL_BASE_MS = 60_000; // 60s base (was 15s — killed Supabase free tier)
     const DISPATCH_POLL_MAX_MS = 300_000; // 5 min max backoff
@@ -2397,6 +2468,13 @@ async function main() {
       console.log(`📡 [CrewDispatch] Starting batched dispatch poller for [${agentNames.join(", ")}] (base: ${DISPATCH_POLL_BASE_MS / 1000}s)`);
 
       const runDispatchPoll = async () => {
+        // Skip if pipeline is running — Supabase needs all bandwidth for clip uploads
+        if (pipelineRunning) {
+          console.log(`⏸️ [DispatchPoller] Skipped — pipeline running`);
+          dispatchPollTimer = setTimeout(runDispatchPoll, dispatchPollMs);
+          return;
+        }
+
         try {
           // ONE query for ALL agents instead of 6 separate queries
           const tasksByAgent = await claimAllPending(agentNames, 1);
@@ -2644,6 +2722,12 @@ async function main() {
     console.log(`📋 [TaskPoller] Starting task approval poller (every ${TASK_POLL_MS / 1000}s)`);
 
     setInterval(async () => {
+      // Skip if pipeline is running — preserve Supabase bandwidth
+      if (pipelineRunning) {
+        console.log(`⏸️ [TaskPoller] Skipped — pipeline running`);
+        return;
+      }
+
       try {
         const supabaseUrl = process.env.SUPABASE_URL!;
         const supabaseKey = process.env.SUPABASE_ANON_KEY!;

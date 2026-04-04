@@ -205,11 +205,18 @@ export async function generateScript(
   const voice = SCRIPT_VOICE[brand];
   const segmentCount = targetDuration === "short" ? 5 : 20;
   const durationRange = targetDuration === "short" ? "30-60 seconds" : "10-15 minutes";
+  const perSegmentGuidance = targetDuration === "short"
+    ? `Each segment's voiceover should be 2-4 natural spoken sentences (about 30-50 words).`
+    : `Each segment's voiceover should be 6-10 natural spoken sentences (about 80-130 words). This is CRITICAL — short segments will make the video too short. Write as if you're narrating a documentary scene, not a social media clip. Take your time. Let ideas breathe. Use rhetorical pauses. Paint the picture slowly.`;
+  const durationHintExample = targetDuration === "short" ? 8 : 40;
+  const durationHintNote = targetDuration === "short"
+    ? `duration_hint is approximate seconds per segment (total should sum to ~45s)`
+    : `duration_hint MUST be 30-45 seconds per segment (total should sum to 600-900 seconds / 10-15 minutes). Do NOT use values under 25.`;
 
   const prompt = `${voice}
 
 SOURCE INTELLIGENCE (extracted from research):
-${sourceIntelligence.slice(0, 3000)}
+${sourceIntelligence.slice(0, 4000)}
 
 TARGET: ${durationRange} faceless video with ${segmentCount} visual segments.
 NICHE: ${niche.replace(/_/g, " ")}
@@ -220,9 +227,9 @@ Generate a voiceover script as a JSON object with this exact structure:
   "hook": "The first 1-2 sentences — the scroll-stopping opening line",
   "segments": [
     {
-      "voiceover": "The text to be spoken aloud for this segment (2-4 sentences)",
+      "voiceover": "The text to be spoken aloud for this segment",
       "visual_direction": "Brief description of what the viewer SEES during this segment",
-      "duration_hint": 8
+      "duration_hint": ${durationHintExample}
     }
   ],
   "cta": "Closing call-to-action directing to sovereign-synthesis.com"
@@ -230,15 +237,19 @@ Generate a voiceover script as a JSON object with this exact structure:
 
 RULES:
 - The hook MUST stop someone mid-scroll in under 3 seconds
-- Each segment's voiceover should be 2-4 natural spoken sentences
+- ${perSegmentGuidance}
+- PACING: Write for a MEASURED, documentary-style voiceover — not a fast-talking YouTuber. Include natural pauses with ellipses (...) and rhetorical questions. The listener should feel like they're being let in on a secret, not being sold something.
 - Visual directions should be CINEMATIC and specific — think B-roll descriptions
-- duration_hint is approximate seconds per segment (total should sum to target)
+- ${durationHintNote}
 - CTA should feel organic, not salesy — "The full protocol is at sovereign-synthesis.com"
 - Return ONLY valid JSON, no markdown code fences, no explanation`;
 
+  // Long-form scripts with 20 segments of 80-130 words each need more token headroom
+  const maxTokens = targetDuration === "long" ? 8192 : 4096;
+
   const response = await llm.generate(
     [{ role: "user", content: prompt }],
-    { maxTokens: 4096, temperature: 0.8 }
+    { maxTokens, temperature: 0.8 }
   );
   const result = response.content;
 
@@ -249,16 +260,35 @@ RULES:
     throw new Error(`Failed to parse script from LLM. Response starts: ${result.slice(0, 150)}`);
   }
 
+  // Enforce minimum duration hints for long mode
+  const minDurationHint = targetDuration === "long" ? 25 : 5;
+  const defaultDurationHint = targetDuration === "long" ? 40 : 8;
+
+  const segments = (parsed.segments || []).map((s: any) => ({
+    voiceover: s.voiceover || "",
+    visual_direction: s.visual_direction || "",
+    duration_hint: Math.max(s.duration_hint || defaultDurationHint, minDurationHint),
+  }));
+
+  // Log actual voiceover word counts for debugging duration
+  const wordCounts = segments.map((s: any, i: number) => {
+    const words = s.voiceover.split(/\s+/).filter(Boolean).length;
+    return `seg${i}:${words}w`;
+  });
+  const totalWords = segments.reduce((sum: number, s: any) => sum + s.voiceover.split(/\s+/).filter(Boolean).length, 0);
+  const estimatedMinutes = (totalWords / 140).toFixed(1); // ~140 WPM for measured narration
+  console.log(`📊 [FacelessFactory] Script word counts: [${wordCounts.join(", ")}] | Total: ${totalWords} words | Estimated: ~${estimatedMinutes} min at 140 WPM`);
+
+  if (targetDuration === "long" && totalWords < 800) {
+    console.warn(`⚠️ [FacelessFactory] Long-form script only has ${totalWords} words — expected 1200-1800 for 10-15 min. Video will be shorter than target.`);
+  }
+
   return {
     title: parsed.title || "Untitled",
     niche,
     brand,
     hook: parsed.hook || parsed.segments?.[0]?.voiceover || "",
-    segments: (parsed.segments || []).map((s: any) => ({
-      voiceover: s.voiceover || "",
-      visual_direction: s.visual_direction || "",
-      duration_hint: s.duration_hint || 8,
-    })),
+    segments,
     cta: parsed.cta || "The full protocol is at sovereign-synthesis.com",
   };
 }
@@ -277,12 +307,15 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<strin
     script.cta
   ];
   const totalChars = allSegmentTexts.reduce((sum, t) => sum + t.length, 0);
-  console.log(`🗣️ [FacelessFactory] Rendering TTS — ${allSegmentTexts.length} segments, ${totalChars} chars total`);
+  const isLongForm = allSegmentTexts.length > 8;
+  // Slow down TTS for long-form: 0.9x speed for measured, documentary-style delivery
+  const ttsSpeed = isLongForm ? 0.9 : undefined;
+  console.log(`🗣️ [FacelessFactory] Rendering TTS — ${allSegmentTexts.length} segments, ${totalChars} chars total${isLongForm ? " (long-form, 0.9x speed)" : ""}`);
 
   // If total text fits in one call (short-form), do it in one shot
   if (totalChars <= 3800) {
     const fullText = allSegmentTexts.join(" ... ");
-    const audioBuffer = await textToSpeech(fullText);
+    const audioBuffer = await textToSpeech(fullText, ttsSpeed ? { speed: ttsSpeed } : undefined);
 
     const rawPath = `${FACELESS_DIR}/${jobId}_voiceover_raw.opus`;
     writeFileSync(rawPath, audioBuffer);
@@ -317,7 +350,7 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<strin
     for (let attempt = 1; attempt <= MAX_TTS_RETRIES; attempt++) {
       try {
         console.log(`  🗣️ Segment ${i + 1}/${allSegmentTexts.length} (${segText.length} chars) — attempt ${attempt}/${MAX_TTS_RETRIES}...`);
-        segBuffer = await textToSpeech(segText);
+        segBuffer = await textToSpeech(segText, ttsSpeed ? { speed: ttsSpeed } : undefined);
         break; // Success — exit retry loop
       } catch (err: any) {
         console.error(`  ⚠️ TTS attempt ${attempt} failed for segment ${i + 1}: ${err.message?.slice(0, 200)}`);

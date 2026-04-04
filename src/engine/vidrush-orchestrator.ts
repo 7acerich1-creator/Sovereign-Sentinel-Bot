@@ -204,33 +204,53 @@ async function chopLongFormIntoClips(
 async function uploadClipsToStorage(clips: ClipMeta[], jobId: string): Promise<void> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return;
 
+  const MAX_RETRIES = 3;
+
   for (const clip of clips) {
-    try {
-      const fileBuffer = readFileSync(clip.localPath);
-      const storagePath = `vidrush/${jobId}/clip_${clip.index.toString().padStart(2, "0")}.mp4`;
+    let uploaded = false;
 
-      const resp = await fetch(
-        `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
-        {
-          method: "POST",
-          headers: {
-            apikey: SUPABASE_KEY,
-            Authorization: `Bearer ${SUPABASE_KEY}`,
-            "Content-Type": "video/mp4",
-            "x-upsert": "true",
-          },
-          body: fileBuffer,
+    for (let attempt = 1; attempt <= MAX_RETRIES && !uploaded; attempt++) {
+      try {
+        const fileBuffer = readFileSync(clip.localPath);
+        const storagePath = `vidrush/${jobId}/clip_${clip.index.toString().padStart(2, "0")}.mp4`;
+
+        const resp = await fetch(
+          `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
+          {
+            method: "POST",
+            headers: {
+              apikey: SUPABASE_KEY,
+              Authorization: `Bearer ${SUPABASE_KEY}`,
+              "Content-Type": "video/mp4",
+              "x-upsert": "true",
+            },
+            body: fileBuffer,
+          }
+        );
+
+        if (resp.ok) {
+          clip.publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${storagePath}`;
+          console.log(`📤 [Orchestrator] Clip ${clip.index} uploaded`);
+          uploaded = true;
+        } else if (resp.status === 503 && attempt < MAX_RETRIES) {
+          // Supabase overloaded — exponential backoff
+          const backoffMs = 5000 * Math.pow(2, attempt - 1); // 5s, 10s
+          console.warn(`⚠️ [Orchestrator] Clip ${clip.index} got 503 — retry ${attempt}/${MAX_RETRIES} in ${backoffMs / 1000}s`);
+          await new Promise(r => setTimeout(r, backoffMs));
+        } else {
+          console.error(`[Orchestrator] Clip ${clip.index} upload failed: ${resp.status} (attempt ${attempt}/${MAX_RETRIES})`);
         }
-      );
-
-      if (resp.ok) {
-        clip.publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${storagePath}`;
-        console.log(`📤 [Orchestrator] Clip ${clip.index} uploaded`);
-      } else {
-        console.error(`[Orchestrator] Clip ${clip.index} upload failed: ${resp.status}`);
+      } catch (err: any) {
+        console.error(`[Orchestrator] Clip ${clip.index} upload error (attempt ${attempt}/${MAX_RETRIES}): ${err.message?.slice(0, 200)}`);
+        if (attempt < MAX_RETRIES) {
+          await new Promise(r => setTimeout(r, 3000 * attempt));
+        }
       }
-    } catch (err: any) {
-      console.error(`[Orchestrator] Clip ${clip.index} upload error: ${err.message?.slice(0, 200)}`);
+    }
+
+    // Small delay between clip uploads to avoid slamming Supabase
+    if (uploaded) {
+      await new Promise(r => setTimeout(r, 1500));
     }
   }
 }

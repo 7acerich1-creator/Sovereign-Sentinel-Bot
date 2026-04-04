@@ -50,6 +50,12 @@ export class HeartbeatSystem {
   }
 
   async pulse(): Promise<void> {
+    // Skip if pipeline is running — preserve Supabase bandwidth
+    if ((globalThis as any).__isPipelineRunning?.()) {
+      console.log(`⏸️ [Heartbeat] Skipped — pipeline running`);
+      return;
+    }
+
     for (const check of this.checks) {
       try {
         const message = await check.check();

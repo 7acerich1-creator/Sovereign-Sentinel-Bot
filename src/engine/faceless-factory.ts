@@ -197,30 +197,98 @@ RULES:
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async function renderAudio(script: FacelessScript, jobId: string): Promise<string> {
-  // Combine all voiceover segments + CTA into one audio
-  const fullText = script.segments.map(s => s.voiceover).join(" ... ") + " ... " + script.cta;
-
-  console.log(`🗣️ [FacelessFactory] Rendering TTS (${fullText.length} chars)...`);
-  const audioBuffer = await textToSpeech(fullText);
-
   const audioPath = `${FACELESS_DIR}/${jobId}_voiceover.mp3`;
 
-  // TTS returns opus format from OpenAI, mp3 from ElevenLabs
-  // Convert to mp3 via ffmpeg for consistency
-  const rawPath = `${FACELESS_DIR}/${jobId}_voiceover_raw.opus`;
-  writeFileSync(rawPath, audioBuffer);
+  // For long-form (many segments), TTS APIs have character limits
+  // (OpenAI: 4096, ElevenLabs: 5000). Chunk per segment and concatenate.
+  const allSegmentTexts = [
+    ...script.segments.map(s => s.voiceover),
+    script.cta
+  ];
+  const totalChars = allSegmentTexts.reduce((sum, t) => sum + t.length, 0);
+  console.log(`🗣️ [FacelessFactory] Rendering TTS — ${allSegmentTexts.length} segments, ${totalChars} chars total`);
+
+  // If total text fits in one call (short-form), do it in one shot
+  if (totalChars <= 3800) {
+    const fullText = allSegmentTexts.join(" ... ");
+    const audioBuffer = await textToSpeech(fullText);
+
+    const rawPath = `${FACELESS_DIR}/${jobId}_voiceover_raw.opus`;
+    writeFileSync(rawPath, audioBuffer);
+
+    try {
+      execSync(
+        `ffmpeg -i "${rawPath}" -ar 44100 -ac 1 -c:a libmp3lame -b:a 128k -y "${audioPath}"`,
+        { timeout: 60_000, stdio: "pipe" }
+      );
+    } catch {
+      writeFileSync(audioPath, audioBuffer);
+    }
+
+    console.log(`✅ [FacelessFactory] Audio rendered (single pass): ${audioPath}`);
+    return audioPath;
+  }
+
+  // Long-form: render each segment separately, then concatenate with ffmpeg
+  const segmentPaths: string[] = [];
+
+  for (let i = 0; i < allSegmentTexts.length; i++) {
+    const segText = allSegmentTexts[i];
+    if (!segText.trim()) continue;
+
+    const segRaw = `${FACELESS_DIR}/${jobId}_seg_${i}_raw.opus`;
+    const segMp3 = `${FACELESS_DIR}/${jobId}_seg_${i}.mp3`;
+
+    try {
+      console.log(`  🗣️ Segment ${i + 1}/${allSegmentTexts.length} (${segText.length} chars)...`);
+      const segBuffer = await textToSpeech(segText);
+      writeFileSync(segRaw, segBuffer);
+
+      // Convert to mp3
+      try {
+        execSync(
+          `ffmpeg -i "${segRaw}" -ar 44100 -ac 1 -c:a libmp3lame -b:a 128k -y "${segMp3}"`,
+          { timeout: 30_000, stdio: "pipe" }
+        );
+      } catch {
+        // If ffmpeg conversion fails, write raw as mp3
+        writeFileSync(segMp3, segBuffer);
+      }
+
+      segmentPaths.push(segMp3);
+    } catch (err: any) {
+      console.error(`  ❌ TTS failed for segment ${i + 1}: ${err.message?.slice(0, 200)}`);
+      // Continue — skip this segment rather than killing the whole pipeline
+    }
+
+    // Small delay between TTS calls to avoid rate limits
+    if (i < allSegmentTexts.length - 1) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+
+  if (segmentPaths.length === 0) {
+    throw new Error("All TTS segments failed — cannot produce audio");
+  }
+
+  // Concatenate all segment mp3s into one file
+  const concatListPath = `${FACELESS_DIR}/${jobId}_audio_concat.txt`;
+  const concatContent = segmentPaths.map(p => `file '${p}'`).join("\n");
+  writeFileSync(concatListPath, concatContent);
 
   try {
     execSync(
-      `ffmpeg -i "${rawPath}" -ar 44100 -ac 1 -c:a libmp3lame -b:a 128k -y "${audioPath}"`,
-      { timeout: 60_000, stdio: "pipe" }
+      `ffmpeg -f concat -safe 0 -i "${concatListPath}" -c:a libmp3lame -b:a 128k -y "${audioPath}"`,
+      { timeout: 120_000, stdio: "pipe" }
     );
-  } catch {
-    // If conversion fails, try using raw file directly
-    writeFileSync(audioPath, audioBuffer);
+  } catch (err: any) {
+    // Fallback: just use the first segment
+    console.warn(`[FacelessFactory] Concat failed, using first segment: ${err.message?.slice(0, 200)}`);
+    const { copyFileSync } = require("fs");
+    copyFileSync(segmentPaths[0], audioPath);
   }
 
-  console.log(`✅ [FacelessFactory] Audio rendered: ${audioPath}`);
+  console.log(`✅ [FacelessFactory] Audio rendered (${segmentPaths.length} segments concatenated): ${audioPath}`);
   return audioPath;
 }
 
@@ -351,7 +419,7 @@ async function assembleVideo(
         `-c:v libx264 -preset fast -crf 23 ` +
         `-c:a aac -b:a 128k ` +
         `-shortest -y "${outputPath}"`,
-      { timeout: 300_000, stdio: "pipe" }
+      { timeout: 600_000, stdio: "pipe" }  // 10 min timeout for long-form assembly
     );
   } catch (err: any) {
     // Fallback: simpler assembly without Ken Burns if zoompan fails
@@ -362,7 +430,7 @@ async function assembleVideo(
         `-c:v libx264 -preset fast -crf 23 ` +
         `-c:a aac -b:a 128k ` +
         `-shortest -y "${outputPath}"`,
-      { timeout: 300_000, stdio: "pipe" }
+      { timeout: 600_000, stdio: "pipe" }  // 10 min timeout for long-form assembly
     );
   }
 

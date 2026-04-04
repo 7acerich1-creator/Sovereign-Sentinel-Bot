@@ -37,10 +37,13 @@ COPY skills ./skills
 # Install Python deps for sovereign clip pipeline (yt-dlp only — whisper uses OpenAI API)
 RUN pip3 install --no-cache-dir --break-system-packages yt-dlp
 
-# Configure yt-dlp globally to use Node.js as JS runtime
-# YouTube 2025+ requires a JS runtime for player signature decryption
-# Node.js is already in this image (node:20-slim base)
-RUN mkdir -p /etc/yt-dlp && echo '--js-runtimes node' > /etc/yt-dlp/config
+# Configure yt-dlp globally: JS runtime + anti-bot-detection defaults
+# YouTube 2025+ requires JS runtime for sig decryption + blocks datacenter IPs
+RUN mkdir -p /etc/yt-dlp && printf '%s\n' \
+  '--js-runtimes node' \
+  '--no-check-certificates' \
+  '--extractor-retries 3' \
+  > /etc/yt-dlp/config
 
 # Create persistent data directories
 RUN mkdir -p /app/data /app/memory /app/.agent/logs

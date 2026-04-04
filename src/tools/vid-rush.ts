@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import type { Tool, ToolDefinition } from "../types";
 import { ClipGeneratorTool } from "./clip-generator";
 import { config } from "../config";
+import { ytdlpDownload } from "../utils/ytdlp-download";
 
 const CLIP_DIR = "/tmp/sovereign_clips";
 
@@ -170,16 +171,14 @@ export class VidRushTool implements Tool {
     const audioPath = `${CLIP_DIR}/audio_${videoId}.mp3`;
     const whisperOut = `${CLIP_DIR}/whisper_${videoId}.json`;
 
-    // STEP 1 — Download
+    // STEP 1 — Download (multi-strategy retry)
     try {
-      if (!existsSync(sourcePath)) {
-        console.log(`📥 [VidRush] Downloading ${youtubeUrl}...`);
-        execSync(
-          `yt-dlp --js-runtimes node -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]" ` +
-            `--merge-output-format mp4 -o "${sourcePath}" "${youtubeUrl}"`,
-          { timeout: 300_000, stdio: "pipe" }
-        );
-      }
+      ytdlpDownload({
+        youtubeUrl,
+        outputPath: sourcePath,
+        label: "VidRush",
+        timeout: 300_000,
+      });
     } catch (err: any) {
       return `❌ Download failed: ${err.message?.slice(0, 300)}`;
     }

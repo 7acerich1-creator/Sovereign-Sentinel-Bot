@@ -7,6 +7,7 @@
 import { execSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import type { Tool, ToolDefinition } from "../types";
+import { ytdlpDownload } from "../utils/ytdlp-download";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
@@ -121,16 +122,12 @@ export class ClipGeneratorTool implements Tool {
     const sourcePath = `${CLIP_DIR}/source_${videoId}.mp4`;
 
     try {
-      if (!existsSync(sourcePath)) {
-        console.log(`📥 [ClipGen] Downloading ${youtubeUrl}...`);
-        execSync(
-          `yt-dlp --js-runtimes node -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]" ` +
-            `--merge-output-format mp4 ` +
-            `-o "${sourcePath}" ` +
-            `"${youtubeUrl}"`,
-          { timeout: 300_000, stdio: "pipe" }
-        );
-      }
+      ytdlpDownload({
+        youtubeUrl,
+        outputPath: sourcePath,
+        label: "ClipGen",
+        timeout: 300_000,
+      });
     } catch (err: any) {
       return `❌ Download failed: ${err.message?.slice(0, 300)}`;
     }

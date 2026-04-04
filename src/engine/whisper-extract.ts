@@ -7,6 +7,7 @@
 import { execSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { config } from "../config";
+import { ytdlpDownload } from "../utils/ytdlp-download";
 
 const CLIP_DIR = "/tmp/sovereign_clips";
 
@@ -33,15 +34,13 @@ export async function extractWhisperIntel(youtubeUrl: string): Promise<WhisperRe
   const audioPath = `${CLIP_DIR}/audio_${videoId}.mp3`;
   const whisperPath = `${CLIP_DIR}/whisper_${videoId}.json`;
 
-  // ── STEP 1: Download video via yt-dlp ──
-  if (!existsSync(sourcePath)) {
-    console.log(`📥 [WhisperExtract] Downloading ${youtubeUrl}...`);
-    execSync(
-      `yt-dlp --js-runtimes node -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]" ` +
-        `--merge-output-format mp4 -o "${sourcePath}" "${youtubeUrl}"`,
-      { timeout: 300_000, stdio: "pipe" }
-    );
-  }
+  // ── STEP 1: Download video via yt-dlp (multi-strategy retry) ──
+  ytdlpDownload({
+    youtubeUrl,
+    outputPath: sourcePath,
+    label: "WhisperExtract",
+    timeout: 300_000,
+  });
 
   // ── STEP 2: Extract audio for Whisper ──
   if (!existsSync(audioPath)) {

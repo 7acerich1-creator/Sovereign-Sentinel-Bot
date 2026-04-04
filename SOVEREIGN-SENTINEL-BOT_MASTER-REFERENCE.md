@@ -1,5 +1,26 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-04 (Cowork Session 18 — VidRush Pipeline Debug + First Live Run) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-04 (Cowork Session 19 — VidRush Pipeline Fixes: Poller Pause + Video Length + TTS Cadence) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+
+**Session Summary — Cowork Session 19 (2026-04-04):**
+1. **5 CRITICAL FIXES DEPLOYED — PIPELINE SHOULD NOW PRODUCE 10-15 MIN VIDEOS WITHOUT 503 ERRORS.** All fixes compiled clean (zero new TypeScript errors), committed as `152695b`, pushed to main. Railway auto-deploying.
+2. **FIX 1: POLLER PAUSE DURING PIPELINE.** Root cause of Supabase 503 during pipeline runs: dispatch poller (60s), task poller (120s), heartbeat (300s), and Sapphire sentinel (2hr) all continued firing while pipeline was hammering Supabase with clip uploads. NEW: `pipelineRunning` global flag. All 4 pollers now check `(globalThis).__isPipelineRunning()` and skip their cycle if true. `/pipeline` handler sets flag via `__setPipelineRunning(true)` before `executeFullPipeline()` and clears in `finally` block. Zero Supabase traffic from pollers during pipeline execution.
+3. **FIX 2: VIDEO LENGTH — LONG MODE SCRIPT GENERATION OVERHAULED.** Root cause: prompt said "2-4 sentences" per segment with `duration_hint: 8`. 20 segments × ~12s speech = 240s (4 min). NOW: long mode requests "6-10 sentences (80-130 words)" per segment with `duration_hint: 40`. Minimum duration hint enforced at 25s (was no minimum). Source intelligence slice increased from 3000 to 4000 chars. `maxTokens` bumped from 4096 to 8192 for long scripts. Added word count logging: `[FacelessFactory] Script word counts: [...] | Total: Xw | Estimated: ~Ym at 140 WPM`. Warning logged if total words < 800 for long mode. Also added PACING instruction: "Write for a MEASURED, documentary-style voiceover — not a fast-talking YouTuber."
+4. **FIX 3: TTS CADENCE — SLOWER, MORE MEASURED DELIVERY.** `textToSpeech()` now accepts optional `TTSOptions` with `speed` parameter. Long-form content uses 0.9x speed. ElevenLabs: stability increased 0.65→0.80 and style reduced 0.45→0.35 when speed < 1.0 (more consistent, less dramatic = documentary feel). OpenAI: `speed` param passed through (0.25-4.0 range).
+5. **FIX 4: CLIP UPLOAD RETRY WITH BACKOFF.** `uploadClipsToStorage()` in vidrush-orchestrator.ts now retries 3x per clip with exponential backoff (5s, 10s) on 503. 1.5s delay between successful uploads to pace Supabase traffic. Previously: single attempt, 0 delay between clips = 503 cascade.
+6. **FIX 5: BUFFER AUDIT COMMAND.** New `/buffer_audit` command: lists all channels with duplicate service detection, purges all queued posts via `nukeBufferQueue()`, reports cleanup results. Added to help text.
+7. **STILL NEEDS TESTING (Session 20):**
+   - **yt-dlp fix verification** — Commit 34d1109 (Session 18) added `--js-runtimes nodejs` to Dockerfile. This session's push triggers a fresh Docker rebuild. Send `/status` to Veritas to confirm new deploy is live.
+   - **Buffer cleanup** — Run `/buffer_audit` on Veritas once deployed. This will purge all failed posts and report duplicate channels. Then manually remove duplicate channels in Buffer dashboard (publish.buffer.com).
+   - **E2E pipeline test** — Run `/pipeline <youtube_url>` with all fixes live. Expected: 10-15 min video (not 3.6 min), clips uploaded to Supabase (not 503), Buffer scheduling works.
+   - **Quality evaluation** — Can only happen after clean E2E run.
+8. **Commits this session:** `152695b` — fix: pipeline poller pause, video length, TTS cadence, clip retry, buffer audit (6 files, +209/-47 lines)
+
+**NEXT SESSION PRIORITIES (Session 20 — VidRush E2E Validation):**
+1. **VERIFY DEPLOY** — Check Railway build log. Send `/status` to Veritas. Confirm uptime shows post-push timestamp.
+2. **RUN /buffer_audit** — Purge all failed posts. Note duplicate channels. Manually clean duplicates in Buffer dashboard.
+3. **RUN /pipeline <url>** — Pick a fresh YouTube video. Verify: (a) yt-dlp downloads without JS runtime error, (b) Whisper transcription works, (c) Faceless Factory produces 10-15 min video (check word count log), (d) YouTube upload succeeds, (e) Clips upload to Supabase (no 503), (f) Distribution works, (g) Buffer scheduling works.
+4. **QUALITY EVALUATION** — Watch the produced video. Evaluate: pacing/cadence, voiceover naturalness, image quality, scene transitions, caption quality.
+5. **FINE-TUNE** — Based on quality evaluation: adjust TTS speed, segment count, image prompts, color grades.
 
 **Session Summary — Cowork Session 18 (2026-04-04):**
 1. **FIRST LIVE PIPELINE RUN COMPLETED — BUT THE MACHINE IS STILL BROKEN.** Pipeline ran all 8 steps on video WhqdFNK58S8 (Russell Brunson "Mind Control" video). Produced "The Mind Control Blueprint Hidden For 100 Years" — 219s (3.6 min, should be 10-15 min), 20 scenes, uploaded to YouTube as https://youtube.com/watch?v=mSPZdSX21O4. BUT: only 8 clips cut (should be ~30), 0/8 clips uploaded to Supabase (503 errors), 0 clips distributed, Buffer scheduling unknown. VIDEO QUALITY NOT YET EVALUATED — can't even get to quality tuning because the infrastructure is still failing.

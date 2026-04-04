@@ -1294,10 +1294,26 @@ async function main() {
     const diag: Record<string, unknown> = {};
     const geminiKey = process.env.GEMINI_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
+    const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
     diag.gemini_key_set = !!geminiKey;
     diag.gemini_key_length = geminiKey?.length || 0;
     diag.openai_key_set = !!openaiKey;
     diag.openai_key_length = openaiKey?.length || 0;
+    diag.elevenlabs_key_set = !!elevenLabsKey;
+
+    // Test Pollinations.ai (FREE primary)
+    try {
+      const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent("A simple blue sphere on white background")}?width=512&height=512&nologo=true&seed=${Date.now()}`;
+      const pollRes = await fetch(pollUrl, { redirect: "follow" });
+      diag.pollinations_status = pollRes.status;
+      if (pollRes.ok) {
+        const buf = Buffer.from(await pollRes.arrayBuffer());
+        diag.pollinations_bytes = buf.length;
+        diag.pollinations_ok = buf.length > 5000;
+      }
+    } catch (err: any) {
+      diag.pollinations_error = err.message;
+    }
 
     // Test Gemini Imagen
     if (geminiKey) {
@@ -1342,6 +1358,27 @@ async function main() {
         }
       } catch (err: any) {
         diag.dalle_error = err.message;
+      }
+    }
+
+    // Test ElevenLabs TTS (check account status)
+    if (elevenLabsKey) {
+      try {
+        const res = await fetch("https://api.elevenlabs.io/v1/user/subscription", {
+          headers: { "xi-api-key": elevenLabsKey },
+        });
+        diag.elevenlabs_status = res.status;
+        if (res.ok) {
+          const data = (await res.json()) as any;
+          diag.elevenlabs_tier = data.tier;
+          diag.elevenlabs_chars_remaining = data.character_count !== undefined
+            ? data.character_limit - data.character_count
+            : "unknown";
+        } else {
+          diag.elevenlabs_error = (await res.text()).slice(0, 200);
+        }
+      } catch (err: any) {
+        diag.elevenlabs_error = err.message;
       }
     }
 

@@ -255,41 +255,67 @@ async function generateContentImage(
   let imageBuffer: Buffer | null = null;
   let source = "none";
 
-  // ── STEP 1: Try Gemini Imagen 4 ──
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (geminiKey) {
+  // ── STEP 1: Pollinations.ai (FREE, no auth, unlimited) ──
+  if (!imageBuffer) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${geminiKey}`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },        body: JSON.stringify({
-          instances: [{ prompt: imagePrompt }],
-          parameters: {
-            sampleCount: 1,
-            aspectRatio: "1:1",
-            safetyFilterLevel: "block_only_high",
-          },
-        }),
-      });
-
+      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePrompt.slice(0, 2000))}?width=1024&height=1024&nologo=true&seed=${Date.now()}`;
+      const res = await fetch(pollinationsUrl, { redirect: "follow" });
       if (res.ok) {
-        const data = (await res.json()) as any;
-        const b64 =
-          data.predictions?.[0]?.bytesBase64Encoded ||
-          data.predictions?.[0]?.image?.bytesBase64Encoded;
-        if (b64) {
-          imageBuffer = Buffer.from(b64, "base64");
-          source = "gemini_imagen_4";
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length > 5000) {
+          imageBuffer = buf;
+          source = "pollinations";
+          console.log(`🎨 [ContentEngine] Image generated via Pollinations (${(buf.length / 1024).toFixed(0)}KB)`);
+        } else {
+          console.warn(`[ContentEngine] Pollinations returned tiny response: ${buf.length}B`);
         }
       } else {
-        const errText = await res.text();
-        console.warn(`[ContentEngine] Gemini Imagen ${res.status}: ${errText.slice(0, 200)}`);
+        console.warn(`[ContentEngine] Pollinations ${res.status}`);
       }
     } catch (err: any) {
-      console.warn(`[ContentEngine] Gemini Imagen error: ${err.message}`);
+      console.warn(`[ContentEngine] Pollinations error: ${err.message}`);
     }
   }
-  // ── STEP 2: Fallback to DALL-E 3 ──
+
+  // ── STEP 2: Fallback to Gemini Imagen 4 ──
+  if (!imageBuffer) {
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (geminiKey) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${geminiKey}`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            instances: [{ prompt: imagePrompt }],
+            parameters: {
+              sampleCount: 1,
+              aspectRatio: "1:1",
+              safetyFilterLevel: "block_only_high",
+            },
+          }),
+        });
+
+        if (res.ok) {
+          const data = (await res.json()) as any;
+          const b64 =
+            data.predictions?.[0]?.bytesBase64Encoded ||
+            data.predictions?.[0]?.image?.bytesBase64Encoded;
+          if (b64) {
+            imageBuffer = Buffer.from(b64, "base64");
+            source = "gemini_imagen_4";
+          }
+        } else {
+          const errText = await res.text();
+          console.warn(`[ContentEngine] Gemini Imagen ${res.status}: ${errText.slice(0, 200)}`);
+        }
+      } catch (err: any) {
+        console.warn(`[ContentEngine] Gemini Imagen error: ${err.message}`);
+      }
+    }
+  }
+
+  // ── STEP 3: Fallback to DALL-E 3 ──
   if (!imageBuffer) {
     const openaiKey = process.env.OPENAI_API_KEY;
     if (openaiKey) {
@@ -318,7 +344,8 @@ async function generateContentImage(
             source = "dalle_3";
           }
         } else {
-          const errText = await res.text();          console.warn(`[ContentEngine] DALL-E 3 ${res.status}: ${errText.slice(0, 200)}`);
+          const errText = await res.text();
+          console.warn(`[ContentEngine] DALL-E 3 ${res.status}: ${errText.slice(0, 200)}`);
         }
       } catch (err: any) {
         console.warn(`[ContentEngine] DALL-E 3 error: ${err.message}`);
@@ -327,7 +354,7 @@ async function generateContentImage(
   }
 
   if (!imageBuffer) {
-    console.warn(`[ContentEngine] Image generation failed for ${brand}/${slotLabel} — both providers returned nothing`);
+    console.warn(`[ContentEngine] Image generation failed for ${brand}/${slotLabel} — all 3 providers returned nothing`);
     return null;
   }
 

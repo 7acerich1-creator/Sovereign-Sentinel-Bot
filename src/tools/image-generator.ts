@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Sovereign Image Generator (Gap 4)
-// Gemini Imagen 3 (primary) → DALL-E 3 (fallback)
+// Pollinations.ai (FREE primary) → Gemini Imagen 4 → DALL-E 3 (fallback)
 // Niche-aware prompt enhancement + Supabase logging
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -33,7 +33,7 @@ export class ImageGeneratorTool implements Tool {
   definition: ToolDefinition = {
     name: "generate_image",
     description:
-      "Generates a sovereign brand image using Gemini Imagen 3 (primary) with DALL-E 3 fallback. " +
+      "Generates a sovereign brand image using Pollinations.ai (FREE primary) with Gemini Imagen 4 + DALL-E 3 fallback. " +
       "Enhances the prompt based on content niche for consistent visual identity. " +
       "Saves the image locally and logs to Supabase content_transmissions.",
     parameters: {
@@ -77,18 +77,48 @@ export class ImageGeneratorTool implements Tool {
     let source = "none";
     let imageBuffer: Buffer | null = null;
 
-    // ── STEP 1: Try Gemini Imagen 3 ──
-    const geminiKey = config.llm.providers.gemini?.apiKey;
-    if (geminiKey) {
-      try {
-        imageBuffer = await this.tryGeminiImagen(geminiKey, enhancedPrompt, aspectRatio);
-        if (imageBuffer) source = "gemini_imagen_4";
-      } catch (err: any) {
-        console.warn(`[ImageGen] Gemini Imagen failed: ${err.message}`);
+    // Determine Pollinations dimensions from aspect ratio
+    const POLL_DIMS: Record<string, { w: number; h: number }> = {
+      "16:9": { w: 1792, h: 1024 },
+      "9:16": { w: 1024, h: 1792 },
+      "1:1": { w: 1024, h: 1024 },
+    };
+    const dims = POLL_DIMS[aspectRatio] || POLL_DIMS["9:16"];
+
+    // ── STEP 1: Pollinations.ai (FREE, no auth, unlimited) ──
+    try {
+      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt.slice(0, 2000))}?width=${dims.w}&height=${dims.h}&nologo=true&seed=${Date.now()}`;
+      const res = await fetch(pollinationsUrl, { redirect: "follow" });
+      if (res.ok) {
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length > 5000) {
+          imageBuffer = buf;
+          source = "pollinations";
+          console.log(`🎨 [ImageGen] Generated via Pollinations (${(buf.length / 1024).toFixed(0)}KB)`);
+        } else {
+          console.warn(`[ImageGen] Pollinations returned tiny response: ${buf.length}B`);
+        }
+      } else {
+        console.warn(`[ImageGen] Pollinations ${res.status}`);
+      }
+    } catch (err: any) {
+      console.warn(`[ImageGen] Pollinations error: ${err.message}`);
+    }
+
+    // ── STEP 2: Fallback to Gemini Imagen 4 ──
+    if (!imageBuffer) {
+      const geminiKey = config.llm.providers.gemini?.apiKey;
+      if (geminiKey) {
+        try {
+          imageBuffer = await this.tryGeminiImagen(geminiKey, enhancedPrompt, aspectRatio);
+          if (imageBuffer) source = "gemini_imagen_4";
+        } catch (err: any) {
+          console.warn(`[ImageGen] Gemini Imagen failed: ${err.message}`);
+        }
       }
     }
 
-    // ── STEP 2: Fallback to DALL-E 3 ──
+    // ── STEP 3: Fallback to DALL-E 3 ──
     if (!imageBuffer) {
       const openaiKey = config.llm.providers.openai?.apiKey;
       if (openaiKey) {
@@ -102,7 +132,7 @@ export class ImageGeneratorTool implements Tool {
     }
 
     if (!imageBuffer) {
-      return "❌ Image generation failed — both Gemini Imagen and DALL-E 3 returned errors. Check API keys.";
+      return "❌ Image generation failed — all 3 providers (Pollinations, Gemini, DALL-E) returned errors.";
     }
 
     // ── STEP 3: Save image ──

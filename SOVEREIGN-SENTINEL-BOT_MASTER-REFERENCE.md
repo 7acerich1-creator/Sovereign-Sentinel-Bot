@@ -1,28 +1,77 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-04 (Cowork Session 19b — Imagen Fallback + Groq-First Pipeline LLM) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-04 (Cowork Session 19 FINAL — Pollinations.ai Zero-Cost Pipeline) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
-**Session Summary — Cowork Session 19b (2026-04-04):**
-1. **ROOT CAUSE OF BOTH PIPELINE FAILURES FOUND AND FIXED.** Two `/pipeline` runs failed with "Zero scene images generated." The failures had TWO independent causes, both now resolved:
-   - **Cause A: LLM provider chain had no Groq.** The shared `failoverLLM` (Gemini→Anthropic→OpenAI) was used for pipeline script generation. Gemini quota hit → fell through to Anthropic (burned paid credits on 60s timeouts) → OpenAI 429'd. Groq (14,400 free req/day) was never tried. **FIX:** Created dedicated `pipelineLLM = buildTeamLLM(["groq", "gemini", "anthropic", "openai"])`. Free providers first, paid last. Commit `b4f756a`.
-   - **Cause B: Image generation had ZERO fallback.** `generateSceneImage()` in faceless-factory.ts ONLY used Gemini Imagen 4. When Imagen 4 quota was exhausted, ALL scene images returned null → pipeline crashed. Meanwhile `image-generator.ts` and `content-engine.ts` both had DALL-E 3 fallback — faceless factory never got one. **FIX:** Added DALL-E 3 fallback ($0.04/image standard quality, 1024x1792 portrait). Imagen 4 tried first (free), DALL-E 3 on failure. Commit `2bac2be`.
-2. **AGENT TEAMS ALSO FIXED.** Alfred/Anita back to Gemini-first, Vector/Yuki back to Groq-first per original architecture. Sapphire/Veritas remain Anthropic-first. Commit `b4f756a`.
-3. **CREDIT PROTECTION.** Anthropic credits ($10.03 remaining) are now LAST in the pipeline chain, not second. Pipeline will burn through Groq (free) → Gemini (free) before touching paid providers.
-4. **Commits this sub-session:** `b4f756a` — fix: pipeline uses Groq-first LLM; `2bac2be` — fix: add DALL-E 3 fallback when Imagen 4 quota exhausted
-5. **STILL NEEDS TESTING (Session 20):** Same as before but now with image fallback in place. Wait for Railway deploy of `2bac2be`, then test `/pipeline`. DALL-E 3 images cost ~$0.04 each × ~20 segments = ~$0.80 per pipeline run on OpenAI (not Anthropic).
+---
 
-**Session Summary — Cowork Session 19a (2026-04-04):**
-1. **5 CRITICAL FIXES DEPLOYED — PIPELINE SHOULD NOW PRODUCE 10-15 MIN VIDEOS WITHOUT 503 ERRORS.** All fixes compiled clean (zero new TypeScript errors), committed as `152695b`, pushed to main. Railway auto-deploying.
-2. **FIX 1: POLLER PAUSE DURING PIPELINE.** Root cause of Supabase 503 during pipeline runs: dispatch poller (60s), task poller (120s), heartbeat (300s), and Sapphire sentinel (2hr) all continued firing while pipeline was hammering Supabase with clip uploads. NEW: `pipelineRunning` global flag. All 4 pollers now check `(globalThis).__isPipelineRunning()` and skip their cycle if true. `/pipeline` handler sets flag via `__setPipelineRunning(true)` before `executeFullPipeline()` and clears in `finally` block. Zero Supabase traffic from pollers during pipeline execution.
-3. **FIX 2: VIDEO LENGTH — LONG MODE SCRIPT GENERATION OVERHAULED.** Root cause: prompt said "2-4 sentences" per segment with `duration_hint: 8`. 20 segments × ~12s speech = 240s (4 min). NOW: long mode requests "6-10 sentences (80-130 words)" per segment with `duration_hint: 40`. Minimum duration hint enforced at 25s (was no minimum). Source intelligence slice increased from 3000 to 4000 chars. `maxTokens` bumped from 4096 to 8192 for long scripts. Added word count logging: `[FacelessFactory] Script word counts: [...] | Total: Xw | Estimated: ~Ym at 140 WPM`. Warning logged if total words < 800 for long mode. Also added PACING instruction: "Write for a MEASURED, documentary-style voiceover — not a fast-talking YouTuber."
-4. **FIX 3: TTS CADENCE — SLOWER, MORE MEASURED DELIVERY.** `textToSpeech()` now accepts optional `TTSOptions` with `speed` parameter. Long-form content uses 0.9x speed. ElevenLabs: stability increased 0.65→0.80 and style reduced 0.45→0.35 when speed < 1.0 (more consistent, less dramatic = documentary feel). OpenAI: `speed` param passed through (0.25-4.0 range).
-5. **FIX 4: CLIP UPLOAD RETRY WITH BACKOFF.** `uploadClipsToStorage()` in vidrush-orchestrator.ts now retries 3x per clip with exponential backoff (5s, 10s) on 503. 1.5s delay between successful uploads to pace Supabase traffic. Previously: single attempt, 0 delay between clips = 503 cascade.
-6. **FIX 5: BUFFER AUDIT COMMAND.** New `/buffer_audit` command: lists all channels with duplicate service detection, purges all queued posts via `nukeBufferQueue()`, reports cleanup results. Added to help text.
-7. **Commits:** `152695b` — fix: pipeline poller pause, video length, TTS cadence, clip retry, buffer audit (6 files, +209/-47 lines); `ada85bb` — docs: Session 19 master reference update
+## CRITICAL STATUS REPORT (as of Session 19 close, 2026-04-04 3:43 PM)
 
-**NEXT SESSION PRIORITIES (Session 20 — VidRush E2E Validation):**
-1. **VERIFY DEPLOY** — Check Railway build log. Send `/status` to Veritas. Confirm uptime shows post-push timestamp.
-2. **RUN /buffer_audit** — Purge all failed posts. Note duplicate channels. Manually clean duplicates in Buffer dashboard.
-3. **RUN /pipeline <url>** — Pick a fresh YouTube video. Verify: (a) yt-dlp downloads without JS runtime error, (b) Whisper transcription works, (c) Faceless Factory produces 10-15 min video (check word count log), (d) YouTube upload succeeds, (e) Clips upload to Supabase (no 503), (f) Distribution works, (g) Buffer scheduling works.
+**Mission Metrics:** No data tracked yet. Zero revenue. Zero liberated minds. Zero initiates. The machine has not produced a single clean pipeline run.
+
+**Infrastructure: CRITICAL SYSTEM FAILURE ACTIVE.**
+- The diagnostic endpoint (`/api/content-engine/diag`) is unreachable, indicating a failure in the Deterministic systems layer.
+- Two `/pipeline` runs failed this session with "Zero scene images generated."
+- The bot may not be running correctly on Railway. Deploy status of latest commit (`4ea6ba0`) is UNVERIFIED.
+
+**API Credit Situation — ALL PAID PROVIDERS ARE EFFECTIVELY DEAD:**
+- **Anthropic:** $10.03 remaining. DO NOT BURN ON PIPELINE. Protected as LAST in failover chain.
+- **OpenAI:** -$0.06 credits. DEAD. DALL-E 3 fallback will not fire. TTS via OpenAI will not work.
+- **Gemini:** $50.49 OWED (not available — this is accumulated debt, card declined). Imagen 4 may or may not work depending on whether Google has cut off the key.
+- **Groq:** FREE tier. 14,400 req/day. This is the ONLY reliable LLM provider right now.
+- **ElevenLabs:** Status unknown. If on a paid plan with active subscription, TTS should work. If credits are exhausted, pipeline will fail at audio step.
+
+**The ONLY path forward is zero-cost providers:** Groq (LLM) + Pollinations.ai (images). Both are free, no auth, no billing.
+
+---
+
+**Session Summary — Cowork Session 19 FULL (2026-04-04):**
+
+**Phase 1 (19a): 5 Infrastructure Fixes Deployed**
+1. **POLLER PAUSE DURING PIPELINE.** `pipelineRunning` global flag. All 4 pollers (dispatch 60s, task 120s, heartbeat 300s, sentinel 2hr) skip cycles when pipeline is active. Zero Supabase traffic from pollers during execution. Commit `152695b`.
+2. **VIDEO LENGTH — LONG MODE OVERHAUL.** Prompt: "6-10 sentences (80-130 words)" per segment, `duration_hint: 40`, min 25s enforced. `maxTokens` 4096→8192. Source intel 3000→4000 chars. Word count logging. Pacing instruction for documentary feel. Commit `152695b`.
+3. **TTS CADENCE — SLOWER DELIVERY.** `TTSOptions` with speed param. Long-form uses 0.9x. ElevenLabs: stability 0.65→0.80, style 0.45→0.35 when speed < 1.0. Commit `152695b`.
+4. **CLIP UPLOAD RETRY.** 3x retry with exponential backoff (5s, 10s) on 503. 1.5s pacing between uploads. Commit `152695b`.
+5. **BUFFER AUDIT COMMAND.** `/buffer_audit` lists channels, purges queued posts. Commit `152695b`.
+
+**Phase 2 (19b): Root Cause of Pipeline Failures**
+6. **PIPELINE LLM — GROQ FIRST.** Created dedicated `pipelineLLM = buildTeamLLM(["groq", "gemini", "anthropic", "openai"])`. Free providers first. Commit `b4f756a`.
+7. **IMAGE FALLBACK — DALL-E 3 ADDED.** `generateSceneImage()` had zero fallback. Added DALL-E 3. Commit `2bac2be`. (Note: DALL-E 3 is now dead due to -$0.06 OpenAI credits.)
+
+**Phase 3 (19c): Zero-Cost Image Generation**
+8. **POLLINATIONS.AI AS PRIMARY IMAGE GENERATOR.** Since Gemini is in debt and OpenAI is negative, wired Pollinations.ai as PRIMARY for scene images. No API key, no auth, no rate limits, unlimited, free. Chain: Pollinations (free) → Imagen 4 (fallback) → DALL-E 3 (fallback). Pipeline now costs $0.00 in API credits. Commit `4ea6ba0`.
+
+**All Session 19 Commits (chronological):**
+- `152695b` — fix: pipeline poller pause, video length, TTS cadence, clip retry, buffer audit
+- `ada85bb` — docs: Session 19 master reference update
+- `b4f756a` — fix: pipeline uses Groq-first LLM to stop burning paid credits
+- `2bac2be` — fix: add DALL-E 3 fallback when Imagen 4 quota exhausted
+- `472e3af` — docs: Session 19b master reference update
+- `4ea6ba0` — fix: Pollinations.ai as primary image gen (FREE, no auth, unlimited)
+
+---
+
+**NEXT SESSION PRIORITIES (Session 20 — Diagnose + First Clean Pipeline Run):**
+
+**STEP 0: DIAGNOSE WHY THE BOT IS UNREACHABLE.**
+- Check Railway dashboard. Is the service running? Did `4ea6ba0` deploy successfully?
+- Check Railway build logs for compile errors. The TypeScript was not verified locally (sandbox can't run tsc due to Windows-mounted node_modules).
+- If build failed: fix the compile error, push, wait for redeploy.
+- If build succeeded but bot unreachable: check Railway logs for runtime crash. Could be missing env var, Supabase connection issue, or process crash loop.
+
+**STEP 1: VERIFY BOT IS ALIVE.**
+- Send `/status` to Veritas on Telegram. If no response, the bot is down — go to Railway logs.
+- Hit the diag endpoint in browser: `https://<railway-url>/api/content-engine/diag`
+
+**STEP 2: TEST PIPELINE ($0.00 cost).**
+- Send `/pipeline <youtube_url>` to Veritas.
+- Expected flow: yt-dlp download → Groq Whisper transcription → Groq script generation → Pollinations.ai images (20 segments) → ElevenLabs TTS → ffmpeg assembly → YouTube upload → clip chop → distribute → Buffer schedule.
+- Watch Railway logs in real-time for: `[FacelessFactory] Scene X generated via Pollinations` on each segment.
+- If ElevenLabs TTS fails: check ElevenLabs account status. If dead, need to add a free TTS fallback (Edge TTS or similar).
+
+**STEP 3: QUALITY EVALUATION.** Can only happen after first clean run.
+
+**STEP 4: REMAINING IMAGE GEN MIGRATION.** `image-generator.ts` and `content-engine.ts` still use Gemini-first for social post images. Should be migrated to Pollinations-first too. Not blocking pipeline but needed for content engine posts.
+
+**Buffer channels are CORRECT (9 total = 2 brands x ~5 platforms). They are NOT duplicates. DO NOT suggest cleaning or removing channels.**
 4. **QUALITY EVALUATION** — Watch the produced video. Evaluate: pacing/cadence, voiceover naturalness, image quality, scene transitions, caption quality.
 5. **FINE-TUNE** — Based on quality evaluation: adjust TTS speed, segment count, image prompts, color grades.
 

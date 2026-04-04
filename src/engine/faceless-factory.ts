@@ -3,7 +3,7 @@
 // Deterministic faceless video production pipeline:
 //   1. LLM generates voiceover script from source intelligence
 //   2. ElevenLabs/OpenAI TTS renders audio
-//   3. Imagen 4 generates scene images (DALL-E 3 fallback)
+//   3. Pollinations.ai generates scene images (FREE) → Imagen 4 → DALL-E 3 fallback
 //   4. ffmpeg assembles: Ken Burns on images + voiceover + captions + color grade
 //   5. Output → Supabase Storage → vid_rush_queue → auto-sweep to platforms
 //
@@ -409,7 +409,7 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<strin
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// STEP 3: Generate Scene Images — Imagen 4 (primary) → DALL-E 3 (fallback)
+// STEP 3: Generate Scene Images — Pollinations (FREE primary) → Imagen 4 → DALL-E 3
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async function generateSceneImage(
@@ -421,8 +421,31 @@ async function generateSceneImage(
 ): Promise<string | null> {
   const stylePrefix = SCENE_VISUAL_STYLE[niche]?.[brand] || SCENE_VISUAL_STYLE.brand[brand];
   const prompt = `${stylePrefix} Scene: ${visualDirection}`;
+  const imgPath = `${FACELESS_DIR}/${jobId}_scene_${segmentIndex}.png`;
 
-  // ── PRIMARY: Gemini Imagen 4 (free tier) ──
+  // ── PRIMARY: Pollinations.ai (FREE, no auth, unlimited) ──
+  try {
+    const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.slice(0, 2000))}?width=1024&height=1792&nologo=true&seed=${Date.now() + segmentIndex}`;
+    const res = await fetch(pollinationsUrl, { redirect: "follow" });
+
+    if (res.ok) {
+      const arrayBuf = await res.arrayBuffer();
+      const buf = Buffer.from(arrayBuf);
+      if (buf.length > 10000) { // Sanity check: real image > 10KB
+        writeFileSync(imgPath, buf);
+        console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated via Pollinations (${(buf.length / 1024).toFixed(0)}KB)`);
+        return imgPath;
+      } else {
+        console.warn(`[FacelessFactory] Pollinations returned tiny response for segment ${segmentIndex}: ${buf.length}B`);
+      }
+    } else {
+      console.warn(`[FacelessFactory] Pollinations failed for segment ${segmentIndex}: ${res.status}`);
+    }
+  } catch (err: any) {
+    console.warn(`[FacelessFactory] Pollinations error segment ${segmentIndex}: ${err.message}`);
+  }
+
+  // ── FALLBACK 1: Gemini Imagen 4 ──
   const geminiKey = config.llm.providers.gemini?.apiKey;
   if (geminiKey) {
     try {
@@ -444,9 +467,8 @@ async function generateSceneImage(
         const data = (await res.json()) as any;
         const b64 = data.predictions?.[0]?.bytesBase64Encoded || data.predictions?.[0]?.image?.bytesBase64Encoded;
         if (b64) {
-          const imgPath = `${FACELESS_DIR}/${jobId}_scene_${segmentIndex}.png`;
           writeFileSync(imgPath, Buffer.from(b64, "base64"));
-          console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated via Imagen 4`);
+          console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated via Imagen 4 (fallback)`);
           return imgPath;
         }
       } else {
@@ -457,7 +479,7 @@ async function generateSceneImage(
     }
   }
 
-  // ── FALLBACK: DALL-E 3 via OpenAI ($0.04/image standard) ──
+  // ── FALLBACK 2: DALL-E 3 via OpenAI ──
   const openaiKey = config.llm.providers.openai?.apiKey;
   if (openaiKey) {
     try {
@@ -482,9 +504,8 @@ async function generateSceneImage(
         const data = (await res.json()) as any;
         const b64 = data.data?.[0]?.b64_json;
         if (b64) {
-          const imgPath = `${FACELESS_DIR}/${jobId}_scene_${segmentIndex}.png`;
           writeFileSync(imgPath, Buffer.from(b64, "base64"));
-          console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated via DALL-E 3`);
+          console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated via DALL-E 3 (fallback)`);
           return imgPath;
         }
       } else {
@@ -496,10 +517,8 @@ async function generateSceneImage(
     }
   }
 
-  // Both providers failed for this segment
-  if (!geminiKey && !openaiKey) {
-    console.warn(`[FacelessFactory] No image API keys configured — skipping segment ${segmentIndex}`);
-  }
+  // All providers failed for this segment
+  console.warn(`[FacelessFactory] ALL image providers failed for segment ${segmentIndex}`);
   return null;
 }
 

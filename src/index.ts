@@ -45,7 +45,7 @@ import { VidRushTool } from "./tools/vid-rush";
 import { TikTokBrowserUploadTool, tiktokLoginFlow } from "./tools/tiktok-browser-upload";
 import { InstagramBrowserUploadTool, instagramLoginFlow } from "./tools/instagram-browser-upload";
 import { logTask, updateTask, logAgentActivity } from "./tools/task-logger";
-import { CrewDispatchTool, claimTasks, completeDispatch, dispatchTask, triggerPipelineHandoffs, checkPipelineComplete } from "./agent/crew-dispatch";
+import { CrewDispatchTool, claimTasks, claimAllPending, completeDispatch, dispatchTask, triggerPipelineHandoffs, checkPipelineComplete } from "./agent/crew-dispatch";
 import { ProtocolReaderTool, ProtocolWriterTool } from "./tools/protocol-reader";
 import { RelationshipContextTool } from "./tools/relationship-context";
 import { SapphireSentinel } from "./proactive/sapphire-sentinel";
@@ -2351,24 +2351,38 @@ async function main() {
       }
     };
 
-    // ── Dispatch Poller — checks Supabase crew_dispatch for pending tasks every 15s ──
-    const DISPATCH_POLL_MS = 15_000;
-    if (agentLoops.size > 0) {
-      console.log(`📡 [CrewDispatch] Starting dispatch poller for ${agentLoops.size} agents (every ${DISPATCH_POLL_MS / 1000}s)`);
+    // ── Dispatch Poller — BATCHED: one query for all agents, with 503 backoff ──
+    const DISPATCH_POLL_BASE_MS = 60_000; // 60s base (was 15s — killed Supabase free tier)
+    const DISPATCH_POLL_MAX_MS = 300_000; // 5 min max backoff
+    let dispatchPollMs = DISPATCH_POLL_BASE_MS;
+    let dispatchPollTimer: ReturnType<typeof setTimeout> | null = null;
 
-      setInterval(async () => {
-        let agentIndex = 0;
-        for (const [agentName, { loop: agentLoop, channel }] of agentLoops) {
-          // Stagger agent processing with generous gaps to conserve LLM quota.
-          // Each agent fully processes before the next one starts.
-          if (agentIndex > 0) {
-            await new Promise((resolve) => setTimeout(resolve, 10_000));
+    if (agentLoops.size > 0) {
+      const agentNames = [...agentLoops.keys()];
+      console.log(`📡 [CrewDispatch] Starting batched dispatch poller for [${agentNames.join(", ")}] (base: ${DISPATCH_POLL_BASE_MS / 1000}s)`);
+
+      const runDispatchPoll = async () => {
+        try {
+          // ONE query for ALL agents instead of 6 separate queries
+          const tasksByAgent = await claimAllPending(agentNames, 1);
+
+          // Reset backoff on success
+          if (dispatchPollMs > DISPATCH_POLL_BASE_MS) {
+            console.log(`✅ [DispatchPoller] Supabase recovered — resetting poll to ${DISPATCH_POLL_BASE_MS / 1000}s`);
+            dispatchPollMs = DISPATCH_POLL_BASE_MS;
           }
-          agentIndex++;
-          try {
-            // Claim 1 task at a time — prevents quota burn from parallel processing
-            const tasks = await claimTasks(agentName, 1);
+
+          let agentIndex = 0;
+          for (const [agentName, { loop: agentLoop, channel }] of agentLoops) {
+            try {
+            const tasks = tasksByAgent.get(agentName) || [];
             if (tasks.length === 0) continue;
+
+            // Stagger agent processing with generous gaps to conserve LLM quota.
+            if (agentIndex > 0) {
+              await new Promise((resolve) => setTimeout(resolve, 10_000));
+            }
+            agentIndex++;
 
             for (const task of tasks) {
               console.log(`🔄 [DispatchPoller] ${agentName} processing dispatch ${task.id} (type: ${task.task_type})`);
@@ -2569,14 +2583,29 @@ async function main() {
             console.error(`[DispatchPoller] ${agentName} poll error: ${pollErr.message}`);
           }
         }
-      }, DISPATCH_POLL_MS);
+        } catch (err: any) {
+          if (err.message === "503_BACKOFF") {
+            // Exponential backoff on Supabase 503
+            dispatchPollMs = Math.min(dispatchPollMs * 2, DISPATCH_POLL_MAX_MS);
+            console.warn(`⚠️ [DispatchPoller] Supabase 503 — backing off to ${dispatchPollMs / 1000}s`);
+          } else {
+            console.error(`[DispatchPoller] Fatal poll error: ${err.message}`);
+          }
+        }
+
+        // Schedule next poll (dynamic interval for backoff)
+        dispatchPollTimer = setTimeout(runDispatchPoll, dispatchPollMs);
+      };
+
+      // Start the first poll after a 30s delay (let system stabilize)
+      dispatchPollTimer = setTimeout(runDispatchPoll, 30_000);
     }
 
     // ── Task Approval Poller — executes tasks Ace moves to "In Progress" in Mission Control ──
     // Agents propose tasks via propose_task → tasks table status "To Do"
     // Ace reviews in Mission Control → moves to "In Progress" = green light
     // This poller detects the approval and feeds the task to the assigned agent
-    const TASK_POLL_MS = 30_000;
+    const TASK_POLL_MS = 120_000; // 120s (was 30s — too aggressive for free tier)
     console.log(`📋 [TaskPoller] Starting task approval poller (every ${TASK_POLL_MS / 1000}s)`);
 
     setInterval(async () => {

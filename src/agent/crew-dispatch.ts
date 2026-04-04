@@ -151,6 +151,85 @@ export async function claimTasks(agentName: string, limit = 5): Promise<Dispatch
 }
 
 /**
+ * Batched claim: fetch ALL pending tasks across all agents in ONE query.
+ * Returns a Map of agentName → DispatchRecord[].
+ * This replaces 6 individual claimTasks() calls with 1 GET + 1 PATCH.
+ */
+export async function claimAllPending(agentNames: string[], limitPerAgent = 1): Promise<Map<string, DispatchRecord[]>> {
+  const result = new Map<string, DispatchRecord[]>();
+  if (!SUPABASE_URL || !SUPABASE_KEY || agentNames.length === 0) return result;
+
+  try {
+    // Single query: fetch pending for ALL agents at once
+    const agentList = agentNames.join(",");
+    const totalLimit = agentNames.length * limitPerAgent * 2; // Fetch extra to handle priority sorting per agent
+    const fetchResp = await fetch(
+      `${SUPABASE_URL}/rest/v1/crew_dispatch?to_agent=in.(${agentList})&status=eq.pending&order=priority.asc,created_at.asc&limit=${totalLimit}`,
+      {
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+        },
+      }
+    );
+
+    if (!fetchResp.ok) {
+      // Signal 503 to caller for backoff
+      if (fetchResp.status === 503) {
+        throw new Error(`503_BACKOFF`);
+      }
+      return result;
+    }
+
+    const allTasks = (await fetchResp.json()) as DispatchRecord[];
+    if (allTasks.length === 0) return result;
+
+    // Group by agent, respecting limitPerAgent
+    const toClaim: DispatchRecord[] = [];
+    const agentCounts = new Map<string, number>();
+
+    for (const task of allTasks) {
+      const count = agentCounts.get(task.to_agent) || 0;
+      if (count < limitPerAgent) {
+        toClaim.push(task);
+        agentCounts.set(task.to_agent, count + 1);
+        const arr = result.get(task.to_agent) || [];
+        arr.push(task);
+        result.set(task.to_agent, arr);
+      }
+    }
+
+    if (toClaim.length === 0) return result;
+
+    // Single PATCH to claim all at once
+    const ids = toClaim.map((t) => t.id);
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/crew_dispatch?id=in.(${ids.join(",")})`,
+      {
+        method: "PATCH",
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({
+          status: "claimed",
+          claimed_at: new Date().toISOString(),
+        }),
+      }
+    );
+
+    console.log(`📥 [CrewDispatch] Batched claim: ${toClaim.length} task(s) for [${[...agentCounts.keys()].join(", ")}]`);
+    return result;
+  } catch (err: any) {
+    if (err.message === "503_BACKOFF") throw err; // Re-throw for caller to handle
+    console.error(`[CrewDispatch] Batch claim error: ${err.message}`);
+    return result;
+  }
+}
+
+/**
  * Complete a dispatch task with result.
  */
 export async function completeDispatch(

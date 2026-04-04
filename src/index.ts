@@ -54,7 +54,7 @@ import { KnowledgeWriterTool } from "./tools/knowledge-writer";
 import { ImageGeneratorTool } from "./tools/image-generator";
 import { produceFacelessBatch } from "./engine/faceless-factory";
 import { extractWhisperIntel } from "./engine/whisper-extract";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { ProposeTaskTool, SaveContentDraftTool, FileBriefingTool, CheckApprovedTasksTool } from "./tools/action-surface";
 import { StripeMetricsTool } from "./tools/stripe-metrics";
 import { VideoPublisherTool, TikTokPublishTool, InstagramReelsPublishTool, YouTubeShortsPublishTool } from "./tools/video-publisher";
@@ -1814,30 +1814,98 @@ async function main() {
       process.env.SUPABASE_ANON_KEY
     );
 
-    // ── SUPABASE WARM-UP: Wait for PostgREST schema cache to be ready ──
-    // PGRST002 ("Could not query the database for the schema cache") can persist
-    // for 60-120s on cold starts. Warm up ONCE before attempting any agent init.
-    console.log(`🔥 [Supabase Warmup] Waiting for PostgREST schema cache...`);
-    const WARMUP_MAX_RETRIES = 30;
-    const WARMUP_DELAY_MS = 5000;
-    let supabaseReady = false;
-    for (let attempt = 1; attempt <= WARMUP_MAX_RETRIES; attempt++) {
-      const { data, error } = await supabase
-        .from("personality_config")
-        .select("agent_name")
-        .limit(1);
-      if (!error && data) {
-        console.log(`✅ [Supabase Warmup] PostgREST ready on attempt ${attempt} (${((attempt - 1) * WARMUP_DELAY_MS / 1000).toFixed(0)}s wait)`);
-        supabaseReady = true;
-        break;
-      }
-      if (attempt < WARMUP_MAX_RETRIES) {
-        console.warn(`[Supabase Warmup] Attempt ${attempt}/${WARMUP_MAX_RETRIES} — ${error?.code || "no data"}. Retrying in ${WARMUP_DELAY_MS / 1000}s...`);
-        await new Promise((resolve) => setTimeout(resolve, WARMUP_DELAY_MS));
+    // ── PERSONALITY CACHE: Bypass PostgREST PGRST002 failures ──
+    // PostgREST schema cache can be broken for MINUTES on free-tier Supabase.
+    // Strategy: Try PostgREST first → if it fails, use local JSON cache.
+    // On success, update the local cache for next deploy.
+    const PERSONALITY_CACHE_PATH = "/tmp/personality_cache.json";
+    type PersonalityMap = Record<string, { prompt_blueprint: string; agent_name: string }>;
+    let personalityMap: PersonalityMap = {};
+
+    // Try to load from Supabase PostgREST (3 fast attempts)
+    console.log(`🧠 [PersonalityLoader] Loading agent personalities...`);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const { data, error } = await supabase
+          .from("personality_config")
+          .select("prompt_blueprint, agent_name");
+        if (!error && data && data.length > 0) {
+          for (const row of data) {
+            personalityMap[row.agent_name] = row;
+          }
+          console.log(`✅ [PersonalityLoader] Loaded ${data.length} personalities from Supabase (attempt ${attempt})`);
+          // Cache to disk for next time
+          try {
+            writeFileSync(PERSONALITY_CACHE_PATH, JSON.stringify(personalityMap, null, 2));
+            console.log(`💾 [PersonalityLoader] Cached to ${PERSONALITY_CACHE_PATH}`);
+          } catch { /* non-critical */ }
+          break;
+        }
+        if (attempt < 3) {
+          console.warn(`[PersonalityLoader] Attempt ${attempt}/3 failed (${error?.code || "no data"}). Retrying in 3s...`);
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+        }
+      } catch (err: any) {
+        console.warn(`[PersonalityLoader] Attempt ${attempt}/3 threw: ${err.message}`);
+        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 3000));
       }
     }
-    if (!supabaseReady) {
-      console.error(`❌ [Supabase Warmup] PostgREST never came online after ${WARMUP_MAX_RETRIES} attempts. Agent init will fail.`);
+
+    // If PostgREST failed, try local cache
+    if (Object.keys(personalityMap).length === 0) {
+      console.warn(`⚠️ [PersonalityLoader] PostgREST failed. Trying local cache...`);
+      try {
+        if (existsSync(PERSONALITY_CACHE_PATH)) {
+          personalityMap = JSON.parse(readFileSync(PERSONALITY_CACHE_PATH, "utf-8"));
+          console.log(`📦 [PersonalityLoader] Loaded ${Object.keys(personalityMap).length} personalities from local cache`);
+        } else {
+          console.warn(`⚠️ [PersonalityLoader] No local cache found at ${PERSONALITY_CACHE_PATH}`);
+        }
+      } catch (err: any) {
+        console.error(`❌ [PersonalityLoader] Cache read failed: ${err.message}`);
+      }
+    }
+
+    // Last resort: try direct REST fetch bypassing Supabase JS client
+    if (Object.keys(personalityMap).length === 0) {
+      console.warn(`🔧 [PersonalityLoader] Trying direct REST API fetch...`);
+      for (let attempt = 1; attempt <= 10; attempt++) {
+        try {
+          const resp = await fetch(
+            `${process.env.SUPABASE_URL}/rest/v1/personality_config?select=agent_name,prompt_blueprint`,
+            {
+              headers: {
+                apikey: process.env.SUPABASE_ANON_KEY!,
+                Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+              },
+            }
+          );
+          if (resp.ok) {
+            const rows = (await resp.json()) as any[];
+            if (rows.length > 0) {
+              for (const row of rows) {
+                personalityMap[row.agent_name] = row;
+              }
+              console.log(`✅ [PersonalityLoader] Direct REST loaded ${rows.length} personalities (attempt ${attempt})`);
+              try { writeFileSync(PERSONALITY_CACHE_PATH, JSON.stringify(personalityMap, null, 2)); } catch {}
+              break;
+            }
+          }
+          const errText = await resp.text().catch(() => "");
+          console.warn(`[PersonalityLoader] Direct REST attempt ${attempt}/10 — ${resp.status}: ${errText.slice(0, 100)}`);
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+        } catch (err: any) {
+          console.warn(`[PersonalityLoader] Direct REST attempt ${attempt}/10 threw: ${err.message}`);
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+        }
+      }
+    }
+
+    const loadedCount = Object.keys(personalityMap).length;
+    if (loadedCount === 0) {
+      console.error(`❌ [PersonalityLoader] FATAL: Could not load ANY personalities. Agents will not start.`);
+    } else {
+      console.log(`🧠 [PersonalityLoader] ${loadedCount} personalities ready: ${Object.keys(personalityMap).join(", ")}`);
     }
 
     let botIndex = 0;
@@ -1855,18 +1923,11 @@ async function main() {
       try {
         console.log(`[BotInit] ${agentCfg.name} token: ${token.substring(0, 8)}...`);
 
-        // Fetch personality from Supabase (PostgREST already warmed up above)
-        console.log(`[BotInit] Querying personality_config for agent_name = '${agentCfg.name}'`);
-        const { data: personality, error } = await supabase
-          .from("personality_config")
-          .select("prompt_blueprint, agent_name")
-          .eq("agent_name", agentCfg.name)
-          .maybeSingle();
+        // Fetch personality from pre-loaded map (no PostgREST dependency)
+        const personality = personalityMap[agentCfg.name] || null;
 
-        if (error || !personality) {
-          console.warn(`⚠️ Could not find personality for ${agentCfg.name} in Supabase`);
-          if (error) console.error(`[BotInit] Supabase Error for ${agentCfg.name}:`, JSON.stringify(error, null, 2));
-          else console.warn(`[BotInit] personality_config returned null for ${agentCfg.name}`);
+        if (!personality) {
+          console.warn(`⚠️ [BotInit] No personality for ${agentCfg.name} — skipping`);
           continue;
         }
 

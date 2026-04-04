@@ -180,13 +180,17 @@ async function main() {
   // Sapphire + Veritas → Anthropic primary (strategic, less frequent, high quality)
   // Vector + Yuki → Groq primary (Yuki = most tool calls, Groq = 14,400/day free tier)
   const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
-    alfred: buildTeamLLM(["anthropic", "gemini", "groq"]),
-    anita: buildTeamLLM(["anthropic", "gemini", "groq"]),
+    alfred: buildTeamLLM(["gemini", "groq", "anthropic"]),
+    anita: buildTeamLLM(["gemini", "groq", "anthropic"]),
     sapphire: buildTeamLLM(["anthropic", "gemini", "groq"]),
     veritas: buildTeamLLM(["anthropic", "gemini", "groq"]),
-    vector: buildTeamLLM(["groq", "anthropic", "gemini"]),
-    yuki: buildTeamLLM(["groq", "anthropic", "gemini"]),
+    vector: buildTeamLLM(["groq", "gemini", "anthropic"]),
+    yuki: buildTeamLLM(["groq", "gemini", "anthropic"]),
   };
+
+  // Pipeline-dedicated LLM: Groq first (14,400 free/day), then Gemini, then paid providers last.
+  // This prevents pipeline runs from burning Anthropic/OpenAI credits.
+  const pipelineLLM = buildTeamLLM(["groq", "gemini", "anthropic", "openai"]);
 
   console.log("🔀 [LLM Teams] Provider split active:");
   for (const [agent, team] of Object.entries(AGENT_LLM_TEAMS)) {
@@ -646,7 +650,7 @@ async function main() {
               console.log(`🧪 [/dryrun] Starting executeFullPipeline...`);
               const result = await executeFullPipeline(
                 dryYoutubeUrl,
-                failoverLLM,
+                pipelineLLM,  // Groq-first: free tier, won't burn paid credits
                 dryBrand,
                 async (step: string, detail: string) => {
                   try {
@@ -718,7 +722,7 @@ async function main() {
             try {
               const result = await executeFullPipeline(
                 liveYoutubeUrl,
-                failoverLLM,
+                pipelineLLM,  // Groq-first: free 14,400/day, won't burn Anthropic/OpenAI credits
                 liveBrand,
                 async (step: string, detail: string) => {
                   try {
@@ -1409,7 +1413,7 @@ async function main() {
       const brandList = brands || ["ace_richie", "containment_field"];
       console.log(`📡 [FacelessFactory] Manual trigger — niche: ${detectedNiche}, brands: ${brandList.join(", ")}`);
 
-      const results = await produceFacelessBatch(failoverLLM, sourceIntel.slice(0, 3000), detectedNiche, brandList);
+      const results = await produceFacelessBatch(pipelineLLM, sourceIntel.slice(0, 3000), detectedNiche, brandList);
 
       return JSON.stringify({
         status: "ok",

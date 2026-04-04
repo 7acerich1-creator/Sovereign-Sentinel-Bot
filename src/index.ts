@@ -471,6 +471,7 @@ async function main() {
           `/status — System status\n` +
           `/voice — Toggle voice responses\n` +
           `/dryrun <url> — Validate pipeline (zero cost)\n` +
+          `/pipeline <url> — Run full VidRush pipeline (LIVE)\n` +
           `/test_tts — Test TTS on one segment\n` +
           `/test_yt — Test YouTube upload with 5s clip`,
           { parseMode: "Markdown" }
@@ -603,6 +604,132 @@ async function main() {
         } catch (err: any) {
           await telegram.sendMessage(message.chatId, `❌ YouTube test FAILED: ${err.message?.slice(0, 400)}`);
         }
+        return true;
+      }
+
+      case "/dryrun": {
+        const YT_RE = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|live\/|shorts\/)|youtu\.be\/)([\w-]{11})/i;
+        const ytMatch = arg.match(YT_RE) || message.content.match(YT_RE);
+        if (!ytMatch) {
+          await telegram.sendMessage(message.chatId, "Usage: /dryrun <youtube_url>");
+          return true;
+        }
+        const dryVideoId = ytMatch[1];
+        const dryYoutubeUrl = `https://www.youtube.com/watch?v=${dryVideoId}`;
+
+        await telegram.sendMessage(message.chatId,
+          `🧪 *DRY RUN — VID RUSH PIPELINE*\n` +
+          `Video: \`${dryVideoId}\`\n\n` +
+          `Running full 8-step pipeline with ALL APIs stubbed.\n` +
+          `This validates logic, file paths, and data flow at zero cost.\n` +
+          `If this passes clean → live run should work.`,
+          { parseMode: "Markdown" }
+        );
+
+        const dryBrandMatch = message.content.match(/\b(containment[_ ]?field|tcf)\b/i);
+        const dryBrand = dryBrandMatch ? "containment_field" as const : "ace_richie" as const;
+
+        (async () => {
+          try {
+            const result = await executeFullPipeline(
+              dryYoutubeUrl,
+              failoverLLM,
+              dryBrand,
+              async (step: string, detail: string) => {
+                try {
+                  await telegram.sendMessage(message.chatId,
+                    `🧪 ${step}: ${detail}`,
+                    { parseMode: "Markdown" }
+                  );
+                } catch { /* non-critical */ }
+              },
+              { dryRun: true }
+            );
+
+            const report = `🧪 *DRY RUN — COMPLETE*\n` +
+              `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+              `🎬 YouTube: ${result.youtubeUrl || "simulated"}\n` +
+              `✂️ Clips generated: ${result.clipCount}\n` +
+              `📅 Buffer scheduled: ${result.bufferScheduled} posts\n` +
+              `⏱️ Total time: ${result.duration.toFixed(0)}s\n` +
+              `${result.errors.length > 0 ? `\n⚠️ Issues:\n${result.errors.map(e => "  • " + e).join("\n")}` : "✅ Zero issues — pipeline logic is clean"}\n` +
+              `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+              `_Ready for live run. Drop the URL without /dryrun._`;
+            try {
+              await telegram.sendMessage(message.chatId, report, { parseMode: "Markdown" });
+            } catch {
+              await telegram.sendMessage(message.chatId, report.replace(/[*_`]/g, ""));
+            }
+          } catch (err: any) {
+            console.error(`❌ [DRY RUN] Pipeline failed: ${err.message}`);
+            await telegram.sendMessage(message.chatId,
+              `❌ DRY RUN FAILED at: ${err.message?.slice(0, 500)}\n\nThis would have failed in production too. Fix first.`
+            );
+          }
+        })();
+
+        return true;
+      }
+
+      case "/pipeline": {
+        const YT_RE2 = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|live\/|shorts\/)|youtu\.be\/)([\w-]{11})/i;
+        const ytMatch2 = arg.match(YT_RE2) || message.content.match(YT_RE2);
+        if (!ytMatch2) {
+          await telegram.sendMessage(message.chatId, "Usage: /pipeline <youtube_url>");
+          return true;
+        }
+        const liveVideoId = ytMatch2[1];
+        const liveYoutubeUrl = `https://www.youtube.com/watch?v=${liveVideoId}`;
+
+        await telegram.sendMessage(message.chatId,
+          `🔥 *VID RUSH PIPELINE — ACTIVATED*\n` +
+          `Video: \`${liveVideoId}\`\n\n` +
+          `8-step autonomous pipeline launching:\n` +
+          `1️⃣ Whisper extraction\n` +
+          `2️⃣ Faceless Factory LONG (Anita's Protocol 77 voice)\n` +
+          `3️⃣ YouTube long-form upload\n` +
+          `4️⃣ Chop into ~30 clips\n` +
+          `5️⃣ Upload clips to storage\n` +
+          `6️⃣ Platform-specific copy generation\n` +
+          `7️⃣ Distribute to all platforms\n` +
+          `8️⃣ Schedule a week in Buffer\n\n` +
+          `_This will take several minutes. Sit back, Architect._`,
+          { parseMode: "Markdown" }
+        );
+
+        const liveBrandMatch = message.content.match(/\b(containment[_ ]?field|tcf)\b/i);
+        const liveBrand = liveBrandMatch ? "containment_field" as const : "ace_richie" as const;
+
+        (async () => {
+          try {
+            const result = await executeFullPipeline(
+              liveYoutubeUrl,
+              failoverLLM,
+              liveBrand,
+              async (step: string, detail: string) => {
+                try {
+                  await telegram.sendMessage(message.chatId,
+                    `📡 ${step}: ${detail}`,
+                    { parseMode: "Markdown" }
+                  );
+                } catch { /* non-critical */ }
+              }
+            );
+
+            const report = formatPipelineReport(result);
+            try {
+              await telegram.sendMessage(message.chatId, report, { parseMode: "Markdown" });
+            } catch {
+              await telegram.sendMessage(message.chatId, report.replace(/[*_`]/g, ""));
+            }
+          } catch (err: any) {
+            console.error(`❌ [VidRush] Pipeline failed: ${err.message}`);
+            await telegram.sendMessage(message.chatId,
+              `❌ Vid Rush Pipeline FAILED at: ${err.message?.slice(0, 500)}`
+            );
+          }
+        })();
+
         return true;
       }
 

@@ -1,27 +1,43 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-03 (Cowork Session 17 — VidRush Full Autonomous Pipeline Built) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-04 (Cowork Session 18 — VidRush Pipeline Debug + First Live Run) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+
+**Session Summary — Cowork Session 18 (2026-04-04):**
+1. **FIRST LIVE PIPELINE RUN COMPLETED — BUT THE MACHINE IS STILL BROKEN.** Pipeline ran all 8 steps on video WhqdFNK58S8 (Russell Brunson "Mind Control" video). Produced "The Mind Control Blueprint Hidden For 100 Years" — 219s (3.6 min, should be 10-15 min), 20 scenes, uploaded to YouTube as https://youtube.com/watch?v=mSPZdSX21O4. BUT: only 8 clips cut (should be ~30), 0/8 clips uploaded to Supabase (503 errors), 0 clips distributed, Buffer scheduling unknown. VIDEO QUALITY NOT YET EVALUATED — can't even get to quality tuning because the infrastructure is still failing.
+2. **BUGS FIXED THIS SESSION:**
+   - Command routing: `/dryrun` and `/pipeline` were placed in crew agent handler (Sapphire scope) instead of Veritas `handleCommand()` switch. Moved to correct scope. Added `@botname` stripping from commands (`.replace(/@\w+$/i, "")`). Added `.toLowerCase()` normalization.
+   - Error handling: Wrapped all Telegram sendMessage calls in try-catch with plain text fallback. No more silent failures.
+   - Duplicate code: Removed ~140 lines of duplicate `/dryrun`, `/pipeline`, and YouTube URL handlers from crew agent `onMessage` handler. Crew bots now redirect to Veritas for pipeline commands.
+   - JSON parsing: Faceless Factory script parser replaced with 4-strategy `extractJSON()` function (direct parse, balanced brace matching, sanitized regex, common-mistake fixer). Prevents crash when LLM returns slightly malformed JSON.
+   - yt-dlp JS runtime: YouTube 2025+ requires explicit JS runtime declaration. Added `--js-runtimes nodejs` to all 3 yt-dlp call sites (whisper-extract.ts, vid-rush.ts, clip-generator.ts) AND global config in Dockerfile.bot (`/etc/yt-dlp/config`).
+   - Temp file cleanup: Added `cleanupJobFiles()` to faceless-factory.ts and `cleanupPipelineJob()` to vidrush-orchestrator.ts. Removes intermediate TTS segments, raw audio, scene images, concat lists, stale whisper files (>1hr). Runs on success and failure.
+3. **STILL BROKEN — CRITICAL (must fix next session):**
+   - **yt-dlp JS runtime fix NOT YET DEPLOYED when last tested.** Commits b6d8970 + 34d1109 are pushed but Railway may not have rebuilt yet. The Dockerfile change (34d1109) forces a full Docker rebuild which takes longer. MUST verify this works before anything else.
+   - **Supabase 503 flood STILL HAPPENING.** Clip uploads (Step 5), distribution logging, and Buffer scheduling all fail because Supabase returns 503. Background pollers may still be hammering it. Need to check poller intervals and potentially pause non-essential pollers during pipeline runs.
+   - **Buffer is FULL OF FAILED POSTS.** Screenshot shows April 2026 calendar packed with red X marks across all channels. 155 items in Publish queue. Multiple channels (the_containment_f, acerichie77, ace_richie_77, Ace Richie, The Containment, AceRichie77, ContainmentFld) — many appear to be DUPLICATE channels for the same brands. Failed posts need to be purged. Channel list needs audit and cleanup.
+   - **Video output too short.** 219s (3.6 min) instead of target 10-15 min. The `"long"` mode requests 20 segments but the actual TTS + assembly produced a much shorter video. Need to investigate segment duration hints, TTS output length, and assembly logic.
+   - **Only 8 clips cut instead of ~30.** The 219s video at 25s/clip = 8 clips max. This is a downstream effect of the short video. Fix the video length → clip count fixes itself.
+4. **Commits this session (all pushed to main):**
+   - `56d8c53` — fix: robust command routing for /dryrun and /pipeline
+   - `c3b8ca7` — fix: robust JSON extraction for Faceless Factory script parsing
+   - `6a2e255` — feat: auto-cleanup temp files after pipeline runs
+   - `b6d8970` — fix: add --js-runtimes nodejs to all yt-dlp commands
+   - `34d1109` — fix: global yt-dlp config for nodejs runtime in Dockerfile
+
+**NEXT SESSION PRIORITIES (Session 19 — VidRush Completion):**
+1. **VERIFY yt-dlp fix deployed** — Send `/test_tts` to Veritas to confirm new code is live. Check uptime. Then test `/pipeline` with a YouTube URL.
+2. **FIX SUPABASE 503** — Check poller intervals. May need to pause dispatch poller and heartbeat during pipeline runs, or increase backoff further. Check if free tier is simply overwhelmed.
+3. **FIX VIDEO LENGTH** — Investigate why "long" mode (20 segments) only produces 3.6 min. Check segment duration hints in script generation, TTS output per segment, and assembly logic. Target: 10-15 min output.
+4. **AUDIT + CLEAN BUFFER** — Purge all failed posts. Audit channel list — remove duplicates. Verify Buffer API tokens are valid. Test a single manual post before pipeline scheduling.
+5. **END-TO-END PIPELINE TEST** — With all above fixed, run `/pipeline <url>` and verify all 8 steps complete with real clip uploads, real distribution, real Buffer scheduling.
+6. **QUALITY EVALUATION** — Once pipeline completes successfully, evaluate: video watchability, voiceover quality, scene image quality, caption quality, posting schedule sanity.
 
 **Session Summary — Cowork Session 17 (2026-04-03):**
 1. **VIDRUSH FULL AUTONOMOUS PIPELINE — BUILT.** The pipeline Ace envisioned across 16 sessions is now wired end-to-end: 1 YouTube URL → Whisper extraction → Faceless Factory LONG (Anita's Protocol 77 voice, 20 segments, 10-15 min) → YouTube long-form upload → chop into ~30 clips (9:16, niche color grades) → platform-specific copy generation (7 platforms) → distribute to TikTok/IG/YouTube Shorts → schedule a week of text posts in Buffer. All 8 steps chain autonomously.
 2. **NEW FILE: `src/engine/vidrush-orchestrator.ts`** — Master pipeline engine. `executeFullPipeline(youtubeUrl, llm, brand)` runs all 8 steps with progress callbacks. Reports back via `formatPipelineReport()`. Logs full run to `content_transmissions` in Supabase.
 3. **NEW TOOL: `YouTubeLongFormPublishTool`** in `src/tools/video-publisher.ts` — Same OAuth flow as Shorts but WITHOUT `#Shorts` injection, uses category 27 (Education) instead of 22, no title mangling. Supports both channels (ace_richie / containment_field).
-4. **YOUTUBE URL HANDLER REWRITTEN** in `src/index.ts` — Replaced the old Alfred-dispatch flow with direct `executeFullPipeline()` call. Any agent receiving a YouTube URL now triggers the full autonomous pipeline. Progress updates sent to Telegram in real-time. Brand auto-detected from message content.
-5. **PLATFORM-SPECIFIC COPY ENGINE** — Built into orchestrator. LLM generates unique captions for youtube_short, tiktok, instagram, x_twitter, threads, linkedin, facebook per clip. Batched in groups of 5 to avoid LLM overload. Fallback captions if LLM fails.
-6. **BUFFER WEEK SCHEDULING** — Built into orchestrator. Stagger 4 posts/day across 7 days (9:00, 12:00, 15:00, 18:00 UTC). Auto-discovers Buffer channels. Filters to text-capable channels (X, Threads, LinkedIn, Facebook). Up to 28 scheduled posts per pipeline run.
-7. **CRITICAL FIXES FROM ACE'S FEEDBACK:**
-   - Faceless Factory called with `"long"` mode (20 segments, 10-15 min) — not the default `"short"` (5 segments, 30-60s).
-   - YouTube long-form upload does NOT inject `#Shorts` into titles. Previous sessions hardcoded this without alignment.
-   - Script generation uses `SCRIPT_VOICE[brand]` (Anita's Protocol 77 voice) — confirmed this was already in faceless-factory.ts.
-   - Clips cut from the NEW faceless video, NOT from the original YouTube source.
-8. **Push status: ⏳ NOT YET COMMITTED** — All changes on disk, TypeScript compiles clean. Needs commit + push via Desktop Commander.
-
-**NEXT SESSION PRIORITIES (Session 18):**
-1. **COMMIT + PUSH + DEPLOY** — Git add all new/modified files, commit, push to main. Railway auto-deploys.
-2. **END-TO-END TEST** — Drop a YouTube URL in any agent's DM and verify the full 8-step pipeline executes.
-3. **PLATFORM TOKENS** — YouTube OAuth is configured. TikTok and Instagram API tokens still needed for direct video posting. Browser fallback available for both.
-4. **NODE_MODULES CLEANUP** — Windows-side `node_modules` is corrupted. Run via Desktop Commander.
-5. **VID-RUSH STATUS ENDPOINT FIX** — `/api/vid-rush/status` has "rows is not iterable" bug.
-6. **COOKIE RESILIENCE** — Monitor TikTok/IG cookie expiry.
+4. **YOUTUBE URL HANDLER REWRITTEN** in `src/index.ts` — Replaced the old Alfred-dispatch flow with direct `executeFullPipeline()` call. Veritas handleCommand() routes `/dryrun` and `/pipeline`. Crew bots redirect pipeline commands to Veritas.
+5. **PLATFORM-SPECIFIC COPY ENGINE** — Built into orchestrator. LLM generates unique captions for youtube_short, tiktok, instagram, x_twitter, threads, linkedin, facebook per clip.
+6. **BUFFER WEEK SCHEDULING** — Built into orchestrator. Stagger 4 posts/day across 7 days. Auto-discovers Buffer channels.
 
 **Session Summary — Cowork Session 16 (2026-04-03):**
 1. **SUPABASE 503 FLOOD — ROOT CAUSE FIXED AND DEPLOYED.** Dispatch poller was firing 6 separate `claimTasks()` queries every 15s (~24 req/min) + task poller every 30s + heartbeat + Sapphire sentinel = 40-50 req/min. Free tier PostgREST was choking, returning wall-to-wall 503s on every table query.

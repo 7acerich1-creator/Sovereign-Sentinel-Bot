@@ -1,10 +1,3 @@
-fix: add DALL-E 3 fallback when Imagen 4 quota exhausted
-
-Both pipeline failures were caused by Imagen 4 quota being exhausted
-with NO fallback — every scene image returned null, pipeline crashed.
-
-generateSceneImage now tries Imagen 4 first (free), then falls back
-to DALL-E 3 via OpenAI ($0.04/image standard quality). Same pattern
-already used in image-generator.ts and content-engine.ts.
+docs: Session 19b master reference update
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

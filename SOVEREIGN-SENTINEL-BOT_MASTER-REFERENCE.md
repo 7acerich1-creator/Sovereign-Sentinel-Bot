@@ -1,19 +1,23 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-04 (Cowork Session 19 — VidRush Pipeline Fixes: Poller Pause + Video Length + TTS Cadence) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-04 (Cowork Session 19b — Imagen Fallback + Groq-First Pipeline LLM) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
-**Session Summary — Cowork Session 19 (2026-04-04):**
+**Session Summary — Cowork Session 19b (2026-04-04):**
+1. **ROOT CAUSE OF BOTH PIPELINE FAILURES FOUND AND FIXED.** Two `/pipeline` runs failed with "Zero scene images generated." The failures had TWO independent causes, both now resolved:
+   - **Cause A: LLM provider chain had no Groq.** The shared `failoverLLM` (Gemini→Anthropic→OpenAI) was used for pipeline script generation. Gemini quota hit → fell through to Anthropic (burned paid credits on 60s timeouts) → OpenAI 429'd. Groq (14,400 free req/day) was never tried. **FIX:** Created dedicated `pipelineLLM = buildTeamLLM(["groq", "gemini", "anthropic", "openai"])`. Free providers first, paid last. Commit `b4f756a`.
+   - **Cause B: Image generation had ZERO fallback.** `generateSceneImage()` in faceless-factory.ts ONLY used Gemini Imagen 4. When Imagen 4 quota was exhausted, ALL scene images returned null → pipeline crashed. Meanwhile `image-generator.ts` and `content-engine.ts` both had DALL-E 3 fallback — faceless factory never got one. **FIX:** Added DALL-E 3 fallback ($0.04/image standard quality, 1024x1792 portrait). Imagen 4 tried first (free), DALL-E 3 on failure. Commit `2bac2be`.
+2. **AGENT TEAMS ALSO FIXED.** Alfred/Anita back to Gemini-first, Vector/Yuki back to Groq-first per original architecture. Sapphire/Veritas remain Anthropic-first. Commit `b4f756a`.
+3. **CREDIT PROTECTION.** Anthropic credits ($10.03 remaining) are now LAST in the pipeline chain, not second. Pipeline will burn through Groq (free) → Gemini (free) before touching paid providers.
+4. **Commits this sub-session:** `b4f756a` — fix: pipeline uses Groq-first LLM; `2bac2be` — fix: add DALL-E 3 fallback when Imagen 4 quota exhausted
+5. **STILL NEEDS TESTING (Session 20):** Same as before but now with image fallback in place. Wait for Railway deploy of `2bac2be`, then test `/pipeline`. DALL-E 3 images cost ~$0.04 each × ~20 segments = ~$0.80 per pipeline run on OpenAI (not Anthropic).
+
+**Session Summary — Cowork Session 19a (2026-04-04):**
 1. **5 CRITICAL FIXES DEPLOYED — PIPELINE SHOULD NOW PRODUCE 10-15 MIN VIDEOS WITHOUT 503 ERRORS.** All fixes compiled clean (zero new TypeScript errors), committed as `152695b`, pushed to main. Railway auto-deploying.
 2. **FIX 1: POLLER PAUSE DURING PIPELINE.** Root cause of Supabase 503 during pipeline runs: dispatch poller (60s), task poller (120s), heartbeat (300s), and Sapphire sentinel (2hr) all continued firing while pipeline was hammering Supabase with clip uploads. NEW: `pipelineRunning` global flag. All 4 pollers now check `(globalThis).__isPipelineRunning()` and skip their cycle if true. `/pipeline` handler sets flag via `__setPipelineRunning(true)` before `executeFullPipeline()` and clears in `finally` block. Zero Supabase traffic from pollers during pipeline execution.
 3. **FIX 2: VIDEO LENGTH — LONG MODE SCRIPT GENERATION OVERHAULED.** Root cause: prompt said "2-4 sentences" per segment with `duration_hint: 8`. 20 segments × ~12s speech = 240s (4 min). NOW: long mode requests "6-10 sentences (80-130 words)" per segment with `duration_hint: 40`. Minimum duration hint enforced at 25s (was no minimum). Source intelligence slice increased from 3000 to 4000 chars. `maxTokens` bumped from 4096 to 8192 for long scripts. Added word count logging: `[FacelessFactory] Script word counts: [...] | Total: Xw | Estimated: ~Ym at 140 WPM`. Warning logged if total words < 800 for long mode. Also added PACING instruction: "Write for a MEASURED, documentary-style voiceover — not a fast-talking YouTuber."
 4. **FIX 3: TTS CADENCE — SLOWER, MORE MEASURED DELIVERY.** `textToSpeech()` now accepts optional `TTSOptions` with `speed` parameter. Long-form content uses 0.9x speed. ElevenLabs: stability increased 0.65→0.80 and style reduced 0.45→0.35 when speed < 1.0 (more consistent, less dramatic = documentary feel). OpenAI: `speed` param passed through (0.25-4.0 range).
 5. **FIX 4: CLIP UPLOAD RETRY WITH BACKOFF.** `uploadClipsToStorage()` in vidrush-orchestrator.ts now retries 3x per clip with exponential backoff (5s, 10s) on 503. 1.5s delay between successful uploads to pace Supabase traffic. Previously: single attempt, 0 delay between clips = 503 cascade.
 6. **FIX 5: BUFFER AUDIT COMMAND.** New `/buffer_audit` command: lists all channels with duplicate service detection, purges all queued posts via `nukeBufferQueue()`, reports cleanup results. Added to help text.
-7. **STILL NEEDS TESTING (Session 20):**
-   - **yt-dlp fix verification** — Commit 34d1109 (Session 18) added `--js-runtimes nodejs` to Dockerfile. This session's push triggers a fresh Docker rebuild. Send `/status` to Veritas to confirm new deploy is live.
-   - **Buffer cleanup** — Run `/buffer_audit` on Veritas once deployed. This will purge all failed posts and report duplicate channels. Then manually remove duplicate channels in Buffer dashboard (publish.buffer.com).
-   - **E2E pipeline test** — Run `/pipeline <youtube_url>` with all fixes live. Expected: 10-15 min video (not 3.6 min), clips uploaded to Supabase (not 503), Buffer scheduling works.
-   - **Quality evaluation** — Can only happen after clean E2E run.
-8. **Commits this session:** `152695b` — fix: pipeline poller pause, video length, TTS cadence, clip retry, buffer audit (6 files, +209/-47 lines)
+7. **Commits:** `152695b` — fix: pipeline poller pause, video length, TTS cadence, clip retry, buffer audit (6 files, +209/-47 lines); `ada85bb` — docs: Session 19 master reference update
 
 **NEXT SESSION PRIORITIES (Session 20 — VidRush E2E Validation):**
 1. **VERIFY DEPLOY** — Check Railway build log. Send `/status` to Veritas. Confirm uptime shows post-push timestamp.

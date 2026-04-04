@@ -477,6 +477,193 @@ export class YouTubeShortsPublishTool implements Tool {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 3B. YOUTUBE LONG-FORM — Data API v3
+//     Same OAuth flow as Shorts but WITHOUT #Shorts, proper long-form metadata.
+//     For the VidRush pipeline: Faceless Factory (long) → YouTube long-form upload.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export class YouTubeLongFormPublishTool implements Tool {
+  definition: ToolDefinition = {
+    name: "youtube_publish_long",
+    description:
+      "Upload a LONG-FORM video to YouTube via the Data API v3. " +
+      "For full-length content (5-20 minutes). Does NOT add #Shorts. " +
+      "Use brand parameter to choose channel: 'ace_richie' (default) or 'containment_field'.",
+    parameters: {
+      video_url: {
+        type: "string",
+        description: "Public URL of the video file (MP4). Will be downloaded and uploaded to YouTube.",
+      },
+      title: {
+        type: "string",
+        description: "Video title (max 100 chars). Do NOT include #Shorts.",
+      },
+      description: {
+        type: "string",
+        description: "Full video description. Include hooks, timestamps, links, CTAs, hashtags.",
+      },
+      tags: {
+        type: "string",
+        description: "Comma-separated tags for discoverability.",
+      },
+      niche: {
+        type: "string",
+        description: "Content niche for logging: dark_psychology, self_improvement, burnout, quantum",
+      },
+      brand: {
+        type: "string",
+        description: "Which brand/channel: 'ace_richie' (default) or 'containment_field'.",
+      },
+    },
+    required: ["video_url", "title", "description"],
+  };
+
+  private async getAccessToken(brand: string = "ace_richie"): Promise<string | null> {
+    const directToken = process.env.YOUTUBE_ACCESS_TOKEN;
+    if (directToken) return directToken;
+
+    const refreshToken = brand === "containment_field"
+      ? process.env.YOUTUBE_REFRESH_TOKEN_TCF
+      : process.env.YOUTUBE_REFRESH_TOKEN;
+    const clientId = process.env.YOUTUBE_CLIENT_ID;
+    const clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
+
+    if (!refreshToken || !clientId || !clientSecret) return null;
+
+    try {
+      const resp = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: refreshToken,
+          grant_type: "refresh_token",
+        }).toString(),
+      });
+      if (!resp.ok) return null;
+      const data = await resp.json() as any;
+      return data.access_token || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async execute(args: Record<string, unknown>): Promise<string> {
+    const brand = args.brand ? String(args.brand) : "ace_richie";
+    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Ace Richie 77";
+    const token = await this.getAccessToken(brand);
+    if (!token) {
+      const envHint = brand === "containment_field"
+        ? "YOUTUBE_REFRESH_TOKEN_TCF"
+        : "YOUTUBE_REFRESH_TOKEN";
+      return `❌ YouTube not configured for ${channelLabel}. Set ${envHint} + YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET in Railway env.`;
+    }
+
+    const videoUrl = String(args.video_url);
+    const title = String(args.title).slice(0, 100);
+    const description = String(args.description);
+    const tags = args.tags ? String(args.tags).split(",").map((t) => t.trim()) : [];
+    const niche = args.niche ? String(args.niche) : "unknown";
+
+    try {
+      // Download video from URL
+      const videoResp = await fetch(videoUrl);
+      if (!videoResp.ok) {
+        return `❌ Failed to download video from ${videoUrl}: ${videoResp.status}`;
+      }
+      const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
+      const videoSize = videoBuffer.length;
+
+      // Long-form allows up to 128GB but practical limit ~2GB for API upload
+      if (videoSize > 2 * 1024 * 1024 * 1024) {
+        return `❌ Video too large (${Math.round(videoSize / 1024 / 1024)}MB). API upload limit ~2GB.`;
+      }
+
+      // Initialize resumable upload — NO #Shorts, category 27 (Education) for long-form
+      const metadata = {
+        snippet: {
+          title,  // Clean title, no #Shorts injected
+          description,
+          tags,
+          categoryId: "27", // Education — better for long-form sovereign content
+        },
+        status: {
+          privacyStatus: "public",
+          selfDeclaredMadeForKids: false,
+        },
+      };
+
+      const initResp = await fetch(
+        "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json; charset=UTF-8",
+            "X-Upload-Content-Length": String(videoSize),
+            "X-Upload-Content-Type": "video/mp4",
+          },
+          body: JSON.stringify(metadata),
+        }
+      );
+
+      if (!initResp.ok) {
+        const errText = await initResp.text();
+        return `❌ YouTube upload init failed (${initResp.status}): ${errText.slice(0, 300)}`;
+      }
+
+      const uploadUrl = initResp.headers.get("location");
+      if (!uploadUrl) return "❌ YouTube did not return a resumable upload URL.";
+
+      // Upload video data
+      const uploadResp = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Length": String(videoSize),
+          "Content-Type": "video/mp4",
+        },
+        body: videoBuffer,
+      });
+
+      if (!uploadResp.ok) {
+        const errText = await uploadResp.text();
+        return `❌ YouTube video upload failed (${uploadResp.status}): ${errText.slice(0, 300)}`;
+      }
+
+      const uploadData = await uploadResp.json() as any;
+      const videoId = uploadData.id;
+
+      // Log to Supabase
+      await logVideoPost({
+        source: "youtube_longform",
+        intent_tag: niche,
+        status: "published",
+        strategy_json: {
+          video_id: videoId,
+          video_url: videoUrl,
+          youtube_url: `https://youtube.com/watch?v=${videoId}`,
+          platform: "youtube",
+          format: "long_form",
+          brand,
+          channel: channelLabel,
+        },
+        linkedin_post: description.slice(0, 500),
+      });
+
+      return `✅ YouTube LONG-FORM uploaded to ${channelLabel}.\n` +
+        `Video ID: ${videoId}\n` +
+        `URL: https://youtube.com/watch?v=${videoId}\n` +
+        `Title: ${title}\n` +
+        `Brand: ${channelLabel}\n` +
+        `Niche: ${niche}`;
+    } catch (err: any) {
+      return `❌ YouTube long-form publish error: ${err.message}`;
+    }
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 4. UNIFIED VIDEO PUBLISHER — Smart router
 //    Agents call this single tool. It routes to the right platform.
 //    If platform tokens aren't set, it gracefully reports which are available.

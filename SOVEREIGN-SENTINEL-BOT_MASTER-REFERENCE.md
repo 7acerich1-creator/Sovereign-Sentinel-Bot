@@ -1,21 +1,58 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-03 (Cowork Session 13 — Supabase Security Hardening + Retention Policy) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-03 (Cowork Session 17 — VidRush Full Autonomous Pipeline Built) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
-**Session Summary — Cowork Session 13 (2026-04-03):**
+**Session Summary — Cowork Session 17 (2026-04-03):**
+1. **VIDRUSH FULL AUTONOMOUS PIPELINE — BUILT.** The pipeline Ace envisioned across 16 sessions is now wired end-to-end: 1 YouTube URL → Whisper extraction → Faceless Factory LONG (Anita's Protocol 77 voice, 20 segments, 10-15 min) → YouTube long-form upload → chop into ~30 clips (9:16, niche color grades) → platform-specific copy generation (7 platforms) → distribute to TikTok/IG/YouTube Shorts → schedule a week of text posts in Buffer. All 8 steps chain autonomously.
+2. **NEW FILE: `src/engine/vidrush-orchestrator.ts`** — Master pipeline engine. `executeFullPipeline(youtubeUrl, llm, brand)` runs all 8 steps with progress callbacks. Reports back via `formatPipelineReport()`. Logs full run to `content_transmissions` in Supabase.
+3. **NEW TOOL: `YouTubeLongFormPublishTool`** in `src/tools/video-publisher.ts` — Same OAuth flow as Shorts but WITHOUT `#Shorts` injection, uses category 27 (Education) instead of 22, no title mangling. Supports both channels (ace_richie / containment_field).
+4. **YOUTUBE URL HANDLER REWRITTEN** in `src/index.ts` — Replaced the old Alfred-dispatch flow with direct `executeFullPipeline()` call. Any agent receiving a YouTube URL now triggers the full autonomous pipeline. Progress updates sent to Telegram in real-time. Brand auto-detected from message content.
+5. **PLATFORM-SPECIFIC COPY ENGINE** — Built into orchestrator. LLM generates unique captions for youtube_short, tiktok, instagram, x_twitter, threads, linkedin, facebook per clip. Batched in groups of 5 to avoid LLM overload. Fallback captions if LLM fails.
+6. **BUFFER WEEK SCHEDULING** — Built into orchestrator. Stagger 4 posts/day across 7 days (9:00, 12:00, 15:00, 18:00 UTC). Auto-discovers Buffer channels. Filters to text-capable channels (X, Threads, LinkedIn, Facebook). Up to 28 scheduled posts per pipeline run.
+7. **CRITICAL FIXES FROM ACE'S FEEDBACK:**
+   - Faceless Factory called with `"long"` mode (20 segments, 10-15 min) — not the default `"short"` (5 segments, 30-60s).
+   - YouTube long-form upload does NOT inject `#Shorts` into titles. Previous sessions hardcoded this without alignment.
+   - Script generation uses `SCRIPT_VOICE[brand]` (Anita's Protocol 77 voice) — confirmed this was already in faceless-factory.ts.
+   - Clips cut from the NEW faceless video, NOT from the original YouTube source.
+8. **Push status: ⏳ NOT YET COMMITTED** — All changes on disk, TypeScript compiles clean. Needs commit + push via Desktop Commander.
+
+**NEXT SESSION PRIORITIES (Session 18):**
+1. **COMMIT + PUSH + DEPLOY** — Git add all new/modified files, commit, push to main. Railway auto-deploys.
+2. **END-TO-END TEST** — Drop a YouTube URL in any agent's DM and verify the full 8-step pipeline executes.
+3. **PLATFORM TOKENS** — YouTube OAuth is configured. TikTok and Instagram API tokens still needed for direct video posting. Browser fallback available for both.
+4. **NODE_MODULES CLEANUP** — Windows-side `node_modules` is corrupted. Run via Desktop Commander.
+5. **VID-RUSH STATUS ENDPOINT FIX** — `/api/vid-rush/status` has "rows is not iterable" bug.
+6. **COOKIE RESILIENCE** — Monitor TikTok/IG cookie expiry.
+
+**Session Summary — Cowork Session 16 (2026-04-03):**
+1. **SUPABASE 503 FLOOD — ROOT CAUSE FIXED AND DEPLOYED.** Dispatch poller was firing 6 separate `claimTasks()` queries every 15s (~24 req/min) + task poller every 30s + heartbeat + Sapphire sentinel = 40-50 req/min. Free tier PostgREST was choking, returning wall-to-wall 503s on every table query.
+2. **BATCHED DISPATCH POLLER.** New `claimAllPending()` function in `src/agent/crew-dispatch.ts` — fetches ALL pending tasks for ALL 6 agents in ONE query instead of 6 separate queries. Returns `Map<string, DispatchRecord[]>`. Single PATCH to claim all at once.
+3. **EXPONENTIAL BACKOFF ON 503.** Dispatch poller now uses `setTimeout` recursion instead of `setInterval` for dynamic backoff. On 503, interval doubles (60s → 120s → 240s → 300s max). Resets to 60s base on success. Throws `503_BACKOFF` sentinel for caller to handle.
+4. **POLLING INTERVALS RELAXED.** Dispatch poller: 15s → 60s base. Task approval poller: 30s → 120s. 30s startup delay before first dispatch poll. Net result: ~1 req/min for dispatch instead of ~24 req/min.
+5. **BRACE ALIGNMENT FIX.** Session 15 left the dispatch poller rewrite with a missing `try {` block — the `for-of` loop over `agentLoops` had a `catch` without a matching `try`. Fixed, TypeScript compiles clean (zero errors in modified files).
+6. **Push status: ✅ PUSHED** — Commit `2a1b2cf` pushed to main. Railway auto-deploying.
+
+**Session Summary — Cowork Sessions 14-15 (2026-04-03):**
+1. **SEEDER FIX PUSHED.** `pinecone.ts` upsert fix from Session 13 confirmed pushed (commit `d17ead9`).
+2. **BOT HEALTH VERIFIED.** `/health` endpoint confirmed alive with pinecone/supabase/gemini all true.
+3. **SUPABASE 503 ROOT CAUSE DIAGNOSED.** Pulled API logs — every single query (crew_dispatch, tasks, content_engine_queue, vid_rush_queue, glitch_log, relationship_context, content_transmissions) returning 503. Identified polling frequency as the cause.
+4. **PERSONALITY CONFIG BUNDLING.** Commit `8bd806e` — bundled personality configs locally + 409 conflict defense. This was the last successful deploy before the 503 fix.
+5. **PARTIAL FIX WRITTEN BUT UNCOMMITTED.** `claimAllPending()` function written, dispatch poller rewritten, but had a brace alignment bug. Completed in Session 16.
+
+**NEXT SESSION PRIORITIES (Session 17):**
+1. **VERIFY 503s STOPPED** — After deploy completes, check Supabase API logs. Should see dramatically fewer requests.
+2. **NODE_MODULES CLEANUP** — Windows-side `node_modules` is corrupted (stale worktree artifacts). Run `rmdir /s /q node_modules` then `npm install` via Desktop Commander cmd shell.
+3. **VIDRUSH END-TO-END TEST** — Full pipeline test (carried from Session 12)
+4. **COOKIE RESILIENCE** — Monitor cookie expiry (carried from Session 12)
+5. **CONTENT ENGINE → VIDRUSH BRIDGE** — Connect content output to `vid_rush_queue` (carried from Session 12)
+6. **MISSION CONTROL AUTH** — Future: Add Supabase Auth to dashboard so anon key can be fully locked down
+
+**Previous Session Summary — Cowork Session 13 (2026-04-03):**
 1. **SUPABASE SECURITY HARDENING — ZERO ADVISORIES REMAINING.** Full security audit and remediation of Supabase project `wzthxohtgojenukmdubz`. 4 critical tables (`products`, `payment_history`, `market_research`, `lexical_extraction`) had RLS completely disabled — now enabled with `service_role` ALL + `anon` SELECT-only policies. `users` table had RLS enabled but zero policies — fixed. 4 functions (`increment_fiscal_sum`, `unsubscribe_email`, `get_pending_nurture`, `set_nurture_defaults`) had mutable `search_path` — pinned to `public`. ~40 anon INSERT/UPDATE policies dropped across all tables. ~12 wide-open `{public}` ALL policies replaced. **New security model: `service_role` = full access (bot writes), `anon` = SELECT-only (dashboard reads).** Supabase security advisor returns zero lints.
 2. **DISK IO ROOT CAUSE FOUND + FIXED.** `sync_log` exploded from 558 to 19,237 rows in one week due to blueprint seeder running on every Railway restart (~75 restarts) without dedup. Each restart logged ~250 blueprint chunks. `crew_dispatch` accumulated 3,307 completed tasks. **Purged sync_log from 19,734 → 3,784 rows.** Added unique index on `sync_log.vector_id`.
 3. **BLUEPRINT SEEDER FIX.** `src/memory/pinecone.ts` — `writeSyncLog()` changed from blind `.insert()` to `.upsert()` with `onConflict: "vector_id"`. `seedBlueprints()` now checks if any `blueprint-*` entries exist in `sync_log` before running — skips entirely if already seeded. This prevents the 75x duplicate writes that caused the IO budget depletion.
 4. **RETENTION CLEANUP POLICY DEPLOYED.** `pg_cron` extension enabled. Function `run_retention_cleanup()` runs daily at 3 AM UTC. It deduplicates `sync_log` (keeps latest per `vector_id`), prunes completed `crew_dispatch` older than 7 days, and prunes `messages_log` older than 30 days. Returns JSON with purge counts.
 5. **DASHBOARD LOCKED TO READ-ONLY.** All anon write policies removed. Mission Control dashboard (using `NEXT_PUBLIC_SUPABASE_ANON_KEY` in browser) can now only SELECT. Bot uses `service_role` key which bypasses RLS — completely unaffected. **Architectural note:** The anon key is visible in Vercel frontend source. Anyone who extracts it can read (but no longer write) public tables. Full fix requires adding Supabase Auth to Mission Control (future task).
-6. **Push status: ⏳ NOT PUSHED** — Code changes to `src/memory/pinecone.ts` need git push to deploy the seeder fix.
-
-**NEXT SESSION PRIORITIES (Session 14):**
-1. **GIT PUSH SEEDER FIX** — Push the `pinecone.ts` changes to main for Railway deploy
-2. **VIDRUSH END-TO-END TEST** — Full pipeline test (carried from Session 12)
-3. **COOKIE RESILIENCE** — Monitor cookie expiry (carried from Session 12)
-4. **CONTENT ENGINE → VIDRUSH BRIDGE** — Connect content output to `vid_rush_queue` (carried from Session 12)
-5. **PINECONE AUTH FIX** — Still blocked on API key rotation
-6. **MISSION CONTROL AUTH** — Future: Add Supabase Auth to dashboard so anon key can be fully locked down
+6. **Push status: ✅ PUSHED** — Seeder fix pushed in Session 14 (commit `d17ead9`). 503 fix pushed in Session 16 (commit `2a1b2cf`).
 
 **Previous Session Summary — Cowork Session 12 (2026-04-03):**
 1. **GIT PUSH + RAILWAY DEPLOY.** Session 11 code (Chromium, Puppeteer, browser tools, TikTok/IG upload tools, login endpoints, agent browser directives) pushed to main. Commit includes all Session 11 files. Railway auto-deployed successfully with `BROWSER_ENABLED=true` set in env vars.

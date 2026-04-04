@@ -54,11 +54,12 @@ import { KnowledgeWriterTool } from "./tools/knowledge-writer";
 import { ImageGeneratorTool } from "./tools/image-generator";
 import { produceFacelessBatch } from "./engine/faceless-factory";
 import { extractWhisperIntel } from "./engine/whisper-extract";
+import { executeFullPipeline, formatPipelineReport } from "./engine/vidrush-orchestrator";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { ProposeTaskTool, SaveContentDraftTool, FileBriefingTool, CheckApprovedTasksTool } from "./tools/action-surface";
 import { StripeMetricsTool } from "./tools/stripe-metrics";
-import { VideoPublisherTool, TikTokPublishTool, InstagramReelsPublishTool, YouTubeShortsPublishTool } from "./tools/video-publisher";
+import { VideoPublisherTool, TikTokPublishTool, InstagramReelsPublishTool, YouTubeShortsPublishTool, YouTubeLongFormPublishTool } from "./tools/video-publisher";
 
 // ── Voice ──
 import { transcribeAudio, downloadTelegramFile } from "./voice/transcription";
@@ -2103,183 +2104,77 @@ async function main() {
                 `The clip ripper is running in background. Original message: ${message.content}`;
             }
 
-            // ── YOUTUBE URL PIPELINE INTERCEPTOR — ALL AGENTS ──
-            // Default pipeline: Faceless Factory (generates ORIGINAL videos from extracted intelligence).
-            // Clip Ripper is separated — only fires with explicit "clip this" trigger above.
-            // If the receiving agent is Alfred → he processes it directly.
-            // If it's any OTHER agent → auto-dispatch to Alfred via crew_dispatch.
+            // ── YOUTUBE URL → FULL AUTONOMOUS VID RUSH PIPELINE ──
+            // 1 URL → Whisper → Faceless Factory LONG (Anita's voice) → YouTube upload →
+            // Chop ~30 clips → Platform-specific copy → Distribute all platforms → Buffer week schedule
+            // Ace's words: "1 url, fully autonomous ai driven system"
             else if (YOUTUBE_URL_RE.test(message.content)) {
               const match = message.content.match(YOUTUBE_URL_RE);
               const videoId = match?.[1];
               const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
-              const receivingAgent = agentCfg.name;
 
               await agentChannel.sendTyping(message.chatId);
 
-              // ── Fire Make.com webhooks (Scenarios E + F) regardless of which agent received the URL ──
-              const SCENARIO_E_WEBHOOK = config.vidRush.makeScenarioEWebhook;
-              const SCENARIO_F_WEBHOOK = config.vidRush.makeScenarioFWebhook;
-              const webhookPayload = {
-                youtube_url: youtubeUrl,
-                video_id: videoId,
-                chat_id: String(message.chatId),
-                triggered_by: receivingAgent,
-              };
+              await agentChannel.sendMessage(message.chatId,
+                `🔥 *VID RUSH PIPELINE — ACTIVATED*\n` +
+                `Video: \`${videoId}\`\n\n` +
+                `8-step autonomous pipeline launching:\n` +
+                `1️⃣ Whisper extraction\n` +
+                `2️⃣ Faceless Factory LONG (Anita's Protocol 77 voice)\n` +
+                `3️⃣ YouTube long-form upload\n` +
+                `4️⃣ Chop into ~30 clips\n` +
+                `5️⃣ Upload clips to storage\n` +
+                `6️⃣ Platform-specific copy generation\n` +
+                `7️⃣ Distribute to all platforms\n` +
+                `8️⃣ Schedule a week in Buffer\n\n` +
+                `_This will take several minutes. Sit back, Architect._`,
+                { parseMode: "Markdown" }
+              );
 
-              const webhookFires: Promise<void>[] = [];
+              // Determine brand from message content or default
+              const brandMatch = message.content.match(/\b(containment[_ ]?field|tcf)\b/i);
+              const brand = brandMatch ? "containment_field" as const : "ace_richie" as const;
 
-              if (SCENARIO_E_WEBHOOK) {
-                webhookFires.push(
-                  fetch(SCENARIO_E_WEBHOOK, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(webhookPayload),
-                  }).then(() => console.log(`📡 [VidRush] Scenario E webhook fired via ${receivingAgent} for ${youtubeUrl}`))
-                    .catch((err: any) => console.error(`[VidRush] Scenario E webhook error: ${err.message}`))
-                );
-              } else {
-                console.warn("[VidRush] MAKE_SCENARIO_E_WEBHOOK not set — transcript pipeline skipped");
-              }
+              // Get LLM provider for the pipeline (injectedLLM is in scope from agent init)
+              const pipelineLlm = injectedLLM;
 
-              if (SCENARIO_F_WEBHOOK) {
-                webhookFires.push(
-                  fetch(SCENARIO_F_WEBHOOK, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(webhookPayload),
-                  }).then(() => console.log(`📡 [VidRush] Scenario F webhook fired via ${receivingAgent} for ${youtubeUrl}`))
-                    .catch((err: any) => console.error(`[VidRush] Scenario F webhook error: ${err.message}`))
-                );
-              } else {
-                console.warn("[VidRush] MAKE_SCENARIO_F_WEBHOOK not set — sovereign clip pipeline skipped");
-              }
-
-              Promise.all(webhookFires).catch(() => {});
-
-              if (receivingAgent === "alfred") {
-                // ── ALFRED: Process directly — Faceless Factory is the DEFAULT pipeline ──
-                // Clip Ripper is ON-DEMAND ONLY (use "clip this" or the vid_rush tool explicitly)
-                await agentChannel.sendMessage(message.chatId,
-                  `🎯 _YouTube URL detected. Faceless Factory Pipeline Activated..._\n` +
-                  `Video ID: \`${videoId}\`\n` +
-                  `🎬 _Extracting intelligence → generating original faceless videos_\n` +
-                  `_Running in background. Notification when complete._\n` +
-                  `_💡 Need source clips? Say "clip this" to activate Clip Ripper separately._`,
-                  { parseMode: "Markdown" }
-                );
-
-                // ── FACELESS FACTORY PIPELINE (default) ──
-                // Step 1: Download + Whisper transcription (lightweight, ~30s)
-                // Step 2: Faceless Factory generates original videos from extracted intelligence
-                // Clip Ripper does NOT run unless explicitly requested
-                (async () => {
-                  try {
-                    // Extract intelligence via Whisper
-                    console.log(`🔊 [FacelessPipeline] Starting Whisper extraction for ${youtubeUrl}...`);
-                    const whisperResult = await extractWhisperIntel(youtubeUrl);
-                    const sourceIntel = whisperResult.transcript ||
-                      `YouTube video ${youtubeUrl} about topics related to sovereignty, psychology, and personal transformation.`;
-                    const detectedNiche = whisperResult.niche;
-
-                    console.log(`🎬 [FacelessFactory] Starting faceless production (niche: ${detectedNiche}) from ${whisperResult.segments.length} Whisper segments...`);
-                    await agentChannel.sendMessage(message.chatId,
-                      `🎬 _Faceless Factory starting — ${whisperResult.segments.length} segments extracted_\n` +
-                      `_Niche: ${detectedNiche} | Brands: Ace Richie + Containment Field_`,
-                      { parseMode: "Markdown" }
-                    );
-
-                    const facelessResults = await produceFacelessBatch(
-                      failoverLLM,
-                      sourceIntel.slice(0, 3000),
-                      detectedNiche,
-                      ["ace_richie", "containment_field"]
-                    );
-
-                    const summary = facelessResults.map(r =>
-                      `${r.brand}: "${r.title}" (${r.duration.toFixed(0)}s, ${r.segmentCount} scenes) — ${r.videoUrl ? "✅ queued" : "❌ upload failed"}`
-                    ).join("\n");
-
-                    try {
-                      await agentChannel.sendMessage(message.chatId,
-                        `🎬 *FACELESS FACTORY — COMPLETE*\n\n${summary}`,
-                        { parseMode: "Markdown" }
-                      );
-                    } catch {
-                      await agentChannel.sendMessage(message.chatId,
-                        `FACELESS FACTORY — COMPLETE\n\n${summary}`
-                      );
+              // Run full pipeline in background
+              (async () => {
+                try {
+                  const result = await executeFullPipeline(
+                    youtubeUrl,
+                    pipelineLlm,
+                    brand,
+                    async (step: string, detail: string) => {
+                      try {
+                        await agentChannel.sendMessage(message.chatId,
+                          `📡 ${step}: ${detail}`,
+                          { parseMode: "Markdown" }
+                        );
+                      } catch { /* non-critical progress update */ }
                     }
+                  );
 
-                    // Auto-sweep to publish all ready videos
-                    try {
-                      await fetch(`http://localhost:${config.webhooks.port || 3000}/api/vid-rush/sweep`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                      });
-                    } catch { /* non-critical */ }
-                  } catch (err: any) {
-                    console.error(`❌ [FacelessPipeline] Failed: ${err.message}`);
-                    await agentChannel.sendMessage(message.chatId,
-                      `❌ Faceless Factory pipeline failed: ${err.message?.slice(0, 500)}`
-                    );
-                  }
-                })();
-
-                message.content = `[FACELESS FACTORY PIPELINE ACTIVATED] Content Factory triggered for: ${youtubeUrl}\n\n` +
-                  `The faceless video pipeline is running in background (download → Groq Whisper → LLM script → TTS → Imagen 4 → ffmpeg assembly → Supabase → auto-sweep to platforms).\n\n` +
-                  `Your task: Process this YouTube URL in parallel. Auto-detect the niche (dark psychology, self-improvement, burnout, or quantum physics). ` +
-                  `Extract 3 timestamped hooks: (1) 0:00 scroll-stopping opening, (2) ~30% escalation, (3) ~70% solution/reveal. ` +
-                  `Generate a cleaned transcript summary and 1 core transmission sentence. Apply Sovereign Synthesis lexicon. ` +
-                  `Use the crew_dispatch tool to send your outputs downstream: ` +
-                  `dispatch timestamped_hooks to yuki, cleaned_transcript to anita, and core_summary to sapphire.\n` +
-                  `Original message: ${message.content}`;
-              } else {
-                // ── ANY OTHER AGENT: Auto-dispatch to Alfred for Faceless Factory ──
-                await agentChannel.sendMessage(message.chatId,
-                  `🎯 _YouTube URL detected! Routing to Alfred for Faceless Factory..._\n` +
-                  `Video ID: \`${videoId}\`\n` +
-                  `🎬 _Alfred will extract intelligence and generate original faceless videos._`,
-                  { parseMode: "Markdown" }
-                );
-
-                // Dispatch to Alfred via crew_dispatch (Supabase)
-                const supabaseUrl = process.env.SUPABASE_URL;
-                const supabaseKey = process.env.SUPABASE_ANON_KEY;
-                if (supabaseUrl && supabaseKey) {
+                  const report = formatPipelineReport(result);
                   try {
-                    await fetch(`${supabaseUrl}/rest/v1/crew_dispatch`, {
-                      method: "POST",
-                      headers: {
-                        apikey: supabaseKey,
-                        Authorization: `Bearer ${supabaseKey}`,
-                        "Content-Type": "application/json",
-                        Prefer: "return=minimal",
-                      },
-                      body: JSON.stringify({
-                        target_agent: "alfred",
-                        from_agent: receivingAgent,
-                        task_type: "faceless_factory",
-                        payload: JSON.stringify({
-                          youtube_url: youtubeUrl,
-                          video_id: videoId,
-                          source: `Routed from ${receivingAgent} — Architect dropped URL in ${receivingAgent}'s DM`,
-                        }),
-                        status: "pending",
-                        chat_id: String(message.chatId),
-                      }),
-                    });
-                    console.log(`📡 [FacelessFactory] ${receivingAgent} → Alfred dispatch created for ${youtubeUrl}`);
-                  } catch (err: any) {
-                    console.error(`[FacelessFactory] Failed to dispatch to Alfred: ${err.message}`);
+                    await agentChannel.sendMessage(message.chatId, report, { parseMode: "Markdown" });
+                  } catch {
+                    await agentChannel.sendMessage(message.chatId, report.replace(/[*_`]/g, ""));
                   }
+                } catch (err: any) {
+                  console.error(`❌ [VidRush] Pipeline failed: ${err.message}`);
+                  await agentChannel.sendMessage(message.chatId,
+                    `❌ Vid Rush Pipeline FAILED at: ${err.message?.slice(0, 500)}`
+                  );
                 }
+              })();
 
-                // Let the receiving agent respond naturally about the routing
-                message.content = `The Architect sent a YouTube URL: ${youtubeUrl}\n` +
-                  `I've already routed this to Alfred for Faceless Factory processing (Whisper extraction → LLM script → TTS → image gen → video assembly). ` +
-                  `Acknowledge the routing to the Architect and let them know Alfred is on it. ` +
-                  `Original message: ${message.content}`;
-              }
+              // Let the agent acknowledge the pipeline is running
+              message.content = `[VID RUSH PIPELINE RUNNING] The full autonomous pipeline is executing for: ${youtubeUrl}\n` +
+                `It will: Whisper → create 10-15 min long-form video in Protocol 77 voice → upload to YouTube → ` +
+                `chop into ~30 clips → distribute to all platforms → schedule a week in Buffer.\n` +
+                `Acknowledge to the Architect that the pipeline is running and they'll get progress updates. ` +
+                `Original message: ${message.content}`;
             }
 
             // Log task to Supabase command_queue

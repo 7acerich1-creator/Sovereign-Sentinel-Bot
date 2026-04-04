@@ -3,7 +3,7 @@
 // Deterministic faceless video production pipeline:
 //   1. LLM generates voiceover script from source intelligence
 //   2. ElevenLabs/OpenAI TTS renders audio
-//   3. Imagen 4 generates scene images per script segment
+//   3. Imagen 4 generates scene images (DALL-E 3 fallback)
 //   4. ffmpeg assembles: Ken Burns on images + voiceover + captions + color grade
 //   5. Output → Supabase Storage → vid_rush_queue → auto-sweep to platforms
 //
@@ -409,7 +409,7 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<strin
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// STEP 3: Generate Scene Images via Imagen 4
+// STEP 3: Generate Scene Images — Imagen 4 (primary) → DALL-E 3 (fallback)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async function generateSceneImage(
@@ -419,48 +419,88 @@ async function generateSceneImage(
   jobId: string,
   segmentIndex: number
 ): Promise<string | null> {
-  const geminiKey = config.llm.providers.gemini?.apiKey;
-  if (!geminiKey) {
-    console.warn("[FacelessFactory] No Gemini API key — skipping image gen");
-    return null;
-  }
-
   const stylePrefix = SCENE_VISUAL_STYLE[niche]?.[brand] || SCENE_VISUAL_STYLE.brand[brand];
   const prompt = `${stylePrefix} Scene: ${visualDirection}`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${geminiKey}`;
+  // ── PRIMARY: Gemini Imagen 4 (free tier) ──
+  const geminiKey = config.llm.providers.gemini?.apiKey;
+  if (geminiKey) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${geminiKey}`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          instances: [{ prompt }],
+          parameters: {
+            sampleCount: 1,
+            aspectRatio: "9:16",
+            safetyFilterLevel: "block_only_high",
+          },
+        }),
+      });
 
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        instances: [{ prompt }],
-        parameters: {
-          sampleCount: 1,
-          aspectRatio: "9:16",
-          safetyFilterLevel: "block_only_high",
-        },
-      }),
-    });
-
-    if (!res.ok) {
-      console.warn(`[FacelessFactory] Imagen failed for segment ${segmentIndex}: ${res.status}`);
-      return null;
+      if (res.ok) {
+        const data = (await res.json()) as any;
+        const b64 = data.predictions?.[0]?.bytesBase64Encoded || data.predictions?.[0]?.image?.bytesBase64Encoded;
+        if (b64) {
+          const imgPath = `${FACELESS_DIR}/${jobId}_scene_${segmentIndex}.png`;
+          writeFileSync(imgPath, Buffer.from(b64, "base64"));
+          console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated via Imagen 4`);
+          return imgPath;
+        }
+      } else {
+        console.warn(`[FacelessFactory] Imagen 4 failed for segment ${segmentIndex}: ${res.status}`);
+      }
+    } catch (err: any) {
+      console.warn(`[FacelessFactory] Imagen 4 error segment ${segmentIndex}: ${err.message}`);
     }
-
-    const data = (await res.json()) as any;
-    const b64 = data.predictions?.[0]?.bytesBase64Encoded || data.predictions?.[0]?.image?.bytesBase64Encoded;
-    if (!b64) return null;
-
-    const imgPath = `${FACELESS_DIR}/${jobId}_scene_${segmentIndex}.png`;
-    writeFileSync(imgPath, Buffer.from(b64, "base64"));
-    console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated`);
-    return imgPath;
-  } catch (err: any) {
-    console.warn(`[FacelessFactory] Image gen error segment ${segmentIndex}: ${err.message}`);
-    return null;
   }
+
+  // ── FALLBACK: DALL-E 3 via OpenAI ($0.04/image standard) ──
+  const openaiKey = config.llm.providers.openai?.apiKey;
+  if (openaiKey) {
+    try {
+      console.log(`🔄 [FacelessFactory] Segment ${segmentIndex} falling back to DALL-E 3...`);
+      const res = await fetch("https://api.openai.com/v1/images/generations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiKey}`,
+        },
+        body: JSON.stringify({
+          model: "dall-e-3",
+          prompt: prompt.slice(0, 4000),
+          size: "1024x1792",
+          quality: "standard",
+          n: 1,
+          response_format: "b64_json",
+        }),
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as any;
+        const b64 = data.data?.[0]?.b64_json;
+        if (b64) {
+          const imgPath = `${FACELESS_DIR}/${jobId}_scene_${segmentIndex}.png`;
+          writeFileSync(imgPath, Buffer.from(b64, "base64"));
+          console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated via DALL-E 3`);
+          return imgPath;
+        }
+      } else {
+        const errText = await res.text();
+        console.warn(`[FacelessFactory] DALL-E 3 failed for segment ${segmentIndex}: ${res.status} — ${errText.slice(0, 200)}`);
+      }
+    } catch (err: any) {
+      console.warn(`[FacelessFactory] DALL-E 3 error segment ${segmentIndex}: ${err.message}`);
+    }
+  }
+
+  // Both providers failed for this segment
+  if (!geminiKey && !openaiKey) {
+    console.warn(`[FacelessFactory] No image API keys configured — skipping segment ${segmentIndex}`);
+  }
+  return null;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

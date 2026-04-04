@@ -15,7 +15,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { execSync } from "child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync, rmSync } from "fs";
 import { extractWhisperIntel, type WhisperResult } from "./whisper-extract";
 import { produceFacelessVideo } from "./faceless-factory";
 import { YouTubeLongFormPublishTool } from "../tools/video-publisher";
@@ -25,6 +25,61 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
 const STORAGE_BUCKET = "public-assets";
 const ORCHESTRATOR_DIR = "/tmp/vidrush_orchestrator";
+
+// ── Cleanup: remove all temp files for a pipeline job ──
+export function cleanupPipelineJob(jobId: string): void {
+  try {
+    // Clean orchestrator job dir (clips, etc.)
+    const jobDir = `${ORCHESTRATOR_DIR}/${jobId}`;
+    if (existsSync(jobDir)) {
+      rmSync(jobDir, { recursive: true, force: true });
+      console.log(`🧹 [Orchestrator] Cleaned job dir: ${jobDir}`);
+    }
+    // Clean whisper source files
+    const clipDir = "/tmp/sovereign_clips";
+    if (existsSync(clipDir)) {
+      const files = readdirSync(clipDir);
+      let cleaned = 0;
+      for (const f of files) {
+        // Remove files older than 1 hour to avoid nuking an active job
+        try {
+          const fullPath = `${clipDir}/${f}`;
+          const { mtimeMs } = require("fs").statSync(fullPath);
+          if (Date.now() - mtimeMs > 3600_000) {
+            unlinkSync(fullPath);
+            cleaned++;
+          }
+        } catch { /* skip */ }
+      }
+      if (cleaned > 0) console.log(`🧹 [Orchestrator] Cleaned ${cleaned} stale whisper files`);
+    }
+    // Clean faceless factory intermediates (older than 1 hour)
+    const facelessDir = "/tmp/faceless_factory";
+    if (existsSync(facelessDir)) {
+      const files = readdirSync(facelessDir);
+      let cleaned = 0;
+      for (const f of files) {
+        try {
+          const fullPath = `${facelessDir}/${f}`;
+          const { mtimeMs } = require("fs").statSync(fullPath);
+          if (Date.now() - mtimeMs > 3600_000) {
+            unlinkSync(fullPath);
+            cleaned++;
+          }
+        } catch { /* skip */ }
+      }
+      if (cleaned > 0) console.log(`🧹 [Orchestrator] Cleaned ${cleaned} stale faceless files`);
+    }
+    // Clean test uploads
+    const ytTestDir = "/tmp/yt_test";
+    if (existsSync(ytTestDir)) {
+      rmSync(ytTestDir, { recursive: true, force: true });
+      console.log(`🧹 [Orchestrator] Cleaned yt_test dir`);
+    }
+  } catch (err: any) {
+    console.error(`⚠️ [Orchestrator] Cleanup error: ${err.message}`);
+  }
+}
 
 // ── Types ──
 
@@ -708,6 +763,9 @@ export async function executeFullPipeline(
   console.log(`   Clips: ${clips.length}`);
   console.log(`   Buffer: ${bufferScheduled} scheduled`);
   console.log(`   Errors: ${errors.length}`);
+
+  // Cleanup temp files — pipeline is done, everything is uploaded
+  cleanupPipelineJob(jobId);
 
   return result;
 }

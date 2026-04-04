@@ -108,6 +108,32 @@ function extractJSON(raw: string): any | null {
   return null;
 }
 
+// ── Cleanup: remove all temp files for a job ──
+// Keeps the final video (needed by orchestrator) but removes intermediates
+function cleanupJobFiles(jobId: string, keepFinal: boolean = true): void {
+  try {
+    const { readdirSync, unlinkSync, statSync } = require("fs");
+    if (!existsSync(FACELESS_DIR)) return;
+    const files = readdirSync(FACELESS_DIR) as string[];
+    let cleaned = 0;
+    for (const f of files) {
+      if (!f.startsWith(jobId)) continue;
+      if (keepFinal && f.endsWith("_final.mp4")) continue;
+      const fullPath = `${FACELESS_DIR}/${f}`;
+      try {
+        const stat = statSync(fullPath);
+        if (stat.isFile()) {
+          unlinkSync(fullPath);
+          cleaned++;
+        }
+      } catch { /* skip */ }
+    }
+    if (cleaned > 0) console.log(`🧹 [FacelessFactory] Cleaned ${cleaned} intermediate files for ${jobId}`);
+  } catch (err: any) {
+    console.error(`⚠️ [FacelessFactory] Cleanup error: ${err.message}`);
+  }
+}
+
 const SCRIPT_VOICE: Record<Brand, string> = {
   ace_richie: `You are writing a voiceover script for a faceless video on the Sovereign Synthesis channel (Ace Richie).
 
@@ -640,6 +666,10 @@ export async function produceFacelessVideo(
   // STEP 5: Upload + queue
   console.log(`📤 [FacelessFactory] Uploading to Supabase...`);
   const videoUrl = await uploadAndQueue(videoPath, script, jobId);
+
+  // Clean up intermediate files (TTS segments, raw audio, images, concat lists)
+  // Keep the final video — orchestrator needs it for chopping
+  cleanupJobFiles(jobId, true);
 
   console.log(`\n🔥 [FacelessFactory] JOB COMPLETE — ${jobId}`);
   console.log(`   Title: ${script.title}`);

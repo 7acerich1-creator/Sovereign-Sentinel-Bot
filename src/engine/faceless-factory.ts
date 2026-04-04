@@ -53,6 +53,61 @@ interface FacelessResult {
 
 // ── Brand voice for script generation (reuses Anita's Protocol 77 voice) ──
 
+// ── Robust JSON extraction from LLM responses ──
+// LLMs frequently return JSON with trailing text, markdown fences, control chars, etc.
+// This tries multiple strategies before giving up.
+function extractJSON(raw: string): any | null {
+  // Strategy 1: Direct parse after stripping code fences
+  try {
+    const cleaned = raw.replace(/```json?\n?/g, "").replace(/```\n?/g, "").trim();
+    return JSON.parse(cleaned);
+  } catch { /* continue */ }
+
+  // Strategy 2: Extract outermost { ... } with balanced brace matching
+  try {
+    let depth = 0;
+    let start = -1;
+    for (let i = 0; i < raw.length; i++) {
+      if (raw[i] === "{") {
+        if (depth === 0) start = i;
+        depth++;
+      } else if (raw[i] === "}") {
+        depth--;
+        if (depth === 0 && start >= 0) {
+          const candidate = raw.slice(start, i + 1);
+          return JSON.parse(candidate);
+        }
+      }
+    }
+  } catch { /* continue */ }
+
+  // Strategy 3: Greedy regex + strip control characters
+  try {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      // Remove control chars except \n \r \t
+      const sanitized = match[0].replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+      return JSON.parse(sanitized);
+    }
+  } catch { /* continue */ }
+
+  // Strategy 4: Fix common LLM JSON mistakes (trailing commas, single quotes)
+  try {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      let fixed = match[0]
+        .replace(/,\s*([}\]])/g, "$1")        // trailing commas
+        .replace(/'/g, '"')                     // single quotes → double
+        .replace(/(\w+)\s*:/g, '"$1":')         // unquoted keys
+        .replace(/""(\w+)""/g, '"$1"');         // double-double quotes
+      return JSON.parse(fixed);
+    }
+  } catch { /* continue */ }
+
+  console.error(`[extractJSON] All 4 strategies failed`);
+  return null;
+}
+
 const SCRIPT_VOICE: Record<Brand, string> = {
   ace_richie: `You are writing a voiceover script for a faceless video on the Sovereign Synthesis channel (Ace Richie).
 
@@ -161,21 +216,11 @@ RULES:
   );
   const result = response.content;
 
-  // Parse JSON from LLM response
-  let parsed: any;
-  try {
-    // Strip markdown code fences if present
-    const cleaned = result.replace(/```json?\n?/g, "").replace(/```\n?/g, "").trim();
-    parsed = JSON.parse(cleaned);
-  } catch (err) {
-    console.error(`[FacelessFactory] Script parse failed, attempting recovery...`);
-    // Try to find JSON in the response
-    const jsonMatch = result.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      parsed = JSON.parse(jsonMatch[0]);
-    } else {
-      throw new Error(`Failed to parse script from LLM: ${result.slice(0, 200)}`);
-    }
+  // Robust JSON extraction — LLMs frequently return malformed JSON
+  const parsed = extractJSON(result);
+  if (!parsed) {
+    console.error(`[FacelessFactory] ALL JSON parse attempts failed. Raw response (first 500 chars):\n${result.slice(0, 500)}`);
+    throw new Error(`Failed to parse script from LLM. Response starts: ${result.slice(0, 150)}`);
   }
 
   return {

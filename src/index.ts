@@ -54,7 +54,7 @@ import { KnowledgeWriterTool } from "./tools/knowledge-writer";
 import { ImageGeneratorTool } from "./tools/image-generator";
 import { produceFacelessBatch } from "./engine/faceless-factory";
 import { extractWhisperIntel } from "./engine/whisper-extract";
-import { executeFullPipeline, formatPipelineReport } from "./engine/vidrush-orchestrator";
+import { executeFullPipeline, formatPipelineReport, type PipelineOptions } from "./engine/vidrush-orchestrator";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { ProposeTaskTool, SaveContentDraftTool, FileBriefingTool, CheckApprovedTasksTool } from "./tools/action-surface";
@@ -469,7 +469,10 @@ async function main() {
           `/mesh [goal] — Run mesh workflow\n` +
           `/swarm [goal] — Deploy agent swarm\n` +
           `/status — System status\n` +
-          `/voice — Toggle voice responses`,
+          `/voice — Toggle voice responses\n` +
+          `/dryrun <url> — Validate pipeline (zero cost)\n` +
+          `/test_tts — Test TTS on one segment\n` +
+          `/test_yt — Test YouTube upload with 5s clip`,
           { parseMode: "Markdown" }
         );
         return true;
@@ -550,6 +553,58 @@ async function main() {
           { parseMode: "Markdown" }
         );
         return true;
+
+      case "/test_tts": {
+        await telegram.sendMessage(message.chatId, "🧪 Testing TTS on a single segment...");
+        try {
+          const { textToSpeech } = await import("./voice/tts");
+          const testText = "The simulation never wanted you to see behind the curtain. But here you are, Architect. Protocol 77 is active.";
+          const startMs = Date.now();
+          const buffer = await textToSpeech(testText);
+          const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
+          await telegram.sendMessage(message.chatId,
+            `✅ TTS test passed\n` +
+            `Text: ${testText.length} chars\n` +
+            `Audio: ${(buffer.length / 1024).toFixed(0)} KB\n` +
+            `Time: ${elapsed}s`,
+          );
+        } catch (err: any) {
+          await telegram.sendMessage(message.chatId, `❌ TTS test FAILED: ${err.message?.slice(0, 400)}`);
+        }
+        return true;
+      }
+
+      case "/test_yt": {
+        await telegram.sendMessage(message.chatId, "🧪 Testing YouTube upload with a 5s dummy clip...");
+        try {
+          const { execSync } = await import("child_process");
+          const { existsSync, mkdirSync } = await import("fs");
+          const testDir = "/tmp/yt_test";
+          if (!existsSync(testDir)) mkdirSync(testDir, { recursive: true });
+          const testPath = `${testDir}/test_${Date.now()}.mp4`;
+
+          // Create 5s test video
+          execSync(
+            `ffmpeg -f lavfi -i color=c=black:s=1920x1080:d=5 -f lavfi -i anullsrc=r=44100:cl=mono -shortest -c:v libx264 -preset ultrafast -c:a aac -y "${testPath}"`,
+            { timeout: 15_000, stdio: "pipe" }
+          );
+
+          const { YouTubeLongFormPublishTool } = await import("./tools/video-publisher");
+          const ytTool = new YouTubeLongFormPublishTool();
+          const result = await ytTool.execute({
+            local_path: testPath,
+            title: "TEST — Delete Me — Pipeline Validation",
+            description: "Automated test upload. Safe to delete.",
+            tags: "test,delete",
+            niche: "test",
+            brand: "ace_richie",
+          });
+          await telegram.sendMessage(message.chatId, `YouTube test result:\n${result.slice(0, 500)}`);
+        } catch (err: any) {
+          await telegram.sendMessage(message.chatId, `❌ YouTube test FAILED: ${err.message?.slice(0, 400)}`);
+        }
+        return true;
+      }
 
       case "/mesh":
         if (!arg) {
@@ -2102,6 +2157,72 @@ async function main() {
 
               message.content = `[CLIP RIPPER ACTIVATED] Cutting source video clips for: ${youtubeUrl}\n` +
                 `The clip ripper is running in background. Original message: ${message.content}`;
+            }
+
+            // ── /dryrun <url> — VALIDATE PIPELINE WITHOUT BURNING CREDITS ──
+            // Runs the full 8-step orchestrator with all expensive APIs stubbed.
+            // Tests: file paths, data handoffs, type conversions, error handling, ffmpeg ops.
+            // Zero cost: no TTS, no Imagen, no YouTube upload, no Buffer, no Supabase Storage.
+            else if (/^\/dryrun\b/i.test(message.content) && YOUTUBE_URL_RE.test(message.content)) {
+              const match = message.content.match(YOUTUBE_URL_RE);
+              const videoId = match?.[1];
+              const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
+              await agentChannel.sendTyping(message.chatId);
+              await agentChannel.sendMessage(message.chatId,
+                `🧪 *DRY RUN — VID RUSH PIPELINE*\n` +
+                `Video: \`${videoId}\`\n\n` +
+                `Running full 8-step pipeline with ALL APIs stubbed.\n` +
+                `This validates logic, file paths, and data flow at zero cost.\n` +
+                `If this passes clean → live run should work.`,
+                { parseMode: "Markdown" }
+              );
+
+              const brandMatch = message.content.match(/\b(containment[_ ]?field|tcf)\b/i);
+              const brand = brandMatch ? "containment_field" as const : "ace_richie" as const;
+              const pipelineLlm = injectedLLM;
+
+              (async () => {
+                try {
+                  const result = await executeFullPipeline(
+                    youtubeUrl,
+                    pipelineLlm,
+                    brand,
+                    async (step: string, detail: string) => {
+                      try {
+                        await agentChannel.sendMessage(message.chatId,
+                          `🧪 ${step}: ${detail}`,
+                          { parseMode: "Markdown" }
+                        );
+                      } catch { /* non-critical progress update */ }
+                    },
+                    { dryRun: true }
+                  );
+
+                  const report = `🧪 *DRY RUN — COMPLETE*\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `🎬 YouTube: ${result.youtubeUrl || "simulated"}\n` +
+                    `✂️ Clips generated: ${result.clipCount}\n` +
+                    `📅 Buffer scheduled: ${result.bufferScheduled} posts\n` +
+                    `⏱️ Total time: ${result.duration.toFixed(0)}s\n` +
+                    `${result.errors.length > 0 ? `\n⚠️ Issues:\n${result.errors.map(e => "  • " + e).join("\n")}` : "✅ Zero issues — pipeline logic is clean"}\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `_Ready for live run. Drop the URL without /dryrun._`;
+                  try {
+                    await agentChannel.sendMessage(message.chatId, report, { parseMode: "Markdown" });
+                  } catch {
+                    await agentChannel.sendMessage(message.chatId, report.replace(/[*_`]/g, ""));
+                  }
+                } catch (err: any) {
+                  console.error(`❌ [DRY RUN] Pipeline failed: ${err.message}`);
+                  await agentChannel.sendMessage(message.chatId,
+                    `❌ DRY RUN FAILED at: ${err.message?.slice(0, 500)}\n\nThis would have failed in production too. Fix first.`
+                  );
+                }
+              })();
+
+              message.content = `[DRY RUN PIPELINE RUNNING] Validating pipeline logic for: ${youtubeUrl}\n` +
+                `All APIs are stubbed. Testing data flow only. Original message: ${message.content}`;
             }
 
             // ── YOUTUBE URL → FULL AUTONOMOUS VID RUSH PIPELINE ──

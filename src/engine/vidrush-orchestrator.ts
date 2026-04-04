@@ -405,12 +405,18 @@ async function scheduleBufferWeek(
 // 1 URL → Whisper → Faceless LONG → YouTube → Chop → Distribute → Buffer
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+export interface PipelineOptions {
+  dryRun?: boolean; // Stub all expensive API calls — validates logic without burning credits
+}
+
 export async function executeFullPipeline(
   youtubeUrl: string,
   llm: LLMProvider,
   brand: Brand = "ace_richie",
-  onProgress?: (step: string, detail: string) => Promise<void>
+  onProgress?: (step: string, detail: string) => Promise<void>,
+  options?: PipelineOptions
 ): Promise<OrchestratorResult> {
+  const dryRun = options?.dryRun ?? false;
   const startTime = Date.now();
   const jobId = `vr_${brand}_${Date.now()}`;
   const errors: string[] = [];
@@ -426,37 +432,83 @@ export async function executeFullPipeline(
   };
 
   // ── STEP 1: WHISPER EXTRACTION ──
-  await progress("STEP 1/8", "Downloading video and running Whisper transcription...");
+  await progress("STEP 1/8", dryRun ? "[DRY RUN] Simulating Whisper extraction..." : "Downloading video and running Whisper transcription...");
   let whisperResult: WhisperResult;
-  try {
-    whisperResult = await extractWhisperIntel(youtubeUrl);
-    await progress("STEP 1/8", `✅ Whisper complete — ${whisperResult.segments.length} segments, niche: ${whisperResult.niche}`);
-  } catch (err: any) {
-    throw new Error(`Whisper extraction failed: ${err.message}`);
+  if (dryRun) {
+    whisperResult = {
+      videoId: youtubeUrl.match(/(?:v=|youtu\.be\/)([\w-]{11})/)?.[1] || "dryrun_vid",
+      transcript: "This is a dry-run simulated transcript. The simulation never wanted you to see behind the curtain. " +
+        "But here you are, Architect. The Firmware Update is not a metaphor — it is the literal rewiring of your neural pathways " +
+        "away from fear-based operating systems toward sovereign execution. ".repeat(10),
+      segments: Array.from({ length: 20 }, (_, i) => ({
+        start: i * 30, end: (i + 1) * 30, text: `Simulated segment ${i + 1} of 20`
+      })),
+      sourcePath: `/tmp/sovereign_clips/source_dryrun.mp4`,
+      audioPath: `/tmp/sovereign_clips/audio_dryrun.mp3`,
+      whisperPath: `/tmp/sovereign_clips/whisper_dryrun.json`,
+      niche: "dark_psychology",
+    };
+    await progress("STEP 1/8", `✅ [DRY RUN] Whisper simulated — ${whisperResult.segments.length} segments, niche: ${whisperResult.niche}`);
+  } else {
+    try {
+      whisperResult = await extractWhisperIntel(youtubeUrl);
+      await progress("STEP 1/8", `✅ Whisper complete — ${whisperResult.segments.length} segments, niche: ${whisperResult.niche}`);
+    } catch (err: any) {
+      throw new Error(`Whisper extraction failed: ${err.message}`);
+    }
   }
 
   // ── STEP 2: FACELESS FACTORY — LONG MODE (ANITA'S VOICE) ──
-  await progress("STEP 2/8", "Generating 10-15 minute faceless video in Anita's Protocol 77 voice...");
+  await progress("STEP 2/8", dryRun ? "[DRY RUN] Simulating Faceless Factory..." : "Generating 10-15 minute faceless video in Anita's Protocol 77 voice...");
   let facelessResult: Awaited<ReturnType<typeof produceFacelessVideo>>;
-  try {
-    facelessResult = await produceFacelessVideo(
-      llm,
-      whisperResult.transcript,
-      whisperResult.niche,
+  if (dryRun) {
+    // Create a small dummy video file so Steps 3-4 can operate on a real file path
+    const dummyVideoPath = `${ORCHESTRATOR_DIR}/${jobId}/dryrun_longform.mp4`;
+    try {
+      execSync(
+        `ffmpeg -f lavfi -i color=c=black:s=1920x1080:d=10 -f lavfi -i anullsrc=r=44100:cl=mono -shortest -c:v libx264 -preset ultrafast -c:a aac -y "${dummyVideoPath}"`,
+        { timeout: 15_000, stdio: "pipe" }
+      );
+    } catch (err: any) {
+      // If ffmpeg fails, create an empty placeholder — logic validation still works
+      writeFileSync(dummyVideoPath, Buffer.alloc(1024));
+      console.log(`⚠️ [DRY RUN] Dummy video creation failed, using placeholder: ${err.message?.slice(0, 100)}`);
+    }
+    facelessResult = {
+      videoUrl: null,
+      localPath: dummyVideoPath,
+      title: "DRY RUN — Protocol 77: The Architecture of Sovereign Execution",
+      niche: whisperResult.niche,
       brand,
-      "long"  // ← THIS IS THE KEY — long mode = 20 segments = 10-15 minutes
-    );
-    await progress("STEP 2/8", `✅ Faceless video produced — "${facelessResult.title}" (${facelessResult.duration.toFixed(0)}s, ${facelessResult.segmentCount} scenes)`);
-  } catch (err: any) {
-    throw new Error(`Faceless Factory failed: ${err.message}`);
+      duration: 600,
+      segmentCount: 20,
+    };
+    await progress("STEP 2/8", `✅ [DRY RUN] Faceless simulated — "${facelessResult.title}" (${facelessResult.duration}s, ${facelessResult.segmentCount} scenes)`);
+  } else {
+    try {
+      facelessResult = await produceFacelessVideo(
+        llm,
+        whisperResult.transcript,
+        whisperResult.niche,
+        brand,
+        "long"  // ← THIS IS THE KEY — long mode = 20 segments = 10-15 minutes
+      );
+      await progress("STEP 2/8", `✅ Faceless video produced — "${facelessResult.title}" (${facelessResult.duration.toFixed(0)}s, ${facelessResult.segmentCount} scenes)`);
+    } catch (err: any) {
+      throw new Error(`Faceless Factory failed: ${err.message}`);
+    }
   }
 
   // ── STEP 3: YOUTUBE LONG-FORM UPLOAD ──
-  await progress("STEP 3/8", "Uploading long-form video to YouTube...");
+  await progress("STEP 3/8", dryRun ? "[DRY RUN] Simulating YouTube upload..." : "Uploading long-form video to YouTube...");
   let youtubeVideoId: string | null = null;
   let youtubeUrl2: string | null = null;
 
-  if (facelessResult.localPath || facelessResult.videoUrl) {
+  if (dryRun) {
+    youtubeVideoId = "DRYRUN_" + jobId.slice(0, 8);
+    youtubeUrl2 = `https://youtube.com/watch?v=${youtubeVideoId}`;
+    await progress("STEP 3/8", `✅ [DRY RUN] YouTube simulated — ${youtubeUrl2}`);
+  } else if (facelessResult.localPath || facelessResult.videoUrl) {
     const ytTool = new YouTubeLongFormPublishTool();
     try {
       const ytResult = await ytTool.execute({
@@ -508,56 +560,94 @@ export async function executeFullPipeline(
   }
 
   // ── STEP 5: UPLOAD CLIPS TO SUPABASE STORAGE ──
-  await progress("STEP 5/8", `Uploading ${clips.length} clips to Supabase Storage...`);
-  try {
-    await uploadClipsToStorage(clips, jobId);
-    const uploadedCount = clips.filter(c => c.publicUrl).length;
-    await progress("STEP 5/8", `✅ ${uploadedCount}/${clips.length} clips uploaded`);
-  } catch (err: any) {
-    errors.push(`Clip upload error: ${err.message}`);
-    await progress("STEP 5/8", `⚠️ Clip upload issue: ${err.message?.slice(0, 150)}`);
+  if (dryRun) {
+    await progress("STEP 5/8", `[DRY RUN] Simulating Supabase upload for ${clips.length} clips...`);
+    for (const clip of clips) {
+      clip.publicUrl = `https://dryrun.supabase.co/storage/v1/object/public/public-assets/vidrush/${jobId}/clip_${clip.index.toString().padStart(2, "0")}.mp4`;
+    }
+    await progress("STEP 5/8", `✅ [DRY RUN] ${clips.length}/${clips.length} clips simulated`);
+  } else {
+    await progress("STEP 5/8", `Uploading ${clips.length} clips to Supabase Storage...`);
+    try {
+      await uploadClipsToStorage(clips, jobId);
+      const uploadedCount = clips.filter(c => c.publicUrl).length;
+      await progress("STEP 5/8", `✅ ${uploadedCount}/${clips.length} clips uploaded`);
+    } catch (err: any) {
+      errors.push(`Clip upload error: ${err.message}`);
+      await progress("STEP 5/8", `⚠️ Clip upload issue: ${err.message?.slice(0, 150)}`);
+    }
   }
 
   // ── STEP 6: GENERATE PLATFORM-SPECIFIC COPY ──
-  await progress("STEP 6/8", "Generating platform-specific copy for all clips...");
   let copyMap: Map<number, PlatformCopy>;
-  try {
-    copyMap = await generatePlatformCopy(
-      llm,
-      clips,
-      facelessResult.title,
-      whisperResult.niche,
-      brand,
-      whisperResult.transcript
-    );
-    await progress("STEP 6/8", `✅ Copy generated for ${copyMap.size} clips across 7 platforms`);
-  } catch (err: any) {
-    errors.push(`Copy generation failed: ${err.message}`);
+  if (dryRun) {
+    await progress("STEP 6/8", `[DRY RUN] Simulating platform copy for ${clips.length} clips...`);
     copyMap = new Map();
-    await progress("STEP 6/8", `⚠️ Copy generation failed: ${err.message?.slice(0, 150)}`);
+    for (const clip of clips) {
+      copyMap.set(clip.index, {
+        youtube_short: `DRY RUN — Clip ${clip.index + 1} #Shorts #SovereignSynthesis`,
+        tiktok: `DRY RUN — The simulation cracks. Clip ${clip.index + 1}\n#darkpsychology #mindset`,
+        instagram: `DRY RUN — Protocol 77 activated.\n\n#sovereignty #mindset #protocol77`,
+        x_twitter: `DRY RUN — The Firmware Update continues. sovereign-synthesis.com`,
+        threads: `DRY RUN — The architecture of liberation, piece by piece.`,
+        linkedin: `DRY RUN — A framework for sovereign execution. #MindsetShift`,
+        facebook: `DRY RUN — Full protocol at sovereign-synthesis.com`,
+      });
+      clip.captionText = `DRY RUN — Clip ${clip.index + 1}`;
+    }
+    await progress("STEP 6/8", `✅ [DRY RUN] Copy simulated for ${copyMap.size} clips across 7 platforms`);
+  } else {
+    await progress("STEP 6/8", "Generating platform-specific copy for all clips...");
+    try {
+      copyMap = await generatePlatformCopy(
+        llm,
+        clips,
+        facelessResult.title,
+        whisperResult.niche,
+        brand,
+        whisperResult.transcript
+      );
+      await progress("STEP 6/8", `✅ Copy generated for ${copyMap.size} clips across 7 platforms`);
+    } catch (err: any) {
+      errors.push(`Copy generation failed: ${err.message}`);
+      copyMap = new Map();
+      await progress("STEP 6/8", `⚠️ Copy generation failed: ${err.message?.slice(0, 150)}`);
+    }
   }
 
   // ── STEP 7: DISTRIBUTE CLIPS TO VIDEO PLATFORMS ──
-  await progress("STEP 7/8", "Distributing clips to TikTok, Instagram, YouTube Shorts...");
   let platformResults: string[] = [];
-  try {
-    platformResults = await distributeClips(clips, copyMap, whisperResult.niche, brand);
-    const successCount = platformResults.filter(r => r.includes("✅")).length;
-    await progress("STEP 7/8", `✅ Distribution complete — ${successCount}/${platformResults.length} succeeded`);
-  } catch (err: any) {
-    errors.push(`Distribution failed: ${err.message}`);
-    await progress("STEP 7/8", `⚠️ Distribution failed: ${err.message?.slice(0, 150)}`);
+  if (dryRun) {
+    await progress("STEP 7/8", `[DRY RUN] Simulating distribution for ${clips.length} clips...`);
+    platformResults = clips.map((c) => `Clip ${c.index + 1}: ✅ [DRY RUN] Would distribute to TikTok, IG, YouTube Shorts`);
+    await progress("STEP 7/8", `✅ [DRY RUN] Distribution simulated — ${platformResults.length}/${clips.length} would succeed`);
+  } else {
+    await progress("STEP 7/8", "Distributing clips to TikTok, Instagram, YouTube Shorts...");
+    try {
+      platformResults = await distributeClips(clips, copyMap, whisperResult.niche, brand);
+      const successCount = platformResults.filter(r => r.includes("✅")).length;
+      await progress("STEP 7/8", `✅ Distribution complete — ${successCount}/${platformResults.length} succeeded`);
+    } catch (err: any) {
+      errors.push(`Distribution failed: ${err.message}`);
+      await progress("STEP 7/8", `⚠️ Distribution failed: ${err.message?.slice(0, 150)}`);
+    }
   }
 
   // ── STEP 8: SCHEDULE BUFFER WEEK ──
-  await progress("STEP 8/8", "Scheduling a week of content in Buffer...");
   let bufferScheduled = 0;
-  try {
-    bufferScheduled = await scheduleBufferWeek(clips, copyMap, whisperResult.niche);
-    await progress("STEP 8/8", `✅ ${bufferScheduled} posts scheduled in Buffer`);
-  } catch (err: any) {
-    errors.push(`Buffer scheduling failed: ${err.message}`);
-    await progress("STEP 8/8", `⚠️ Buffer scheduling failed: ${err.message?.slice(0, 150)}`);
+  if (dryRun) {
+    await progress("STEP 8/8", `[DRY RUN] Simulating Buffer scheduling...`);
+    bufferScheduled = Math.min(clips.length, 28);
+    await progress("STEP 8/8", `✅ [DRY RUN] ${bufferScheduled} posts would be scheduled in Buffer`);
+  } else {
+    await progress("STEP 8/8", "Scheduling a week of content in Buffer...");
+    try {
+      bufferScheduled = await scheduleBufferWeek(clips, copyMap, whisperResult.niche);
+      await progress("STEP 8/8", `✅ ${bufferScheduled} posts scheduled in Buffer`);
+    } catch (err: any) {
+      errors.push(`Buffer scheduling failed: ${err.message}`);
+      await progress("STEP 8/8", `⚠️ Buffer scheduling failed: ${err.message?.slice(0, 150)}`);
+    }
   }
 
   const totalDuration = (Date.now() - startTime) / 1000;

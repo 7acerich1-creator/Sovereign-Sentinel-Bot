@@ -129,10 +129,15 @@ async function main() {
   }
 
   // ── 2. Initialize LLM Providers ──
+  // CRITICAL: Initialize ALL providers that have API keys, not just those in failoverOrder.
+  // failoverOrder controls the ORDER, not which providers exist. An env var override of
+  // LLM_FAILOVER_ORDER must never silently prevent a provider from being instantiated.
+  // Bug history: Groq had a key but was excluded because LLM_FAILOVER_ORDER env var
+  // (set before Groq was added) didn't list it. Pipeline ran without its free LLM.
   const llmProviders: LLMProvider[] = [];
-
+  // First pass: initialize in failoverOrder sequence
   for (const providerName of config.llm.failoverOrder) {
-    const providerConfig = config.llm.providers[providerName];
+    const providerConfig = (config.llm.providers as Record<string, any>)[providerName];
     if (providerConfig?.apiKey) {
       try {
         const provider = createProvider(
@@ -142,12 +147,37 @@ async function main() {
           providerConfig.baseUrl
         );
         llmProviders.push(provider);
-        console.log(`# ✅ Active model: ${providerConfig.model}`);
+        console.log(`# ✅ Active model: ${providerName} → ${providerConfig.model}`);
       } catch (err: any) {
         console.warn(`⚠️ LLM provider ${providerName} skipped: ${err.message}`);
       }
     }
   }
+
+  // Second pass: catch any providers with keys that were NOT in failoverOrder
+  // This prevents env var overrides from silently killing providers
+  for (const providerName of Object.keys(config.llm.providers)) {
+    if (llmProviders.some(p => p.name === providerName)) continue; // Already initialized
+    const providerConfig = (config.llm.providers as Record<string, any>)[providerName];
+    if (providerConfig?.apiKey) {
+      try {
+        const provider = createProvider(
+          providerName,
+          providerConfig.apiKey,
+          providerConfig.model,
+          providerConfig.baseUrl
+        );
+        llmProviders.push(provider);
+        console.log(`# ✅ Active model (not in failoverOrder): ${providerName} → ${providerConfig.model}`);
+        console.warn(`⚠️ WARNING: ${providerName} has an API key but is NOT in LLM_FAILOVER_ORDER. Added as fallback. Update the env var to include it.`);
+      } catch (err: any) {
+        console.warn(`⚠️ LLM provider ${providerName} skipped: ${err.message}`);
+      }
+    }
+  }
+
+  // Log the complete chain for PFV-01 Layer 1 verification
+  console.log(`# 🔗 LLM provider chain: [${llmProviders.map(p => p.name).join(", ")}] (${llmProviders.length} active)`);
 
   if (llmProviders.length === 0) {
     console.error("❌ No LLM providers configured. Set at least one API key.");
@@ -1292,6 +1322,22 @@ async function main() {
   // ── /api/content-engine/diag — Test image generation APIs ──
   webhookServer.register("/api/content-engine/diag", async () => {
     const diag: Record<string, unknown> = {};
+
+    // ── PFV-01 LAYER 1: Runtime chain verification ──
+    // These report what's ACTUALLY loaded, not what config says should be loaded
+    diag.llm_chain = failoverLLM.listProviders();
+    diag.llm_chain_count = failoverLLM.listProviders().length;
+    diag.pipeline_llm_chain = pipelineLLM.listProviders();
+    diag.pipeline_llm_first = pipelineLLM.listProviders()[0] || "NONE";
+    diag.groq_in_pipeline = pipelineLLM.listProviders().some(p => p.startsWith("groq"));
+
+    // ── TTS chain verification ──
+    diag.tts_chain = [];
+    if (process.env.ELEVENLABS_API_KEY) (diag.tts_chain as string[]).push("elevenlabs");
+    (diag.tts_chain as string[]).push("edge"); // Always available
+    if (process.env.OPENAI_API_KEY) (diag.tts_chain as string[]).push("openai");
+
+    // ── API key status ──
     const geminiKey = process.env.GEMINI_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
     const elevenLabsKey = process.env.ELEVENLABS_API_KEY;

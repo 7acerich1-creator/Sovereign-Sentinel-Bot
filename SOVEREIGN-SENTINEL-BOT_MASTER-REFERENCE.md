@@ -1,25 +1,57 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-04 (Cowork Session 19 FINAL — Pollinations.ai Zero-Cost Pipeline) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-04 (Cowork Session 20 — FIRST CLEAN PIPELINE RUN) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
-## CRITICAL STATUS REPORT (as of Session 19 close, 2026-04-04 3:43 PM)
+## CRITICAL STATUS REPORT (as of Session 20 close, 2026-04-04 ~7:00 PM)
 
-**Mission Metrics:** No data tracked yet. Zero revenue. Zero liberated minds. Zero initiates. The machine has not produced a single clean pipeline run.
+**Mission Metrics:** FIRST CLEAN PIPELINE RUN COMPLETED. Video produced, 8 clips cut, 8 posts sent to Buffer. Revenue still $0 — but the machine is ALIVE.
 
-**Infrastructure: CRITICAL SYSTEM FAILURE ACTIVE.**
-- The diagnostic endpoint (`/api/content-engine/diag`) is unreachable, indicating a failure in the Deterministic systems layer.
-- Two `/pipeline` runs failed this session with "Zero scene images generated."
-- The bot may not be running correctly on Railway. Deploy status of latest commit (`4ea6ba0`) is UNVERIFIED.
+**Infrastructure: OPERATIONAL.**
+- Bot is live on Railway. Commit `8613fef` deployed and running.
+- Pipeline ran all 8 steps successfully for the first time with zero-cost providers.
+- yt-dlp now authenticated via YouTube cookies (YOUTUBE_COOKIES_BASE64 env var in Railway).
 
 **API Credit Situation — ALL PAID PROVIDERS ARE EFFECTIVELY DEAD:**
 - **Anthropic:** $10.03 remaining. DO NOT BURN ON PIPELINE. Protected as LAST in failover chain.
 - **OpenAI:** -$0.06 credits. DEAD. DALL-E 3 fallback will not fire. TTS via OpenAI will not work.
 - **Gemini:** $50.49 OWED (not available — this is accumulated debt, card declined). Imagen 4 may or may not work depending on whether Google has cut off the key.
 - **Groq:** FREE tier. 14,400 req/day. This is the ONLY reliable LLM provider right now.
-- **ElevenLabs:** Status unknown. If on a paid plan with active subscription, TTS should work. If credits are exhausted, pipeline will fail at audio step.
+- **ElevenLabs:** Creator plan, 93,842 credits remaining. TTS is working.
 
 **The ONLY path forward is zero-cost providers:** Groq (LLM) + Pollinations.ai (images). Both are free, no auth, no billing.
+
+**KNOWN ISSUE — BUFFER POSTING BEHAVIOR:**
+- Pipeline sent 8 posts to Buffer but they are NOT distributing as expected.
+- Posts appear only on X and Threads, not across all 9 channels (2 brands x ~5 platforms).
+- Posts are spread across different days instead of 1 post per day per channel.
+- **Session 21 must investigate and fix the Buffer scheduling logic** — likely an issue in how the pipeline selects channels and schedules dates in the Buffer API calls.
+
+---
+
+**Session Summary — Cowork Session 20 (2026-04-04):**
+
+**FIRST CLEAN PIPELINE RUN ACHIEVED.** After 4 yt-dlp fixes and 2 LLM chain fixes, the pipeline ran all 8 steps for video WhqdFNK58S8 (Russell Brunson "Mind Control"). Produced video, 8 clips, 8 Buffer posts. BUT Buffer scheduling behavior is wrong — posts only showing on X/Threads, not all channels, and spread across days incorrectly.
+
+**Fixes deployed this session:**
+1. **THREE-TIER TTS FALLBACK.** ElevenLabs → Edge TTS (FREE, `edge-tts-node`) → OpenAI. Edge TTS uses `en-US-AriaNeural` voice. Speed mapping 0.9x → "-10%" rate. Commit `85c0f2d`.
+2. **POLLINATIONS-FIRST IMAGE GEN.** Migrated content-engine.ts and image-generator.ts to Pollinations-first (was Gemini-first). All three image surfaces now use free provider first. Commit `85c0f2d`.
+3. **PFV-01 PROTOCOL CREATED.** Pre-Flight Verification protocol — 5-layer deep verification before declaring systems operational. Post-failure investigation template. Skill file at `.claude/skills/pre-flight-verification/SKILL.md`. Commit `da8b4a8`.
+4. **TWO-PASS PROVIDER INITIALIZATION.** Fixed silent Groq exclusion caused by stale `LLM_FAILOVER_ORDER` env var in Railway. Second pass catches providers with keys not in failoverOrder. Runtime chain verification fields added to diag endpoint. Commit `da8b4a8`.
+5. **yt-dlp RUNTIME NAME FIX.** Changed `--js-runtimes nodejs` to `--js-runtimes node` across all 4 call sites + Dockerfile. `nodejs` was never a valid yt-dlp runtime name. Commit `d282c7e`.
+6. **BULLETPROOF yt-dlp DOWNLOAD UTILITY.** Created shared `src/utils/ytdlp-download.ts` with multi-strategy retry (6 player client rotations + user-agent spoofing). All 3 download sites now use this single utility. Commit `11ae10a`.
+7. **COOKIE-AUTHENTICATED yt-dlp.** Added `YOUTUBE_COOKIES_BASE64` env var support. Bot decodes cookies.txt at runtime for authenticated YouTube access from Railway datacenter IP. Commit `79e127c`.
+8. **REMOTE JS CHALLENGE SOLVER.** Added `--remote-components ejs:github` flag — YouTube now requires a JS challenge solver component that yt-dlp downloads from GitHub. This was the final fix that unblocked the pipeline. Commit `8613fef`.
+
+**All Session 20 Commits (chronological):**
+- `85c0f2d` — fix: three-tier TTS fallback + Pollinations-first image gen + edge-tts-node dep + enhanced diag
+- `da8b4a8` — fix: PFV-01 two-pass provider init + runtime chain verification in diag
+- `d282c7e` — fix: yt-dlp runtime name nodejs to node
+- `11ae10a` — fix: bulletproof yt-dlp with multi-strategy anti-bot retry
+- `79e127c` — fix: cookie-authenticated yt-dlp for Railway datacenter IP
+- `8613fef` — fix: enable yt-dlp remote JS challenge solver
+
+**YouTube cookies set in Railway:** `YOUTUBE_COOKIES_BASE64` env var (53rd variable). Cookies expire periodically — when yt-dlp starts failing with "sign in" errors again, refresh by exporting cookies from Chrome and re-encoding.
 
 ---
 
@@ -49,31 +81,28 @@
 
 ---
 
-**NEXT SESSION PRIORITIES (Session 20 — Diagnose + First Clean Pipeline Run):**
+**NEXT SESSION PRIORITIES (Session 21 — Fix Buffer Distribution + Quality Eval):**
 
-**STEP 0: DIAGNOSE WHY THE BOT IS UNREACHABLE.**
-- Check Railway dashboard. Is the service running? Did `4ea6ba0` deploy successfully?
-- Check Railway build logs for compile errors. The TypeScript was not verified locally (sandbox can't run tsc due to Windows-mounted node_modules).
-- If build failed: fix the compile error, push, wait for redeploy.
-- If build succeeded but bot unreachable: check Railway logs for runtime crash. Could be missing env var, Supabase connection issue, or process crash loop.
+**STEP 1: DIAGNOSE BUFFER SCHEDULING.**
+- Pipeline produced 8 clips and sent 8 posts to Buffer, BUT posts only appear on X and Threads (not all 9 channels). Posts spread across different days instead of 1 post/day/channel.
+- Investigate: How does the pipeline select which Buffer channels to post to? Is it cycling through all 9 or only picking specific ones?
+- Read the Buffer scheduling code in `vidrush-orchestrator.ts` and/or `faceless-factory.ts` to understand channel selection logic.
+- Check Buffer API: Are channel IDs correct? Are all 9 channels still active and connected?
+- Fix: Posts should distribute across ALL channels (both brands, all platforms) on a sensible schedule.
 
-**STEP 1: VERIFY BOT IS ALIVE.**
-- Send `/status` to Veritas on Telegram. If no response, the bot is down — go to Railway logs.
-- Hit the diag endpoint in browser: `https://<railway-url>/api/content-engine/diag`
+**STEP 2: QUALITY EVALUATION.**
+- Watch the produced video from Session 20 run (WhqdFNK58S8 Russell Brunson "Mind Control").
+- Evaluate: video length (target 10-15 min), pacing/cadence, voiceover naturalness, image quality, scene transitions, caption quality.
+- Check the 8 clips — are they properly cut? Right aspect ratio (9:16)? Good segment selection?
 
-**STEP 2: TEST PIPELINE ($0.00 cost).**
-- Send `/pipeline <youtube_url>` to Veritas.
-- Expected flow: yt-dlp download → Groq Whisper transcription → Groq script generation → Pollinations.ai images (20 segments) → ElevenLabs TTS → ffmpeg assembly → YouTube upload → clip chop → distribute → Buffer schedule.
-- Watch Railway logs in real-time for: `[FacelessFactory] Scene X generated via Pollinations` on each segment.
-- If ElevenLabs TTS fails: check ElevenLabs account status. If dead, need to add a free TTS fallback (Edge TTS or similar).
+**STEP 3: FINE-TUNE.**
+- Based on quality evaluation: adjust TTS speed, segment count, image prompts, color grades.
+- If video still too short, investigate segment duration hints and TTS output length.
 
-**STEP 3: QUALITY EVALUATION.** Can only happen after first clean run.
-
-**STEP 4: REMAINING IMAGE GEN MIGRATION.** `image-generator.ts` and `content-engine.ts` still use Gemini-first for social post images. Should be migrated to Pollinations-first too. Not blocking pipeline but needed for content engine posts.
+**STEP 4: STALE ENV VAR CLEANUP.**
+- `LLM_FAILOVER_ORDER` in Railway still doesn't include `groq`. The two-pass code handles it, but the env var should be updated to match reality: `groq,gemini,anthropic,openai`.
 
 **Buffer channels are CORRECT (9 total = 2 brands x ~5 platforms). They are NOT duplicates. DO NOT suggest cleaning or removing channels.**
-4. **QUALITY EVALUATION** — Watch the produced video. Evaluate: pacing/cadence, voiceover naturalness, image quality, scene transitions, caption quality.
-5. **FINE-TUNE** — Based on quality evaluation: adjust TTS speed, segment count, image prompts, color grades.
 
 **Session Summary — Cowork Session 18 (2026-04-04):**
 1. **FIRST LIVE PIPELINE RUN COMPLETED — BUT THE MACHINE IS STILL BROKEN.** Pipeline ran all 8 steps on video WhqdFNK58S8 (Russell Brunson "Mind Control" video). Produced "The Mind Control Blueprint Hidden For 100 Years" — 219s (3.6 min, should be 10-15 min), 20 scenes, uploaded to YouTube as https://youtube.com/watch?v=mSPZdSX21O4. BUT: only 8 clips cut (should be ~30), 0/8 clips uploaded to Supabase (503 errors), 0 clips distributed, Buffer scheduling unknown. VIDEO QUALITY NOT YET EVALUATED — can't even get to quality tuning because the infrastructure is still failing.

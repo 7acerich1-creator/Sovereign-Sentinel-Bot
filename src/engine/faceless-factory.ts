@@ -273,10 +273,15 @@ export async function generateScript(
     ? `duration_hint is approximate seconds per segment (total should sum to ~45s)`
     : `duration_hint MUST be 30-45 seconds per segment (total should sum to 600-900 seconds / 10-15 minutes). Do NOT use values under 25.`;
 
+  // Groq free tier has strict per-request token limits.
+  // The full prompt template + rules + JSON schema ~2000 tokens.
+  // Truncate source intelligence aggressively to stay under limits.
+  // 2500 chars ≈ ~700 tokens — keeps total well under Groq's cap.
+  const truncatedIntel = sourceIntelligence.slice(0, 2500);
   const prompt = `${voice}
 
 SOURCE INTELLIGENCE (extracted from research):
-${sourceIntelligence.slice(0, 4000)}
+${truncatedIntel}
 
 TARGET: ${durationRange} faceless video with ${segmentCount} visual segments.
 NICHE: ${niche.replace(/_/g, " ")}

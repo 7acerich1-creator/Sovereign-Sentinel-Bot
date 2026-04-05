@@ -168,10 +168,11 @@ async function extractStoryMoments(
     }
   }
 
-  // Cap at ~4000 chars to stay within token limits for Groq
+  // Cap at ~2500 chars to stay within Groq free-tier per-request token limits.
+  // The prompt template + rules add ~1500 tokens on top of the transcript.
   let transcriptBlock = condensed.join("\n");
-  if (transcriptBlock.length > 4000) {
-    transcriptBlock = transcriptBlock.slice(0, 4000) + "\n[...transcript truncated]";
+  if (transcriptBlock.length > 2500) {
+    transcriptBlock = transcriptBlock.slice(0, 2500) + "\n[...transcript truncated]";
   }
 
   const prompt = `You are a viral content strategist analyzing a ${niche.replace(/_/g, " ")} video transcript (${totalDuration.toFixed(0)}s total).

@@ -1,15 +1,17 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-04 (Cowork Session 22 — PLATFORM METADATA + LLM FAILOVER FIX) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-05 (Cowork Session 23 — PIPELINE TEST + DISTRIBUTION ARCHITECTURE FIX) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
-## CRITICAL STATUS REPORT (as of Session 22, 2026-04-04 ~11:00 PM)
+## CRITICAL STATUS REPORT (as of Session 23, 2026-04-05 ~12:00 AM)
 
-**Mission Metrics:** BUFFER DISTRIBUTION COMPLETE — channel filtering eradicated, platform metadata added, video assets flowing. LLM failover fixed (Groq first). Revenue still $0.
+**Mission Metrics:** FIRST CLEAN END-TO-END PIPELINE RUN. All 8 steps green. 1 URL → YouTube long-form + 9 clips + 16 Buffer posts scheduled across 7 days. Two architecture bugs found and fixed: GraphQL enum quoting (killed YouTube/IG Buffer posts) and dual-path distribution (dumped all Shorts at once). Revenue still $0.
 
-**Infrastructure: OPERATIONAL.**
-- Bot is live on Railway. Commit `fe768d5` deploying (Session 22 code pushed).
-- Pipeline ran all 8 steps successfully in Session 20. Buffer scheduling fixed Session 21, metadata added Session 22.
+**Infrastructure: OPERATIONAL — AWAITING PUSH.**
+- Bot is live on Railway. Commit `fe768d5` deployed (Session 22).
+- Session 23 fixes are LOCAL — need commit + push. Three files changed.
+- Pipeline ran all 8 steps for video iR4AAwNP3r8: "Beyond The Simulation" (258s, 12 scenes, 9 clips, 16 Buffer posts).
+- YouTube long-form live: https://youtube.com/watch?v=ybjDyM3uVts
 - yt-dlp authenticated via YouTube cookies (YOUTUBE_COOKIES_BASE64 env var in Railway).
 
 **API Credit Situation — ALL PAID PROVIDERS ARE EFFECTIVELY DEAD:**
@@ -148,17 +150,91 @@
 - `src/engine/vidrush-orchestrator.ts` — per-channel metadata builder (YouTube/IG/TikTok) in scheduleBufferWeek
 - `src/config.ts` — failover order → groq,gemini,anthropic,openai
 
-**NEXT SESSION PRIORITIES (Session 23 — Test + Quality Gate):**
+---
 
-**STEP 1: TEST BUFFER DISTRIBUTION.** Code is deployed (commit `fe768d5`). Run `/pipeline` with a YouTube URL. Verify: (a) all 9 channels receive posts, (b) TikTok/IG/YouTube posts include video + metadata, (c) X/Threads get text-only, (d) scheduling is staggered correctly. Check Buffer calendar.
+**Session Summary — Cowork Session 23 (2026-04-05):**
 
-**STEP 2: IF BUFFER REJECTS POSTS** — check Railway logs for GraphQL error messages. Common issues: metadata field name mismatch, enum values wrong (e.g. YouTube categoryId format), Instagram type enum.
+**FIRST CLEAN PIPELINE TEST + TWO ARCHITECTURE BUGS FIXED.**
 
-**STEP 3: BUILD QUALITY GATE.** The video production quality standard (see PENDING section above). Add background music, audio crossfade, voice warmth, text overlay, intro/outro to ffmpeg assembly in faceless-factory.ts.
+**Pipeline Test Results (video iR4AAwNP3r8):**
+- All 8 steps completed successfully. Total time: 2313s (~38 min).
+- Step 1: Whisper — 570 segments, niche: dark_psychology
+- Step 2: Faceless Factory — "Beyond The Simulation" (258s, 12 scenes) — STILL SHORT (4.3 min vs 10-15 min target, deferred to Quality Gate)
+- Step 3: YouTube upload — https://youtube.com/watch?v=ybjDyM3uVts
+- Step 4: 9 clips chopped
+- Step 5: 9/9 clips uploaded to Supabase (first time no 503s!)
+- Step 6: Copy for 9 clips × 7 platforms
+- Step 7: Distribution 9/9 succeeded (but dumped all at once — see Bug 1)
+- Step 8: 16 posts scheduled in Buffer
+- Buffer channels that received posts: TikTok (6), X (7), Threads (3) = 16
+- Buffer channels that received ZERO: Instagram (0), YouTube (0) = see Bug 2
+
+**Bug 1 FOUND AND FIXED — DUAL-PATH DISTRIBUTION (all Shorts at once):**
+- **ROOT CAUSE:** Step 7 (`distributeClips`) fired `VideoPublisherTool` with `platforms: "all"` for every clip — direct API publish to TikTok/IG/YouTube ALL AT ONCE. Step 8 then scheduled the SAME clips across Buffer staggered over 7 days. Dual-path = duplicate posts + instant dump.
+- **FIX:** Step 7 is now verification-only. It confirms clips have public URLs and logs readiness. NO MORE direct API publishing from Step 7. Step 3 handles the YouTube long-form. Step 8 handles ALL clip distribution via Buffer (staggered across 7 days, all 9 channels).
+- **File:** `src/engine/vidrush-orchestrator.ts` — Replaced `distributeClips()` call with verification logic.
+
+**Bug 2 FOUND AND FIXED — GRAPHQL ENUM QUOTING (YouTube/IG silent rejection):**
+- **ROOT CAUSE:** `buildGqlObj()` in social-scheduler.ts quoted ALL string values with `JSON.stringify()`. But Buffer's GraphQL schema has enum fields that must be UNQUOTED: YouTube `privacy` (YoutubePrivacy enum: public/private/unlisted), Instagram `type` (PostType enum: reel). Sending `privacy: "public"` (quoted) instead of `privacy: public` (enum) caused Buffer to silently reject YouTube and Instagram posts. TikTok worked because its only metadata field is `title` (String, correctly quoted).
+- **FIX:** Added `ENUM:` prefix convention. Strings starting with `"ENUM:"` are rendered unquoted by `buildGqlObj()`. Regular strings remain quoted. The prefix survives `JSON.stringify()`/`JSON.parse()` round-trip between orchestrator and social-scheduler.
+- **Files:** `src/tools/social-scheduler.ts` (buildGqlObj enum detection), `src/engine/vidrush-orchestrator.ts` (metadata builder uses ENUM:public, ENUM:reel)
+
+**Buffer GraphQL Schema Verified (from developers.buffer.com/reference.html):**
+- `YoutubePostMetadataInput`: title (String!), categoryId (String!), privacy (YoutubePrivacy), license (YoutubeLicense), notifySubscribers (Boolean), embeddable (Boolean), madeForKids (Boolean)
+- `InstagramPostMetadataInput`: type (PostType!), firstComment (String), link (String), geolocation (InstagramGeolocationInput), shouldShareToFeed (Boolean!)
+- `TikTokPostMetadataInput`: title (String)
+- `YoutubePrivacy` enum: public, private, unlisted
+- `ShareMode` enum: addToQueue, shareNext, shareNow, customScheduled
+
+**NEW: Viral Brain Prompt System (src/prompts/social-optimization-prompt.ts):**
+- `buildSocialOptimizationPrompt(ctx)` — Deep platform-aware copy generation prompt with scratchpad pre-think layer
+- `TARGET_AUDIENCES` — 5 customer avatars: trapped_professional, awakening_mind, dark_psychology_seeker, inner_circle_candidate, chosen_one
+- `PLATFORM_DEFAULTS` — Per-platform metadata constraints (hashtag counts, max lengths, hook windows)
+- Integration plan documented in PROMPT TEMPLATES section above
+
+**Session 23 changes NOT YET PUSHED. Files changed:**
+- `src/tools/social-scheduler.ts` — buildGqlObj ENUM: prefix support
+- `src/engine/vidrush-orchestrator.ts` — Step 7 → verification only, metadata uses ENUM: prefix
+- `src/prompts/social-optimization-prompt.ts` — NEW FILE: Viral Brain prompt system
+
+**NEXT SESSION PRIORITIES (Session 24):**
+
+**STEP 1: COMMIT + PUSH + DEPLOY Session 23 fixes.** Then re-test pipeline. Verify all 9 Buffer channels receive posts (especially YouTube and Instagram). Check Buffer calendar.
+
+**STEP 2: PURGE OLD BUFFER POSTS.** The 16 posts from Session 23 test are live in Buffer queue. The Saturday posts from Step 7's direct dump are also there. Run `/buffer_audit` or manually purge before next test to avoid double-posting.
+
+**STEP 3: BUILD QUALITY GATE.** Video production quality standard (see PENDING section above). Video length also needs fixing (258s/4.3 min vs 10-15 min target) — investigate segment count, TTS duration hints, and assembly logic in faceless-factory.ts.
+
+**STEP 4: PLATFORM ADAPTATION ENGINE.** TikTok needs faster cadence. Each platform needs format-specific variants. Wire in the Viral Brain prompt for per-platform copy optimization.
 
 **STEP 4: PLATFORM ADAPTATION ENGINE.** TikTok needs faster cadence (1.05-1.1x speed). Each platform needs format-specific variants. Design the adapter layer.
 
 **Buffer channels are CORRECT (9 total = 2 brands x ~5 platforms). They are NOT duplicates. DO NOT suggest cleaning or removing channels. DO NOT filter channels by service type. EVER.**
+
+---
+
+**PROMPT TEMPLATES — VIRAL BRAIN SYSTEM (Session 23):**
+
+**File:** `src/prompts/social-optimization-prompt.ts`
+**Purpose:** Deep platform-aware copy generation that replaces the shallow generic prompt in `generatePlatformCopy()` (vidrush-orchestrator.ts line 263). The current prompt just says things like "Casual, hook-driven" — the Viral Brain prompt forces the LLM to think through algorithm priorities, engagement patterns, timing, virality mechanics, and accessibility per platform before generating copy.
+
+**Contains:**
+- `buildSocialOptimizationPrompt(ctx)` — Full prompt builder with scratchpad pre-think layer. Accepts content type, platform, target audience, source title, niche, transcript, brand.
+- `TARGET_AUDIENCES` — Pre-built audience profiles mapped to the 4 Sovereign Synthesis customer avatars (Trapped Professional, Awakening Mind, Dark Psychology Seeker, Inner Circle Candidate).
+- `PLATFORM_DEFAULTS` — Per-platform metadata defaults (hashtag counts, max lengths, format requirements, hook windows).
+
+**Integration plan (Quality Gate Step 6 upgrade):**
+1. Import `buildSocialOptimizationPrompt` and `TARGET_AUDIENCES` into vidrush-orchestrator.ts
+2. Replace the inline prompt string in `generatePlatformCopy()` with per-platform calls using the template
+3. Use `PLATFORM_DEFAULTS` to validate generated copy (e.g., reject if X caption > 280 chars, enforce #Shorts in YouTube titles)
+4. Platform Adaptation Engine uses the same prompt system but for VIDEO format decisions (speed, aspect ratio, overlay style)
+
+**Variables map to pipeline:**
+- `contentType` → set by orchestrator (faceless_video for long-form, short_clip for clips)
+- `platform` → derived from `SERVICE_TO_COPY_KEY` per channel
+- `targetAudience` → selected from `TARGET_AUDIENCES` based on brand (ace_richie → trapped_professional, containment_field → dark_psychology_seeker)
+
+---
 
 **Session Summary — Cowork Session 18 (2026-04-04):**
 1. **FIRST LIVE PIPELINE RUN COMPLETED — BUT THE MACHINE IS STILL BROKEN.** Pipeline ran all 8 steps on video WhqdFNK58S8 (Russell Brunson "Mind Control" video). Produced "The Mind Control Blueprint Hidden For 100 Years" — 219s (3.6 min, should be 10-15 min), 20 scenes, uploaded to YouTube as https://youtube.com/watch?v=mSPZdSX21O4. BUT: only 8 clips cut (should be ~30), 0/8 clips uploaded to Supabase (503 errors), 0 clips distributed, Buffer scheduling unknown. VIDEO QUALITY NOT YET EVALUATED — can't even get to quality tuning because the infrastructure is still failing.

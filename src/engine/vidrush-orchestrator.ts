@@ -532,16 +532,19 @@ async function scheduleBufferWeek(
         const metadata: Record<string, unknown> = {};
         const clipTitle = postText.split("\n")[0].slice(0, 100) || "Sovereign Synthesis";
 
+        // ENUM: prefix = GraphQL enum values (rendered unquoted by buildGqlObj in social-scheduler.ts)
+        // Without prefix = regular strings (rendered quoted)
+        // This convention survives JSON.stringify/parse round-trip.
         if (channel.service === "youtube") {
           metadata.youtube = {
             title: clipTitle,
-            categoryId: "22",  // "People & Blogs" — safe default for Sovereign Synthesis content
-            privacy: "public",
+            categoryId: "22",               // String! per Buffer schema
+            privacy: "ENUM:public",          // YoutubePrivacy enum — NOT a quoted string
             madeForKids: false,
           };
         } else if (channel.service === "instagram") {
           metadata.instagram = {
-            type: "reel",  // Reels are the primary format for short-form video
+            type: "ENUM:reel",               // PostType enum — NOT a quoted string
             shouldShareToFeed: true,
           };
         } else if (channel.service === "tiktok") {
@@ -796,22 +799,31 @@ export async function executeFullPipeline(
     }
   }
 
-  // ── STEP 7: DISTRIBUTE CLIPS TO VIDEO PLATFORMS ──
+  // ── STEP 7: VERIFY CLIPS READY FOR BUFFER DISTRIBUTION ──
+  // ARCHITECTURE DECISION (Session 23): Step 7 NO LONGER fires direct API publishes.
+  // Previously, Step 7 dumped all clips to TikTok/IG/YouTube Shorts simultaneously via
+  // VideoPublisherTool, causing "all at once" posting. Step 8 then scheduled the SAME
+  // clips across Buffer staggered over 7 days — creating a duplicate dual-path problem.
+  //
+  // NOW: Step 3 handles YouTube long-form upload. Step 8 handles ALL clip distribution
+  // via Buffer scheduling (staggered across 7 days, all 9 channels, platform-specific
+  // metadata + video assets). Step 7 is a verification pass only.
   let platformResults: string[] = [];
+  const clipsReady = clips.filter(c => c.publicUrl);
+  const clipsNoUrl = clips.filter(c => !c.publicUrl);
+
   if (dryRun) {
-    await progress("STEP 7/8", `[DRY RUN] Simulating distribution for ${clips.length} clips...`);
-    platformResults = clips.map((c) => `Clip ${c.index + 1}: ✅ [DRY RUN] Would distribute to TikTok, IG, YouTube Shorts`);
-    await progress("STEP 7/8", `✅ [DRY RUN] Distribution simulated — ${platformResults.length}/${clips.length} would succeed`);
+    await progress("STEP 7/8", `[DRY RUN] Verifying ${clips.length} clips ready for Buffer distribution...`);
+    platformResults = clips.map((c) => `Clip ${c.index + 1}: ✅ [DRY RUN] Ready for Buffer scheduling`);
+    await progress("STEP 7/8", `✅ [DRY RUN] ${clips.length} clips verified — will be scheduled in Step 8`);
   } else {
-    await progress("STEP 7/8", "Distributing clips to TikTok, Instagram, YouTube Shorts...");
-    try {
-      platformResults = await distributeClips(clips, copyMap, whisperResult.niche, brand);
-      const successCount = platformResults.filter(r => r.includes("✅")).length;
-      await progress("STEP 7/8", `✅ Distribution complete — ${successCount}/${platformResults.length} succeeded`);
-    } catch (err: any) {
-      errors.push(`Distribution failed: ${err.message}`);
-      await progress("STEP 7/8", `⚠️ Distribution failed: ${err.message?.slice(0, 150)}`);
+    await progress("STEP 7/8", `Verifying clips for distribution — ${clipsReady.length}/${clips.length} have public URLs...`);
+    platformResults = clipsReady.map((c) => `Clip ${c.index + 1}: ✅ Ready (${c.publicUrl?.slice(-40)})`);
+    if (clipsNoUrl.length > 0) {
+      const skipped = clipsNoUrl.map(c => `Clip ${c.index + 1}: ⚠️ No public URL — will be text-only on media platforms`);
+      platformResults.push(...skipped);
     }
+    await progress("STEP 7/8", `✅ ${clipsReady.length}/${clips.length} clips verified with video URLs — routing to Buffer in Step 8`);
   }
 
   // ── STEP 8: SCHEDULE BUFFER WEEK ──

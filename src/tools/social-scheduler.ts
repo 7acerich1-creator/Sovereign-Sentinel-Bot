@@ -193,9 +193,16 @@ export class SocialSchedulerPostTool implements Tool {
           // Structure: metadata: { youtube: { title: "...", categoryId: "..." }, ... }
           let metadataBlock = "";
           if (metadataObj && Object.keys(metadataObj).length > 0) {
+            // GraphQL enum convention: strings prefixed with "ENUM:" are rendered
+            // unquoted (as GraphQL enum values). All other strings are quoted.
+            // Example: "ENUM:public" → public  |  "Hello" → "Hello"
+            // This survives JSON.stringify/parse round-trip from the orchestrator.
             const buildGqlObj = (obj: unknown): string => {
               if (obj === null || obj === undefined) return "null";
-              if (typeof obj === "string") return JSON.stringify(obj);
+              if (typeof obj === "string") {
+                if (obj.startsWith("ENUM:")) return obj.slice(5); // Unquoted enum
+                return JSON.stringify(obj); // Quoted string
+              }
               if (typeof obj === "number" || typeof obj === "boolean") return String(obj);
               if (Array.isArray(obj)) return `[${obj.map(buildGqlObj).join(", ")}]`;
               if (typeof obj === "object") {

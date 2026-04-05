@@ -226,13 +226,56 @@
 - Buffer scheduling expanded: 8 slots/day (4AM/6AM/8AM/10AM/12PM/2PM/5PM/8PM CT), 56 slots/week
 - Steady state math: 1 auto + 1-2 manual URLs/day × 29 pieces/URL × 7-day spread = 250-400+ posts/week
 
-**NEXT SESSION PRIORITIES (Session 24):**
+**SESSION 23 TEST 3 RESULTS (2026-04-05 ~3AM) — video tET-aR-JG-o:**
+- ✅ 56 posts scheduled (8 slots/day working perfectly)
+- ✅ 425s/7min video, 15 scenes (up from 258s/12 scenes in Test 2)
+- ✅ All 8 steps green, Groq stayed primary
+- ✅ Content quality is strong — intelligence, hooks, narrative all there
+- ❌ Music bed — silent failure (likely Railway ffmpeg missing lavfi anoisesrc)
+- ❌ Long-form video is VERTICAL (9:16) — should be HORIZONTAL (16:9) for YouTube
+- ❌ Delivery cadence still too fast — reads like run-on, needs longer pauses + chapter breaks
+- ❌ Shorts are CLIPS not STORIES — needs semantic extraction, not silence-boundary chopping
 
-**STEP 1: RE-TEST PIPELINE** with all Session 23 upgrades deployed. Verify: music bed plays, hook overlay renders, longer video output, Groq stays primary (check Railway logs for provider name).
+**NEXT SESSION PRIORITIES (Session 24) — DELIVERY QUALITY:**
 
-**STEP 2: EVALUATE OUTPUT QUALITY.** Listen to the music bed mixing level. Check if hook overlay is readable. Verify segment expansion produces longer videos (target 10-15 min). Tune parameters if needed.
+**STEP 1: FIX ORIENTATION — Long-form = 16:9, Shorts = 9:16.**
+- faceless-factory.ts hardcodes 1080x1920 everywhere (images, Ken Burns, fallback)
+- Need format parameter: `"horizontal"` → 1920x1080 images (1792x1024), Ken Burns s=1920x1080
+- `"vertical"` stays as-is for shorts pipeline
+- Image gen prompts need landscape descriptions for horizontal mode
 
-**STEP 3: PLATFORM ADAPTATION ENGINE.** TikTok needs faster cadence (1.05-1.1x speed). Each platform needs format-specific variants. Wire in the Viral Brain prompt for per-platform copy optimization.
+**STEP 2: FIX MUSIC BED — Railway ffmpeg compatibility.**
+- Check Railway ffmpeg build for lavfi support: `ffmpeg -filters 2>&1 | grep anoisesrc`
+- If missing: generate ambient WAV in Node.js (Buffer of sine wave samples) → feed as regular audio input
+- Alternative: bundle a 60s royalty-free ambient loop as a static asset
+
+**STEP 3: FIX DELIVERY CADENCE — Pacing architecture.**
+- Bump silence pads 0.6s → 1.5s between segments
+- Add chapter breaks: 2.5s silence every 4-5 segments
+- Script-level fix: add LLM directive for short sentences, ellipses, rhetorical pauses
+- Consider TTS speed 0.85x → 0.80x for even more documentary feel
+
+**STEP 4: SEMANTIC CLIP EXTRACTION — Shorts as stories.**
+- THIS IS THE BIG ONE. Replace silence-boundary chopping with LLM semantic extraction.
+- New Step 4a: LLM reads full transcript with timestamps → identifies 8-12 self-contained "story moments" (hook → insight → payoff)
+- Step 4b: Map story moments to video timestamps
+- Step 4c: Cut at semantic boundaries, not silence boundaries
+- Each short should feel COMPLETE: setup, insight, resolution
+- This is Yuki's original purpose — consider wiring her in OR keeping as inline LLM pass for speed
+
+**STEP 5: PLATFORM ADAPTATION ENGINE (deferred from Session 23).**
+- Horizontal long-form → YouTube
+- Vertical shorts → TikTok, Instagram Reels, YouTube Shorts
+- Platform-specific cadence: TikTok = faster cuts, YouTube = slower delivery
+- Wire in Viral Brain prompt for per-platform copy optimization
+
+**AGENT ROLE EVOLUTION (Ace's question — "are they all still necessary?"):**
+- Veritas: Pipeline trigger + DM interface. ESSENTIAL.
+- Alfred: Daily trend scan + auto-pipeline trigger. ESSENTIAL (just built).
+- Yuki: Evolving from "clip extraction dispatch" to "semantic story finder" in Step 4. ESSENTIAL for shorts quality.
+- Anita: Protocol 77 voice DNA is in all scripts. Could evolve to quality reviewer (rewrites weak sections pre-TTS). KEEP.
+- Vector: Analytics + metrics. Dormant until revenue flows. LOW PRIORITY.
+- Sapphire: Brand guardian + strategic oversight. Value increases at scale. LOW PRIORITY NOW.
 
 **Buffer channels are CORRECT (9 total = 2 brands x ~5 platforms). They are NOT duplicates. DO NOT suggest cleaning or removing channels. DO NOT filter channels by service type. EVER.**
 

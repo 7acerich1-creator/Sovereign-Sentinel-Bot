@@ -34,7 +34,10 @@
   - `dailyContentProduction` (manual) → AGENT_LLM_TEAMS.anita [Gemini → Groq → Anthropic]
 - **Also purged:** AgentComms (legacy in-memory message bus). Fully replaced by Supabase crew-dispatch. Import + instantiation removed from index.ts.
 - **Left intentionally on failoverLLM:** AgentSwarm + MeshWorkflow (rare on-demand tools, Groq-first is fine).
-- **[DVP: ADDRESSED]** — needs Architect to test `/status` + `/pipeline` after Railway deploy to verify.
+- **[DVP: ADDRESSED]** LLM routing fix — confirm `/status` shows Anthropic-first for Veritas after deploy.
+- **[DVP: ADDRESSED]** Imagen 4 primary — production pipeline will confirm `"via Imagen 4"` in logs. Falls to Pollinations if Gemini key blocked.
+- **[DVP: ADDRESSED]** Sapphire Sentinel v2 — 5 proactive alert rules (pipeline failure, critical glitch, stasis, Buffer health, content engine deadline). Self-verifies on next 2hr scan.
+- **[DVP: ADDRESSED]** `/status` + `/start` display — shows per-agent routing map. Commit `3c2b9ce`.
 
 **RESOLVED — BUFFER POSTING (Session 21 fix):**
 - **ROOT CAUSE:** `scheduleBufferWeek()` in vidrush-orchestrator.ts had a hardcoded filter that ONLY selected channels with service type "twitter", "threads", "linkedin", "facebook", "mastodon". YouTube, Instagram, and TikTok channels were explicitly EXCLUDED. This was based on a false assumption that Buffer can't post to those platforms. Buffer supports ALL connected channels.
@@ -81,14 +84,18 @@
 - [DVP: ADDRESSED] Voice warmth reverb — dual-tap aecho (100ms + 200ms reflections at 25%/15% volume) for long-form only. Creates "dark theater" presence where voice exists in a cinematic space. Shorts stay dry for direct impact. Added to mastering chain after EQ, before loudnorm. Commit `cd60174`.
 - REMAINING (not yet addressed):
   5. Intro bumper + outro CTA card
+  6. **Reverb too heavy** — dial back dual-tap aecho (100ms+200ms reflections). Current settings are audibly "wet". Reduce to single tap or lower volume percentages.
+  7. **Background music not landing** — current WAV sine wave + pink noise generation is placeholder quality. Needs real ambient beds (royalty-free cinematic loops or AI-generated music).
+  8. **Image prompts need major improvement** — especially for Imagen 4 when billing is resolved. Faceless factory visual_direction prompts are too generic. Need cinematic-specific, detailed scene descriptions that leverage Imagen 4's capabilities.
 - Platform Adaptation Engine needed: Each platform needs slightly different clip versions (TikTok = faster cadence, IG = cover frame optimization, etc.)
 - Distribution Router consolidation: Single entry point instead of split Buffer/direct-API paths
+- **Funnel Audit skill deployed** — `skills/funnel-audit.md` gives Veritas deep audit methodology for the entire T0→T6 conversion path. Covers distribution, links, Stripe, email, pipeline health, and TCF→Ace handoff.
 
 ---
 
 **Session Summary — Cowork Session 26 (2026-04-05):**
 
-**LLM ROUTING OVERHAUL + DEAD CODE PURGE.** Investigated why bot was unresponsive on night of Apr 4 and missed 10AM CDT morning briefing + Alfred trend scan. Root cause: 5 features (Veritas chat, briefings, Sapphire Sentinel, Content Engine x2) were wired to `failoverLLM` (Groq-first chain) instead of their dedicated AGENT_LLM_TEAMS. When pipeline activity rate-limited Groq, the entire chat/briefing system cascaded through dead providers and silently failed. Fixed by rewiring all 5 to agent-specific teams. Also purged dead AgentComms code (replaced by Supabase crew-dispatch). Explained Swarm vs Mesh vs Crew Dispatch architecture to Architect. Confirmed Gemini API key works for Imagen 4 (same key, $0.02-0.06/image). Provided complete 15-command reference card for Google Keep. Commit `509fa4b` pushed, Railway auto-deploying. [DVP: ADDRESSED — awaiting Architect test]
+**LLM ROUTING + DUAL PIPELINE + FUNNEL AUDIT.** Major session. (1) Fixed bot unresponsiveness — 5 features rewired from failoverLLM to AGENT_LLM_TEAMS. Purged dead AgentComms. (2) Sapphire Sentinel v2 — 5 proactive alert rules (pipeline failure, critical glitch, stasis, Buffer health, content engine deadline). (3) Imagen 4 promoted to primary then REVERTED — Gemini billing $62.30 with card declining. Pollinations stays primary. (4) Dual-brand pipeline — every /pipeline trigger and Alfred auto-pipeline now fires BOTH ace_richie and containment_field sequentially. "ace only"/"tcf only" override available. (5) CTA cleanup — removed /inner-circle from YouTube descriptions, all CTAs point to sovereign-synthesis.com. (6) Fixed /status and /start display to show per-agent LLM routing map. (7) Built Funnel Audit skill for Veritas (skills/funnel-audit.md). (8) Documented funnel link issues in Mission Control master reference — sovereign-synthesis.com is NOT T0 yet, IG bio has old link, TikTok has no link. Commits: `509fa4b` → `b0d5c7d` → `3c2b9ce` → `c94d53e` → pending (revert + skill).
 
 ---
 

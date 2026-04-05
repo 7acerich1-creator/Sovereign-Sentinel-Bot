@@ -3,7 +3,7 @@
 // Deterministic faceless video production pipeline:
 //   1. LLM generates voiceover script from source intelligence
 //   2. ElevenLabs/OpenAI TTS renders audio
-//   3. Gemini Imagen 4 generates scene images (PRIMARY) → Pollinations.ai (FREE fallback) → DALL-E 3 fallback
+//   3. Pollinations.ai generates scene images (FREE primary) → Gemini Imagen 4 → DALL-E 3 fallback
 //   4. ffmpeg assembles: Ken Burns on images + voiceover + captions + color grade
 //   5. Output → Supabase Storage → vid_rush_queue → auto-sweep to platforms
 //
@@ -652,7 +652,7 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<Audio
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// STEP 3: Generate Scene Images — Imagen 4 (PRIMARY) → Pollinations (FREE fallback) → DALL-E 3 → Gradient fallback
+// STEP 3: Generate Scene Images — Pollinations (FREE primary) → Imagen 4 → DALL-E 3 → Gradient fallback
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /** Verify a buffer is a real image by checking magic bytes (PNG/JPEG/WebP/GIF) */
@@ -760,8 +760,32 @@ async function generateSceneImage(
   const prompt = `${stylePrefix} Scene: ${visualDirection}`;
   const imgPath = `${FACELESS_DIR}/${jobId}_scene_${segmentIndex}.png`;
 
-  // ── PRIMARY: Gemini Imagen 4 (cinematic quality, $0.02-0.04/image) ──
-  // Session 26: Promoted from fallback to primary for visual quality uplift
+  // ── PRIMARY: Pollinations.ai (FREE, no auth, unlimited) ──
+  // Session 26: REVERTED from Imagen 4 primary — Gemini billing $62+ with card declining.
+  // Railway IPs may get blocked/CAPTCHAd — validate response is a REAL image, not HTML garbage
+  try {
+    const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.slice(0, 2000))}?width=${dim.pollW}&height=${dim.pollH}&nologo=true&seed=${Date.now() + segmentIndex}`;
+    const res = await fetch(pollinationsUrl, { redirect: "follow" });
+
+    if (res.ok) {
+      const contentType = res.headers.get("content-type") || "";
+      const arrayBuf = await res.arrayBuffer();
+      const buf = Buffer.from(arrayBuf);
+      if (isValidImage(buf) && buf.length > 10000) {
+        writeFileSync(imgPath, buf);
+        console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated via Pollinations (${(buf.length / 1024).toFixed(0)}KB)`);
+        return imgPath;
+      } else {
+        console.warn(`[FacelessFactory] Pollinations returned non-image for segment ${segmentIndex}: ${buf.length}B, content-type: ${contentType}, magic: ${buf.slice(0, 4).toString("hex")}`);
+      }
+    } else {
+      console.warn(`[FacelessFactory] Pollinations failed for segment ${segmentIndex}: ${res.status}`);
+    }
+  } catch (err: any) {
+    console.warn(`[FacelessFactory] Pollinations error segment ${segmentIndex}: ${err.message}`);
+  }
+
+  // ── FALLBACK 1: Gemini Imagen 4 ──
   const geminiKey = config.llm.providers.gemini?.apiKey;
   if (geminiKey) {
     try {
@@ -786,7 +810,7 @@ async function generateSceneImage(
           const imgBuf = Buffer.from(b64, "base64");
           if (isValidImage(imgBuf)) {
             writeFileSync(imgPath, imgBuf);
-            console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated via Imagen 4 (${(imgBuf.length / 1024).toFixed(0)}KB)`);
+            console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated via Imagen 4 (fallback)`);
             return imgPath;
           } else {
             console.warn(`[FacelessFactory] Imagen 4 returned invalid image data for segment ${segmentIndex}`);
@@ -798,30 +822,6 @@ async function generateSceneImage(
     } catch (err: any) {
       console.warn(`[FacelessFactory] Imagen 4 error segment ${segmentIndex}: ${err.message}`);
     }
-  }
-
-  // ── FALLBACK 1: Pollinations.ai (FREE, no auth, unlimited) ──
-  // Railway IPs may get blocked/CAPTCHAd — validate response is a REAL image, not HTML garbage
-  try {
-    const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.slice(0, 2000))}?width=${dim.pollW}&height=${dim.pollH}&nologo=true&seed=${Date.now() + segmentIndex}`;
-    const res = await fetch(pollinationsUrl, { redirect: "follow" });
-
-    if (res.ok) {
-      const contentType = res.headers.get("content-type") || "";
-      const arrayBuf = await res.arrayBuffer();
-      const buf = Buffer.from(arrayBuf);
-      if (isValidImage(buf) && buf.length > 10000) {
-        writeFileSync(imgPath, buf);
-        console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated via Pollinations fallback (${(buf.length / 1024).toFixed(0)}KB)`);
-        return imgPath;
-      } else {
-        console.warn(`[FacelessFactory] Pollinations returned non-image for segment ${segmentIndex}: ${buf.length}B, content-type: ${contentType}, magic: ${buf.slice(0, 4).toString("hex")}`);
-      }
-    } else {
-      console.warn(`[FacelessFactory] Pollinations failed for segment ${segmentIndex}: ${res.status}`);
-    }
-  } catch (err: any) {
-    console.warn(`[FacelessFactory] Pollinations error segment ${segmentIndex}: ${err.message}`);
   }
 
   // ── FALLBACK 2: DALL-E 3 via OpenAI ──

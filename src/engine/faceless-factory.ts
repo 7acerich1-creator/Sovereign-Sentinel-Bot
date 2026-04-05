@@ -104,7 +104,44 @@ function extractJSON(raw: string): any | null {
     }
   } catch { /* continue */ }
 
-  console.error(`[extractJSON] All 4 strategies failed`);
+  // Strategy 5: TRUNCATION REPAIR — LLM ran out of tokens mid-JSON.
+  // Close any open strings, arrays, and objects to salvage partial data.
+  // This is critical for long-form scripts where 20 segments can exceed token limits.
+  try {
+    const match = raw.match(/\{[\s\S]*/);
+    if (match) {
+      let truncated = match[0]
+        .replace(/```\s*$/g, "")              // Strip trailing code fence
+        .replace(/,\s*([}\]])/g, "$1")        // Trailing commas
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ""); // Control chars
+
+      // Close any open string (odd number of unescaped quotes)
+      const quoteCount = (truncated.match(/(?<!\\)"/g) || []).length;
+      if (quoteCount % 2 !== 0) truncated += '"';
+
+      // Remove any trailing partial key-value pair (e.g., `"voiceover": "some text`)
+      // by trimming back to the last complete value
+      truncated = truncated.replace(/,\s*"[^"]*":\s*"[^"]*$/, "");
+      truncated = truncated.replace(/,\s*"[^"]*":\s*$/, "");
+      truncated = truncated.replace(/,\s*"[^"]*$/, "");
+
+      // Close open structures: count [ vs ] and { vs }
+      const openBraces = (truncated.match(/{/g) || []).length;
+      const closeBraces = (truncated.match(/}/g) || []).length;
+      const openBrackets = (truncated.match(/\[/g) || []).length;
+      const closeBrackets = (truncated.match(/]/g) || []).length;
+
+      // Close arrays first, then objects
+      for (let i = 0; i < openBrackets - closeBrackets; i++) truncated += "]";
+      for (let i = 0; i < openBraces - closeBraces; i++) truncated += "}";
+
+      const repaired = JSON.parse(truncated);
+      console.warn(`[extractJSON] Strategy 5: Repaired truncated JSON. Segments recovered: ${repaired.segments?.length || 0}`);
+      return repaired;
+    }
+  } catch { /* continue */ }
+
+  console.error(`[extractJSON] All 5 strategies failed`);
   return null;
 }
 
@@ -244,8 +281,10 @@ RULES:
 - CTA should feel organic, not salesy — "The full protocol is at sovereign-synthesis.com"
 - Return ONLY valid JSON, no markdown code fences, no explanation`;
 
-  // Long-form scripts with 20 segments of 80-130 words each need more token headroom
-  const maxTokens = targetDuration === "long" ? 8192 : 4096;
+  // Long-form scripts with 20 segments of 80-130 words each need serious token headroom.
+  // 20 segments × ~120 words × ~1.5 tokens/word = ~3600 tokens just for voiceover text,
+  // plus visual_direction, structure, etc. 12288 gives comfortable room.
+  const maxTokens = targetDuration === "long" ? 12288 : 4096;
 
   const response = await llm.generate(
     [{ role: "user", content: prompt }],

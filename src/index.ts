@@ -749,8 +749,16 @@ async function main() {
             );
           } catch { /* guaranteed plain text fallback above */ }
 
-          const liveBrandMatch = message.content.match(/\b(containment[_ ]?field|tcf)\b/i);
-          const liveBrand = liveBrandMatch ? "containment_field" as const : "ace_richie" as const;
+          // Session 26: Dual-brand pipeline — every URL fires BOTH brands sequentially.
+          // Ace Richie first (niche rotation, personal brand), then TCF (dark psych perspective).
+          // Use "ace only" or "tcf only" to force single-brand.
+          const onlyAce = /\bace\s*only\b/i.test(message.content);
+          const onlyTcf = /\btcf\s*only\b/i.test(message.content);
+          const brands: Array<"ace_richie" | "containment_field"> = onlyTcf
+            ? ["containment_field"]
+            : onlyAce
+            ? ["ace_richie"]
+            : ["ace_richie", "containment_field"];
 
           (async () => {
             // Pause all pollers during pipeline execution to preserve Supabase bandwidth
@@ -758,30 +766,42 @@ async function main() {
             if (setPipelineRunning) setPipelineRunning(true);
 
             try {
-              const result = await executeFullPipeline(
-                liveYoutubeUrl,
-                pipelineLLM,  // Groq-first: free 14,400/day, won't burn Anthropic/OpenAI credits
-                liveBrand,
-                async (step: string, detail: string) => {
-                  try {
-                    await telegram.sendMessage(message.chatId, `${step}: ${detail}`);
-                  } catch { /* non-critical */ }
-                }
-              );
+              for (const brand of brands) {
+                const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
+                try {
+                  await telegram.sendMessage(message.chatId,
+                    `--- ${brandLabel} PIPELINE ---`
+                  );
+                } catch { /* non-critical */ }
 
-              const report = formatPipelineReport(result);
-              try {
-                await telegram.sendMessage(message.chatId, report, { parseMode: "Markdown" });
-              } catch {
-                await telegram.sendMessage(message.chatId, report.replace(/[*_`]/g, ""));
+                try {
+                  const result = await executeFullPipeline(
+                    liveYoutubeUrl,
+                    pipelineLLM,  // Groq-first: free 14,400/day, won't burn Anthropic/OpenAI credits
+                    brand,
+                    async (step: string, detail: string) => {
+                      try {
+                        await telegram.sendMessage(message.chatId, `[${brandLabel}] ${step}: ${detail}`);
+                      } catch { /* non-critical */ }
+                    }
+                  );
+
+                  const report = formatPipelineReport(result);
+                  try {
+                    await telegram.sendMessage(message.chatId, `${brandLabel} COMPLETE:\n${report}`, { parseMode: "Markdown" });
+                  } catch {
+                    await telegram.sendMessage(message.chatId, `${brandLabel} COMPLETE:\n${report.replace(/[*_`]/g, "")}`);
+                  }
+                } catch (err: any) {
+                  console.error(`❌ [/pipeline] ${brandLabel} Pipeline CRASHED: ${err.message}\n${err.stack}`);
+                  try {
+                    await telegram.sendMessage(message.chatId,
+                      `${brandLabel} Pipeline FAILED: ${err.message?.slice(0, 500)}`
+                    );
+                  } catch { /* nothing */ }
+                  // Continue to next brand even if one fails
+                }
               }
-            } catch (err: any) {
-              console.error(`❌ [/pipeline] Pipeline CRASHED: ${err.message}\n${err.stack}`);
-              try {
-                await telegram.sendMessage(message.chatId,
-                  `Pipeline FAILED: ${err.message?.slice(0, 500)}`
-                );
-              } catch { /* nothing */ }
             } finally {
               // Always resume pollers, even on failure
               if (setPipelineRunning) setPipelineRunning(false);
@@ -2720,35 +2740,47 @@ async function main() {
                         );
                       } catch { /* non-critical */ }
 
-                      // Fire pipeline in background (same pattern as /pipeline command)
+                      // Session 26: Dual-brand auto-pipeline — fires BOTH brands sequentially.
+                      // Ace Richie (niche rotation) → The Containment Field (dark psych perspective).
                       (async () => {
                         const setPipelineRunning = (globalThis as any).__setPipelineRunning;
                         if (setPipelineRunning) setPipelineRunning(true);
+                        const autoBrands: Array<"ace_richie" | "containment_field"> = ["ace_richie", "containment_field"];
                         try {
-                          const result = await executeFullPipeline(
-                            autoUrl,
-                            pipelineLLM,
-                            "ace_richie",
-                            async (step: string, detail: string) => {
+                          for (const brand of autoBrands) {
+                            const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
+                            try {
+                              await channel.sendMessage(task.chat_id || defaultChatId, `--- ${brandLabel} AUTO-PIPELINE ---`);
+                            } catch { /* non-critical */ }
+
+                            try {
+                              const result = await executeFullPipeline(
+                                autoUrl,
+                                pipelineLLM,
+                                brand,
+                                async (step: string, detail: string) => {
+                                  try {
+                                    await channel.sendMessage(task.chat_id || defaultChatId, `[${brandLabel}] ${step}: ${detail}`);
+                                  } catch { /* non-critical */ }
+                                }
+                              );
+                              const report = formatPipelineReport(result);
                               try {
-                                await channel.sendMessage(task.chat_id || defaultChatId, `${step}: ${detail}`);
-                              } catch { /* non-critical */ }
+                                await channel.sendMessage(task.chat_id || defaultChatId, `${brandLabel} COMPLETE:\n${report}`, { parseMode: "Markdown" });
+                              } catch {
+                                await channel.sendMessage(task.chat_id || defaultChatId, `${brandLabel} COMPLETE:\n${report.replace(/[*_`]/g, "")}`);
+                              }
+                            } catch (pipeErr: any) {
+                              console.error(`❌ [AutoPipeline] ${brandLabel} Pipeline CRASHED: ${pipeErr.message}`);
+                              try {
+                                await channel.sendMessage(
+                                  task.chat_id || defaultChatId,
+                                  `${brandLabel} Pipeline FAILED: ${pipeErr.message?.slice(0, 500)}`
+                                );
+                              } catch { /* silent */ }
+                              // Continue to next brand even if one fails
                             }
-                          );
-                          const report = formatPipelineReport(result);
-                          try {
-                            await channel.sendMessage(task.chat_id || defaultChatId, report, { parseMode: "Markdown" });
-                          } catch {
-                            await channel.sendMessage(task.chat_id || defaultChatId, report.replace(/[*_`]/g, ""));
                           }
-                        } catch (pipeErr: any) {
-                          console.error(`❌ [AutoPipeline] Pipeline CRASHED: ${pipeErr.message}`);
-                          try {
-                            await channel.sendMessage(
-                              task.chat_id || defaultChatId,
-                              `Pipeline FAILED: ${pipeErr.message?.slice(0, 500)}`
-                            );
-                          } catch { /* silent */ }
                         } finally {
                           if (setPipelineRunning) setPipelineRunning(false);
                         }

@@ -964,8 +964,7 @@ export async function executeFullPipeline(
         title: facelessResult.title,
         description: `${facelessResult.title}\n\n` +
           `Extracted intelligence from the simulation. The Firmware Update continues.\n\n` +
-          `🔗 Full Protocol: https://sovereign-synthesis.com\n` +
-          `📡 Join the Inner Circle: https://sovereign-synthesis.com/inner-circle\n\n` +
+          `🔗 The Protocol: https://sovereign-synthesis.com\n\n` +
           `#SovereignSynthesis #Protocol77 #${whisperResult.niche.replace(/_/g, "")} #FirmwareUpdate #EscapeVelocity`,
         tags: `sovereign synthesis,protocol 77,${whisperResult.niche.replace(/_/g, ",")},firmware update,escape velocity,dark psychology,mindset`,
         niche: whisperResult.niche,

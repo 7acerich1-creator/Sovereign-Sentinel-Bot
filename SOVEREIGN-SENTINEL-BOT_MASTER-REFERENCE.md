@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-05 (Cowork Session 23 — QUALITY GATE + MUSIC + AUTO-PIPELINE + GROQ LOCK) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-05 (Cowork Session 24 — SCHEDULER TIMEZONE FIX + STAGGER) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -8,8 +8,9 @@
 **Mission Metrics:** FIRST CLEAN END-TO-END PIPELINE RUN. All 8 steps green. 1 URL → YouTube long-form + 9 clips + 16 Buffer posts scheduled across 7 days. Two architecture bugs found and fixed: GraphQL enum quoting (killed YouTube/IG Buffer posts) and dual-path distribution (dumped all Shorts at once). Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit `050e699` (Session 23 — Alfred auto-pipeline trigger).
-- Full Session 23 commit chain: `c549b79` (Quality Gate) → `0177d3b` (music bed) → `2e1d3d0` (JSON repair + 12288 tokens) → `bd6744b` (Groq retry + 8 slots) → `050e699` (Alfred auto-pipeline).
+- Bot is live on Railway. Latest commit `d2847f7` (Session 24 — Scheduler timezone fix + stagger).
+- Session 23 commit chain: `c549b79` → `0177d3b` → `2e1d3d0` → `bd6744b` → `050e699` (Alfred auto-pipeline).
+- Session 24 commit: `d2847f7` (scheduler timezone fix + minute-level staggering).
 - Pipeline ran all 8 steps for video iR4AAwNP3r8: "Beyond The Simulation" (258s, 12 scenes, 9 clips, 16 Buffer posts).
 - YouTube long-form live: https://youtube.com/watch?v=ybjDyM3uVts
 - yt-dlp authenticated via YouTube cookies (YOUTUBE_COOKIES_BASE64 env var in Railway).
@@ -220,11 +221,25 @@
 - extractJSON has 5 strategies including truncation repair (closes open JSON structures)
 - Long-form scripts use maxTokens=12288 (was 8192)
 
-**CONTENT COMPOUNDING ENGINE (Session 23):**
-- Alfred's daily 8AM scan now includes directive to find YouTube URL for #1 trending topic
+**CONTENT COMPOUNDING ENGINE (Session 23, SCHEDULE FIXED Session 24):**
+- Alfred's daily 10:05AM CDT scan includes directive to find YouTube URL for #1 trending topic
 - When response contains `PIPELINE_URL: <youtube_url>`, dispatch poller auto-fires VidRush pipeline
 - Buffer scheduling expanded: 8 slots/day (4AM/6AM/8AM/10AM/12PM/2PM/5PM/8PM CT), 56 slots/week
 - Steady state math: 1 auto + 1-2 manual URLs/day × 29 pieces/URL × 7-day spread = 250-400+ posts/week
+
+**SCHEDULER TIMEZONE FIX + STAGGER (Session 24, commit d2847f7):**
+- **BUG FIXED:** All schedulers used `.getHours()` which returns UTC on Railway, but hour values were written as if local time. Every task fired 3-6:30AM CDT while Architect was asleep. Zero dispatches in 24hr confirms bot may not be running OR tasks fired unnoticed.
+- **FIX:** All `.getHours()` replaced with `.getUTCHours()`. Veritas Monday check uses `.getUTCDay()`. All hour values remapped to Architect's 10AM CDT day start. Minute-window guards added to every scheduler to prevent LLM/Supabase collision.
+- **FINAL SCHEDULE (all CDT, all using getUTCHours + minute guards):**
+  - 10:00 AM — Morning Briefing (UTC 15, min 0-2) — direct LLM summary to Telegram
+  - 10:05 AM — Alfred Trend Scan (UTC 15, min 5-7) — dispatches to crew_dispatch, Gemini primary
+  - 11:00 AM — Vector Metrics Sweep (UTC 16, min 0-2) — Groq primary
+  - 11:10 AM Mon — Veritas Weekly Directive (UTC 16, min 10-12) — Anthropic primary
+  - 12:30 PM — Content Engine Production (UTC 17, min 28-32) — failoverLLM
+  - 3:00 PM — Stasis Detection (UTC 20, min 0-2) — per-agent teams
+  - 8:00 PM — Evening Recap (UTC 01, min 0-2) — failoverLLM
+- **Config defaults updated:** `MORNING_BRIEFING_HOUR=15`, `EVENING_RECAP_HOUR=1` (in config.ts)
+- **Files changed:** `src/config.ts`, `src/index.ts` (7 scheduler blocks + 2 log lines)
 
 **SESSION 23 TEST 3 RESULTS (2026-04-05 ~3AM) — video tET-aR-JG-o:**
 - ✅ 56 posts scheduled (8 slots/day working perfectly)

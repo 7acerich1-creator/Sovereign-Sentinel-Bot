@@ -205,12 +205,12 @@ async function main() {
     return new FailoverLLM(chain, 60_000, primaryRetries);
   }
 
-  // Team assignments:
-  // Alfred + Anita → Gemini primary (low rate, research/writing tasks)
-  // Sapphire + Veritas → Anthropic primary (strategic, less frequent, high quality)
-  // Vector + Yuki → Groq primary (Yuki = most tool calls, Groq = 14,400/day free tier)
+  // Team assignments (Session 24 — Alfred promoted to Groq):
+  // Alfred + Vector + Yuki → Groq primary (14,400/day). Staggered: Alfred 10:05AM, Vector 12PM, Yuki on-dispatch only.
+  // Anita → Gemini primary (lighter writing/rewrite tasks, 250/day is sufficient solo)
+  // Sapphire + Veritas → Anthropic primary (strategic, less frequent, highest quality)
   const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
-    alfred: buildTeamLLM(["gemini", "groq", "anthropic"]),
+    alfred: buildTeamLLM(["groq", "gemini", "anthropic"]),
     anita: buildTeamLLM(["gemini", "groq", "anthropic"]),
     sapphire: buildTeamLLM(["anthropic", "gemini", "groq"]),
     veritas: buildTeamLLM(["anthropic", "gemini", "groq"]),
@@ -914,7 +914,7 @@ async function main() {
 
   const autonomousFiredDates = { vectorSweep: "", alfredScan: "", veritasDirective: "" };
 
-  // Vector — Daily CRO Metrics Sweep (11:00 AM CDT = 16:00 UTC)
+  // Vector — Daily CRO Metrics Sweep (12:00 PM CDT = 17:00 UTC — after VidRush pipeline clears)
   scheduler.add({
     name: "Vector Daily Metrics Sweep",
     intervalMs: 60_000,
@@ -925,7 +925,7 @@ async function main() {
       const hour = now.getUTCHours();
       const minute = now.getUTCMinutes();
       const dateKey = now.toDateString();
-      if (hour === 16 && minute >= 0 && minute <= 2 && autonomousFiredDates.vectorSweep !== dateKey) {
+      if (hour === 17 && minute >= 0 && minute <= 2 && autonomousFiredDates.vectorSweep !== dateKey) {
         autonomousFiredDates.vectorSweep = dateKey;
         console.log(`📊 [AutoOps] Vector daily metrics sweep firing for ${dateKey}`);
         try {
@@ -966,7 +966,6 @@ async function main() {
       const dateKey = now.toDateString();
       if (hour === 15 && minute >= 5 && minute <= 7 && autonomousFiredDates.alfredScan !== dateKey) {
         autonomousFiredDates.alfredScan = dateKey;
-        autonomousFiredDates.alfredScan = dateKey;
         console.log(`🔍 [AutoOps] Alfred daily trend scan firing for ${dateKey}`);
         try {
           await dispatchTask({
@@ -997,7 +996,7 @@ async function main() {
     },
   });
 
-  // Veritas — Weekly Strategic Directive (Monday 11:10 AM CDT = 16:10 UTC — 10min after Vector)
+  // Veritas — Weekly Strategic Directive (Monday 12:10 PM CDT = 17:10 UTC — 10min after Vector)
   scheduler.add({
     name: "Veritas Weekly Directive",
     intervalMs: 60_000,
@@ -1006,7 +1005,7 @@ async function main() {
     handler: async () => {
       const now = new Date();
       const dateKey = now.toDateString();
-      if (now.getUTCDay() === 1 && now.getUTCHours() === 16 && now.getUTCMinutes() >= 10 && now.getUTCMinutes() <= 12 && autonomousFiredDates.veritasDirective !== dateKey) {
+      if (now.getUTCDay() === 1 && now.getUTCHours() === 17 && now.getUTCMinutes() >= 10 && now.getUTCMinutes() <= 12 && autonomousFiredDates.veritasDirective !== dateKey) {
         autonomousFiredDates.veritasDirective = dateKey;
         console.log(`🎯 [AutoOps] Veritas weekly strategic directive firing for ${dateKey}`);
         try {
@@ -1035,7 +1034,7 @@ async function main() {
     },
   });
 
-  console.log("⚡ [AutoOps] Scheduled: Alfred trend scan (10:05AM CDT/15:05UTC), Vector daily sweep (11:00AM CDT/16:00UTC), Veritas weekly directive (Mon 11:10AM CDT/16:10UTC)");
+  console.log("⚡ [AutoOps] Scheduled: Alfred trend scan (10:05AM CDT/15:05UTC), Vector daily sweep (12:00PM CDT/17:00UTC), Veritas weekly directive (Mon 12:10PM CDT/17:10UTC)");
 
   // ── Deterministic Content Engine — Daily Production + Distribution ──
   // Master ref Section 23. Posting guide: SOVEREIGN-POSTING-GUIDE.md
@@ -1048,7 +1047,7 @@ async function main() {
     console.warn(`[ContentEngine] Boot channel discovery failed (will retry): ${err.message}`)
   );
 
-  // Daily Content Production (12:30 PM CDT = 17:30 UTC — after Alfred pipeline + Vector sweep)
+  // Daily Content Production (1:30 PM CDT = 18:30 UTC — after Vector sweep + Veritas clear)
   scheduler.add({
     name: "Content Engine — Daily Production",
     intervalMs: 60_000,
@@ -1060,8 +1059,8 @@ async function main() {
       const minute = now.getUTCMinutes();
       const dateKey = now.toDateString();
 
-      // Fire at 17:30 UTC (12:30 PM CDT) — after Alfred's trend scan and pipeline have had time to run
-      if (hour === 17 && minute >= 28 && minute <= 32 && contentEngineFiredDate.production !== dateKey) {
+      // Fire at 18:30 UTC (1:30 PM CDT) — after Vector sweep and Veritas weekly have cleared
+      if (hour === 18 && minute >= 28 && minute <= 32 && contentEngineFiredDate.production !== dateKey) {
         contentEngineFiredDate.production = dateKey;
         console.log(`🚀 [ContentEngine] Daily production firing for ${dateKey}`);
         try {
@@ -1098,9 +1097,9 @@ async function main() {
     },
   });
 
-  console.log("⚡ [ContentEngine] Scheduled: Daily production (12:30PM CDT/17:30UTC), Distribution sweep (every 5min)");
+  console.log("⚡ [ContentEngine] Scheduled: Daily production (1:30PM CDT/18:30UTC), Distribution sweep (every 5min)");
 
-  // ── Stasis Detection — Daily Agent Self-Check (3:00 PM CDT = 20:00 UTC) ──
+  // ── Stasis Detection — Daily Agent Self-Check (3:30 PM CDT = 20:30 UTC) ──
   const stasisFiredDate = { value: "" };
   const stasisAgents = ["vector", "yuki", "alfred", "anita", "sapphire", "veritas"];
 
@@ -1114,7 +1113,7 @@ async function main() {
       const hour = now.getUTCHours();
       const minute = now.getUTCMinutes();
       const dateKey = now.toDateString();
-      if (hour === 20 && minute >= 0 && minute <= 2 && stasisFiredDate.value !== dateKey) {
+      if (hour === 20 && minute >= 28 && minute <= 32 && stasisFiredDate.value !== dateKey) {
         stasisFiredDate.value = dateKey;
         console.log(`🔍 [StasisCheck] Dispatching daily stasis self-check to all agents for ${dateKey}`);
         for (const agent of stasisAgents) {

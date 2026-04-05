@@ -971,6 +971,10 @@ async function main() {
                 "Scan trending topics across your 5 niches (dark psychology, self-improvement, burnout recovery, quantum consciousness, sovereign systems). " +
                 "Score each opportunity by relevance to Sovereign Synthesis brand (1-10) and viral potential (1-10). " +
                 "Generate today's content brief: top 3 content opportunities with suggested hooks, formats (short-form, long-form, carousel), and target platforms. " +
+                "CRITICAL — PIPELINE FUEL: For your #1 ranked opportunity, use your browser tool to search YouTube for a high-performing video " +
+                "(50k+ views, relevant to the topic, posted in last 30 days). Include the FULL YouTube URL in your response " +
+                "in this exact format: PIPELINE_URL: https://www.youtube.com/watch?v=XXXXX — This URL will auto-trigger the VidRush pipeline. " +
+                "If you cannot find a suitable video, write PIPELINE_URL: NONE. " +
                 "Dispatch the top hook to Yuki for distribution optimization. " +
                 "Report the full brief to the Architect.",
               triggered_at: new Date().toISOString(),
@@ -2673,6 +2677,66 @@ async function main() {
                   }
                 } catch (handoffErr: any) {
                   console.error(`[Pipeline] Handoff error for ${agentName}: ${handoffErr.message}`);
+                }
+
+                // ── AUTO-PIPELINE TRIGGER: Alfred's daily scan → VidRush ──
+                // When Alfred completes a daily_trend_scan and his response contains PIPELINE_URL: <youtube_url>,
+                // automatically fire the 8-step VidRush pipeline. This is the compounding engine:
+                // 1 auto-pipeline/day + manual URLs = 250+ posts/week at steady state.
+                if (agentName === "alfred" && task.task_type === "daily_trend_scan") {
+                  try {
+                    const pipelineUrlMatch = response.match(/PIPELINE_URL:\s*(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11}))/);
+                    if (pipelineUrlMatch) {
+                      const autoUrl = pipelineUrlMatch[1];
+                      const autoVideoId = pipelineUrlMatch[2];
+                      console.log(`🚀 [AutoPipeline] Alfred found pipeline fuel: ${autoVideoId} — launching VidRush`);
+                      try {
+                        await channel.sendMessage(
+                          task.chat_id || defaultChatId,
+                          `🚀 *AUTO-PIPELINE ACTIVATED*\nAlfred's daily scan found: \`${autoVideoId}\`\n8-step pipeline launching autonomously...`,
+                          { parseMode: "Markdown" }
+                        );
+                      } catch { /* non-critical */ }
+
+                      // Fire pipeline in background (same pattern as /pipeline command)
+                      (async () => {
+                        const setPipelineRunning = (globalThis as any).__setPipelineRunning;
+                        if (setPipelineRunning) setPipelineRunning(true);
+                        try {
+                          const result = await executeFullPipeline(
+                            autoUrl,
+                            pipelineLLM,
+                            "ace_richie",
+                            async (step: string, detail: string) => {
+                              try {
+                                await channel.sendMessage(task.chat_id || defaultChatId, `${step}: ${detail}`);
+                              } catch { /* non-critical */ }
+                            }
+                          );
+                          const report = formatPipelineReport(result);
+                          try {
+                            await channel.sendMessage(task.chat_id || defaultChatId, report, { parseMode: "Markdown" });
+                          } catch {
+                            await channel.sendMessage(task.chat_id || defaultChatId, report.replace(/[*_`]/g, ""));
+                          }
+                        } catch (pipeErr: any) {
+                          console.error(`❌ [AutoPipeline] Pipeline CRASHED: ${pipeErr.message}`);
+                          try {
+                            await channel.sendMessage(
+                              task.chat_id || defaultChatId,
+                              `Pipeline FAILED: ${pipeErr.message?.slice(0, 500)}`
+                            );
+                          } catch { /* silent */ }
+                        } finally {
+                          if (setPipelineRunning) setPipelineRunning(false);
+                        }
+                      })();
+                    } else {
+                      console.log(`🔍 [AutoPipeline] Alfred scan complete — no PIPELINE_URL found in response`);
+                    }
+                  } catch (autoErr: any) {
+                    console.error(`[AutoPipeline] Error checking Alfred response: ${autoErr.message}`);
+                  }
                 }
 
                 // ── Two-tier notification: per-agent brief recap + Sapphire full summary ──

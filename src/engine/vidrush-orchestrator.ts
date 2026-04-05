@@ -127,8 +127,13 @@ const NICHE_FILTERS: Record<string, string> = {
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// STEP 4: CHOP LONG-FORM INTO CLIPS
-// Evenly divides the long-form video into ~30 clips (20-30s each)
+// STEP 4: SMART CHOP — CUT AT SENTENCE BOUNDARIES
+// Uses ffmpeg silencedetect to find natural pause points in the TTS audio,
+// then cuts clips at those pauses instead of at arbitrary math intervals.
+// This prevents the "mid-sentence cliff" problem where clips start/end
+// in the middle of a thought.
+//
+// QUALITY GATE (Session 23): Replaces dumb math division.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async function chopLongFormIntoClips(
@@ -136,7 +141,7 @@ async function chopLongFormIntoClips(
   niche: string,
   jobId: string,
   targetClipCount: number = 30,
-  clipDurationSec: number = 25
+  targetClipDuration: number = 25
 ): Promise<ClipMeta[]> {
   // Get video duration
   let totalDuration: number;
@@ -150,26 +155,103 @@ async function chopLongFormIntoClips(
     totalDuration = 600; // fallback 10 min
   }
 
-  // Calculate actual clip count and duration
-  const maxClips = Math.floor(totalDuration / clipDurationSec);
-  const actualClipCount = Math.min(targetClipCount, maxClips);
-  const actualDuration = totalDuration / actualClipCount;
+  // ── SMART BOUNDARY DETECTION ──
+  // Use ffmpeg silencedetect to find pauses in the TTS voiceover.
+  // These pauses occur naturally between sentences/segments.
+  // silence_threshold: -35dB catches TTS inter-sentence gaps
+  // min_silence_duration: 0.3s filters out micro-pauses within words
+  let silencePoints: number[] = [];
+  try {
+    const silenceOutput = execSync(
+      `ffmpeg -i "${videoPath}" -af "silencedetect=noise=-35dB:d=0.3" -f null - 2>&1`,
+      { timeout: 60_000, encoding: "utf-8" }
+    );
+    // Parse silence_end timestamps from ffmpeg output
+    // Format: [silencedetect @ 0x...] silence_end: 28.5432 | silence_duration: 0.512
+    const matches = silenceOutput.matchAll(/silence_end:\s*([\d.]+)/g);
+    for (const match of matches) {
+      silencePoints.push(parseFloat(match[1]));
+    }
+    console.log(`🔍 [Orchestrator] Found ${silencePoints.length} silence boundaries in ${totalDuration.toFixed(0)}s video`);
+  } catch (err: any) {
+    console.warn(`[Orchestrator] Silence detection failed, using fallback: ${err.message?.slice(0, 150)}`);
+  }
 
-  console.log(`🔪 [Orchestrator] Chopping ${totalDuration.toFixed(0)}s video into ${actualClipCount} clips of ~${actualDuration.toFixed(0)}s each`);
+  // ── BUILD CLIP BOUNDARIES ──
+  // Strategy: walk through the video in ~targetClipDuration chunks.
+  // At each target cut point, snap to the nearest silence boundary.
+  // This ensures clips start/end at natural sentence breaks.
+  // Tolerance: ±8s from the ideal cut point (so clips range ~17-33s)
+  const MIN_CLIP_DURATION = 15;  // Never shorter than 15s
+  const MAX_CLIP_DURATION = 40;  // Never longer than 40s
+  const SNAP_TOLERANCE = 8;      // Search ±8s for a silence boundary
 
+  const maxClips = Math.floor(totalDuration / MIN_CLIP_DURATION);
+  const idealClipCount = Math.min(targetClipCount, maxClips);
+  const idealDuration = totalDuration / idealClipCount;
+
+  const cutPoints: number[] = [0]; // Always start at 0
+
+  if (silencePoints.length >= 2) {
+    // SMART MODE: snap to silence boundaries
+    let currentTarget = idealDuration;
+
+    while (currentTarget < totalDuration - MIN_CLIP_DURATION) {
+      // Find the silence point nearest to our target
+      let bestPoint = currentTarget;
+      let bestDistance = SNAP_TOLERANCE + 1;
+
+      for (const sp of silencePoints) {
+        const distance = Math.abs(sp - currentTarget);
+        if (distance < bestDistance && distance <= SNAP_TOLERANCE) {
+          // Also check it won't create a clip that's too short or too long
+          const lastCut = cutPoints[cutPoints.length - 1];
+          const clipLen = sp - lastCut;
+          if (clipLen >= MIN_CLIP_DURATION && clipLen <= MAX_CLIP_DURATION) {
+            bestPoint = sp;
+            bestDistance = distance;
+          }
+        }
+      }
+
+      // If no silence boundary found within tolerance, use the target directly
+      // (still better than cutting mid-word since ffmpeg will find the nearest keyframe)
+      const lastCut = cutPoints[cutPoints.length - 1];
+      const clipLen = bestPoint - lastCut;
+      if (clipLen >= MIN_CLIP_DURATION) {
+        cutPoints.push(bestPoint);
+      }
+
+      currentTarget = bestPoint + idealDuration;
+    }
+
+    console.log(`🎯 [Orchestrator] Smart chop: ${cutPoints.length - 1} clips with sentence-boundary cuts`);
+  } else {
+    // FALLBACK: dumb math division (if silence detection failed)
+    const actualClipCount = Math.min(targetClipCount, Math.floor(totalDuration / targetClipDuration));
+    const actualDuration = totalDuration / actualClipCount;
+    for (let i = 1; i < actualClipCount; i++) {
+      cutPoints.push(i * actualDuration);
+    }
+    console.log(`⚠️ [Orchestrator] Fallback chop: ${cutPoints.length - 1} clips with math division (no silence data)`);
+  }
+
+  // Always end at video duration
+  cutPoints.push(totalDuration);
+
+  // ── CUT CLIPS ──
   const clipDir = `${ORCHESTRATOR_DIR}/${jobId}/clips`;
   if (!existsSync(clipDir)) mkdirSync(clipDir, { recursive: true });
 
   const nicheFilter = NICHE_FILTERS[niche] || NICHE_FILTERS.dark_psychology;
   const clips: ClipMeta[] = [];
 
-  for (let i = 0; i < actualClipCount; i++) {
-    const startSec = i * actualDuration;
-    const endSec = Math.min(startSec + actualDuration, totalDuration);
+  for (let i = 0; i < cutPoints.length - 1; i++) {
+    const startSec = cutPoints[i];
+    const endSec = cutPoints[i + 1];
     const clipPath = `${clipDir}/clip_${i.toString().padStart(2, "0")}.mp4`;
 
     try {
-      // Cut + scale to 9:16 + niche color grade
       execSync(
         `ffmpeg -i "${videoPath}" ` +
           `-ss ${startSec.toFixed(2)} -to ${endSec.toFixed(2)} ` +
@@ -188,12 +270,13 @@ async function chopLongFormIntoClips(
         endSec,
         captionText: "",
       });
+      console.log(`  ✂️ Clip ${i}: ${startSec.toFixed(1)}s → ${endSec.toFixed(1)}s (${(endSec - startSec).toFixed(1)}s)`);
     } catch (err: any) {
       console.error(`[Orchestrator] Clip ${i} failed: ${err.message?.slice(0, 200)}`);
     }
   }
 
-  console.log(`✅ [Orchestrator] ${clips.length}/${actualClipCount} clips cut`);
+  console.log(`✅ [Orchestrator] ${clips.length}/${cutPoints.length - 1} clips cut (smart boundaries)`);
   return clips;
 }
 

@@ -279,6 +279,63 @@ RULES:
   const estimatedMinutes = (totalWords / 140).toFixed(1); // ~140 WPM for measured narration
   console.log(`📊 [FacelessFactory] Script word counts: [${wordCounts.join(", ")}] | Total: ${totalWords} words | Estimated: ~${estimatedMinutes} min at 140 WPM`);
 
+  // QUALITY GATE (Session 23): Enforce minimum segment count for long-form.
+  // If the LLM produces fewer than 15 segments, the video will be 2-4 min instead of 10-15.
+  // This was the root cause of "Break Free" at 171s (7 segments) and "Beyond The Simulation"
+  // at 258s (12 segments). The LLM simply doesn't produce enough content on the first pass.
+  if (targetDuration === "long" && segments.length < 15) {
+    console.warn(`⚠️ [FacelessFactory] Only ${segments.length} segments (need 15+). Attempting segment expansion...`);
+    // Don't retry the whole LLM call (costs time + tokens) — instead, expand what we have.
+    // Take each short segment and ask the LLM to elaborate it into 2 segments.
+    const expansionNeeded = Math.max(15 - segments.length, 5);
+    const segmentsToExpand = segments
+      .map((s: any, i: number) => ({ ...s, _idx: i, _words: s.voiceover.split(/\s+/).filter(Boolean).length }))
+      .sort((a: any, b: any) => a._words - b._words) // Expand shortest segments first
+      .slice(0, expansionNeeded);
+
+    for (const seg of segmentsToExpand) {
+      try {
+        const expandPrompt = `You are expanding a voiceover script segment for a faceless documentary video.
+
+ORIGINAL SEGMENT: "${seg.voiceover}"
+VISUAL: "${seg.visual_direction}"
+
+Rewrite this as TWO separate segments. Each segment should be 6-10 sentences (80-130 words).
+The first segment sets up the idea. The second segment deepens it with examples, implications, or a provocative question.
+Write in a measured, documentary-style voice — not fast-talking.
+
+Return ONLY valid JSON:
+[
+  { "voiceover": "first segment text", "visual_direction": "visual for first", "duration_hint": 35 },
+  { "voiceover": "second segment text", "visual_direction": "visual for second", "duration_hint": 35 }
+]`;
+
+        const expandResponse = await llm.generate(
+          [{ role: "user", content: expandPrompt }],
+          { maxTokens: 2048, temperature: 0.7 }
+        );
+
+        const expandParsed = extractJSON(expandResponse.content);
+        if (Array.isArray(expandParsed) && expandParsed.length === 2) {
+          // Replace the original segment with the two expanded ones
+          const idx = segments.findIndex((s: any) => s.voiceover === seg.voiceover);
+          if (idx !== -1) {
+            segments.splice(idx, 1,
+              { voiceover: expandParsed[0].voiceover, visual_direction: expandParsed[0].visual_direction || seg.visual_direction, duration_hint: Math.max(expandParsed[0].duration_hint || 35, 25) },
+              { voiceover: expandParsed[1].voiceover, visual_direction: expandParsed[1].visual_direction || seg.visual_direction, duration_hint: Math.max(expandParsed[1].duration_hint || 35, 25) }
+            );
+            console.log(`  📝 Expanded segment ${seg._idx}: ${seg._words}w → ${expandParsed[0].voiceover.split(/\s+/).length}w + ${expandParsed[1].voiceover.split(/\s+/).length}w`);
+          }
+        }
+      } catch (err: any) {
+        console.warn(`  ⚠️ Expansion failed for segment ${seg._idx}: ${err.message?.slice(0, 100)}`);
+      }
+    }
+
+    const newTotal = segments.reduce((sum: number, s: any) => sum + s.voiceover.split(/\s+/).filter(Boolean).length, 0);
+    console.log(`📊 [FacelessFactory] After expansion: ${segments.length} segments, ${newTotal} words (~${(newTotal / 140).toFixed(1)} min)`);
+  }
+
   if (targetDuration === "long" && totalWords < 800) {
     console.warn(`⚠️ [FacelessFactory] Long-form script only has ${totalWords} words — expected 1200-1800 for 10-15 min. Video will be shorter than target.`);
   }
@@ -308,8 +365,10 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<strin
   ];
   const totalChars = allSegmentTexts.reduce((sum, t) => sum + t.length, 0);
   const isLongForm = allSegmentTexts.length > 8;
-  // Slow down TTS for long-form: 0.9x speed for measured, documentary-style delivery
-  const ttsSpeed = isLongForm ? 0.9 : undefined;
+  // QUALITY GATE (Session 23): Slower TTS for documentary feel.
+  // 0.9x was still too rushed per real output testing. 0.85x + 0.6s silence pads
+  // between segments creates the measured, "letting you in on a secret" cadence.
+  const ttsSpeed = isLongForm ? 0.85 : undefined;
   console.log(`🗣️ [FacelessFactory] Rendering TTS — ${allSegmentTexts.length} segments, ${totalChars} chars total${isLongForm ? " (long-form, 0.9x speed)" : ""}`);
 
   // If total text fits in one call (short-form), do it in one shot
@@ -387,24 +446,69 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<strin
     throw new Error("All TTS segments failed — cannot produce audio");
   }
 
-  // Concatenate all segment mp3s into one file
-  const concatListPath = `${FACELESS_DIR}/${jobId}_audio_concat.txt`;
-  const concatContent = segmentPaths.map(p => `file '${p}'`).join("\n");
-  writeFileSync(concatListPath, concatContent);
-
+  // QUALITY GATE (Session 23): Generate a 0.6s silence pad for between segments.
+  // This creates breathing room between thoughts, reducing the "rushed" feeling.
+  const silencePad = `${FACELESS_DIR}/${jobId}_silence.mp3`;
   try {
     execSync(
-      `ffmpeg -f concat -safe 0 -i "${concatListPath}" -c:a libmp3lame -b:a 128k -y "${audioPath}"`,
+      `ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 0.6 -c:a libmp3lame -b:a 128k -y "${silencePad}"`,
+      { timeout: 10_000, stdio: "pipe" }
+    );
+  } catch {
+    // If silence generation fails, we'll concatenate without pads
+  }
+  const hasSilencePad = existsSync(silencePad);
+
+  // Concatenate all segment mp3s with silence pads between them
+  const concatListPath = `${FACELESS_DIR}/${jobId}_audio_concat.txt`;
+  const concatLines: string[] = [];
+  for (let i = 0; i < segmentPaths.length; i++) {
+    concatLines.push(`file '${segmentPaths[i]}'`);
+    // Add silence pad between segments (not after the last one)
+    if (hasSilencePad && i < segmentPaths.length - 1) {
+      concatLines.push(`file '${silencePad}'`);
+    }
+  }
+  writeFileSync(concatListPath, concatLines.join("\n"));
+
+  // Concatenate with silence pads, then apply loudnorm + voice warmth
+  const rawConcatPath = `${FACELESS_DIR}/${jobId}_voiceover_raw_concat.mp3`;
+  try {
+    execSync(
+      `ffmpeg -f concat -safe 0 -i "${concatListPath}" -c:a libmp3lame -b:a 128k -y "${rawConcatPath}"`,
       { timeout: 120_000, stdio: "pipe" }
     );
   } catch (err: any) {
-    // Fallback: just use the first segment
     console.warn(`[FacelessFactory] Concat failed, using first segment: ${err.message?.slice(0, 200)}`);
     const { copyFileSync } = require("fs");
-    copyFileSync(segmentPaths[0], audioPath);
+    copyFileSync(segmentPaths[0], rawConcatPath);
   }
 
-  console.log(`✅ [FacelessFactory] Audio rendered (${segmentPaths.length} segments concatenated): ${audioPath}`);
+  // QUALITY GATE: Audio post-processing chain
+  //   1. loudnorm — consistent volume (fixes "too quiet" issue)
+  //   2. bass boost — voice warmth (subtle low-end fill, reduces robotic feel)
+  //   3. highpass — remove rumble below 80Hz
+  //   4. acompressor — gentle compression to even out volume peaks
+  try {
+    execSync(
+      `ffmpeg -i "${rawConcatPath}" ` +
+        `-af "highpass=f=80,` +
+        `acompressor=threshold=-20dB:ratio=3:attack=5:release=50,` +
+        `equalizer=f=200:t=h:w=100:g=3,` +  // Warm bass boost
+        `equalizer=f=3000:t=h:w=1000:g=-1,` +  // Slight high cut (less harsh)
+        `loudnorm=I=-16:LRA=11:TP=-1.5" ` +  // EBU R128 loudness normalization
+        `-c:a libmp3lame -b:a 192k -y "${audioPath}"`,
+      { timeout: 120_000, stdio: "pipe" }
+    );
+    console.log(`✅ [FacelessFactory] Audio rendered + mastered (${segmentPaths.length} segments, loudnorm + warmth): ${audioPath}`);
+  } catch (err: any) {
+    // Fallback: use raw concat without mastering
+    console.warn(`[FacelessFactory] Audio mastering failed, using raw concat: ${err.message?.slice(0, 200)}`);
+    const { copyFileSync } = require("fs");
+    copyFileSync(rawConcatPath, audioPath);
+    console.log(`✅ [FacelessFactory] Audio rendered (${segmentPaths.length} segments, no mastering): ${audioPath}`);
+  }
+
   return audioPath;
 }
 
@@ -577,22 +681,37 @@ async function assembleVideo(
   const totalFrames = Math.ceil(audioDuration * fps);
   const framesPerSegment = Math.ceil(segDuration * fps);
 
+  // QUALITY GATE (Session 23): Text hook overlay
+  // Burns the hook text into the first 3 seconds of the video as a scroll-stopping overlay.
+  // White text with dark shadow, centered, large font. Fades out from 2s-3s.
+  const hookText = (script.hook || script.segments[0]?.voiceover || "")
+    .split(/[.!?]/)[0]  // First sentence only
+    .replace(/'/g, "'\\''")  // Escape single quotes for ffmpeg
+    .replace(/:/g, "\\:")     // Escape colons for ffmpeg drawtext
+    .slice(0, 80);            // Max 80 chars for readability
+
+  // drawtext filter: show for first 3s, fade out during second 2-3
+  const hookOverlay = hookText
+    ? `,drawtext=text='${hookText}':fontsize=42:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h*0.4):enable='between(t,0,3)':alpha='if(lt(t,2),1,(3-t))'`
+    : "";
+
   // Build the ffmpeg command:
   // 1. Concat images into slideshow
   // 2. Apply Ken Burns (zoompan) effect
   // 3. Apply niche color grade
-  // 4. Overlay voiceover audio
-  // 5. Output 9:16 MP4
+  // 4. Overlay hook text (first 3s)
+  // 5. Overlay voiceover audio
+  // 6. Output 9:16 MP4
 
   const kenBurnsFilter = `zoompan=z='min(zoom+0.0005,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${framesPerSegment}:s=1080x1920:fps=${fps}`;
 
   try {
     execSync(
       `ffmpeg -f concat -safe 0 -i "${concatListPath}" -i "${audioPath}" ` +
-        `-filter_complex "[0:v]${kenBurnsFilter},${nicheFilter}[v]" ` +
+        `-filter_complex "[0:v]${kenBurnsFilter},${nicheFilter}${hookOverlay}[v]" ` +
         `-map "[v]" -map 1:a ` +
         `-c:v libx264 -preset fast -crf 23 ` +
-        `-c:a aac -b:a 128k ` +
+        `-c:a aac -b:a 192k ` +
         `-shortest -y "${outputPath}"`,
       { timeout: 600_000, stdio: "pipe" }  // 10 min timeout for long-form assembly
     );
@@ -601,9 +720,9 @@ async function assembleVideo(
     console.warn(`[FacelessFactory] Ken Burns failed, trying simple assembly: ${err.message?.slice(0, 200)}`);
     execSync(
       `ffmpeg -f concat -safe 0 -i "${concatListPath}" -i "${audioPath}" ` +
-        `-vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${nicheFilter}" ` +
+        `-vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${nicheFilter}${hookOverlay}" ` +
         `-c:v libx264 -preset fast -crf 23 ` +
-        `-c:a aac -b:a 128k ` +
+        `-c:a aac -b:a 192k ` +
         `-shortest -y "${outputPath}"`,
       { timeout: 600_000, stdio: "pipe" }  // 10 min timeout for long-form assembly
     );

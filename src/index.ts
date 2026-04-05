@@ -206,13 +206,13 @@ async function main() {
     return new FailoverLLM(chain, 60_000, primaryRetries);
   }
 
-  // Team assignments (Session 24 — Alfred promoted to Groq):
-  // Alfred + Vector + Yuki → Groq primary (14,400/day). Staggered: Alfred 10:05AM, Vector 12PM, Yuki on-dispatch only.
-  // Anita → Gemini primary (lighter writing/rewrite tasks, 250/day is sufficient solo)
+  // Team assignments (Session 24 — Alfred promoted to Groq, Session 28 — Anita moved to Groq-first):
+  // ALL content agents → Groq primary (14,400/day). Staggered: Alfred 10:05AM, Vector 12PM, Yuki on-dispatch only.
+  // Anita → Groq primary (was Gemini-first, caused $62 bill in 5 days — 26K token system prompt × cascade dispatches)
   // Sapphire + Veritas → Anthropic primary (strategic, less frequent, highest quality)
   const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
     alfred: buildTeamLLM(["groq", "gemini", "anthropic"]),
-    anita: buildTeamLLM(["gemini", "groq", "anthropic"]),
+    anita: buildTeamLLM(["groq", "gemini", "anthropic"]),
     sapphire: buildTeamLLM(["anthropic", "gemini", "groq"]),
     veritas: buildTeamLLM(["anthropic", "gemini", "groq"]),
     vector: buildTeamLLM(["groq", "gemini", "anthropic"]),
@@ -1093,8 +1093,8 @@ async function main() {
         contentEngineFiredDate.production = dateKey;
         console.log(`🚀 [ContentEngine] Daily production firing for ${dateKey}`);
         try {
-          // Content Engine uses Anita's team (Gemini-first) — writing tasks, 250/day is sufficient.
-          // Keeps pipeline Groq budget untouched and Anthropic reserved for Veritas brain.
+          // Content Engine uses Anita's team (Groq-first, Gemini failover) — writing tasks.
+          // Session 28: Moved from Gemini-first to stop $12/day token burn from 26K system prompt.
           const count = await dailyContentProduction(AGENT_LLM_TEAMS.anita);
           console.log(`✅ [ContentEngine] Produced ${count} content pieces for today`);
 
@@ -1349,7 +1349,7 @@ async function main() {
     try {
       console.log(`🚀 [ContentEngine] MANUAL production trigger for ${dateKey} (force=${force})`);
       contentEngineFiredDate.production = dateKey;
-      // Manual trigger uses same Anita team as scheduled — consistent LLM routing.
+      // Manual trigger uses same Anita team as scheduled — Groq-first, consistent LLM routing.
       const count = await dailyContentProduction(AGENT_LLM_TEAMS.anita);
       console.log(`✅ [ContentEngine] Manual production complete: ${count} pieces`);
 

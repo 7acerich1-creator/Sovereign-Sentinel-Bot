@@ -111,7 +111,7 @@ export class SocialSchedulerPostTool implements Tool {
       },
       media_url: {
         type: "string",
-        description: "Optional URL to an image to attach to the post. Buffer GraphQL supports image URLs.",
+        description: "Optional URL to an image or video to attach to the post. Buffer GraphQL supports both image and video assets.",
       },
       niche: {
         type: "string",
@@ -120,6 +120,10 @@ export class SocialSchedulerPostTool implements Tool {
       now: {
         type: "string",
         description: "Set to 'true' to share immediately instead of adding to queue.",
+      },
+      metadata_json: {
+        type: "string",
+        description: "JSON string of platform-specific metadata. Structure: { youtube: { title, categoryId, privacy?, ... }, instagram: { type, shouldShareToFeed, firstComment? }, tiktok: { title? } }. Only include the relevant platform key for the target channel.",
       },
     },
     required: ["channel_ids", "text"],
@@ -133,6 +137,16 @@ export class SocialSchedulerPostTool implements Tool {
       let mediaUrl = args.media_url ? String(args.media_url) : undefined;
       const now = args.now === "true" || args.now === true;
       const niche = args.niche ? String(args.niche) : "unknown";
+
+      // Platform-specific metadata (YouTube, Instagram, TikTok, etc.)
+      let metadataObj: Record<string, unknown> | undefined;
+      if (args.metadata_json) {
+        try {
+          metadataObj = JSON.parse(String(args.metadata_json));
+        } catch {
+          console.warn("[SocialScheduler] Failed to parse metadata_json — posting without metadata");
+        }
+      }
 
       // ── MEDIA TYPE DETECTION ──
       // Buffer GraphQL assets supports both images AND videos.
@@ -175,6 +189,26 @@ export class SocialSchedulerPostTool implements Tool {
             dueAtBlock = `dueAt: "${scheduledAt}"`;
           }
 
+          // Build platform-specific metadata block
+          // Structure: metadata: { youtube: { title: "...", categoryId: "..." }, ... }
+          let metadataBlock = "";
+          if (metadataObj && Object.keys(metadataObj).length > 0) {
+            const buildGqlObj = (obj: unknown): string => {
+              if (obj === null || obj === undefined) return "null";
+              if (typeof obj === "string") return JSON.stringify(obj);
+              if (typeof obj === "number" || typeof obj === "boolean") return String(obj);
+              if (Array.isArray(obj)) return `[${obj.map(buildGqlObj).join(", ")}]`;
+              if (typeof obj === "object") {
+                const entries = Object.entries(obj as Record<string, unknown>)
+                  .filter(([, v]) => v !== undefined && v !== null)
+                  .map(([k, v]) => `${k}: ${buildGqlObj(v)}`);
+                return `{ ${entries.join(", ")} }`;
+              }
+              return String(obj);
+            };
+            metadataBlock = `metadata: ${buildGqlObj(metadataObj)}`;
+          }
+
           const query = `
             mutation CreatePost {
               createPost(input: {
@@ -184,6 +218,7 @@ export class SocialSchedulerPostTool implements Tool {
                 mode: ${shareMode}
                 ${dueAtBlock ? `, ${dueAtBlock}` : ""}
                 ${assetsBlock ? `, ${assetsBlock}` : ""}
+                ${metadataBlock ? `, ${metadataBlock}` : ""}
               }) {
                 ... on PostActionSuccess {
                   post {

@@ -510,6 +510,10 @@ async function scheduleBufferWeek(
 
     // ── MEDIA-REQUIRED CHANNELS (TikTok, Instagram, YouTube) ──
     // Only send if clip has a public video URL
+    // CRITICAL: These platforms REQUIRE metadata fields per Buffer API docs:
+    //   YouTube: metadata.youtube.title + metadata.youtube.categoryId (REQUIRED)
+    //   Instagram: metadata.instagram.type + metadata.instagram.shouldShareToFeed (REQUIRED)
+    //   TikTok: metadata.tiktok.title (optional but recommended)
     if (clip.publicUrl) {
       for (const channel of mediaChannels) {
         const dayOffset = Math.floor(globalSlotIndex / timeSlots.length);
@@ -524,6 +528,28 @@ async function scheduleBufferWeek(
         const postText = (copy as any)[copyKey] || copy.tiktok || copy.instagram ||
           `Firmware Update incoming. #SovereignSynthesis #${niche.replace(/_/g, "")}`;
 
+        // Build platform-specific metadata based on channel service
+        const metadata: Record<string, unknown> = {};
+        const clipTitle = postText.split("\n")[0].slice(0, 100) || "Sovereign Synthesis";
+
+        if (channel.service === "youtube") {
+          metadata.youtube = {
+            title: clipTitle,
+            categoryId: "22",  // "People & Blogs" — safe default for Sovereign Synthesis content
+            privacy: "public",
+            madeForKids: false,
+          };
+        } else if (channel.service === "instagram") {
+          metadata.instagram = {
+            type: "reel",  // Reels are the primary format for short-form video
+            shouldShareToFeed: true,
+          };
+        } else if (channel.service === "tiktok") {
+          metadata.tiktok = {
+            title: clipTitle,
+          };
+        }
+
         try {
           const result = await postTool.execute({
             channel_ids: channel.id,
@@ -531,10 +557,11 @@ async function scheduleBufferWeek(
             media_url: clip.publicUrl,
             scheduled_at: scheduledAt,
             niche,
+            metadata_json: JSON.stringify(metadata),
           });
           if (result.includes("✅")) {
             scheduledCount++;
-            console.log(`  📌 Clip ${clipIdx} → ${channel.service}/${channel.name} @ ${scheduledAt} [video]`);
+            console.log(`  📌 Clip ${clipIdx} → ${channel.service}/${channel.name} @ ${scheduledAt} [video+metadata]`);
           }
         } catch (err: any) {
           console.error(`[Orchestrator] Buffer failed clip ${clipIdx} → ${channel.service}: ${err.message?.slice(0, 200)}`);

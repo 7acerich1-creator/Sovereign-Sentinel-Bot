@@ -33,9 +33,9 @@ export const config: GravityClawConfig = {
 
   llm: {
     defaultProvider: process.env.LLM_DEFAULT_PROVIDER || "anthropic",
-    // Anthropic primary ($13 credits loaded 2026-04-03). Gemini secondary ($45 balance).
-    // Groq free tier as emergency fallback. OpenAI/DeepSeek last resort.
-    failoverOrder: envList("LLM_FAILOVER_ORDER", ["anthropic", "gemini", "groq", "openai", "deepseek"]),
+    // Groq FREE tier first (no cost). Gemini secondary ($45 balance). Anthropic tertiary ($13 credits).
+    // OpenAI last resort. DeepSeek removed — unreliable.
+    failoverOrder: envList("LLM_FAILOVER_ORDER", ["groq", "gemini", "anthropic", "openai"]),
     maxIterations: envInt("LLM_MAX_ITERATIONS", 10),
     providers: {
       gemini: {

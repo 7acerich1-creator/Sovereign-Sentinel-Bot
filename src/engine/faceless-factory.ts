@@ -178,6 +178,15 @@ function cleanupJobFiles(jobId: string, keepFinal: boolean = true): void {
         }
       } catch { /* skip */ }
     }
+    // Also clean up scene clips subdirectory
+    const sceneDir = `${FACELESS_DIR}/${jobId}_scenes`;
+    if (existsSync(sceneDir)) {
+      try {
+        const { rmSync } = require("fs");
+        rmSync(sceneDir, { recursive: true, force: true });
+        cleaned++;
+      } catch { /* skip */ }
+    }
     if (cleaned > 0) console.log(`🧹 [FacelessFactory] Cleaned ${cleaned} intermediate files for ${jobId}`);
   } catch (err: any) {
     console.error(`⚠️ [FacelessFactory] Cleanup error: ${err.message}`);
@@ -551,10 +560,18 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<strin
   }
 
   // QUALITY GATE: Audio post-processing chain
-  //   1. loudnorm — consistent volume (fixes "too quiet" issue)
-  //   2. bass boost — voice warmth (subtle low-end fill, reduces robotic feel)
-  //   3. highpass — remove rumble below 80Hz
-  //   4. acompressor — gentle compression to even out volume peaks
+  //   1. highpass — remove rumble below 80Hz
+  //   2. acompressor — gentle compression to even out volume peaks
+  //   3. bass boost — voice warmth (subtle low-end fill)
+  //   4. high cut — reduce harshness above 3kHz
+  //   5. [long-form only] room reverb — cinematic presence via dual-tap aecho
+  //      Creates the "dark theater" feel where the voice exists in a space,
+  //      not injected dry into the ear. Two reflections: 100ms + 200ms.
+  //      Shorts stay dry — they need to hit fast and direct.
+  //   6. loudnorm — EBU R128 consistent volume
+  const reverbFilter = isLongForm
+    ? `aecho=0.8:0.72:100|200:0.25|0.15,`  // Dark theater: dual-tap room reverb
+    : "";
   try {
     execSync(
       `ffmpeg -i "${rawConcatPath}" ` +
@@ -562,11 +579,12 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<strin
         `acompressor=threshold=-20dB:ratio=3:attack=5:release=50,` +
         `equalizer=f=200:t=h:w=100:g=3,` +  // Warm bass boost
         `equalizer=f=3000:t=h:w=1000:g=-1,` +  // Slight high cut (less harsh)
+        `${reverbFilter}` +                     // Room reverb (long-form only)
         `loudnorm=I=-16:LRA=11:TP=-1.5" ` +  // EBU R128 loudness normalization
         `-c:a libmp3lame -b:a 192k -y "${audioPath}"`,
       { timeout: 120_000, stdio: "pipe" }
     );
-    console.log(`✅ [FacelessFactory] Audio rendered + mastered (${segmentPaths.length} segments, loudnorm + warmth): ${audioPath}`);
+    console.log(`✅ [FacelessFactory] Audio rendered + mastered (${segmentPaths.length} segments, loudnorm + warmth${isLongForm ? " + room reverb" : ""}): ${audioPath}`);
   } catch (err: any) {
     // Fallback: use raw concat without mastering
     console.warn(`[FacelessFactory] Audio mastering failed, using raw concat: ${err.message?.slice(0, 200)}`);
@@ -734,22 +752,69 @@ async function assembleVideo(
   }
 
   const segDuration = audioDuration / validSegments.length;
+  const fps = 30;
+  const framesPerSegment = Math.round(segDuration * fps);
+  const fadeDuration = 0.4; // 0.4s fade in/out between scenes — smooth dissolve-like transitions
 
-  // Build ffmpeg concat input file
-  // Each image shown for segDuration seconds
+  // ── PRE-RENDER EACH SCENE AS A VIDEO CLIP (Ken Burns + fade transitions) ──
+  // Instead of a single concat-then-zoompan approach, render each scene individually
+  // with Ken Burns + fade-in/fade-out. Concat the clips for smooth transitions.
+  // This prevents hard cuts between scenes — fades create a dissolve-like effect.
+  const sceneClipPaths: string[] = [];
+  const sceneClipDir = `${FACELESS_DIR}/${jobId}_scenes`;
+  if (!existsSync(sceneClipDir)) mkdirSync(sceneClipDir, { recursive: true });
+
+  const dim = DIMS[orientation];
+
+  for (let i = 0; i < validSegments.length; i++) {
+    const seg = validSegments[i];
+    const clipPath = `${sceneClipDir}/scene_${i.toString().padStart(2, "0")}.mp4`;
+    const fadeOutStart = Math.max(0, segDuration - fadeDuration);
+
+    // Ken Burns zoompan + fade in (first 0.4s) + fade out (last 0.4s)
+    // First and last scenes: only fade in or fade out respectively (no double-fade at edges)
+    const fadeIn = i > 0 ? `fade=t=in:st=0:d=${fadeDuration},` : "";
+    const fadeOut = i < validSegments.length - 1 ? `,fade=t=out:st=${fadeOutStart.toFixed(2)}:d=${fadeDuration}` : "";
+
+    try {
+      execSync(
+        `ffmpeg -loop 1 -i "${seg.imgPath}" ` +
+          `-t ${segDuration.toFixed(2)} ` +
+          `-vf "${fadeIn}zoompan=z='min(zoom+0.0005,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${framesPerSegment}:s=${dim.width}x${dim.height}:fps=${fps}${fadeOut}" ` +
+          `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p ` +
+          `-y "${clipPath}"`,
+        { timeout: 120_000, stdio: "pipe" }
+      );
+      sceneClipPaths.push(clipPath);
+    } catch (err: any) {
+      console.warn(`[FacelessFactory] Scene ${i} clip render failed, using raw: ${err.message?.slice(0, 150)}`);
+      // Fallback: render without Ken Burns/fade
+      try {
+        execSync(
+          `ffmpeg -loop 1 -i "${seg.imgPath}" ` +
+            `-t ${segDuration.toFixed(2)} ` +
+            `-vf "scale=${dim.width}:${dim.height}:force_original_aspect_ratio=increase,crop=${dim.width}:${dim.height}" ` +
+            `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p ` +
+            `-y "${clipPath}"`,
+          { timeout: 60_000, stdio: "pipe" }
+        );
+        sceneClipPaths.push(clipPath);
+      } catch { /* skip this scene entirely */ }
+    }
+  }
+
+  if (sceneClipPaths.length === 0) {
+    throw new Error("All scene clip renders failed — cannot assemble video");
+  }
+
+  // Build concat list from pre-rendered scene clips
   const concatListPath = `${FACELESS_DIR}/${jobId}_concat.txt`;
-  const concatLines = validSegments.map(
-    (s) => `file '${s.imgPath}'\nduration ${segDuration.toFixed(2)}`
-  );
-  // ffmpeg concat requires last file repeated without duration
-  concatLines.push(`file '${validSegments[validSegments.length - 1].imgPath}'`);
+  const concatLines = sceneClipPaths.map(p => `file '${p}'`);
   writeFileSync(concatListPath, concatLines.join("\n"));
 
-  // Ken Burns: slow zoom from 100% to 115% over each segment
-  // zoompan filter: z increases from 1 to 1.15 over the segment, with pan to keep centered
-  const fps = 30;
-  const totalFrames = Math.ceil(audioDuration * fps);
-  const framesPerSegment = Math.ceil(segDuration * fps);
+  console.log(`🎬 [FacelessFactory] ${sceneClipPaths.length}/${validSegments.length} scene clips rendered (Ken Burns + ${fadeDuration}s crossfade)`);
+
+  // Ken Burns is now applied per-scene above. Video assembly just concats + applies color grade + hook.
 
   // QUALITY GATE (Session 23): Text hook overlay
   // Burns the hook text into the first 3 seconds of the video as a scroll-stopping overlay.
@@ -898,20 +963,11 @@ async function assembleVideo(
     console.warn(`[FacelessFactory] Music bed generation failed (non-fatal): ${err.message?.slice(0, 200)}`);
   }
 
-  // Build the ffmpeg command:
-  // 1. Concat images into slideshow
-  // 2. Apply Ken Burns (zoompan) effect
-  // 3. Apply niche color grade
-  // 4. Overlay hook text (first 3s)
-  // 5. Mix voiceover + background music
-  // 6. Output MP4 (orientation-aware: 16:9 for long-form, 9:16 for shorts)
-
-  const dim = DIMS[orientation];
-  const kenBurnsFilter = `zoompan=z='min(zoom+0.0005,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${framesPerSegment}:s=${dim.width}x${dim.height}:fps=${fps}`;
+  // Build the final assembly command:
+  // Scene clips are already pre-rendered with Ken Burns + crossfade above.
+  // Assembly just needs: concat scenes → apply color grade + hook overlay → mix audio.
 
   // Audio filter: if music bed exists, mix voice (loud) + music (quiet) via amix.
-  // Voice gets volume=1.0, music gets volume=0.15 (~-16dB under voice).
-  // amix normalize=0 prevents auto-gain that would pump the music up when voice pauses.
   const audioFilter = hasMusicBed
     ? `[1:a]volume=1.0[voice];[2:a]volume=0.15[bg];[voice][bg]amix=inputs=2:duration=first:normalize=0[aout]`
     : "";
@@ -921,30 +977,35 @@ async function assembleVideo(
   try {
     execSync(
       `ffmpeg -f concat -safe 0 -i "${concatListPath}" -i "${audioPath}" ${musicInput}` +
-        `-filter_complex "[0:v]${kenBurnsFilter},${nicheFilter}${hookOverlay}[v]${hasMusicBed ? ";" + audioFilter : ""}" ` +
+        `-filter_complex "[0:v]${nicheFilter}${hookOverlay}[v]${hasMusicBed ? ";" + audioFilter : ""}" ` +
         `-map "[v]" ${audioMap} ` +
         `-c:v libx264 -preset fast -crf 23 ` +
         `-c:a aac -b:a 192k ` +
         `-shortest -y "${outputPath}"`,
-      { timeout: 600_000, stdio: "pipe" }  // 10 min timeout for long-form assembly
+      { timeout: 600_000, stdio: "pipe" }
     );
   } catch (err: any) {
-    // Fallback: simpler assembly without Ken Burns if zoompan fails.
-    // When music bed exists, must use filter_complex for both video + audio (can't mix -vf and -filter_complex).
-    console.warn(`[FacelessFactory] Ken Burns failed, trying simple assembly: ${err.message?.slice(0, 200)}`);
-    const fallbackVideoFilter = `[0:v]scale=${dim.width}:${dim.height}:force_original_aspect_ratio=increase,crop=${dim.width}:${dim.height},${nicheFilter}${hookOverlay}[v]`;
-    const fallbackFilter = hasMusicBed
-      ? `${fallbackVideoFilter};${audioFilter}`
-      : fallbackVideoFilter;
-    execSync(
-      `ffmpeg -f concat -safe 0 -i "${concatListPath}" -i "${audioPath}" ${musicInput}` +
-        `-filter_complex "${fallbackFilter}" ` +
-        `-map "[v]" ${audioMap} ` +
-        `-c:v libx264 -preset fast -crf 23 ` +
-        `-c:a aac -b:a 192k ` +
-        `-shortest -y "${outputPath}"`,
-      { timeout: 600_000, stdio: "pipe" }  // 10 min timeout for long-form assembly
-    );
+    // Fallback: no filter_complex for video — just pass through + audio mix
+    console.warn(`[FacelessFactory] Color grade/hook failed, trying plain assembly: ${err.message?.slice(0, 200)}`);
+    if (hasMusicBed) {
+      execSync(
+        `ffmpeg -f concat -safe 0 -i "${concatListPath}" -i "${audioPath}" ${musicInput}` +
+          `-filter_complex "${audioFilter}" ` +
+          `-map 0:v ${audioMap} ` +
+          `-c:v libx264 -preset fast -crf 23 ` +
+          `-c:a aac -b:a 192k ` +
+          `-shortest -y "${outputPath}"`,
+        { timeout: 600_000, stdio: "pipe" }
+      );
+    } else {
+      execSync(
+        `ffmpeg -f concat -safe 0 -i "${concatListPath}" -i "${audioPath}" ` +
+          `-c:v libx264 -preset fast -crf 23 ` +
+          `-c:a aac -b:a 192k ` +
+          `-shortest -y "${outputPath}"`,
+        { timeout: 600_000, stdio: "pipe" }
+      );
+    }
   }
 
   console.log(`🎬 [FacelessFactory] Video assembled: ${outputPath}`);

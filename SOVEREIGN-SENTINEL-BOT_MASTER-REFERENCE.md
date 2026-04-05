@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-05 (Cowork Session 23 — PIPELINE TEST + DISTRIBUTION ARCHITECTURE FIX) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-05 (Cowork Session 23 — QUALITY GATE + MUSIC + AUTO-PIPELINE + GROQ LOCK) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -8,8 +8,8 @@
 **Mission Metrics:** FIRST CLEAN END-TO-END PIPELINE RUN. All 8 steps green. 1 URL → YouTube long-form + 9 clips + 16 Buffer posts scheduled across 7 days. Two architecture bugs found and fixed: GraphQL enum quoting (killed YouTube/IG Buffer posts) and dual-path distribution (dumped all Shorts at once). Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit `0177d3b` (Session 23 — background music bed).
-- Quality Gate commit `c549b79` + music commit `0177d3b` both deployed.
+- Bot is live on Railway. Latest commit `050e699` (Session 23 — Alfred auto-pipeline trigger).
+- Full Session 23 commit chain: `c549b79` (Quality Gate) → `0177d3b` (music bed) → `2e1d3d0` (JSON repair + 12288 tokens) → `bd6744b` (Groq retry + 8 slots) → `050e699` (Alfred auto-pipeline).
 - Pipeline ran all 8 steps for video iR4AAwNP3r8: "Beyond The Simulation" (258s, 12 scenes, 9 clips, 16 Buffer posts).
 - YouTube long-form live: https://youtube.com/watch?v=ybjDyM3uVts
 - yt-dlp authenticated via YouTube cookies (YOUTUBE_COOKIES_BASE64 env var in Railway).
@@ -197,10 +197,13 @@
 - `PLATFORM_DEFAULTS` — Per-platform metadata constraints (hashtag counts, max lengths, hook windows)
 - Integration plan documented in PROMPT TEMPLATES section above
 
-**Session 23 changes — ALL PUSHED. Commits:**
-- `c549b79` — Quality Gate: smart clip boundaries (silencedetect), segment expansion (LLM), audio mastering (loudnorm+EQ+compression), 0.6s silence pads, 0.85x TTS speed, hook text overlay (drawtext)
-- `0177d3b` — Background music bed: niche-aware ambient drone (sine waves + pink noise), mixed at -16dB under voice, 2s fade-in / 3s fade-out. Zero external deps.
-- Earlier Session 23 commits: buildGqlObj ENUM: prefix (social-scheduler.ts), Step 7 → verification only (vidrush-orchestrator.ts), Viral Brain prompt system (social-optimization-prompt.ts)
+**Session 23 changes — ALL PUSHED. Full commit chain:**
+- `a9ae902` — GraphQL enum quoting fix (ENUM: prefix), Step 7 → verification only, Viral Brain prompt system
+- `c549b79` — Quality Gate: smart clip boundaries, segment expansion, audio mastering, silence pads, TTS speed, hook overlay
+- `0177d3b` — Background music bed: niche-aware ambient drone (sine waves + pink noise)
+- `2e1d3d0` — Truncated JSON repair (Strategy 5) + maxTokens bumped 8192→12288 for long-form
+- `bd6744b` — Groq retry lock (3x before Gemini failover) + 8 daily Buffer time slots
+- `050e699` — Alfred auto-pipeline trigger (daily scan finds YouTube URL → fires VidRush)
 
 **QUALITY GATE — DEPLOYED (Session 23). Production upgrades in faceless-factory.ts:**
 1. **Smart clip boundaries** — ffmpeg silencedetect finds natural pause points (±8s tolerance, 15-40s clips). Falls back to math division.
@@ -211,15 +214,25 @@
 6. **Hook text overlay** — First sentence burns into opening 3s, fades out 2-3s. White text, dark shadow, centered.
 7. **Background music** — Niche-specific ambient drone (dark_psych=A minor ominous, self_improvement=C major uplifting, etc). Layered sine waves + filtered pink noise. Mixed under voice via amix normalize=0. Graceful fallback if generation fails.
 
+**LLM PROVIDER ARCHITECTURE (Session 23):**
+- Pipeline LLM: Groq → (3 retries with 3s/6s/9s backoff) → Gemini → Anthropic → OpenAI
+- Groq gets 4 total attempts before Gemini ever touches the request. Gemini's JSON output is unreliable.
+- extractJSON has 5 strategies including truncation repair (closes open JSON structures)
+- Long-form scripts use maxTokens=12288 (was 8192)
+
+**CONTENT COMPOUNDING ENGINE (Session 23):**
+- Alfred's daily 8AM scan now includes directive to find YouTube URL for #1 trending topic
+- When response contains `PIPELINE_URL: <youtube_url>`, dispatch poller auto-fires VidRush pipeline
+- Buffer scheduling expanded: 8 slots/day (4AM/6AM/8AM/10AM/12PM/2PM/5PM/8PM CT), 56 slots/week
+- Steady state math: 1 auto + 1-2 manual URLs/day × 29 pieces/URL × 7-day spread = 250-400+ posts/week
+
 **NEXT SESSION PRIORITIES (Session 24):**
 
-**STEP 1: RE-TEST PIPELINE** with Quality Gate + music deployed. Buffer will add new posts alongside existing queue (no collision — uses `customScheduled` with specific `dueAt` timestamps). Afternoon slots (2PM, 4PM, 6PM CT) are available if we want to expand scheduling windows.
+**STEP 1: RE-TEST PIPELINE** with all Session 23 upgrades deployed. Verify: music bed plays, hook overlay renders, longer video output, Groq stays primary (check Railway logs for provider name).
 
 **STEP 2: EVALUATE OUTPUT QUALITY.** Listen to the music bed mixing level. Check if hook overlay is readable. Verify segment expansion produces longer videos (target 10-15 min). Tune parameters if needed.
 
 **STEP 3: PLATFORM ADAPTATION ENGINE.** TikTok needs faster cadence (1.05-1.1x speed). Each platform needs format-specific variants. Wire in the Viral Brain prompt for per-platform copy optimization.
-
-**STEP 4: SCHEDULING INTELLIGENCE.** Current scheduler doesn't check for existing Buffer posts — just adds at hardcoded time slots. Consider: query pending posts first, offset new posts to avoid stacking. Also add afternoon slots (2PM, 4PM, 6PM CT) to the rotation.
 
 **Buffer channels are CORRECT (9 total = 2 brands x ~5 platforms). They are NOT duplicates. DO NOT suggest cleaning or removing channels. DO NOT filter channels by service type. EVER.**
 

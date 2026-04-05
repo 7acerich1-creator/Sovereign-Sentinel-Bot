@@ -2113,4 +2113,23 @@ The weekly batch must respect the IG cap: Instagram (Ace) = 3 slots/day (7 AM, 1
 
 ---
 
+## Section 28: Gemini Billing Crisis — Root Cause & Fix (2026-04-05, Session 28)
+
+**Problem:** Gemini API billed $62.16 in Apr 1-5 (vs $17.20 for all of March). Card declining.
+
+**Root Cause:** Anita was configured as Gemini-first (`["gemini", "groq", "anthropic"]`). Every dispatched task sent ~26K input tokens to `gemini-3.1-pro-preview`. The 26K breaks down as: 4.5K system prompt (prompt_blueprint) + ~20K accumulated context (conversation summary + last 20 messages from SQLite + semantic memory search + Pinecone recalls + dispatch payload). Pipeline cascade multiplied this — one Alfred scan triggers 5-8 downstream Gemini calls via `triggerPipelineHandoffs()`.
+
+**Fix Applied (commit a66af35):** Flipped Anita to Groq-first (`["groq", "gemini", "anthropic"]`). Groq is free tier. Gemini remains as failover only. All other agents were already Groq-first or Anthropic-first.
+
+**Current LLM Team Assignments:**
+- Alfred, Vector, Yuki, **Anita** → Groq primary (free, 14,400/day)
+- Sapphire, Veritas → Anthropic primary (strategic, highest quality)
+- Pipeline → Groq primary with Gemini failover
+- Gemini is now FAILOVER ONLY for all agents
+
+**FUTURE OPTIMIZATION (Option C) — Not urgent, queue for later:**
+The real token bloat is NOT the system prompt (4.5K is fine). It's the context accumulation in `agent/loop.ts` `buildContext()` which loads conversation summary + 20 recent messages + memory search + Pinecone recalls for EVERY dispatch call. Dispatch tasks share the agent loop's conversation history, so each successive cascade call gets heavier. The optimization would be: clear agent loop context between dispatch tasks so each starts clean (~6-8K per call instead of ~26K). This is free on Groq so no cost urgency, but would improve response quality (less noise in context) and reduce latency. File: `src/agent/loop.ts` around line 230.
+
+---
+
 *This document is the sovereign source of truth. If it doesn't know it, the session doesn't know it. Update it or lose it.*

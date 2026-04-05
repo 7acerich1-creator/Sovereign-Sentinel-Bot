@@ -13,3 +13,10 @@ mcp.json
 credentials_vault.json
 *.pyc
 __pycache__/
+
+# Temp files
+commitmsg.txt
+*.patch
+
+# Legacy — fully migrated to TypeScript
+_legacy/

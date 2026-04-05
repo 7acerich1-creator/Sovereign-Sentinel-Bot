@@ -7,9 +7,9 @@
 
 **Mission Metrics:** FIRST CLEAN END-TO-END PIPELINE RUN. All 8 steps green. 1 URL → YouTube long-form + 9 clips + 16 Buffer posts scheduled across 7 days. Two architecture bugs found and fixed: GraphQL enum quoting (killed YouTube/IG Buffer posts) and dual-path distribution (dumped all Shorts at once). Revenue still $0.
 
-**Infrastructure: OPERATIONAL — AWAITING PUSH.**
-- Bot is live on Railway. Commit `fe768d5` deployed (Session 22).
-- Session 23 fixes are LOCAL — need commit + push. Three files changed.
+**Infrastructure: OPERATIONAL — ALL PUSHED.**
+- Bot is live on Railway. Latest commit `0177d3b` (Session 23 — background music bed).
+- Quality Gate commit `c549b79` + music commit `0177d3b` both deployed.
 - Pipeline ran all 8 steps for video iR4AAwNP3r8: "Beyond The Simulation" (258s, 12 scenes, 9 clips, 16 Buffer posts).
 - YouTube long-form live: https://youtube.com/watch?v=ybjDyM3uVts
 - yt-dlp authenticated via YouTube cookies (YOUTUBE_COOKIES_BASE64 env var in Railway).
@@ -43,11 +43,16 @@
   - TikTok: `metadata.tiktok = { title }` — optional but recommended
   - Without these metadata fields, YouTube and Instagram posts would be SILENTLY REJECTED by Buffer
 
-**PENDING — VIDEO PRODUCTION QUALITY GATE (Session 22+):**
-- Current video production has ZERO effects: no background music, no sound effects, no transitions, no text overlays, no intro/outro, no audio processing on voice. It's a Ken Burns slideshow with raw TTS voiceover.
-- Quality Gate system needed (ffmpeg-based, zero cost):
-  1. Background ambient music (low volume, royalty-free, niche-matched)
-  2. Audio crossfade between scenes (not hard cuts)
+**QUALITY GATE STATUS (Session 23 — DEPLOYED):**
+- ✅ Background ambient music — niche-aware synthesized drone, mixed under voice
+- ✅ Audio mastering — loudnorm + EQ + compression chain
+- ✅ Silence pads between segments — 0.6s breathing room
+- ✅ Hook text overlay — first sentence burned into opening 3s
+- ✅ Smart clip boundaries — silencedetect natural pause points
+- ✅ Segment expansion — LLM expands short scripts to 15+ segments
+- ✅ Slower TTS — 0.85x documentary cadence
+- REMAINING Quality Gate items (Session 24+):
+  1. Audio crossfade between scenes (not hard cuts)
   3. Voice warmth filter (EQ + slight reverb to reduce robotic feel)
   4. Text hook overlay burned into first 3 seconds
   5. Intro bumper + outro CTA card
@@ -192,22 +197,29 @@
 - `PLATFORM_DEFAULTS` — Per-platform metadata constraints (hashtag counts, max lengths, hook windows)
 - Integration plan documented in PROMPT TEMPLATES section above
 
-**Session 23 changes NOT YET PUSHED. Files changed:**
-- `src/tools/social-scheduler.ts` — buildGqlObj ENUM: prefix support
-- `src/engine/vidrush-orchestrator.ts` — Step 7 → verification only, metadata uses ENUM: prefix
-- `src/prompts/social-optimization-prompt.ts` — NEW FILE: Viral Brain prompt system
+**Session 23 changes — ALL PUSHED. Commits:**
+- `c549b79` — Quality Gate: smart clip boundaries (silencedetect), segment expansion (LLM), audio mastering (loudnorm+EQ+compression), 0.6s silence pads, 0.85x TTS speed, hook text overlay (drawtext)
+- `0177d3b` — Background music bed: niche-aware ambient drone (sine waves + pink noise), mixed at -16dB under voice, 2s fade-in / 3s fade-out. Zero external deps.
+- Earlier Session 23 commits: buildGqlObj ENUM: prefix (social-scheduler.ts), Step 7 → verification only (vidrush-orchestrator.ts), Viral Brain prompt system (social-optimization-prompt.ts)
+
+**QUALITY GATE — DEPLOYED (Session 23). Production upgrades in faceless-factory.ts:**
+1. **Smart clip boundaries** — ffmpeg silencedetect finds natural pause points (±8s tolerance, 15-40s clips). Falls back to math division.
+2. **Segment expansion** — If LLM produces < 15 segments, shortest are expanded via follow-up LLM calls.
+3. **Audio mastering** — highpass 80Hz → compressor → warm bass EQ (+3dB@200Hz) → high cut (-1dB@3kHz) → loudnorm EBU R128 (-16 LUFS).
+4. **Silence pads** — 0.6s between segments for breathing room.
+5. **TTS speed** — 0.85x for documentary cadence (was 0.9x).
+6. **Hook text overlay** — First sentence burns into opening 3s, fades out 2-3s. White text, dark shadow, centered.
+7. **Background music** — Niche-specific ambient drone (dark_psych=A minor ominous, self_improvement=C major uplifting, etc). Layered sine waves + filtered pink noise. Mixed under voice via amix normalize=0. Graceful fallback if generation fails.
 
 **NEXT SESSION PRIORITIES (Session 24):**
 
-**STEP 1: COMMIT + PUSH + DEPLOY Session 23 fixes.** Then re-test pipeline. Verify all 9 Buffer channels receive posts (especially YouTube and Instagram). Check Buffer calendar.
+**STEP 1: RE-TEST PIPELINE** with Quality Gate + music deployed. Buffer will add new posts alongside existing queue (no collision — uses `customScheduled` with specific `dueAt` timestamps). Afternoon slots (2PM, 4PM, 6PM CT) are available if we want to expand scheduling windows.
 
-**STEP 2: PURGE OLD BUFFER POSTS.** The 16 posts from Session 23 test are live in Buffer queue. The Saturday posts from Step 7's direct dump are also there. Run `/buffer_audit` or manually purge before next test to avoid double-posting.
+**STEP 2: EVALUATE OUTPUT QUALITY.** Listen to the music bed mixing level. Check if hook overlay is readable. Verify segment expansion produces longer videos (target 10-15 min). Tune parameters if needed.
 
-**STEP 3: BUILD QUALITY GATE.** Video production quality standard (see PENDING section above). Video length also needs fixing (258s/4.3 min vs 10-15 min target) — investigate segment count, TTS duration hints, and assembly logic in faceless-factory.ts.
+**STEP 3: PLATFORM ADAPTATION ENGINE.** TikTok needs faster cadence (1.05-1.1x speed). Each platform needs format-specific variants. Wire in the Viral Brain prompt for per-platform copy optimization.
 
-**STEP 4: PLATFORM ADAPTATION ENGINE.** TikTok needs faster cadence. Each platform needs format-specific variants. Wire in the Viral Brain prompt for per-platform copy optimization.
-
-**STEP 4: PLATFORM ADAPTATION ENGINE.** TikTok needs faster cadence (1.05-1.1x speed). Each platform needs format-specific variants. Design the adapter layer.
+**STEP 4: SCHEDULING INTELLIGENCE.** Current scheduler doesn't check for existing Buffer posts — just adds at hardcoded time slots. Consider: query pending posts first, offset new posts to avoid stacking. Also add afternoon slots (2PM, 4PM, 6PM CT) to the rotation.
 
 **Buffer channels are CORRECT (9 total = 2 brands x ~5 platforms). They are NOT duplicates. DO NOT suggest cleaning or removing channels. DO NOT filter channels by service type. EVER.**
 

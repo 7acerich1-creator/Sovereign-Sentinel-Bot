@@ -495,7 +495,8 @@ async function main() {
           `⚡ *GRAVITY CLAW v3.0 — ONLINE*\n\n` +
           `Sovereign Frequency: *LOCKED*\n` +
           `Protocol 77: *ACTIVE*\n` +
-          `LLM: *${failoverLLM.activeProvider || failoverLLM.listProviders()[0]}*\n` +
+          `Veritas Brain: *${AGENT_LLM_TEAMS.veritas.listProviders().join(" → ")}*\n` +
+          `Pipeline LLM: *${failoverLLM.listProviders().join(" → ")}*\n` +
           `Memory: *${memoryProviders.map((m) => m.name).join(", ")}*\n` +
           `Tools: *${tools.length} loaded*\n\n` +
           `Commands:\n` +
@@ -583,12 +584,17 @@ async function main() {
       case "/status":
         await telegram.sendMessage(message.chatId,
           `📊 *SYSTEM STATUS — GRAVITY CLAW v3.0*\n\n` +
-          `⚡ LLM: ${failoverLLM.activeProvider || failoverLLM.listProviders()[0]}\n` +
-          `🧠 Memory Tiers: ${memoryProviders.length}\n` +
+          `🧠 *LLM ROUTING:*\n` +
+          `  Veritas (chat): ${AGENT_LLM_TEAMS.veritas.listProviders().join(" → ")}\n` +
+          `  Sapphire: ${AGENT_LLM_TEAMS.sapphire.listProviders().join(" → ")}\n` +
+          `  Anita (content): ${AGENT_LLM_TEAMS.anita.listProviders().join(" → ")}\n` +
+          `  Alfred (trends): ${AGENT_LLM_TEAMS.alfred.listProviders().join(" → ")}\n` +
+          `  Pipeline: ${failoverLLM.listProviders().join(" → ")}\n\n` +
           `🔧 Tools: ${tools.length}\n` +
           `📡 MCP Servers: ${mcpBridge.listConnectedServers().length}\n` +
           `📚 Skills: ${skillsSystem.listSkills().length}\n` +
           `⏰ Scheduled: ${scheduler.list().length}\n` +
+          `🧠 Memory Tiers: ${memoryProviders.length}\n` +
           `🔒 Security: ${config.security.maxAgentIterations} max iterations\n\n` +
           `*FREQUENCY: SOVEREIGN*`,
           { parseMode: "Markdown" }

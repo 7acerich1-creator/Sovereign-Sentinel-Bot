@@ -127,19 +127,137 @@ const NICHE_FILTERS: Record<string, string> = {
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// STEP 4: SMART CHOP — CUT AT SENTENCE BOUNDARIES
-// Uses ffmpeg silencedetect to find natural pause points in the TTS audio,
-// then cuts clips at those pauses instead of at arbitrary math intervals.
-// This prevents the "mid-sentence cliff" problem where clips start/end
-// in the middle of a thought.
+// STEP 4: SEMANTIC CLIP EXTRACTION
+// Session 24 UPGRADE: LLM-driven story moment identification.
+// Instead of cutting at silence boundaries (arbitrary chunks),
+// the LLM reads the Whisper transcript and identifies self-contained
+// "story moments" — complete ideas that work as standalone shorts.
+// Each clip gets a title + hook for downstream copy generation.
 //
-// QUALITY GATE (Session 23): Replaces dumb math division.
+// Fallback chain: LLM semantic → silence boundaries → math division
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+interface StoryMoment {
+  title: string;
+  hook: string;
+  startSec: number;
+  endSec: number;
+}
+
+/** Ask the LLM to identify self-contained story moments from the transcript */
+async function extractStoryMoments(
+  llm: LLMProvider,
+  segments: { start: number; end: number; text: string }[],
+  niche: string,
+  totalDuration: number
+): Promise<StoryMoment[] | null> {
+  if (!segments || segments.length < 10) return null;
+
+  // Build a condensed transcript with timestamps for the LLM.
+  // Group segments into ~10s chunks to keep the prompt manageable.
+  const condensed: string[] = [];
+  let chunkStart = segments[0].start;
+  let chunkText: string[] = [];
+
+  for (const seg of segments) {
+    chunkText.push(seg.text.trim());
+    if (seg.end - chunkStart >= 10 || seg === segments[segments.length - 1]) {
+      condensed.push(`[${chunkStart.toFixed(1)}s-${seg.end.toFixed(1)}s] ${chunkText.join(" ")}`);
+      chunkStart = seg.end;
+      chunkText = [];
+    }
+  }
+
+  // Cap at ~4000 chars to stay within token limits for Groq
+  let transcriptBlock = condensed.join("\n");
+  if (transcriptBlock.length > 4000) {
+    transcriptBlock = transcriptBlock.slice(0, 4000) + "\n[...transcript truncated]";
+  }
+
+  const prompt = `You are a viral content strategist analyzing a ${niche.replace(/_/g, " ")} video transcript (${totalDuration.toFixed(0)}s total).
+
+Your job: identify 8-15 SELF-CONTAINED STORY MOMENTS that each work as a standalone short-form video (15-45 seconds each).
+
+A great story moment:
+- Has a complete thought arc (setup → insight → payoff)
+- Opens with a hook that stops the scroll
+- Contains a single powerful idea (not 3 ideas crammed together)
+- Ends with impact — a punchline, revelation, or call to action
+- Does NOT start or end mid-sentence
+
+Rules:
+- Moments must not overlap
+- Cover the best material across the full video (don't cluster at the start)
+- startSec and endSec must match the timestamps in the transcript
+- Prefer slightly longer clips (25-40s) over rushed short ones
+- Skip any weak filler sections — quality over quantity
+
+Respond with ONLY a JSON array, no markdown, no explanation:
+[
+  { "title": "short punchy title", "hook": "opening line that stops the scroll", "startSec": 12.5, "endSec": 38.2 },
+  ...
+]
+
+TRANSCRIPT:
+${transcriptBlock}`;
+
+  try {
+    const response = await llm.generate(
+      [{ role: "user", content: prompt }],
+      { temperature: 0.3, maxTokens: 4096 }
+    );
+
+    // Parse JSON from response
+    const jsonMatch = response.content.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      console.warn("[Orchestrator] LLM story extraction returned no JSON array");
+      return null;
+    }
+
+    const moments: StoryMoment[] = JSON.parse(jsonMatch[0]);
+
+    // Validate: each moment must have valid timestamps and reasonable duration
+    const valid = moments.filter(m =>
+      typeof m.startSec === "number" &&
+      typeof m.endSec === "number" &&
+      m.endSec > m.startSec &&
+      (m.endSec - m.startSec) >= 12 &&
+      (m.endSec - m.startSec) <= 60 &&
+      m.startSec >= 0 &&
+      m.endSec <= totalDuration + 2 &&
+      typeof m.title === "string" &&
+      typeof m.hook === "string"
+    );
+
+    // Sort by start time, remove overlaps
+    valid.sort((a, b) => a.startSec - b.startSec);
+    const deduped: StoryMoment[] = [];
+    for (const m of valid) {
+      const prev = deduped[deduped.length - 1];
+      if (!prev || m.startSec >= prev.endSec - 1) {
+        deduped.push(m);
+      }
+    }
+
+    if (deduped.length < 3) {
+      console.warn(`[Orchestrator] LLM only found ${deduped.length} valid moments — falling back`);
+      return null;
+    }
+
+    console.log(`🧠 [Orchestrator] LLM identified ${deduped.length} story moments from transcript`);
+    return deduped;
+  } catch (err: any) {
+    console.warn(`[Orchestrator] LLM story extraction failed (non-fatal): ${err.message?.slice(0, 200)}`);
+    return null;
+  }
+}
 
 async function chopLongFormIntoClips(
   videoPath: string,
   niche: string,
   jobId: string,
+  llm: LLMProvider | null,
+  whisperSegments: { start: number; end: number; text: string }[] | null,
   targetClipCount: number = 30,
   targetClipDuration: number = 25
 ): Promise<ClipMeta[]> {
@@ -155,19 +273,69 @@ async function chopLongFormIntoClips(
     totalDuration = 600; // fallback 10 min
   }
 
-  // ── SMART BOUNDARY DETECTION ──
+  // ── TIER 1: LLM SEMANTIC EXTRACTION ──
+  // Ask the LLM to identify self-contained story moments from the transcript.
+  // Each moment is a complete idea that works as a standalone short.
+  let storyMoments: StoryMoment[] | null = null;
+  if (llm && whisperSegments && whisperSegments.length >= 10) {
+    storyMoments = await extractStoryMoments(llm, whisperSegments, niche, totalDuration);
+  }
+
+  if (storyMoments && storyMoments.length >= 3) {
+    // ── SEMANTIC MODE: cut at LLM-identified story boundaries ──
+    console.log(`🧠 [Orchestrator] Semantic chop: ${storyMoments.length} story moments`);
+    for (const m of storyMoments) {
+      console.log(`  📖 "${m.title}" (${m.startSec.toFixed(1)}s → ${m.endSec.toFixed(1)}s, ${(m.endSec - m.startSec).toFixed(1)}s)`);
+    }
+
+    const clipDir = `${ORCHESTRATOR_DIR}/${jobId}/clips`;
+    if (!existsSync(clipDir)) mkdirSync(clipDir, { recursive: true });
+
+    const nicheFilter = NICHE_FILTERS[niche] || NICHE_FILTERS.dark_psychology;
+    const clips: ClipMeta[] = [];
+
+    for (let i = 0; i < storyMoments.length; i++) {
+      const moment = storyMoments[i];
+      const clipPath = `${clipDir}/clip_${i.toString().padStart(2, "0")}.mp4`;
+
+      try {
+        execSync(
+          `ffmpeg -i "${videoPath}" ` +
+            `-ss ${moment.startSec.toFixed(2)} -to ${moment.endSec.toFixed(2)} ` +
+            `-vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${nicheFilter}" ` +
+            `-c:v libx264 -preset fast -crf 23 ` +
+            `-c:a aac -b:a 128k ` +
+            `-y "${clipPath}"`,
+          { timeout: 120_000, stdio: "pipe" }
+        );
+
+        clips.push({
+          index: i,
+          localPath: clipPath,
+          publicUrl: null,
+          startSec: moment.startSec,
+          endSec: moment.endSec,
+          captionText: `${moment.title} | ${moment.hook}`,
+        });
+        console.log(`  ✂️ Clip ${i}: "${moment.title}" ${moment.startSec.toFixed(1)}s → ${moment.endSec.toFixed(1)}s (${(moment.endSec - moment.startSec).toFixed(1)}s)`);
+      } catch (err: any) {
+        console.error(`[Orchestrator] Clip ${i} ("${moment.title}") failed: ${err.message?.slice(0, 200)}`);
+      }
+    }
+
+    console.log(`✅ [Orchestrator] ${clips.length}/${storyMoments.length} semantic clips cut`);
+    return clips;
+  }
+
+  // ── TIER 2: SILENCE-BOUNDARY DETECTION (fallback) ──
   // Use ffmpeg silencedetect to find pauses in the TTS voiceover.
-  // These pauses occur naturally between sentences/segments.
-  // silence_threshold: -35dB catches TTS inter-sentence gaps
-  // min_silence_duration: 0.3s filters out micro-pauses within words
+  console.log(`[Orchestrator] Falling back to silence-boundary detection (no semantic extraction available)`);
   let silencePoints: number[] = [];
   try {
     const silenceOutput = execSync(
       `ffmpeg -i "${videoPath}" -af "silencedetect=noise=-35dB:d=0.3" -f null - 2>&1`,
       { timeout: 60_000, encoding: "utf-8" }
     );
-    // Parse silence_end timestamps from ffmpeg output
-    // Format: [silencedetect @ 0x...] silence_end: 28.5432 | silence_duration: 0.512
     const matches = silenceOutput.matchAll(/silence_end:\s*([\d.]+)/g);
     for (const match of matches) {
       silencePoints.push(parseFloat(match[1]));
@@ -178,33 +346,27 @@ async function chopLongFormIntoClips(
   }
 
   // ── BUILD CLIP BOUNDARIES ──
-  // Strategy: walk through the video in ~targetClipDuration chunks.
-  // At each target cut point, snap to the nearest silence boundary.
-  // This ensures clips start/end at natural sentence breaks.
-  // Tolerance: ±8s from the ideal cut point (so clips range ~17-33s)
-  const MIN_CLIP_DURATION = 15;  // Never shorter than 15s
-  const MAX_CLIP_DURATION = 40;  // Never longer than 40s
-  const SNAP_TOLERANCE = 8;      // Search ±8s for a silence boundary
+  const MIN_CLIP_DURATION = 15;
+  const MAX_CLIP_DURATION = 40;
+  const SNAP_TOLERANCE = 8;
 
   const maxClips = Math.floor(totalDuration / MIN_CLIP_DURATION);
   const idealClipCount = Math.min(targetClipCount, maxClips);
   const idealDuration = totalDuration / idealClipCount;
 
-  const cutPoints: number[] = [0]; // Always start at 0
+  const cutPoints: number[] = [0];
 
   if (silencePoints.length >= 2) {
     // SMART MODE: snap to silence boundaries
     let currentTarget = idealDuration;
 
     while (currentTarget < totalDuration - MIN_CLIP_DURATION) {
-      // Find the silence point nearest to our target
       let bestPoint = currentTarget;
       let bestDistance = SNAP_TOLERANCE + 1;
 
       for (const sp of silencePoints) {
         const distance = Math.abs(sp - currentTarget);
         if (distance < bestDistance && distance <= SNAP_TOLERANCE) {
-          // Also check it won't create a clip that's too short or too long
           const lastCut = cutPoints[cutPoints.length - 1];
           const clipLen = sp - lastCut;
           if (clipLen >= MIN_CLIP_DURATION && clipLen <= MAX_CLIP_DURATION) {
@@ -214,8 +376,6 @@ async function chopLongFormIntoClips(
         }
       }
 
-      // If no silence boundary found within tolerance, use the target directly
-      // (still better than cutting mid-word since ffmpeg will find the nearest keyframe)
       const lastCut = cutPoints[cutPoints.length - 1];
       const clipLen = bestPoint - lastCut;
       if (clipLen >= MIN_CLIP_DURATION) {
@@ -227,7 +387,7 @@ async function chopLongFormIntoClips(
 
     console.log(`🎯 [Orchestrator] Smart chop: ${cutPoints.length - 1} clips with sentence-boundary cuts`);
   } else {
-    // FALLBACK: dumb math division (if silence detection failed)
+    // TIER 3 FALLBACK: dumb math division
     const actualClipCount = Math.min(targetClipCount, Math.floor(totalDuration / targetClipDuration));
     const actualDuration = totalDuration / actualClipCount;
     for (let i = 1; i < actualClipCount; i++) {
@@ -236,7 +396,6 @@ async function chopLongFormIntoClips(
     console.log(`⚠️ [Orchestrator] Fallback chop: ${cutPoints.length - 1} clips with math division (no silence data)`);
   }
 
-  // Always end at video duration
   cutPoints.push(totalDuration);
 
   // ── CUT CLIPS ──
@@ -276,7 +435,7 @@ async function chopLongFormIntoClips(
     }
   }
 
-  console.log(`✅ [Orchestrator] ${clips.length}/${cutPoints.length - 1} clips cut (smart boundaries)`);
+  console.log(`✅ [Orchestrator] ${clips.length}/${cutPoints.length - 1} clips cut (silence boundaries)`);
   return clips;
 }
 
@@ -814,18 +973,20 @@ export async function executeFullPipeline(
     await progress("STEP 3/8", "⚠️ No video URL — skipping YouTube upload");
   }
 
-  // ── STEP 4: CHOP INTO CLIPS ──
-  await progress("STEP 4/8", "Chopping long-form into ~30 clips...");
+  // ── STEP 4: SEMANTIC CLIP EXTRACTION ──
+  await progress("STEP 4/8", "Extracting story moments from long-form video...");
   let clips: ClipMeta[];
   try {
     clips = await chopLongFormIntoClips(
       facelessResult.localPath,
       whisperResult.niche,
       jobId,
+      llm,
+      whisperResult.segments,
       30,
-      25 // ~25s per clip
+      25 // ~25s per clip fallback
     );
-    await progress("STEP 4/8", `✅ ${clips.length} clips cut from long-form video`);
+    await progress("STEP 4/8", `✅ ${clips.length} clips extracted (${clips[0]?.captionText ? "semantic" : "silence-boundary"})`);
   } catch (err: any) {
     throw new Error(`Clip chopping failed: ${err.message}`);
   }

@@ -12,7 +12,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { execSync } from "child_process";
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from "fs";
 import { config } from "../config";
 import { textToSpeech } from "../voice/tts";
 import type { LLMProvider } from "../types";
@@ -25,6 +25,19 @@ const STORAGE_BUCKET = "public-assets";
 // ── Types ──
 
 type Brand = "ace_richie" | "containment_field";
+type Orientation = "horizontal" | "vertical";
+
+// Dimension presets per orientation — single source of truth for all image gen + ffmpeg
+const DIMS: Record<Orientation, {
+  width: number; height: number;         // ffmpeg output (Ken Burns, fallback)
+  pollW: number; pollH: number;          // Pollinations API
+  aspectRatio: string;                   // Imagen 4 API
+  dalleSize: string;                     // DALL-E 3 API
+  promptTag: string;                     // injected into image gen prompts
+}> = {
+  horizontal: { width: 1920, height: 1080, pollW: 1792, pollH: 1024, aspectRatio: "16:9", dalleSize: "1792x1024", promptTag: "16:9 cinematic widescreen landscape composition" },
+  vertical:   { width: 1080, height: 1920, pollW: 1024, pollH: 1792, aspectRatio: "9:16", dalleSize: "1024x1792", promptTag: "{ORIENTATION} portrait composition" },
+};
 
 interface ScriptSegment {
   voiceover: string;
@@ -197,24 +210,24 @@ The voiceover should sound measured and low-cadence — like a whistleblower rea
 
 const SCENE_VISUAL_STYLE: Record<string, Record<Brand, string>> = {
   dark_psychology: {
-    ace_richie: "Cinematic noir photography, amber light cutting through darkness, brutalist architecture, dramatic shadows, moody atmospheric, 9:16 vertical. NO text, NO words, NO letters.",
-    containment_field: "Surveillance camera aesthetic, rain-slicked urban night, cold blue lighting, neon reflections on wet concrete, clinical, 9:16 vertical. NO text, NO words, NO letters.",
+    ace_richie: "Cinematic noir photography, amber light cutting through darkness, brutalist architecture, dramatic shadows, moody atmospheric, {ORIENTATION}. NO text, NO words, NO letters.",
+    containment_field: "Surveillance camera aesthetic, rain-slicked urban night, cold blue lighting, neon reflections on wet concrete, clinical, {ORIENTATION}. NO text, NO words, NO letters.",
   },
   self_improvement: {
-    ace_richie: "Golden hour photography, figure ascending stone steps, sovereign majestic landscape, warm amber tones, cinematic, 9:16 vertical. NO text, NO words, NO letters.",
-    containment_field: "Sterile corporate interior, shattered mirror, deconstructed wellness imagery, cool muted tones, clinical, 9:16 vertical. NO text, NO words, NO letters.",
+    ace_richie: "Golden hour photography, figure ascending stone steps, sovereign majestic landscape, warm amber tones, cinematic, {ORIENTATION}. NO text, NO words, NO letters.",
+    containment_field: "Sterile corporate interior, shattered mirror, deconstructed wellness imagery, cool muted tones, clinical, {ORIENTATION}. NO text, NO words, NO letters.",
   },
   burnout: {
-    ace_richie: "Chains dissolving into golden particles, industrial to natural transition, liberation imagery, warm undertones, cinematic, 9:16 vertical. NO text, NO words, NO letters.",
-    containment_field: "Human silhouette surrounded by screens, hamster wheel of devices, toxic green glow, suffocating composition, 9:16 vertical. NO text, NO words, NO letters.",
+    ace_richie: "Chains dissolving into golden particles, industrial to natural transition, liberation imagery, warm undertones, cinematic, {ORIENTATION}. NO text, NO words, NO letters.",
+    containment_field: "Human silhouette surrounded by screens, hamster wheel of devices, toxic green glow, suffocating composition, {ORIENTATION}. NO text, NO words, NO letters.",
   },
   quantum: {
-    ace_richie: "Cosmic geometric light patterns, deep indigo and electric gold, sacred geometry, abstract energy visualization, cinematic, 9:16 vertical. NO text, NO words, NO letters.",
-    containment_field: "Data visualization glitching, reality wireframe overlaid on physical space, matrix aesthetic, cool blue-green, 9:16 vertical. NO text, NO words, NO letters.",
+    ace_richie: "Cosmic geometric light patterns, deep indigo and electric gold, sacred geometry, abstract energy visualization, cinematic, {ORIENTATION}. NO text, NO words, NO letters.",
+    containment_field: "Data visualization glitching, reality wireframe overlaid on physical space, matrix aesthetic, cool blue-green, {ORIENTATION}. NO text, NO words, NO letters.",
   },
   brand: {
-    ace_richie: "Midnight blue and amber, throne-like composition, master architect energy, sovereign aesthetic, cinematic, 9:16 vertical. NO text, NO words, NO letters.",
-    containment_field: "Dark room, single red light on classified document, information broker aesthetic, noir, 9:16 vertical. NO text, NO words, NO letters.",
+    ace_richie: "Midnight blue and amber, throne-like composition, master architect energy, sovereign aesthetic, cinematic, {ORIENTATION}. NO text, NO words, NO letters.",
+    containment_field: "Dark room, single red light on classified document, information broker aesthetic, noir, {ORIENTATION}. NO text, NO words, NO letters.",
   },
 };
 
@@ -237,7 +250,8 @@ export async function generateScript(
   sourceIntelligence: string,
   niche: string,
   brand: Brand,
-  targetDuration: "short" | "long" = "short"
+  targetDuration: "short" | "long" = "short",
+  orientation: Orientation = "vertical"
 ): Promise<FacelessScript> {
   const voice = SCRIPT_VOICE[brand];
   const segmentCount = targetDuration === "short" ? 5 : 20;
@@ -275,8 +289,9 @@ Generate a voiceover script as a JSON object with this exact structure:
 RULES:
 - The hook MUST stop someone mid-scroll in under 3 seconds
 - ${perSegmentGuidance}
-- PACING: Write for a MEASURED, documentary-style voiceover — not a fast-talking YouTuber. Include natural pauses with ellipses (...) and rhetorical questions. The listener should feel like they're being let in on a secret, not being sold something.
+- PACING: Write for a MEASURED, documentary-style voiceover — not a fast-talking YouTuber. Include natural pauses with ellipses (...) and rhetorical questions. Use SHORT sentences. Let ideas land. Leave space between thoughts. The listener should feel like they're being let in on a secret, not being sold something. Every 4 segments, write a transitional beat — a sentence that signals a shift in the narrative ("But here's where it gets interesting..." or "Now... consider this.").
 - Visual directions should be CINEMATIC and specific — think B-roll descriptions
+- FORMAT: ${orientation === "horizontal" ? "LANDSCAPE 16:9 — compose for widescreen. Sweeping vistas, wide establishing shots, cinematic framing with negative space." : "VERTICAL 9:16 — compose for mobile. Center subject, close crops, portrait framing."}
 - ${durationHintNote}
 - CTA should feel organic, not salesy — "The full protocol is at sovereign-synthesis.com"
 - Return ONLY valid JSON, no markdown code fences, no explanation`;
@@ -404,11 +419,11 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<strin
   ];
   const totalChars = allSegmentTexts.reduce((sum, t) => sum + t.length, 0);
   const isLongForm = allSegmentTexts.length > 8;
-  // QUALITY GATE (Session 23): Slower TTS for documentary feel.
-  // 0.9x was still too rushed per real output testing. 0.85x + 0.6s silence pads
-  // between segments creates the measured, "letting you in on a secret" cadence.
-  const ttsSpeed = isLongForm ? 0.85 : undefined;
-  console.log(`🗣️ [FacelessFactory] Rendering TTS — ${allSegmentTexts.length} segments, ${totalChars} chars total${isLongForm ? " (long-form, 0.9x speed)" : ""}`);
+  // QUALITY GATE (Session 24): Documentary cadence — slow and deliberate.
+  // 0.85x was still too rushed per Session 23 test. 0.80x with 1.5s silence pads
+  // + 2.5s chapter breaks every 4 segments creates measured pacing.
+  const ttsSpeed = isLongForm ? 0.80 : undefined;
+  console.log(`🗣️ [FacelessFactory] Rendering TTS — ${allSegmentTexts.length} segments, ${totalChars} chars total${isLongForm ? " (long-form, 0.80x speed)" : ""}`);
 
   // If total text fits in one call (short-form), do it in one shot
   if (totalChars <= 3800) {
@@ -485,27 +500,39 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<strin
     throw new Error("All TTS segments failed — cannot produce audio");
   }
 
-  // QUALITY GATE (Session 23): Generate a 0.6s silence pad for between segments.
-  // This creates breathing room between thoughts, reducing the "rushed" feeling.
+  // QUALITY GATE (Session 24): 1.5s silence between segments, 2.5s chapter breaks every 4.
+  // Session 23 test showed 0.6s was too tight — felt like a run-on. 1.5s lets ideas breathe.
   const silencePad = `${FACELESS_DIR}/${jobId}_silence.mp3`;
+  const chapterPad = `${FACELESS_DIR}/${jobId}_chapter.mp3`;
   try {
     execSync(
-      `ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 0.6 -c:a libmp3lame -b:a 128k -y "${silencePad}"`,
+      `ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 1.5 -c:a libmp3lame -b:a 128k -y "${silencePad}"`,
+      { timeout: 10_000, stdio: "pipe" }
+    );
+    // Chapter break: longer pause every 4 segments for documentary feel
+    execSync(
+      `ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 2.5 -c:a libmp3lame -b:a 128k -y "${chapterPad}"`,
       { timeout: 10_000, stdio: "pipe" }
     );
   } catch {
     // If silence generation fails, we'll concatenate without pads
   }
   const hasSilencePad = existsSync(silencePad);
+  const hasChapterPad = existsSync(chapterPad);
 
-  // Concatenate all segment mp3s with silence pads between them
+  // Concatenate all segment mp3s with silence pads + chapter breaks
   const concatListPath = `${FACELESS_DIR}/${jobId}_audio_concat.txt`;
   const concatLines: string[] = [];
   for (let i = 0; i < segmentPaths.length; i++) {
     concatLines.push(`file '${segmentPaths[i]}'`);
-    // Add silence pad between segments (not after the last one)
-    if (hasSilencePad && i < segmentPaths.length - 1) {
-      concatLines.push(`file '${silencePad}'`);
+    // Add silence between segments (not after the last one)
+    if (i < segmentPaths.length - 1) {
+      // Chapter break every 4 segments (longer pause for documentary pacing)
+      if (hasChapterPad && (i + 1) % 4 === 0) {
+        concatLines.push(`file '${chapterPad}'`);
+      } else if (hasSilencePad) {
+        concatLines.push(`file '${silencePad}'`);
+      }
     }
   }
   writeFileSync(concatListPath, concatLines.join("\n"));
@@ -560,15 +587,18 @@ async function generateSceneImage(
   niche: string,
   brand: Brand,
   jobId: string,
-  segmentIndex: number
+  segmentIndex: number,
+  orientation: Orientation = "vertical"
 ): Promise<string | null> {
-  const stylePrefix = SCENE_VISUAL_STYLE[niche]?.[brand] || SCENE_VISUAL_STYLE.brand[brand];
+  const dim = DIMS[orientation];
+  const rawStyle = SCENE_VISUAL_STYLE[niche]?.[brand] || SCENE_VISUAL_STYLE.brand[brand];
+  const stylePrefix = rawStyle.replace(/\{ORIENTATION\}/g, dim.promptTag);
   const prompt = `${stylePrefix} Scene: ${visualDirection}`;
   const imgPath = `${FACELESS_DIR}/${jobId}_scene_${segmentIndex}.png`;
 
   // ── PRIMARY: Pollinations.ai (FREE, no auth, unlimited) ──
   try {
-    const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.slice(0, 2000))}?width=1024&height=1792&nologo=true&seed=${Date.now() + segmentIndex}`;
+    const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.slice(0, 2000))}?width=${dim.pollW}&height=${dim.pollH}&nologo=true&seed=${Date.now() + segmentIndex}`;
     const res = await fetch(pollinationsUrl, { redirect: "follow" });
 
     if (res.ok) {
@@ -600,7 +630,7 @@ async function generateSceneImage(
           instances: [{ prompt }],
           parameters: {
             sampleCount: 1,
-            aspectRatio: "9:16",
+            aspectRatio: dim.aspectRatio,
             safetyFilterLevel: "block_only_high",
           },
         }),
@@ -636,7 +666,7 @@ async function generateSceneImage(
         body: JSON.stringify({
           model: "dall-e-3",
           prompt: prompt.slice(0, 4000),
-          size: "1024x1792",
+          size: dim.dalleSize,
           quality: "standard",
           n: 1,
           response_format: "b64_json",
@@ -673,7 +703,8 @@ async function assembleVideo(
   script: FacelessScript,
   audioPath: string,
   imagePaths: (string | null)[],
-  jobId: string
+  jobId: string,
+  orientation: Orientation = "vertical"
 ): Promise<string> {
   const outputPath = `${FACELESS_DIR}/${jobId}_final.mp4`;
   const nicheFilter = NICHE_FILTERS[script.niche] || NICHE_FILTERS.brand;
@@ -754,33 +785,114 @@ async function assembleVideo(
   try {
     const tones = MUSIC_TONES[script.niche] || MUSIC_TONES.brand;
     const musicDuration = Math.ceil(audioDuration) + 4; // extra 4s for fade buffer
+    const sampleRate = 44100;
+    const totalSamples = sampleRate * musicDuration;
 
-    // Layer 3 sine waves + filtered noise into a dark ambient pad.
-    // sine waves create the tonal foundation, noise adds texture/atmosphere.
-    // Everything is volume-reduced at the source to avoid clipping when mixed.
+    // ── Node.js WAV generation ──
+    // Railway's ffmpeg may lack lavfi/anoisesrc filters.
+    // Generate all tones + noise as raw PCM in Node, write WAV files,
+    // then let ffmpeg mix from standard file inputs — zero filter dependencies.
+
+    /** Write a mono 16-bit WAV file from a Float32 sample buffer */
+    const writeWav = (filePath: string, samples: Float32Array): void => {
+      const numSamples = samples.length;
+      const byteRate = sampleRate * 2; // 16-bit mono = 2 bytes/sample
+      const dataSize = numSamples * 2;
+      const buf = Buffer.alloc(44 + dataSize);
+      // RIFF header
+      buf.write("RIFF", 0);
+      buf.writeUInt32LE(36 + dataSize, 4);
+      buf.write("WAVE", 8);
+      // fmt chunk
+      buf.write("fmt ", 12);
+      buf.writeUInt32LE(16, 16);       // chunk size
+      buf.writeUInt16LE(1, 20);        // PCM format
+      buf.writeUInt16LE(1, 22);        // mono
+      buf.writeUInt32LE(sampleRate, 24);
+      buf.writeUInt32LE(byteRate, 28);
+      buf.writeUInt16LE(2, 30);        // block align
+      buf.writeUInt16LE(16, 32);       // bits per sample
+      // data chunk
+      buf.write("data", 36);
+      buf.writeUInt32LE(dataSize, 40);
+      for (let i = 0; i < numSamples; i++) {
+        const clamped = Math.max(-1, Math.min(1, samples[i]));
+        buf.writeInt16LE(Math.round(clamped * 32767), 44 + i * 2);
+      }
+      writeFileSync(filePath, buf);
+    };
+
+    /** Generate a sine wave at given frequency and amplitude */
+    const generateSine = (freq: number, amp: number): Float32Array => {
+      const out = new Float32Array(totalSamples);
+      const step = (2 * Math.PI * freq) / sampleRate;
+      for (let i = 0; i < totalSamples; i++) {
+        out[i] = Math.sin(step * i) * amp;
+      }
+      return out;
+    };
+
+    /** Generate pink noise using Voss-McCartney algorithm, amplitude-scaled */
+    const generatePinkNoise = (amp: number): Float32Array => {
+      const out = new Float32Array(totalSamples);
+      // 8-octave pink noise via running-sum of white noise octaves
+      const numOctaves = 8;
+      const octaves = new Float64Array(numOctaves);
+      let runningSum = 0;
+      for (let i = 0; i < totalSamples; i++) {
+        // Update one octave per sample based on bit pattern (Voss algorithm)
+        const changed = i === 0 ? (1 << numOctaves) - 1 : i ^ (i - 1);
+        for (let o = 0; o < numOctaves; o++) {
+          if (changed & (1 << o)) {
+            runningSum -= octaves[o];
+            octaves[o] = (Math.random() * 2 - 1);
+            runningSum += octaves[o];
+          }
+        }
+        out[i] = (runningSum / numOctaves) * amp;
+      }
+      return out;
+    };
+
+    // Generate each layer as a WAV file
+    const basePath = `${FACELESS_DIR}/${jobId}_tone_base.wav`;
+    const harmPath = `${FACELESS_DIR}/${jobId}_tone_harm.wav`;
+    const subPath  = `${FACELESS_DIR}/${jobId}_tone_sub.wav`;
+    const noisePath = `${FACELESS_DIR}/${jobId}_noise.wav`;
+
+    writeWav(basePath, generateSine(tones.base, 0.3));
+    writeWav(harmPath, generateSine(tones.harmonic, 0.15));
+    writeWav(subPath, generateSine(tones.sub, 0.2));
+    writeWav(noisePath, generatePinkNoise(0.02));
+
+    // Mix all 4 layers via ffmpeg standard file inputs (no lavfi needed).
+    // amix → fade in/out → lowpass → master volume → mp3
     execSync(
       `ffmpeg ` +
-        `-f lavfi -i "sine=frequency=${tones.base}:duration=${musicDuration}:sample_rate=44100" ` +
-        `-f lavfi -i "sine=frequency=${tones.harmonic}:duration=${musicDuration}:sample_rate=44100" ` +
-        `-f lavfi -i "sine=frequency=${tones.sub}:duration=${musicDuration}:sample_rate=44100" ` +
-        `-f lavfi -i "anoisesrc=d=${musicDuration}:c=pink:r=44100:a=0.02" ` +
+        `-i "${basePath}" ` +
+        `-i "${harmPath}" ` +
+        `-i "${subPath}" ` +
+        `-i "${noisePath}" ` +
         `-filter_complex "` +
-          `[0:a]volume=0.3[base];` +        // Base tone
-          `[1:a]volume=0.15[harm];` +        // Harmonic (quieter)
-          `[2:a]volume=0.2[sub];` +          // Sub bass
           `[3:a]lowpass=f=800[noise];` +     // Filtered pink noise — warmth
-          `[base][harm][sub][noise]amix=inputs=4:duration=first:normalize=0,` + // Mix layers
+          `[0:a][1:a][2:a][noise]amix=inputs=4:duration=first:normalize=0,` +
           `afade=t=in:st=0:d=2,` +           // 2s fade in
           `afade=t=out:st=${musicDuration - 3}:d=3,` +  // 3s fade out
-          `lowpass=f=2000,` +                // Roll off highs so it doesn't compete with voice
+          `lowpass=f=2000,` +                // Roll off highs — don't compete with voice
           `volume=0.4` +                     // Master level before mixing with voice
         `[music]" ` +
         `-map "[music]" -c:a libmp3lame -b:a 128k -y "${musicPath}"`,
       { timeout: 60_000, stdio: "pipe" }
     );
+
     hasMusicBed = existsSync(musicPath);
     if (hasMusicBed) {
       console.log(`🎵 [FacelessFactory] Music bed generated: ${script.niche} ambient (${musicDuration}s)`);
+    }
+
+    // Clean up intermediate WAV files
+    for (const tmp of [basePath, harmPath, subPath, noisePath]) {
+      try { unlinkSync(tmp); } catch { /* ignore */ }
     }
   } catch (err: any) {
     console.warn(`[FacelessFactory] Music bed generation failed (non-fatal): ${err.message?.slice(0, 200)}`);
@@ -792,9 +904,10 @@ async function assembleVideo(
   // 3. Apply niche color grade
   // 4. Overlay hook text (first 3s)
   // 5. Mix voiceover + background music
-  // 6. Output 9:16 MP4
+  // 6. Output MP4 (orientation-aware: 16:9 for long-form, 9:16 for shorts)
 
-  const kenBurnsFilter = `zoompan=z='min(zoom+0.0005,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${framesPerSegment}:s=1080x1920:fps=${fps}`;
+  const dim = DIMS[orientation];
+  const kenBurnsFilter = `zoompan=z='min(zoom+0.0005,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${framesPerSegment}:s=${dim.width}x${dim.height}:fps=${fps}`;
 
   // Audio filter: if music bed exists, mix voice (loud) + music (quiet) via amix.
   // Voice gets volume=1.0, music gets volume=0.15 (~-16dB under voice).
@@ -819,7 +932,7 @@ async function assembleVideo(
     // Fallback: simpler assembly without Ken Burns if zoompan fails.
     // When music bed exists, must use filter_complex for both video + audio (can't mix -vf and -filter_complex).
     console.warn(`[FacelessFactory] Ken Burns failed, trying simple assembly: ${err.message?.slice(0, 200)}`);
-    const fallbackVideoFilter = `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${nicheFilter}${hookOverlay}[v]`;
+    const fallbackVideoFilter = `[0:v]scale=${dim.width}:${dim.height}:force_original_aspect_ratio=increase,crop=${dim.width}:${dim.height},${nicheFilter}${hookOverlay}[v]`;
     const fallbackFilter = hasMusicBed
       ? `${fallbackVideoFilter};${audioFilter}`
       : fallbackVideoFilter;
@@ -926,12 +1039,15 @@ export async function produceFacelessVideo(
 
   if (!existsSync(FACELESS_DIR)) mkdirSync(FACELESS_DIR, { recursive: true });
 
+  // Long-form = YouTube = 16:9 horizontal. Shorts = TikTok/IG/YT Shorts = 9:16 vertical.
+  const orientation: Orientation = targetDuration === "long" ? "horizontal" : "vertical";
+
   console.log(`\n🔥 [FacelessFactory] Starting job ${jobId}`);
-  console.log(`   Brand: ${brand} | Niche: ${niche} | Duration: ${targetDuration}`);
+  console.log(`   Brand: ${brand} | Niche: ${niche} | Duration: ${targetDuration} | Orientation: ${orientation} (${DIMS[orientation].width}x${DIMS[orientation].height})`);
 
   // STEP 1: Generate script
   console.log(`📝 [FacelessFactory] Generating script...`);
-  const script = await generateScript(llm, sourceIntelligence, niche, brand, targetDuration);
+  const script = await generateScript(llm, sourceIntelligence, niche, brand, targetDuration, orientation);
   console.log(`✅ [FacelessFactory] Script: "${script.title}" — ${script.segments.length} segments`);
 
   // Save script for reference
@@ -950,7 +1066,8 @@ export async function produceFacelessVideo(
       niche,
       brand,
       jobId,
-      i
+      i,
+      orientation
     );
     imagePaths.push(imgPath);
     // Small delay between Imagen requests to avoid rate limits
@@ -968,7 +1085,7 @@ export async function produceFacelessVideo(
 
   // STEP 4: Assemble video
   console.log(`🎬 [FacelessFactory] Assembling video...`);
-  const videoPath = await assembleVideo(script, audioPath, imagePaths, jobId);
+  const videoPath = await assembleVideo(script, audioPath, imagePaths, jobId, orientation);
 
   // Get final duration
   let finalDuration = 0;

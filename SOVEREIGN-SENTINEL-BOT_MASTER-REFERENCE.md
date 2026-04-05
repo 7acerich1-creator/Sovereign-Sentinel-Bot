@@ -8,10 +8,10 @@
 **Mission Metrics:** FIRST CLEAN END-TO-END PIPELINE RUN. All 8 steps green. 1 URL → YouTube long-form + 9 clips + 16 Buffer posts scheduled across 7 days. Two architecture bugs found and fixed: GraphQL enum quoting (killed YouTube/IG Buffer posts) and dual-path distribution (dumped all Shorts at once). Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit `cd60174` (Session 24). Session 25 fixes NOT YET PUSHED — need git push via Desktop Commander.
+- Bot is live on Railway. Latest commit `5adefce` (Session 25 — black video + timing + scene-audio sync fixes). Auto-deploying.
 - Session 23 commit chain: `c549b79` → `0177d3b` → `2e1d3d0` → `bd6744b` → `050e699` (Alfred auto-pipeline).
 - Session 24 commits: `d2847f7` (timezone fix) → `2a14154` (Alfred Groq) → `0706f68` (orientation + cadence + music bed) → `8475da7` (DVP) → `3291382` (semantic clips) → `cd60174` (crossfade + reverb).
-- Session 25 changes (NOT PUSHED): 6 fixes to faceless-factory.ts + vidrush-orchestrator.ts after "Breaking Free" pipeline test revealed black video + timing issues.
+- Session 25 commit: `5adefce` (black video + timing + scene-audio sync — 6 fixes, 316 insertions, 76 deletions).
 - Pipeline ran all 8 steps for video iR4AAwNP3r8: "Beyond The Simulation" (258s, 12 scenes, 9 clips, 16 Buffer posts).
 - YouTube long-form live: https://youtube.com/watch?v=ybjDyM3uVts
 - yt-dlp authenticated via YouTube cookies (YOUTUBE_COOKIES_BASE64 env var in Railway).
@@ -277,7 +277,7 @@
 - ❌ Clip count/duration wrong for faceless output — 30 clips × 25s designed for 20-60min external rips, not 5min faceless.
 - ✅ Story extraction "a little better" per Ace.
 
-**SESSION 25 FIXES (NOT YET PUSHED):**
+**SESSION 25 FIXES (PUSHED — commit `5adefce`, auto-deploying to Railway):**
 1. [DVP: ADDRESSED] Image validation: magic byte check (PNG/JPEG/WebP/GIF) + >10KB size gate. Fallback chain: Pollinations → Imagen 4 → DALL-E 3 → cinematic gradient (niche-aware palettes) → minimal dark PNG. `generateSceneImage()` almost never returns null.
 2. [DVP: ADDRESSED] Scene crossfade: replaced per-scene fade-in/fade-out with true xfade dissolve filter chain. 0.6s dissolve between scenes, no black flash.
 3. [DVP: ADDRESSED] Clip timing: Whisper chunk resolution 10s → 5s. Audio-aware padding (PAD_BEFORE=0.3s, PAD_AFTER=0.2s, boundary-clamped). Audio fades (afade in 0.15s, afade out 0.3s).
@@ -285,10 +285,15 @@
 5. [DVP: ADDRESSED] Dynamic clip params: faceless output (3-8min) gets ~1 clip per 45s (4-12 clips, 20-55s each). External rips (>10min) keep 30 × 25s defaults.
 6. [DVP: ADDRESSED] xfade offset calculation: uses cumulative per-clip durations for variable-length scenes (was equal-division formula).
 
-**NEXT SESSION PRIORITIES (Session 25):**
-1. GIT PUSH — commit + push all Session 25 changes via Desktop Commander cmd shell.
-2. PIPELINE RETEST — run full pipeline, verify all 6 fixes produce visible video with correct timing.
-3. DVP VERIFICATION — test results will upgrade ADDRESSED → VERIFIED or flag REGRESSED.
+**NEXT SESSION PRIORITIES (Session 26):**
+1. CHECK ALFRED'S 10AM RUN — pipeline should auto-trigger. Check Railway logs + Supabase for new video.
+2. DVP VERIFICATION — test results will upgrade ADDRESSED → VERIFIED or flag REGRESSED. Key checks:
+   - Is the video visible (not black)? → validates Fix 1 (image validation + gradient fallback)
+   - Are scene transitions smooth (no black flash)? → validates Fix 2 (xfade dissolve)
+   - Do clips start/end cleanly (no mid-word cuts)? → validates Fix 3 (audio padding)
+   - Do scene changes land on speech pauses? → validates Fix 4 (scene-audio sync)
+   - Are clip count/duration reasonable for source length? → validates Fix 5 (dynamic params)
+3. If all VERIFIED → production-ready. If any REGRESSED → debug that specific fix.
 - THIS IS THE BIG ONE. Replace silence-boundary chopping with LLM semantic extraction.
 - New Step 4a: LLM reads full transcript with timestamps → identifies 8-12 self-contained "story moments" (hook → insight → payoff)
 - Step 4b: Map story moments to video timestamps

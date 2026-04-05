@@ -8,7 +8,7 @@
 // 4. Chop long-form into ~30 clips (ffmpeg, niche color grades)
 // 5. Generate platform-specific copy per clip (LLM)
 // 6. Distribute clips to all platforms (TikTok, IG, YouTube Shorts)
-// 7. Schedule text+thumbnail posts to Buffer (a week of content)
+// 7. Schedule posts to ALL Buffer channels (a week of content across every platform)
 // 8. Report back to Architect
 //
 // Ace's words: "1 url, fully autonomous ai driven system"
@@ -388,9 +388,26 @@ async function distributeClips(
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // STEP 8: SCHEDULE WEEK IN BUFFER
-// Stagger text+image posts across 7 days, 4 per day
-// Buffer handles: X, Threads, LinkedIn, Facebook
+// Distribute text+image posts across ALL connected Buffer channels over 7 days.
+// Buffer supports every connected channel — X, Threads, LinkedIn, Facebook,
+// YouTube (community posts), Instagram, TikTok, etc. NO channels are excluded.
+// Strategy: Round-robin clips across channels. Each (clip, channel) pair
+// gets its own unique time slot so nothing overlaps.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Map Buffer service names to our platform copy keys
+const SERVICE_TO_COPY_KEY: Record<string, keyof PlatformCopy> = {
+  twitter: "x_twitter",
+  threads: "threads",
+  linkedin: "linkedin",
+  facebook: "facebook",
+  instagram: "instagram",
+  tiktok: "tiktok",
+  youtube: "youtube_short",
+  googlebusiness: "facebook",
+  mastodon: "threads",
+  pinterest: "instagram",
+};
 
 async function scheduleBufferWeek(
   clips: ClipMeta[],
@@ -399,7 +416,7 @@ async function scheduleBufferWeek(
 ): Promise<number> {
   const { SocialSchedulerListProfilesTool, SocialSchedulerPostTool } = await import("../tools/social-scheduler");
 
-  // Get available Buffer channels
+  // Get ALL available Buffer channels — no filtering, no exclusions
   const listTool = new SocialSchedulerListProfilesTool();
   const channelsRaw = await listTool.execute();
 
@@ -416,62 +433,74 @@ async function scheduleBufferWeek(
     return 0;
   }
 
-  // Filter to text-capable channels (X, Threads, LinkedIn, Facebook)
-  // Buffer can do text + image, NOT video
-  const textChannels = channels
-    .filter((c: any) => ["twitter", "threads", "linkedin", "facebook", "mastodon"].includes(c.service))
-    .map((c: any) => c.id);
+  // Use ALL channels — Buffer handles every connected platform
+  // Only skip channels with paused queues
+  const activeChannels = channels.filter((c: any) => !c.queuePaused);
 
-  if (textChannels.length === 0) {
-    console.error("[Orchestrator] No text-capable Buffer channels");
+  if (activeChannels.length === 0) {
+    console.error("[Orchestrator] All Buffer channel queues are paused");
     return 0;
   }
+
+  console.log(`📡 [Orchestrator] Scheduling across ${activeChannels.length} active Buffer channels: ${activeChannels.map((c: any) => `${c.service}/${c.name}`).join(", ")}`);
 
   const postTool = new SocialSchedulerPostTool();
   let scheduledCount = 0;
 
-  // Schedule 4 posts per day for 7 days = 28 slots
-  // Time slots: 9:00, 12:00, 15:00, 18:00 UTC
+  // Time slots: 4 per day — 4AM, 7AM, 10AM, 1PM CT (= 09:00, 12:00, 15:00, 18:00 UTC)
   const timeSlots = ["09:00:00", "12:00:00", "15:00:00", "18:00:00"];
   const now = new Date();
 
-  for (let clipIdx = 0; clipIdx < clips.length && scheduledCount < 28; clipIdx++) {
+  // Strategy: Round-robin clips across channels.
+  // Each clip is sent to EACH channel, one at a time.
+  // Each (clip, channel) gets its own time slot.
+  let globalSlotIndex = 0;
+
+  for (let clipIdx = 0; clipIdx < clips.length; clipIdx++) {
     const copy = copyMap.get(clips[clipIdx].index);
     if (!copy) continue;
 
-    const dayOffset = Math.floor(scheduledCount / timeSlots.length);
-    const slotIdx = scheduledCount % timeSlots.length;
+    for (const channel of activeChannels) {
+      const dayOffset = Math.floor(globalSlotIndex / timeSlots.length);
+      const slotIdx = globalSlotIndex % timeSlots.length;
 
-    const schedDate = new Date(now);
-    schedDate.setDate(schedDate.getDate() + dayOffset + 1); // Start tomorrow
-    const isoDate = schedDate.toISOString().split("T")[0];
-    const scheduledAt = `${isoDate}T${timeSlots[slotIdx]}Z`;
+      // Cap at 7 days of content
+      if (dayOffset >= 7) break;
 
-    // Pick platform-specific copy based on which channels are in Buffer
-    // Use the most universal copy — linkedin for professional, x_twitter for punchy
-    const postText = copy.linkedin || copy.x_twitter || copy.threads || copy.facebook ||
-      `Firmware Update incoming. sovereign-synthesis.com #SovereignSynthesis #${niche.replace(/_/g, "")}`;
+      const schedDate = new Date(now);
+      schedDate.setDate(schedDate.getDate() + dayOffset + 1);
+      const isoDate = schedDate.toISOString().split("T")[0];
+      const scheduledAt = `${isoDate}T${timeSlots[slotIdx]}Z`;
 
-    try {
-      const result = await postTool.execute({
-        channel_ids: textChannels.join(","),
-        text: postText,
-        scheduled_at: scheduledAt,
-        niche,
-      });
+      // Pick platform-specific copy based on the channel's service type
+      const copyKey = SERVICE_TO_COPY_KEY[channel.service] || "x_twitter";
+      const postText = (copy as any)[copyKey] || copy.x_twitter || copy.threads ||
+        `Firmware Update incoming. sovereign-synthesis.com #SovereignSynthesis #${niche.replace(/_/g, "")}`;
 
-      if (result.includes("✅")) {
-        scheduledCount++;
+      try {
+        const result = await postTool.execute({
+          channel_ids: channel.id,
+          text: postText,
+          scheduled_at: scheduledAt,
+          niche,
+        });
+
+        if (result.includes("✅")) {
+          scheduledCount++;
+          console.log(`  📌 Clip ${clipIdx} → ${channel.service}/${channel.name} @ ${scheduledAt}`);
+        }
+      } catch (err: any) {
+        console.error(`[Orchestrator] Buffer schedule failed for clip ${clipIdx} → ${channel.service}: ${err.message?.slice(0, 200)}`);
       }
-    } catch (err: any) {
-      console.error(`[Orchestrator] Buffer schedule failed for clip ${clipIdx}: ${err.message?.slice(0, 200)}`);
+
+      globalSlotIndex++;
+      await new Promise(r => setTimeout(r, 500));
     }
 
-    // Small delay between API calls
-    await new Promise(r => setTimeout(r, 500));
+    if (Math.floor(globalSlotIndex / timeSlots.length) >= 7) break;
   }
 
-  console.log(`✅ [Orchestrator] ${scheduledCount} posts scheduled in Buffer across ${Math.ceil(scheduledCount / timeSlots.length)} days`);
+  console.log(`✅ [Orchestrator] ${scheduledCount} posts scheduled in Buffer across ${activeChannels.length} channels over ${Math.min(7, Math.ceil(globalSlotIndex / timeSlots.length))} days`);
   return scheduledCount;
 }
 

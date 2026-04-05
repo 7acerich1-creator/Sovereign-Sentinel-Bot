@@ -36,11 +36,11 @@ const BRANDS = ["ace_richie", "containment_field"] as const;
 type Brand = typeof BRANDS[number];
 
 // ── CE-1 FIX: Platform image requirements ──
-// Platforms that REJECT text-only posts via Buffer API
+// Platforms where an image is strongly preferred for engagement
 const IMAGE_REQUIRED_PLATFORMS = new Set(["instagram", "tiktok"]);
 // Platforms that accept text-only posts
-// NOTE: YouTube excluded — Buffer API requires video, not images/text. LinkedIn not connected.
-const TEXT_OK_PLATFORMS = new Set(["x", "twitter", "threads"]);
+// Buffer supports ALL connected channels — YouTube (community), IG, TikTok, X, Threads, LinkedIn, FB
+const TEXT_OK_PLATFORMS = new Set(["x", "twitter", "threads", "youtube", "linkedin", "facebook"]);
 // Threads hard limit from Meta API (500 chars max)
 const THREADS_CHAR_LIMIT = 500;
 

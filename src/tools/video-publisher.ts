@@ -1,12 +1,11 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Direct Video Publisher (Path A)
-// Bypasses Buffer entirely for video content.
-// Buffer v1 API has NO video upload capability (media[photo] only).
-// This module posts video directly to platform APIs:
-//   - TikTok Content Posting API
-//   - Instagram Graph API (Reels)
-//   - YouTube Data API (Shorts)
-// Buffer remains in use for text-only posts (X, Threads).
+// Direct API/browser video uploads to platforms.
+// This module handles VIDEO FILE uploads via:
+//   - TikTok Content Posting API (+ browser fallback)
+//   - Instagram Graph API / browser fallback (Reels)
+//   - YouTube Data API (Shorts + Long-form)
+// Buffer handles text+image posts across ALL channels.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { Tool, ToolDefinition } from "../types";
@@ -47,7 +46,7 @@ export class TikTokPublishTool implements Tool {
     name: "tiktok_publish_video",
     description:
       "Publish a video directly to TikTok using the Content Posting API. " +
-      "Requires a public video URL (Supabase storage). This bypasses Buffer which cannot handle video. " +
+      "Requires a public video URL (Supabase storage). Direct API upload for video files. " +
       "Use for short-form clips (15-60s). Include caption with hooks and hashtags.",
     parameters: {
       video_url: {
@@ -149,7 +148,7 @@ export class InstagramReelsPublishTool implements Tool {
     name: "instagram_publish_reel",
     description:
       "Publish a Reel to Instagram via the Graph API. " +
-      "Requires a public video URL. This bypasses Buffer which cannot handle video uploads. " +
+      "Requires a public video URL. Direct API upload for video files. " +
       "Use for vertical short-form content (up to 90s). Include caption with hooks and hashtags.",
     parameters: {
       video_url: {
@@ -702,9 +701,9 @@ export class VideoPublisherTool implements Tool {
   definition: ToolDefinition = {
     name: "publish_video",
     description:
-      "Publish a video to one or more platforms (TikTok, Instagram Reels, YouTube Shorts). " +
-      "This is the primary video distribution tool — use this instead of Buffer's social_scheduler_create_post for video content. " +
-      "Buffer can only handle images and text. Videos must go through this tool. " +
+      "Publish a video file to one or more platforms (TikTok, Instagram Reels, YouTube Shorts). " +
+      "This is for VIDEO FILE uploads via direct API/browser. " +
+      "Buffer handles text+image posts across all channels separately. " +
       "Specify target platforms as comma-separated list. If a platform isn't configured, you'll be told which ones are available.",
     parameters: {
       video_url: {

@@ -130,20 +130,22 @@ export class SocialSchedulerPostTool implements Tool {
       const channelIds = String(args.channel_ids).split(",").map((s) => s.trim());
       const text = String(args.text);
       const scheduledAt = args.scheduled_at ? String(args.scheduled_at) : undefined;
-      const mediaUrl = args.media_url ? String(args.media_url) : undefined;
+      let mediaUrl = args.media_url ? String(args.media_url) : undefined;
       const now = args.now === "true" || args.now === true;
       const niche = args.niche ? String(args.niche) : "unknown";
 
-      // ── VIDEO DETECTION — Buffer cannot handle video via API ──
+      // ── VIDEO FILE DETECTION ──
+      // Buffer GraphQL assets field accepts image URLs, not video files.
+      // If a video URL is passed as media, strip it and post text-only.
+      // Video FILE uploads go through the publish_video tool (direct API/browser).
+      // Buffer posts text+image content to ALL connected channels including YT, IG, TikTok.
       if (mediaUrl) {
         const isVideoUrl = /\.(mp4|mov|avi|webm|mkv)(\?|$)/i.test(mediaUrl) ||
           mediaUrl.includes("/video/") || mediaUrl.includes("video_url");
 
         if (isVideoUrl) {
-          return `⚠️ Buffer cannot publish video content (API limitation — images only).\n` +
-            `Use the publish_video tool instead to post video to TikTok, Instagram Reels, and YouTube Shorts.\n` +
-            `Video URL: ${mediaUrl}\n` +
-            `Text content can still be posted via this tool (just remove the media_url parameter).`;
+          console.warn(`[Buffer] Video file URL detected as media — posting text-only (video files use publish_video tool)`);
+          mediaUrl = undefined;
         }
       }
 

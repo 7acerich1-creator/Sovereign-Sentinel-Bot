@@ -1,15 +1,15 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-04 (Cowork Session 21 — BUFFER FIX + QUALITY GATE DESIGN) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-04 (Cowork Session 22 — PLATFORM METADATA + LLM FAILOVER FIX) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
-## CRITICAL STATUS REPORT (as of Session 21, 2026-04-04 ~8:00 PM)
+## CRITICAL STATUS REPORT (as of Session 22, 2026-04-04 ~11:00 PM)
 
-**Mission Metrics:** BUFFER DISTRIBUTION FIXED. False channel filtering eradicated across 4 files. Pipeline now schedules to ALL 9 Buffer channels with platform-specific copy and staggered time slots. Revenue still $0.
+**Mission Metrics:** BUFFER DISTRIBUTION COMPLETE — channel filtering eradicated, platform metadata added, video assets flowing. LLM failover fixed (Groq first). Revenue still $0.
 
 **Infrastructure: OPERATIONAL.**
-- Bot is live on Railway. Commit `8613fef` still deployed — Session 21 code NOT yet pushed.
-- Pipeline ran all 8 steps successfully in Session 20. Buffer scheduling was broken due to false channel filter.
+- Bot is live on Railway. Commit `fe768d5` deploying (Session 22 code pushed).
+- Pipeline ran all 8 steps successfully in Session 20. Buffer scheduling fixed Session 21, metadata added Session 22.
 - yt-dlp authenticated via YouTube cookies (YOUTUBE_COOKIES_BASE64 env var in Railway).
 
 **API Credit Situation — ALL PAID PROVIDERS ARE EFFECTIVELY DEAD:**
@@ -35,6 +35,11 @@
 - Buffer GraphQL `assets` field supports: `images: [{ url }]` AND `videos: [{ url }]`
 - Platform-specific metadata available: `YoutubePostMetadataInput` (title, categoryId, privacy), `TikTokPostMetadataInput` (title), `InstagramPostMetadataInput` (first comment, geolocation)
 - **CRITICAL:** Clips MUST have `publicUrl` (Supabase storage) to post to TikTok/IG/YouTube. If Supabase upload fails (503), those channels get skipped.
+- **Session 22 addition:** `createPost` mutation now sends platform-specific `metadata` field:
+  - YouTube: `metadata.youtube = { title, categoryId: "22", privacy: "public", madeForKids: false }` — title and categoryId are REQUIRED by Buffer API
+  - Instagram: `metadata.instagram = { type: "reel", shouldShareToFeed: true }` — type and shouldShareToFeed are REQUIRED by Buffer API
+  - TikTok: `metadata.tiktok = { title }` — optional but recommended
+  - Without these metadata fields, YouTube and Instagram posts would be SILENTLY REJECTED by Buffer
 
 **PENDING — VIDEO PRODUCTION QUALITY GATE (Session 22+):**
 - Current video production has ZERO effects: no background music, no sound effects, no transitions, no text overlays, no intro/outro, no audio processing on voice. It's a Ken Burns slideshow with raw TTS voiceover.
@@ -122,19 +127,36 @@
 - `src/tools/video-publisher.ts` — Purged false "Buffer can't handle video" comments/descriptions
 - `src/engine/content-engine.ts` — Expanded TEXT_OK_PLATFORMS, fixed false comments
 
-**Both commits pushed. Railway auto-deploying.**
+**All Session 21 + 22 commits pushed. Railway auto-deploying.**
 
-**NEXT SESSION PRIORITIES (Session 22 — Test + Quality Gate):**
+---
 
-**STEP 1: TEST BUFFER DISTRIBUTION.** Code is deployed (commit `ecaee6f`). Run `/pipeline` with a YouTube URL. Verify: (a) all 9 channels receive posts, (b) TikTok/IG/YouTube posts include video media, (c) X/Threads get text-only, (d) scheduling is staggered correctly. Check Buffer calendar.
+**Session Summary — Cowork Session 22 (2026-04-04):**
 
-**STEP 2: IF SUPABASE 503 BLOCKS CLIP UPLOADS** — TikTok/IG/YouTube channels will be skipped (they need publicUrl). If this happens, investigate Supabase storage reliability.
+**DUE DILIGENCE ON BUFFER API — PLATFORM METADATA + LLM FAILOVER FIX.** Researched Buffer GraphQL API docs to verify everything BEFORE testing. Found and fixed critical issues that would have caused silent failures.
+
+**Fixes deployed this session:**
+1. **PLATFORM METADATA IN createPost MUTATION.** Buffer API requires specific metadata fields per platform. YouTube requires `title` + `categoryId`, Instagram requires `type` + `shouldShareToFeed`. Without these, posts are silently rejected. Added `metadata_json` parameter to social-scheduler.ts with a recursive `buildGqlObj` serializer that converts nested JS objects to inline GraphQL. Orchestrator now builds metadata per channel service type.
+2. **VideoAssetInput VERIFIED.** Confirmed from Buffer docs that `videos: [{ url: String! }]` is the correct schema. Our code was already correct.
+3. **LLM FAILOVER ORDER FIXED.** Railway env var was `gemini,anthropic,openai` — Groq (FREE tier) was completely excluded. Updated to `groq,gemini,anthropic,openai` in Railway AND in config.ts hardcoded default.
+4. **media_url DESCRIPTION FIXED.** social-scheduler.ts tool description still said "image" only — updated to "image or video".
+
+**Commit:** `fe768d5` — feat: add platform metadata to Buffer posts + fix LLM failover order
+
+**Files changed:**
+- `src/tools/social-scheduler.ts` — metadata_json param + buildGqlObj serializer + metadata block in mutation
+- `src/engine/vidrush-orchestrator.ts` — per-channel metadata builder (YouTube/IG/TikTok) in scheduleBufferWeek
+- `src/config.ts` — failover order → groq,gemini,anthropic,openai
+
+**NEXT SESSION PRIORITIES (Session 23 — Test + Quality Gate):**
+
+**STEP 1: TEST BUFFER DISTRIBUTION.** Code is deployed (commit `fe768d5`). Run `/pipeline` with a YouTube URL. Verify: (a) all 9 channels receive posts, (b) TikTok/IG/YouTube posts include video + metadata, (c) X/Threads get text-only, (d) scheduling is staggered correctly. Check Buffer calendar.
+
+**STEP 2: IF BUFFER REJECTS POSTS** — check Railway logs for GraphQL error messages. Common issues: metadata field name mismatch, enum values wrong (e.g. YouTube categoryId format), Instagram type enum.
 
 **STEP 3: BUILD QUALITY GATE.** The video production quality standard (see PENDING section above). Add background music, audio crossfade, voice warmth, text overlay, intro/outro to ffmpeg assembly in faceless-factory.ts.
 
 **STEP 4: PLATFORM ADAPTATION ENGINE.** TikTok needs faster cadence (1.05-1.1x speed). Each platform needs format-specific variants. Design the adapter layer.
-
-**STEP 5: STALE ENV VAR CLEANUP.** Update `LLM_FAILOVER_ORDER` in Railway to `groq,gemini,anthropic,openai`.
 
 **Buffer channels are CORRECT (9 total = 2 brands x ~5 platforms). They are NOT duplicates. DO NOT suggest cleaning or removing channels. DO NOT filter channels by service type. EVER.**
 
@@ -1487,7 +1509,7 @@ Video publisher code is fully written and registered. This is purely a credentia
 | `PORT` | 3000 | Set by Railway automatically |
 | `BUFFER_ORG_ID` | "69c613a244dbc563b3e05050" (hardcoded) | Not needed in Railway |
 | `LLM_DEFAULT_PROVIDER` | "anthropic" (changed 2026-04-03) | Not needed — hardcoded default updated |
-| `LLM_FAILOVER_ORDER` | "anthropic,gemini,groq,openai,deepseek" | Not needed — hardcoded default updated |
+| `LLM_FAILOVER_ORDER` | "groq,gemini,anthropic,openai" | UPDATED Session 22 — was "gemini,anthropic,openai" (Groq missing!) |
 | `GEMINI_MODEL` | "gemini-3.1-pro-preview" | Not needed |
 | `BROWSER_ENABLED` | "false" | NOT SET — see Browser section below |
 | `SHELL_ENABLED` | "true" (default) | Not needed |

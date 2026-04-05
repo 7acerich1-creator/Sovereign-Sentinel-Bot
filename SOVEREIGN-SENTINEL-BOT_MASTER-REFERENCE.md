@@ -8,9 +8,9 @@
 **Mission Metrics:** FIRST CLEAN END-TO-END PIPELINE RUN. All 8 steps green. 1 URL → YouTube long-form + 9 clips + 16 Buffer posts scheduled across 7 days. Two architecture bugs found and fixed: GraphQL enum quoting (killed YouTube/IG Buffer posts) and dual-path distribution (dumped all Shorts at once). Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit `0706f68` (Session 24 — Faceless Factory delivery quality).
+- Bot is live on Railway. Latest commit `3291382` (Session 24 — Semantic clip extraction).
 - Session 23 commit chain: `c549b79` → `0177d3b` → `2e1d3d0` → `bd6744b` → `050e699` (Alfred auto-pipeline).
-- Session 24 commits: `d2847f7` (timezone fix + stagger) → `2a14154` (Alfred Groq + spacing) → `0706f68` (orientation + cadence + music bed).
+- Session 24 commits: `d2847f7` (timezone fix + stagger) → `2a14154` (Alfred Groq + spacing) → `0706f68` (orientation + cadence + music bed) → `8475da7` (DVP protocol) → `3291382` (semantic clip extraction).
 - Pipeline ran all 8 steps for video iR4AAwNP3r8: "Beyond The Simulation" (258s, 12 scenes, 9 clips, 16 Buffer posts).
 - YouTube long-form live: https://youtube.com/watch?v=ybjDyM3uVts
 - yt-dlp authenticated via YouTube cookies (YOUTUBE_COOKIES_BASE64 env var in Railway).
@@ -64,10 +64,10 @@
 - [DVP: ADDRESSED] Scheduler timezone fix — all getUTCHours, minute-window guards, 10AM CDT day start. Commit `d2847f7`.
 - [DVP: ADDRESSED] Alfred on Groq — promoted from Gemini (250/day) to Groq (14,400/day). Commit `2a14154`.
 - [DVP: ADDRESSED] Pipeline-safe spacing — Vector moved to 12PM, Content Engine 1:30PM, Stasis 3:30PM. Commit `2a14154`.
+- [DVP: ADDRESSED] Semantic clip extraction — LLM reads Whisper transcript, identifies 8-15 self-contained story moments with titles + hooks. Three-tier fallback: LLM semantic → silence boundaries → math division. captionText carries title|hook for downstream copy gen. Commit `3291382`.
 - REMAINING (not yet addressed):
   1. Audio crossfade between scenes (not hard cuts)
   3. Voice warmth filter (EQ + slight reverb to reduce robotic feel)
-  4. Semantic clip extraction (LLM-driven story moments instead of silence-boundary chopping) — STEP 4, the anchor piece
   5. Intro bumper + outro CTA card
 - Platform Adaptation Engine needed: Each platform needs slightly different clip versions (TikTok = faster cadence, IG = cover frame optimization, etc.)
 - Distribution Router consolidation: Single entry point instead of split Buffer/direct-API paths
@@ -265,7 +265,7 @@
 - ❌→[DVP: ADDRESSED] Music bed — was silent failure (Railway ffmpeg missing lavfi anoisesrc). Session 24: Node.js WAV generation, zero lavfi dependency. Commit `0706f68`. Needs pipeline test to verify.
 - ❌→[DVP: ADDRESSED] Long-form orientation — was 9:16 vertical, should be 16:9 horizontal. Session 24: DIMS constant + orientation threading. Commit `0706f68`. Needs pipeline test to verify.
 - ❌→[DVP: ADDRESSED] Delivery cadence — was too fast/run-on. Session 24: TTS 0.80, pads 1.5s, chapter breaks, pacing guidance. Commit `0706f68`. Needs pipeline test to verify.
-- ❌ Shorts are CLIPS not STORIES — needs semantic extraction, not silence-boundary chopping — **STEP 4 pending**
+- ❌→[DVP: ADDRESSED] Shorts are CLIPS not STORIES. Session 24: LLM semantic extraction identifies self-contained story moments from Whisper transcript. Three-tier fallback preserved. Commit `3291382`. Needs pipeline test to verify.
 
 **NEXT SESSION PRIORITIES (Session 24) — DELIVERY QUALITY:**
 

@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-05 (Cowork Session 25 — PIPELINE TEST FIX: BLACK VIDEO + TIMING + SCENE SYNC) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-05 (Cowork Session 26 — LLM ROUTING FIX + AGENT COMMS PURGE) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -8,22 +8,33 @@
 **Mission Metrics:** FIRST CLEAN END-TO-END PIPELINE RUN. All 8 steps green. 1 URL → YouTube long-form + 9 clips + 16 Buffer posts scheduled across 7 days. Two architecture bugs found and fixed: GraphQL enum quoting (killed YouTube/IG Buffer posts) and dual-path distribution (dumped all Shorts at once). Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit `5adefce` (Session 25 — black video + timing + scene-audio sync fixes). Auto-deploying.
+- Bot is live on Railway. Latest commit `509fa4b` (Session 26 — LLM routing fix + AgentComms purge). Auto-deploying.
 - Session 23 commit chain: `c549b79` → `0177d3b` → `2e1d3d0` → `bd6744b` → `050e699` (Alfred auto-pipeline).
 - Session 24 commits: `d2847f7` (timezone fix) → `2a14154` (Alfred Groq) → `0706f68` (orientation + cadence + music bed) → `8475da7` (DVP) → `3291382` (semantic clips) → `cd60174` (crossfade + reverb).
 - Session 25 commit: `5adefce` (black video + timing + scene-audio sync — 6 fixes, 316 insertions, 76 deletions).
+- Session 26 commit: `509fa4b` (5 LLM routing fixes + AgentComms purge — 18 insertions, 11 deletions).
 - Pipeline ran all 8 steps for video iR4AAwNP3r8: "Beyond The Simulation" (258s, 12 scenes, 9 clips, 16 Buffer posts).
 - YouTube long-form live: https://youtube.com/watch?v=ybjDyM3uVts
 - yt-dlp authenticated via YouTube cookies (YOUTUBE_COOKIES_BASE64 env var in Railway).
 
-**API Credit Situation — ALL PAID PROVIDERS ARE EFFECTIVELY DEAD:**
-- **Anthropic:** $10.03 remaining. DO NOT BURN ON PIPELINE. Protected as LAST in failover chain.
+**API Credit Situation (updated Session 26):**
+- **Anthropic:** ~$10 remaining. NOW USED FOR VERITAS BRAIN ONLY (chat, briefings, Sapphire). Low burn rate (~$0.36/month for briefings, ~$0.01/conversation). Estimated runway: 37-74 days.
 - **OpenAI:** -$0.06 credits. DEAD. DALL-E 3 fallback will not fire. TTS via OpenAI will not work.
-- **Gemini:** $50.49 OWED (not available — this is accumulated debt, card declined). Imagen 4 may or may not work depending on whether Google has cut off the key.
-- **Groq:** FREE tier. 14,400 req/day. This is the ONLY reliable LLM provider right now.
+- **Gemini:** $50.49 OWED (accumulated debt). Key may still authenticate for Imagen 4 ($0.02-0.06/image) — untested. Gemini text generation is secondary fallback for Veritas/Sapphire teams.
+- **Groq:** FREE tier. 14,400 req/day. DEDICATED to pipeline (VidRush, Alfred trend scan, Vector, Yuki). No longer competing with chat.
 - **ElevenLabs:** Creator plan, 93,842 credits remaining. TTS is working.
 
-**The ONLY path forward is zero-cost providers:** Groq (LLM) + Pollinations.ai (images). Both are free, no auth, no billing.
+**LLM ROUTING (Session 26 fix — commit 509fa4b):**
+- **ROOT CAUSE of Session 25 unresponsiveness:** Veritas chat, Briefings, Sapphire Sentinel, and Content Engine were ALL wired to `failoverLLM` (Groq-first). When pipeline activity rate-limited Groq (12k TPM), the chain cascaded through dead providers (Gemini debt, OpenAI negative), silently failing.
+- **FIX:** Rewired 5 call sites to use AGENT_LLM_TEAMS (dedicated per-agent failover chains):
+  - `agentLoop` (Veritas chat) → AGENT_LLM_TEAMS.veritas [Anthropic → Gemini → Groq]
+  - `ProactiveBriefings` → AGENT_LLM_TEAMS.veritas [Anthropic → Gemini → Groq]
+  - `SapphireSentinel` → AGENT_LLM_TEAMS.sapphire [Anthropic → Gemini → Groq]
+  - `dailyContentProduction` (scheduled) → AGENT_LLM_TEAMS.anita [Gemini → Groq → Anthropic]
+  - `dailyContentProduction` (manual) → AGENT_LLM_TEAMS.anita [Gemini → Groq → Anthropic]
+- **Also purged:** AgentComms (legacy in-memory message bus). Fully replaced by Supabase crew-dispatch. Import + instantiation removed from index.ts.
+- **Left intentionally on failoverLLM:** AgentSwarm + MeshWorkflow (rare on-demand tools, Groq-first is fine).
+- **[DVP: ADDRESSED]** — needs Architect to test `/status` + `/pipeline` after Railway deploy to verify.
 
 **RESOLVED — BUFFER POSTING (Session 21 fix):**
 - **ROOT CAUSE:** `scheduleBufferWeek()` in vidrush-orchestrator.ts had a hardcoded filter that ONLY selected channels with service type "twitter", "threads", "linkedin", "facebook", "mastodon". YouTube, Instagram, and TikTok channels were explicitly EXCLUDED. This was based on a false assumption that Buffer can't post to those platforms. Buffer supports ALL connected channels.
@@ -72,6 +83,12 @@
   5. Intro bumper + outro CTA card
 - Platform Adaptation Engine needed: Each platform needs slightly different clip versions (TikTok = faster cadence, IG = cover frame optimization, etc.)
 - Distribution Router consolidation: Single entry point instead of split Buffer/direct-API paths
+
+---
+
+**Session Summary — Cowork Session 26 (2026-04-05):**
+
+**LLM ROUTING OVERHAUL + DEAD CODE PURGE.** Investigated why bot was unresponsive on night of Apr 4 and missed 10AM CDT morning briefing + Alfred trend scan. Root cause: 5 features (Veritas chat, briefings, Sapphire Sentinel, Content Engine x2) were wired to `failoverLLM` (Groq-first chain) instead of their dedicated AGENT_LLM_TEAMS. When pipeline activity rate-limited Groq, the entire chat/briefing system cascaded through dead providers and silently failed. Fixed by rewiring all 5 to agent-specific teams. Also purged dead AgentComms code (replaced by Supabase crew-dispatch). Explained Swarm vs Mesh vs Crew Dispatch architecture to Architect. Confirmed Gemini API key works for Imagen 4 (same key, $0.02-0.06/image). Provided complete 15-command reference card for Google Keep. Commit `509fa4b` pushed, Railway auto-deploying. [DVP: ADDRESSED — awaiting Architect test]
 
 ---
 

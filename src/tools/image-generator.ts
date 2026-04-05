@@ -1,7 +1,8 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Sovereign Image Generator (Gap 4)
-// Pollinations.ai (FREE primary) → Gemini Imagen 4 → DALL-E 3 (fallback)
+// Gemini Imagen 4 (PRIMARY) → Pollinations.ai (FREE fallback) → DALL-E 3 (fallback)
 // Niche-aware prompt enhancement + Supabase logging
+// Session 26: Imagen 4 promoted to primary for cinematic quality uplift
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { writeFileSync } from "fs";
@@ -33,7 +34,7 @@ export class ImageGeneratorTool implements Tool {
   definition: ToolDefinition = {
     name: "generate_image",
     description:
-      "Generates a sovereign brand image using Pollinations.ai (FREE primary) with Gemini Imagen 4 + DALL-E 3 fallback. " +
+      "Generates a sovereign brand image using Gemini Imagen 4 (PRIMARY) with Pollinations.ai + DALL-E 3 fallback. " +
       "Enhances the prompt based on content niche for consistent visual identity. " +
       "Saves the image locally and logs to Supabase content_transmissions.",
     parameters: {
@@ -85,36 +86,36 @@ export class ImageGeneratorTool implements Tool {
     };
     const dims = POLL_DIMS[aspectRatio] || POLL_DIMS["9:16"];
 
-    // ── STEP 1: Pollinations.ai (FREE, no auth, unlimited) ──
-    try {
-      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt.slice(0, 2000))}?width=${dims.w}&height=${dims.h}&nologo=true&seed=${Date.now()}`;
-      const res = await fetch(pollinationsUrl, { redirect: "follow" });
-      if (res.ok) {
-        const buf = Buffer.from(await res.arrayBuffer());
-        if (buf.length > 5000) {
-          imageBuffer = buf;
-          source = "pollinations";
-          console.log(`🎨 [ImageGen] Generated via Pollinations (${(buf.length / 1024).toFixed(0)}KB)`);
-        } else {
-          console.warn(`[ImageGen] Pollinations returned tiny response: ${buf.length}B`);
-        }
-      } else {
-        console.warn(`[ImageGen] Pollinations ${res.status}`);
+    // ── STEP 1: Gemini Imagen 4 (PRIMARY — cinematic quality, $0.02-0.04/image) ──
+    const geminiKey = config.llm.providers.gemini?.apiKey;
+    if (geminiKey) {
+      try {
+        imageBuffer = await this.tryGeminiImagen(geminiKey, enhancedPrompt, aspectRatio);
+        if (imageBuffer) source = "gemini_imagen_4";
+      } catch (err: any) {
+        console.warn(`[ImageGen] Gemini Imagen failed: ${err.message}`);
       }
-    } catch (err: any) {
-      console.warn(`[ImageGen] Pollinations error: ${err.message}`);
     }
 
-    // ── STEP 2: Fallback to Gemini Imagen 4 ──
+    // ── STEP 2: Fallback to Pollinations.ai (FREE, no auth) ──
     if (!imageBuffer) {
-      const geminiKey = config.llm.providers.gemini?.apiKey;
-      if (geminiKey) {
-        try {
-          imageBuffer = await this.tryGeminiImagen(geminiKey, enhancedPrompt, aspectRatio);
-          if (imageBuffer) source = "gemini_imagen_4";
-        } catch (err: any) {
-          console.warn(`[ImageGen] Gemini Imagen failed: ${err.message}`);
+      try {
+        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt.slice(0, 2000))}?width=${dims.w}&height=${dims.h}&nologo=true&seed=${Date.now()}`;
+        const res = await fetch(pollinationsUrl, { redirect: "follow" });
+        if (res.ok) {
+          const buf = Buffer.from(await res.arrayBuffer());
+          if (buf.length > 5000) {
+            imageBuffer = buf;
+            source = "pollinations";
+            console.log(`🎨 [ImageGen] Generated via Pollinations fallback (${(buf.length / 1024).toFixed(0)}KB)`);
+          } else {
+            console.warn(`[ImageGen] Pollinations returned tiny response: ${buf.length}B`);
+          }
+        } else {
+          console.warn(`[ImageGen] Pollinations ${res.status}`);
         }
+      } catch (err: any) {
+        console.warn(`[ImageGen] Pollinations error: ${err.message}`);
       }
     }
 

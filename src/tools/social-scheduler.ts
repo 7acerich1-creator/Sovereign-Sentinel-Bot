@@ -134,19 +134,13 @@ export class SocialSchedulerPostTool implements Tool {
       const now = args.now === "true" || args.now === true;
       const niche = args.niche ? String(args.niche) : "unknown";
 
-      // ── VIDEO FILE DETECTION ──
-      // Buffer GraphQL assets field accepts image URLs, not video files.
-      // If a video URL is passed as media, strip it and post text-only.
-      // Video FILE uploads go through the publish_video tool (direct API/browser).
-      // Buffer posts text+image content to ALL connected channels including YT, IG, TikTok.
+      // ── MEDIA TYPE DETECTION ──
+      // Buffer GraphQL assets supports both images AND videos.
+      // TikTok, Instagram, YouTube channels REQUIRE media — never strip it.
+      let isVideo = false;
       if (mediaUrl) {
-        const isVideoUrl = /\.(mp4|mov|avi|webm|mkv)(\?|$)/i.test(mediaUrl) ||
-          mediaUrl.includes("/video/") || mediaUrl.includes("video_url");
-
-        if (isVideoUrl) {
-          console.warn(`[Buffer] Video file URL detected as media — posting text-only (video files use publish_video tool)`);
-          mediaUrl = undefined;
-        }
+        isVideo = /\.(mp4|mov|avi|webm|mkv|mpeg|mpg)(\?|$)/i.test(mediaUrl) ||
+          mediaUrl.includes("/video/");
       }
 
       // Buffer GraphQL ShareMode enum: addToQueue | shareNext | shareNow | customScheduled
@@ -165,9 +159,15 @@ export class SocialSchedulerPostTool implements Tool {
       for (const channelId of channelIds) {
         try {
           // Build the input dynamically
+          // Buffer assets support both images and videos
           let assetsBlock = "";
           if (mediaUrl) {
-            assetsBlock = `assets: { images: [{ url: "${mediaUrl.replace(/"/g, '\\"')}" }] }`;
+            const escapedUrl = mediaUrl.replace(/"/g, '\\"');
+            if (isVideo) {
+              assetsBlock = `assets: { videos: [{ url: "${escapedUrl}" }] }`;
+            } else {
+              assetsBlock = `assets: { images: [{ url: "${escapedUrl}" }] }`;
+            }
           }
 
           let dueAtBlock = "";

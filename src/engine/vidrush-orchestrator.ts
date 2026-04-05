@@ -388,11 +388,14 @@ async function distributeClips(
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // STEP 8: SCHEDULE WEEK IN BUFFER
-// Distribute text+image posts across ALL connected Buffer channels over 7 days.
-// Buffer supports every connected channel — X, Threads, LinkedIn, Facebook,
-// YouTube (community posts), Instagram, TikTok, etc. NO channels are excluded.
-// Strategy: Round-robin clips across channels. Each (clip, channel) pair
-// gets its own unique time slot so nothing overlaps.
+// Distribute posts across ALL connected Buffer channels over 7 days.
+// PLATFORM REQUIREMENTS (verified from Buffer docs):
+//   - TikTok: REQUIRES video or images. Text-only WILL FAIL.
+//   - Instagram: REQUIRES image or video. Text-only WILL FAIL.
+//   - YouTube: REQUIRES video (Shorts only). Text-only WILL FAIL. No community posts via Buffer.
+//   - X/Twitter, Threads, LinkedIn, Facebook: text-only works fine.
+// Strategy: Clips with publicUrl → video platforms get video URL as media.
+//           Clips without publicUrl → skip video platforms, text-only to text platforms.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 // Map Buffer service names to our platform copy keys
@@ -408,6 +411,12 @@ const SERVICE_TO_COPY_KEY: Record<string, keyof PlatformCopy> = {
   mastodon: "threads",
   pinterest: "instagram",
 };
+
+// Platforms that REQUIRE media (video or image) — text-only will be rejected
+const MEDIA_REQUIRED_SERVICES = new Set(["tiktok", "instagram", "youtube"]);
+
+// Platforms that accept text-only posts
+const TEXT_OK_SERVICES = new Set(["twitter", "threads", "linkedin", "facebook", "mastodon", "googlebusiness", "bluesky"]);
 
 async function scheduleBufferWeek(
   clips: ClipMeta[],
@@ -433,8 +442,7 @@ async function scheduleBufferWeek(
     return 0;
   }
 
-  // Use ALL channels — Buffer handles every connected platform
-  // Only skip channels with paused queues
+  // Use ALL channels — only skip paused queues
   const activeChannels = channels.filter((c: any) => !c.queuePaused);
 
   if (activeChannels.length === 0) {
@@ -442,7 +450,17 @@ async function scheduleBufferWeek(
     return 0;
   }
 
-  console.log(`📡 [Orchestrator] Scheduling across ${activeChannels.length} active Buffer channels: ${activeChannels.map((c: any) => `${c.service}/${c.name}`).join(", ")}`);
+  // Split channels by what they need
+  const textChannels = activeChannels.filter((c: any) => !MEDIA_REQUIRED_SERVICES.has(c.service));
+  const mediaChannels = activeChannels.filter((c: any) => MEDIA_REQUIRED_SERVICES.has(c.service));
+
+  // Clips that have public URLs can go to media-required platforms
+  const clipsWithMedia = clips.filter(c => c.publicUrl);
+
+  console.log(`📡 [Orchestrator] Scheduling across ${activeChannels.length} active channels:`);
+  console.log(`   Text channels (${textChannels.length}): ${textChannels.map((c: any) => `${c.service}/${c.name}`).join(", ")}`);
+  console.log(`   Media channels (${mediaChannels.length}): ${mediaChannels.map((c: any) => `${c.service}/${c.name}`).join(", ")}`);
+  console.log(`   Clips with video URL: ${clipsWithMedia.length}/${clips.length}`);
 
   const postTool = new SocialSchedulerPostTool();
   let scheduledCount = 0;
@@ -450,29 +468,23 @@ async function scheduleBufferWeek(
   // Time slots: 4 per day — 4AM, 7AM, 10AM, 1PM CT (= 09:00, 12:00, 15:00, 18:00 UTC)
   const timeSlots = ["09:00:00", "12:00:00", "15:00:00", "18:00:00"];
   const now = new Date();
-
-  // Strategy: Round-robin clips across channels.
-  // Each clip is sent to EACH channel, one at a time.
-  // Each (clip, channel) gets its own time slot.
   let globalSlotIndex = 0;
 
   for (let clipIdx = 0; clipIdx < clips.length; clipIdx++) {
-    const copy = copyMap.get(clips[clipIdx].index);
+    const clip = clips[clipIdx];
+    const copy = copyMap.get(clip.index);
     if (!copy) continue;
 
-    for (const channel of activeChannels) {
+    // ── TEXT-ONLY CHANNELS (X, Threads, LinkedIn, Facebook) ──
+    for (const channel of textChannels) {
       const dayOffset = Math.floor(globalSlotIndex / timeSlots.length);
       const slotIdx = globalSlotIndex % timeSlots.length;
-
-      // Cap at 7 days of content
       if (dayOffset >= 7) break;
 
       const schedDate = new Date(now);
       schedDate.setDate(schedDate.getDate() + dayOffset + 1);
-      const isoDate = schedDate.toISOString().split("T")[0];
-      const scheduledAt = `${isoDate}T${timeSlots[slotIdx]}Z`;
+      const scheduledAt = `${schedDate.toISOString().split("T")[0]}T${timeSlots[slotIdx]}Z`;
 
-      // Pick platform-specific copy based on the channel's service type
       const copyKey = SERVICE_TO_COPY_KEY[channel.service] || "x_twitter";
       const postText = (copy as any)[copyKey] || copy.x_twitter || copy.threads ||
         `Firmware Update incoming. sovereign-synthesis.com #SovereignSynthesis #${niche.replace(/_/g, "")}`;
@@ -484,17 +496,55 @@ async function scheduleBufferWeek(
           scheduled_at: scheduledAt,
           niche,
         });
-
         if (result.includes("✅")) {
           scheduledCount++;
-          console.log(`  📌 Clip ${clipIdx} → ${channel.service}/${channel.name} @ ${scheduledAt}`);
+          console.log(`  📌 Clip ${clipIdx} → ${channel.service}/${channel.name} @ ${scheduledAt} [text]`);
         }
       } catch (err: any) {
-        console.error(`[Orchestrator] Buffer schedule failed for clip ${clipIdx} → ${channel.service}: ${err.message?.slice(0, 200)}`);
+        console.error(`[Orchestrator] Buffer failed clip ${clipIdx} → ${channel.service}: ${err.message?.slice(0, 200)}`);
       }
 
       globalSlotIndex++;
       await new Promise(r => setTimeout(r, 500));
+    }
+
+    // ── MEDIA-REQUIRED CHANNELS (TikTok, Instagram, YouTube) ──
+    // Only send if clip has a public video URL
+    if (clip.publicUrl) {
+      for (const channel of mediaChannels) {
+        const dayOffset = Math.floor(globalSlotIndex / timeSlots.length);
+        const slotIdx = globalSlotIndex % timeSlots.length;
+        if (dayOffset >= 7) break;
+
+        const schedDate = new Date(now);
+        schedDate.setDate(schedDate.getDate() + dayOffset + 1);
+        const scheduledAt = `${schedDate.toISOString().split("T")[0]}T${timeSlots[slotIdx]}Z`;
+
+        const copyKey = SERVICE_TO_COPY_KEY[channel.service] || "tiktok";
+        const postText = (copy as any)[copyKey] || copy.tiktok || copy.instagram ||
+          `Firmware Update incoming. #SovereignSynthesis #${niche.replace(/_/g, "")}`;
+
+        try {
+          const result = await postTool.execute({
+            channel_ids: channel.id,
+            text: postText,
+            media_url: clip.publicUrl,
+            scheduled_at: scheduledAt,
+            niche,
+          });
+          if (result.includes("✅")) {
+            scheduledCount++;
+            console.log(`  📌 Clip ${clipIdx} → ${channel.service}/${channel.name} @ ${scheduledAt} [video]`);
+          }
+        } catch (err: any) {
+          console.error(`[Orchestrator] Buffer failed clip ${clipIdx} → ${channel.service}: ${err.message?.slice(0, 200)}`);
+        }
+
+        globalSlotIndex++;
+        await new Promise(r => setTimeout(r, 500));
+      }
+    } else {
+      console.warn(`  ⚠️ Clip ${clipIdx} has no public URL — skipping media-required channels (TikTok/IG/YouTube)`);
     }
 
     if (Math.floor(globalSlotIndex / timeSlots.length) >= 7) break;

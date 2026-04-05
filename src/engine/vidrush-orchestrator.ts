@@ -548,8 +548,12 @@ async function scheduleBufferWeek(
   const postTool = new SocialSchedulerPostTool();
   let scheduledCount = 0;
 
-  // Time slots: 4 per day — 4AM, 7AM, 10AM, 1PM CT (= 09:00, 12:00, 15:00, 18:00 UTC)
-  const timeSlots = ["09:00:00", "12:00:00", "15:00:00", "18:00:00"];
+  // Time slots: 8 per day — supports up to 3 pipeline runs/day without collision.
+  // CT times: 4AM, 6AM, 8AM, 10AM, 12PM, 2PM, 5PM, 8PM
+  // = UTC:    09:00, 11:00, 13:00, 15:00, 17:00, 19:00, 22:00, 01:00(+1)
+  // 8 slots × 7 days = 56 slots/week. At ~28 posts/pipeline, that's exactly 2 full pipelines.
+  // A 3rd pipeline in the same week spills into slightly tighter spacing — still clean.
+  const timeSlots = ["09:00:00", "11:00:00", "13:00:00", "15:00:00", "17:00:00", "19:00:00", "22:00:00", "01:00:00"];
   const now = new Date();
   let globalSlotIndex = 0;
 

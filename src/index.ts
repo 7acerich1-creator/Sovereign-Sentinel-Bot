@@ -193,7 +193,7 @@ async function main() {
   const providersByName: Record<string, LLMProvider> = {};
   for (const p of llmProviders) providersByName[p.name] = p;
 
-  function buildTeamLLM(primaryOrder: string[]): FailoverLLM {
+  function buildTeamLLM(primaryOrder: string[], primaryRetries = 0): FailoverLLM {
     const chain: LLMProvider[] = [];
     for (const name of primaryOrder) {
       if (providersByName[name]) chain.push(providersByName[name]);
@@ -202,7 +202,7 @@ async function main() {
     for (const p of llmProviders) {
       if (!chain.includes(p)) chain.push(p);
     }
-    return new FailoverLLM(chain);
+    return new FailoverLLM(chain, 60_000, primaryRetries);
   }
 
   // Team assignments:
@@ -219,8 +219,9 @@ async function main() {
   };
 
   // Pipeline-dedicated LLM: Groq first (14,400 free/day), then Gemini, then paid providers last.
-  // This prevents pipeline runs from burning Anthropic/OpenAI credits.
-  const pipelineLLM = buildTeamLLM(["groq", "gemini", "anthropic", "openai"]);
+  // primaryRetries=3: Groq gets 4 total attempts (1 + 3 retries with 3s/6s/9s backoff)
+  // before EVER falling to Gemini. Gemini's JSON output is unreliable for structured generation.
+  const pipelineLLM = buildTeamLLM(["groq", "gemini", "anthropic", "openai"], 3);
 
   console.log("🔀 [LLM Teams] Provider split active:");
   for (const [agent, team] of Object.entries(AGENT_LLM_TEAMS)) {

@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-05 (Cowork Session 24 — SCHEDULER FIX + ALFRED GROQ + DELIVERY QUALITY) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-05 (Cowork Session 25 — PIPELINE TEST FIX: BLACK VIDEO + TIMING + SCENE SYNC) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -8,9 +8,10 @@
 **Mission Metrics:** FIRST CLEAN END-TO-END PIPELINE RUN. All 8 steps green. 1 URL → YouTube long-form + 9 clips + 16 Buffer posts scheduled across 7 days. Two architecture bugs found and fixed: GraphQL enum quoting (killed YouTube/IG Buffer posts) and dual-path distribution (dumped all Shorts at once). Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit `cd60174` (Session 24 — Scene crossfade + voice reverb).
+- Bot is live on Railway. Latest commit `cd60174` (Session 24). Session 25 fixes NOT YET PUSHED — need git push via Desktop Commander.
 - Session 23 commit chain: `c549b79` → `0177d3b` → `2e1d3d0` → `bd6744b` → `050e699` (Alfred auto-pipeline).
 - Session 24 commits: `d2847f7` (timezone fix) → `2a14154` (Alfred Groq) → `0706f68` (orientation + cadence + music bed) → `8475da7` (DVP) → `3291382` (semantic clips) → `cd60174` (crossfade + reverb).
+- Session 25 changes (NOT PUSHED): 6 fixes to faceless-factory.ts + vidrush-orchestrator.ts after "Breaking Free" pipeline test revealed black video + timing issues.
 - Pipeline ran all 8 steps for video iR4AAwNP3r8: "Beyond The Simulation" (258s, 12 scenes, 9 clips, 16 Buffer posts).
 - YouTube long-form live: https://youtube.com/watch?v=ybjDyM3uVts
 - yt-dlp authenticated via YouTube cookies (YOUTUBE_COOKIES_BASE64 env var in Railway).
@@ -267,26 +268,27 @@
 - ❌→[DVP: ADDRESSED] Delivery cadence — was too fast/run-on. Session 24: TTS 0.80, pads 1.5s, chapter breaks, pacing guidance. Commit `0706f68`. Needs pipeline test to verify.
 - ❌→[DVP: ADDRESSED] Shorts are CLIPS not STORIES. Session 24: LLM semantic extraction identifies self-contained story moments from Whisper transcript. Three-tier fallback preserved. Commit `3291382`. Needs pipeline test to verify.
 
-**NEXT SESSION PRIORITIES (Session 24) — DELIVERY QUALITY:**
+**SESSION 25 PIPELINE TEST RESULTS (2026-04-05) — video b67-5KxX5lY "Breaking Free":**
+- ❌ COMPLETELY BLACK VIDEO — 5:46, 10.5MB (should be 40-60MB). All clips also black.
+- Root cause: Pollinations.ai returns HTML/CAPTCHA from Railway IPs; old size-only check passed garbage through.
+- ❌ Black flash between scenes — fade-to-black + fade-from-black = 0.8s dark gap per transition.
+- ❌ Clips cutting mid-word — 10s Whisper chunk resolution too coarse for LLM timestamp precision, no audio padding.
+- ❌ Scene transitions don't align with speech pauses — equal-division timing ignores TTS silence pads.
+- ❌ Clip count/duration wrong for faceless output — 30 clips × 25s designed for 20-60min external rips, not 5min faceless.
+- ✅ Story extraction "a little better" per Ace.
 
-**STEP 1: FIX ORIENTATION — Long-form = 16:9, Shorts = 9:16.**
-- faceless-factory.ts hardcodes 1080x1920 everywhere (images, Ken Burns, fallback)
-- Need format parameter: `"horizontal"` → 1920x1080 images (1792x1024), Ken Burns s=1920x1080
-- `"vertical"` stays as-is for shorts pipeline
-- Image gen prompts need landscape descriptions for horizontal mode
+**SESSION 25 FIXES (NOT YET PUSHED):**
+1. [DVP: ADDRESSED] Image validation: magic byte check (PNG/JPEG/WebP/GIF) + >10KB size gate. Fallback chain: Pollinations → Imagen 4 → DALL-E 3 → cinematic gradient (niche-aware palettes) → minimal dark PNG. `generateSceneImage()` almost never returns null.
+2. [DVP: ADDRESSED] Scene crossfade: replaced per-scene fade-in/fade-out with true xfade dissolve filter chain. 0.6s dissolve between scenes, no black flash.
+3. [DVP: ADDRESSED] Clip timing: Whisper chunk resolution 10s → 5s. Audio-aware padding (PAD_BEFORE=0.3s, PAD_AFTER=0.2s, boundary-clamped). Audio fades (afade in 0.15s, afade out 0.3s).
+4. [DVP: ADDRESSED] Scene-audio sync: `renderAudio()` now returns per-segment durations (voiceover + silence pads). `assembleVideo()` uses actual durations per scene instead of equal division. Scene transitions now land on natural speech pauses.
+5. [DVP: ADDRESSED] Dynamic clip params: faceless output (3-8min) gets ~1 clip per 45s (4-12 clips, 20-55s each). External rips (>10min) keep 30 × 25s defaults.
+6. [DVP: ADDRESSED] xfade offset calculation: uses cumulative per-clip durations for variable-length scenes (was equal-division formula).
 
-**STEP 2: FIX MUSIC BED — Railway ffmpeg compatibility.**
-- Check Railway ffmpeg build for lavfi support: `ffmpeg -filters 2>&1 | grep anoisesrc`
-- If missing: generate ambient WAV in Node.js (Buffer of sine wave samples) → feed as regular audio input
-- Alternative: bundle a 60s royalty-free ambient loop as a static asset
-
-**STEP 3: FIX DELIVERY CADENCE — Pacing architecture.**
-- Bump silence pads 0.6s → 1.5s between segments
-- Add chapter breaks: 2.5s silence every 4-5 segments
-- Script-level fix: add LLM directive for short sentences, ellipses, rhetorical pauses
-- Consider TTS speed 0.85x → 0.80x for even more documentary feel
-
-**STEP 4: SEMANTIC CLIP EXTRACTION — Shorts as stories.**
+**NEXT SESSION PRIORITIES (Session 25):**
+1. GIT PUSH — commit + push all Session 25 changes via Desktop Commander cmd shell.
+2. PIPELINE RETEST — run full pipeline, verify all 6 fixes produce visible video with correct timing.
+3. DVP VERIFICATION — test results will upgrade ADDRESSED → VERIFIED or flag REGRESSED.
 - THIS IS THE BIG ONE. Replace silence-boundary chopping with LLM semantic extraction.
 - New Step 4a: LLM reads full transcript with timestamps → identifies 8-12 self-contained "story moments" (hook → insight → payoff)
 - Step 4b: Map story moments to video timestamps

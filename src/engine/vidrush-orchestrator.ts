@@ -154,14 +154,16 @@ async function extractStoryMoments(
   if (!segments || segments.length < 10) return null;
 
   // Build a condensed transcript with timestamps for the LLM.
-  // Group segments into ~10s chunks to keep the prompt manageable.
+  // Group segments into ~5s chunks for FINER timestamp precision.
+  // Previous 10s chunks were too coarse — LLM couldn't cut at word boundaries
+  // because it only had 10s-resolution timestamps to work with.
   const condensed: string[] = [];
   let chunkStart = segments[0].start;
   let chunkText: string[] = [];
 
   for (const seg of segments) {
     chunkText.push(seg.text.trim());
-    if (seg.end - chunkStart >= 10 || seg === segments[segments.length - 1]) {
+    if (seg.end - chunkStart >= 5 || seg === segments[segments.length - 1]) {
       condensed.push(`[${chunkStart.toFixed(1)}s-${seg.end.toFixed(1)}s] ${chunkText.join(" ")}`);
       chunkStart = seg.end;
       chunkText = [];
@@ -295,17 +297,31 @@ async function chopLongFormIntoClips(
     const nicheFilter = NICHE_FILTERS[niche] || NICHE_FILTERS.dark_psychology;
     const clips: ClipMeta[] = [];
 
+    // Audio-aware padding: add breathing room so clips don't start/end mid-word.
+    // 0.3s before the LLM's start (catches the beginning of the first word)
+    // 0.2s after the LLM's end (lets the last word finish naturally)
+    const PAD_BEFORE = 0.3;
+    const PAD_AFTER = 0.2;
+
     for (let i = 0; i < storyMoments.length; i++) {
       const moment = storyMoments[i];
       const clipPath = `${clipDir}/clip_${i.toString().padStart(2, "0")}.mp4`;
 
+      // Apply padding, clamped to video boundaries and non-overlapping with neighbors
+      const prevEnd = i > 0 ? storyMoments[i - 1].endSec : 0;
+      const paddedStart = Math.max(0, Math.max(prevEnd, moment.startSec - PAD_BEFORE));
+      const paddedEnd = Math.min(totalDuration, moment.endSec + PAD_AFTER);
+
       try {
+        // Use -ss before -i for fast seeking, then -t for duration (more reliable than -to with -ss before -i)
+        const duration = paddedEnd - paddedStart;
         execSync(
-          `ffmpeg -i "${videoPath}" ` +
-            `-ss ${moment.startSec.toFixed(2)} -to ${moment.endSec.toFixed(2)} ` +
+          `ffmpeg -ss ${paddedStart.toFixed(2)} -i "${videoPath}" ` +
+            `-t ${duration.toFixed(2)} ` +
             `-vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${nicheFilter}" ` +
             `-c:v libx264 -preset fast -crf 23 ` +
             `-c:a aac -b:a 128k ` +
+            `-af "afade=t=in:st=0:d=0.15,afade=t=out:st=${Math.max(0, duration - 0.3).toFixed(2)}:d=0.3" ` +
             `-y "${clipPath}"`,
           { timeout: 120_000, stdio: "pipe" }
         );
@@ -314,17 +330,17 @@ async function chopLongFormIntoClips(
           index: i,
           localPath: clipPath,
           publicUrl: null,
-          startSec: moment.startSec,
-          endSec: moment.endSec,
+          startSec: paddedStart,
+          endSec: paddedEnd,
           captionText: `${moment.title} | ${moment.hook}`,
         });
-        console.log(`  ✂️ Clip ${i}: "${moment.title}" ${moment.startSec.toFixed(1)}s → ${moment.endSec.toFixed(1)}s (${(moment.endSec - moment.startSec).toFixed(1)}s)`);
+        console.log(`  ✂️ Clip ${i}: "${moment.title}" ${paddedStart.toFixed(1)}s → ${paddedEnd.toFixed(1)}s (${duration.toFixed(1)}s, padded ±0.3s)`);
       } catch (err: any) {
         console.error(`[Orchestrator] Clip ${i} ("${moment.title}") failed: ${err.message?.slice(0, 200)}`);
       }
     }
 
-    console.log(`✅ [Orchestrator] ${clips.length}/${storyMoments.length} semantic clips cut`);
+    console.log(`✅ [Orchestrator] ${clips.length}/${storyMoments.length} semantic clips cut (with audio padding + fade)`);
     return clips;
   }
 
@@ -978,14 +994,27 @@ export async function executeFullPipeline(
   await progress("STEP 4/8", "Extracting story moments from long-form video...");
   let clips: ClipMeta[];
   try {
+    // Dynamic clip params based on source video duration:
+    // - External YT rips (20-60min): 30 clips, 25s each (original defaults)
+    // - Faceless factory output (3-8min): fewer, shorter clips
+    //   e.g. 5min video → ~6-8 clips of 30-45s each (complete standalone moments)
+    const srcDuration = facelessResult.duration || 300;
+    const dynamicClipCount = srcDuration > 600
+      ? 30                                          // long external rips
+      : Math.max(4, Math.min(12, Math.round(srcDuration / 45))); // faceless: ~1 clip per 45s
+    const dynamicClipDuration = srcDuration > 600
+      ? 25                                          // long external rips
+      : Math.max(20, Math.min(55, Math.round(srcDuration / dynamicClipCount))); // sized to source
+    console.log(`📐 [Orchestrator] Dynamic clip params: ${dynamicClipCount} clips × ~${dynamicClipDuration}s (source: ${srcDuration.toFixed(0)}s)`);
+
     clips = await chopLongFormIntoClips(
       facelessResult.localPath,
       whisperResult.niche,
       jobId,
       llm,
       whisperResult.segments,
-      30,
-      25 // ~25s per clip fallback
+      dynamicClipCount,
+      dynamicClipDuration
     );
     await progress("STEP 4/8", `✅ ${clips.length} clips extracted (${clips[0]?.captionText ? "semantic" : "silence-boundary"})`);
   } catch (err: any) {

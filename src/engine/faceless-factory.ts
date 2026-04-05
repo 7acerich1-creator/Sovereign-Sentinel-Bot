@@ -428,7 +428,15 @@ Return ONLY valid JSON:
 // STEP 2: Render TTS Audio from Script
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-async function renderAudio(script: FacelessScript, jobId: string): Promise<string> {
+interface AudioRenderResult {
+  audioPath: string;
+  /** Per-segment durations in seconds (voiceover + trailing silence/chapter pad).
+   *  Length matches the number of actual TTS segments rendered.
+   *  Used by assembleVideo to align scene visuals with speech timing. */
+  segmentDurations: number[];
+}
+
+async function renderAudio(script: FacelessScript, jobId: string): Promise<AudioRenderResult> {
   const audioPath = `${FACELESS_DIR}/${jobId}_voiceover.mp3`;
 
   // For long-form (many segments), TTS APIs have character limits
@@ -463,11 +471,19 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<strin
     }
 
     console.log(`✅ [FacelessFactory] Audio rendered (single pass): ${audioPath}`);
-    return audioPath;
+    // Single-pass: we don't have per-segment timing, use equal division
+    const equalDur = (() => {
+      try {
+        const d = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${audioPath}"`, { timeout: 10_000, stdio: "pipe" }).toString().trim();
+        return (parseFloat(d) || 60) / allSegmentTexts.length;
+      } catch { return 60 / allSegmentTexts.length; }
+    })();
+    return { audioPath, segmentDurations: allSegmentTexts.map(() => equalDur) };
   }
 
   // Long-form: render each segment separately, then concatenate with ffmpeg
   const segmentPaths: string[] = [];
+  const rawSegDurations: number[] = []; // voiceover-only durations per segment (seconds)
 
   for (let i = 0; i < allSegmentTexts.length; i++) {
     const segText = allSegmentTexts[i];
@@ -508,7 +524,15 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<strin
       writeFileSync(segMp3, segBuffer!);
     }
 
+    // Measure this segment's audio duration for scene sync
+    let segAudioDur = 3; // default fallback
+    try {
+      const d = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${segMp3}"`, { timeout: 10_000, stdio: "pipe" }).toString().trim();
+      segAudioDur = parseFloat(d) || 3;
+    } catch { /* use default */ }
+
     segmentPaths.push(segMp3);
+    rawSegDurations.push(segAudioDur);
 
     // Small delay between TTS calls to avoid rate limits
     if (i < allSegmentTexts.length - 1) {
@@ -604,12 +628,123 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<strin
     console.log(`✅ [FacelessFactory] Audio rendered (${segmentPaths.length} segments, no mastering): ${audioPath}`);
   }
 
-  return audioPath;
+  // ── Calculate per-segment durations (voiceover + trailing silence pad) for scene sync ──
+  // This tells assembleVideo exactly how long each scene should display,
+  // so visual transitions align with the natural speech pauses.
+  const SILENCE_PAD_SEC = 1.5;
+  const CHAPTER_PAD_SEC = 2.5;
+  const segmentDurations: number[] = [];
+  for (let i = 0; i < rawSegDurations.length; i++) {
+    let dur = rawSegDurations[i];
+    // Add the trailing silence pad (mirrors the concat logic above)
+    if (i < rawSegDurations.length - 1) {
+      if ((i + 1) % 4 === 0) {
+        dur += CHAPTER_PAD_SEC; // chapter break every 4 segments
+      } else {
+        dur += SILENCE_PAD_SEC; // standard inter-segment pause
+      }
+    }
+    segmentDurations.push(dur);
+  }
+  console.log(`🎯 [FacelessFactory] Per-segment durations for scene sync: [${segmentDurations.map(d => d.toFixed(1) + "s").join(", ")}]`);
+
+  return { audioPath, segmentDurations };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// STEP 3: Generate Scene Images — Pollinations (FREE primary) → Imagen 4 → DALL-E 3
+// STEP 3: Generate Scene Images — Pollinations (FREE primary) → Imagen 4 → DALL-E 3 → Gradient fallback
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/** Verify a buffer is a real image by checking magic bytes (PNG/JPEG/WebP/GIF) */
+function isValidImage(buf: Buffer): boolean {
+  if (buf.length < 8) return false;
+  // PNG: 89 50 4E 47
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return true;
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return true;
+  // WebP: RIFF....WEBP
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+      buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return true;
+  // GIF: GIF87a or GIF89a
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return true;
+  return false;
+}
+
+/** Generate a cinematic gradient fallback image using ffmpeg when all providers fail.
+ *  Niche-aware color palettes so the video still looks intentional, not broken. */
+function generateFallbackGradient(
+  imgPath: string, width: number, height: number, niche: string, segmentIndex: number
+): boolean {
+  // Niche-specific gradient palettes (dark cinematic tones)
+  const GRADIENT_PALETTES: Record<string, { from: string; to: string; overlay: string }[]> = {
+    dark_psychology: [
+      { from: "#0a0a0a", to: "#1a0a00", overlay: "#ff660015" }, // near-black to dark amber
+      { from: "#0d0d1a", to: "#0a0000", overlay: "#ff000010" }, // dark navy to blood
+      { from: "#0a0a0a", to: "#001a1a", overlay: "#00ffff08" }, // black to dark teal
+    ],
+    self_improvement: [
+      { from: "#0a0800", to: "#1a1000", overlay: "#ffa50020" }, // dark gold gradient
+      { from: "#0d0a00", to: "#1a0d00", overlay: "#ff880018" }, // warm amber
+      { from: "#0a0500", to: "#1a1200", overlay: "#ffcc0015" }, // sunrise dark
+    ],
+    burnout: [
+      { from: "#0a0a0a", to: "#0a0d1a", overlay: "#4488ff10" }, // cold blue fade
+      { from: "#050505", to: "#0d0a0a", overlay: "#ff444408" }, // ash to ember
+      { from: "#0a0a0d", to: "#0d0a0a", overlay: "#8844ff08" }, // dark purple shift
+    ],
+    quantum: [
+      { from: "#000a0d", to: "#0d000a", overlay: "#8800ff15" }, // cosmic indigo
+      { from: "#0a0005", to: "#00050a", overlay: "#00ffaa10" }, // electric teal
+      { from: "#050008", to: "#080005", overlay: "#ff00ff08" }, // void purple
+    ],
+    brand: [
+      { from: "#0a0a0a", to: "#1a0a00", overlay: "#ff660015" },
+      { from: "#0a0800", to: "#1a1000", overlay: "#ffa50020" },
+      { from: "#050505", to: "#0d0a0a", overlay: "#ff444408" },
+    ],
+  };
+
+  const palettes = GRADIENT_PALETTES[niche] || GRADIENT_PALETTES.brand;
+  const palette = palettes[segmentIndex % palettes.length];
+
+  try {
+    // Generate a dark cinematic gradient with subtle noise texture using ffmpeg
+    // gradients + geq noise creates a film-grain look that doesn't scream "placeholder"
+    execSync(
+      `ffmpeg -f lavfi -i "color=c=${palette.from}:s=${width}x${height}:d=1,format=rgb24,` +
+      `geq=r='clip(r(X,Y)+random(1)*8,0,255)':g='clip(g(X,Y)+random(1)*6,0,255)':b='clip(b(X,Y)+random(1)*10,0,255)'" ` +
+      `-frames:v 1 -y "${imgPath}"`,
+      { timeout: 15_000, stdio: "pipe" }
+    );
+    if (existsSync(imgPath)) {
+      console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} → cinematic gradient fallback (${niche})`);
+      return true;
+    }
+  } catch (err: any) {
+    console.warn(`[FacelessFactory] Gradient fallback failed: ${err.message?.slice(0, 100)}`);
+  }
+
+  // Ultra-fallback: write a minimal valid PNG (1x1 dark pixel, ffmpeg will scale it)
+  try {
+    // Minimal valid 1x1 PNG — dark pixel (0x0A, 0x0A, 0x0A)
+    const minPng = Buffer.from([
+      0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A, // PNG signature
+      0x00,0x00,0x00,0x0D,0x49,0x48,0x44,0x52, // IHDR chunk
+      0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x01, // 1x1
+      0x08,0x02,0x00,0x00,0x00,0x90,0x77,0x53, // 8-bit RGB
+      0xDE,0x00,0x00,0x00,0x0C,0x49,0x44,0x41, // IDAT chunk
+      0x54,0x08,0xD7,0x63,0x60,0x60,0x60,0x00, // compressed pixel data
+      0x00,0x00,0x04,0x00,0x01,0x9A,0xFF,0xA1, // (dark)
+      0x00,0x00,0x00,0x00,0x49,0x45,0x4E,0x44, // IEND
+      0xAE,0x42,0x60,0x82,
+    ]);
+    writeFileSync(imgPath, minPng);
+    console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} → minimal dark PNG fallback`);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function generateSceneImage(
   visualDirection: string,
@@ -626,19 +761,21 @@ async function generateSceneImage(
   const imgPath = `${FACELESS_DIR}/${jobId}_scene_${segmentIndex}.png`;
 
   // ── PRIMARY: Pollinations.ai (FREE, no auth, unlimited) ──
+  // Railway IPs may get blocked/CAPTCHAd — validate response is a REAL image, not HTML garbage
   try {
     const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.slice(0, 2000))}?width=${dim.pollW}&height=${dim.pollH}&nologo=true&seed=${Date.now() + segmentIndex}`;
     const res = await fetch(pollinationsUrl, { redirect: "follow" });
 
     if (res.ok) {
+      const contentType = res.headers.get("content-type") || "";
       const arrayBuf = await res.arrayBuffer();
       const buf = Buffer.from(arrayBuf);
-      if (buf.length > 10000) { // Sanity check: real image > 10KB
+      if (isValidImage(buf) && buf.length > 10000) {
         writeFileSync(imgPath, buf);
         console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated via Pollinations (${(buf.length / 1024).toFixed(0)}KB)`);
         return imgPath;
       } else {
-        console.warn(`[FacelessFactory] Pollinations returned tiny response for segment ${segmentIndex}: ${buf.length}B`);
+        console.warn(`[FacelessFactory] Pollinations returned non-image for segment ${segmentIndex}: ${buf.length}B, content-type: ${contentType}, magic: ${buf.slice(0, 4).toString("hex")}`);
       }
     } else {
       console.warn(`[FacelessFactory] Pollinations failed for segment ${segmentIndex}: ${res.status}`);
@@ -669,9 +806,14 @@ async function generateSceneImage(
         const data = (await res.json()) as any;
         const b64 = data.predictions?.[0]?.bytesBase64Encoded || data.predictions?.[0]?.image?.bytesBase64Encoded;
         if (b64) {
-          writeFileSync(imgPath, Buffer.from(b64, "base64"));
-          console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated via Imagen 4 (fallback)`);
-          return imgPath;
+          const imgBuf = Buffer.from(b64, "base64");
+          if (isValidImage(imgBuf)) {
+            writeFileSync(imgPath, imgBuf);
+            console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated via Imagen 4 (fallback)`);
+            return imgPath;
+          } else {
+            console.warn(`[FacelessFactory] Imagen 4 returned invalid image data for segment ${segmentIndex}`);
+          }
         }
       } else {
         console.warn(`[FacelessFactory] Imagen 4 failed for segment ${segmentIndex}: ${res.status}`);
@@ -706,9 +848,14 @@ async function generateSceneImage(
         const data = (await res.json()) as any;
         const b64 = data.data?.[0]?.b64_json;
         if (b64) {
-          writeFileSync(imgPath, Buffer.from(b64, "base64"));
-          console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated via DALL-E 3 (fallback)`);
-          return imgPath;
+          const imgBuf = Buffer.from(b64, "base64");
+          if (isValidImage(imgBuf)) {
+            writeFileSync(imgPath, imgBuf);
+            console.log(`🎨 [FacelessFactory] Scene ${segmentIndex} generated via DALL-E 3 (fallback)`);
+            return imgPath;
+          } else {
+            console.warn(`[FacelessFactory] DALL-E 3 returned invalid image data for segment ${segmentIndex}`);
+          }
         }
       } else {
         const errText = await res.text();
@@ -719,9 +866,12 @@ async function generateSceneImage(
     }
   }
 
-  // All providers failed for this segment
-  console.warn(`[FacelessFactory] ALL image providers failed for segment ${segmentIndex}`);
-  return null;
+  // ── FALLBACK 3: Cinematic gradient (NEVER return null — always produce SOMETHING visual) ──
+  // Better a dark atmospheric gradient than a black void. The audio IS the payload;
+  // the visual just needs to not be broken.
+  console.warn(`[FacelessFactory] ALL image providers failed for segment ${segmentIndex} — generating cinematic gradient`);
+  const fallbackOk = generateFallbackGradient(imgPath, dim.width, dim.height, niche, segmentIndex);
+  return fallbackOk ? imgPath : null;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -733,7 +883,8 @@ async function assembleVideo(
   audioPath: string,
   imagePaths: (string | null)[],
   jobId: string,
-  orientation: Orientation = "vertical"
+  orientation: Orientation = "vertical",
+  segmentDurations?: number[]
 ): Promise<string> {
   const outputPath = `${FACELESS_DIR}/${jobId}_final.mp4`;
   const nicheFilter = NICHE_FILTERS[script.niche] || NICHE_FILTERS.brand;
@@ -762,54 +913,65 @@ async function assembleVideo(
     throw new Error("No scene images generated — cannot assemble video");
   }
 
-  const segDuration = audioDuration / validSegments.length;
+  // ── Per-segment timing: use actual TTS durations when available, fall back to equal division ──
+  // When segmentDurations is provided (long-form), each scene's visual duration matches
+  // its voiceover + silence pad — so scene transitions land on the natural speech pauses.
+  const hasPerSegTiming = segmentDurations && segmentDurations.length >= validSegments.length;
+  const getSegDuration = (segIdx: number): number => {
+    if (hasPerSegTiming) {
+      // Map valid segment index back to original script segment index
+      const origIdx = validSegments[segIdx].index;
+      return segmentDurations![origIdx] || (audioDuration / validSegments.length);
+    }
+    return audioDuration / validSegments.length;
+  };
   const fps = 30;
-  const framesPerSegment = Math.round(segDuration * fps);
-  const fadeDuration = 0.4; // 0.4s fade in/out between scenes — smooth dissolve-like transitions
+  const xfadeDuration = 0.6; // 0.6s true dissolve between scenes (not fade-to-black)
 
-  // ── PRE-RENDER EACH SCENE AS A VIDEO CLIP (Ken Burns + fade transitions) ──
-  // Instead of a single concat-then-zoompan approach, render each scene individually
-  // with Ken Burns + fade-in/fade-out. Concat the clips for smooth transitions.
-  // This prevents hard cuts between scenes — fades create a dissolve-like effect.
+  // ── PRE-RENDER EACH SCENE AS A VIDEO CLIP (Ken Burns, NO fade — xfade handles transitions) ──
+  // Each scene renders clean (no fade in/out). True dissolve transitions are applied
+  // via ffmpeg xfade filter during concat. This eliminates the black-flash problem
+  // where fade-out + fade-in created a visible dark gap between scenes.
   const sceneClipPaths: string[] = [];
   const sceneClipDir = `${FACELESS_DIR}/${jobId}_scenes`;
   if (!existsSync(sceneClipDir)) mkdirSync(sceneClipDir, { recursive: true });
 
   const dim = DIMS[orientation];
 
+  // Track per-clip durations for xfade offset calculation
+  const clipDurations: number[] = [];
+
   for (let i = 0; i < validSegments.length; i++) {
     const seg = validSegments[i];
     const clipPath = `${sceneClipDir}/scene_${i.toString().padStart(2, "0")}.mp4`;
-    const fadeOutStart = Math.max(0, segDuration - fadeDuration);
-
-    // Ken Burns zoompan + fade in (first 0.4s) + fade out (last 0.4s)
-    // First and last scenes: only fade in or fade out respectively (no double-fade at edges)
-    const fadeIn = i > 0 ? `fade=t=in:st=0:d=${fadeDuration},` : "";
-    const fadeOut = i < validSegments.length - 1 ? `,fade=t=out:st=${fadeOutStart.toFixed(2)}:d=${fadeDuration}` : "";
+    const thisSegDuration = getSegDuration(i);
+    const thisFrames = Math.round(thisSegDuration * fps);
 
     try {
       execSync(
         `ffmpeg -loop 1 -i "${seg.imgPath}" ` +
-          `-t ${segDuration.toFixed(2)} ` +
-          `-vf "${fadeIn}zoompan=z='min(zoom+0.0005,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${framesPerSegment}:s=${dim.width}x${dim.height}:fps=${fps}${fadeOut}" ` +
+          `-t ${thisSegDuration.toFixed(2)} ` +
+          `-vf "zoompan=z='min(zoom+0.0005,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${thisFrames}:s=${dim.width}x${dim.height}:fps=${fps}" ` +
           `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p ` +
           `-y "${clipPath}"`,
         { timeout: 120_000, stdio: "pipe" }
       );
       sceneClipPaths.push(clipPath);
+      clipDurations.push(thisSegDuration);
     } catch (err: any) {
       console.warn(`[FacelessFactory] Scene ${i} clip render failed, using raw: ${err.message?.slice(0, 150)}`);
-      // Fallback: render without Ken Burns/fade
+      // Fallback: render without Ken Burns
       try {
         execSync(
           `ffmpeg -loop 1 -i "${seg.imgPath}" ` +
-            `-t ${segDuration.toFixed(2)} ` +
+            `-t ${thisSegDuration.toFixed(2)} ` +
             `-vf "scale=${dim.width}:${dim.height}:force_original_aspect_ratio=increase,crop=${dim.width}:${dim.height}" ` +
             `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p ` +
             `-y "${clipPath}"`,
           { timeout: 60_000, stdio: "pipe" }
         );
         sceneClipPaths.push(clipPath);
+        clipDurations.push(thisSegDuration);
       } catch { /* skip this scene entirely */ }
     }
   }
@@ -818,12 +980,52 @@ async function assembleVideo(
     throw new Error("All scene clip renders failed — cannot assemble video");
   }
 
-  // Build concat list from pre-rendered scene clips
+  // ── TRUE CROSSFADE via xfade filter ──
+  // If we have multiple scenes, chain xfade filters for real dissolve transitions.
+  // If xfade fails (older ffmpeg), fall back to simple concat.
   const concatListPath = `${FACELESS_DIR}/${jobId}_concat.txt`;
-  const concatLines = sceneClipPaths.map(p => `file '${p}'`);
-  writeFileSync(concatListPath, concatLines.join("\n"));
+  let usedXfade = false;
+  const xfadedPath = `${FACELESS_DIR}/${jobId}_xfaded.mp4`;
 
-  console.log(`🎬 [FacelessFactory] ${sceneClipPaths.length}/${validSegments.length} scene clips rendered (Ken Burns + ${fadeDuration}s crossfade)`);
+  if (sceneClipPaths.length >= 2) {
+    try {
+      // Build xfade filter chain: [0][1]xfade=...[v01]; [v01][2]xfade=...[v012]; etc.
+      const inputs = sceneClipPaths.map((p, i) => `-i "${p}"`).join(" ");
+      let filterChain = "";
+      let prevLabel = "[0]";
+      // Cumulative offset: each xfade starts where the previous output ends minus overlap.
+      // offset_i = sum(clipDurations[0..i-1]) - (i * xfadeDuration)
+      // This correctly handles variable-length clips instead of assuming equal durations.
+      let cumulativeDuration = clipDurations[0] || 0;
+      for (let i = 1; i < sceneClipPaths.length; i++) {
+        const offset = cumulativeDuration - (i * xfadeDuration);
+        const outLabel = i === sceneClipPaths.length - 1 ? "[vout]" : `[v${i}]`;
+        filterChain += `${prevLabel}[${i}]xfade=transition=fade:duration=${xfadeDuration}:offset=${Math.max(0, offset).toFixed(2)}${outLabel}; `;
+        prevLabel = outLabel;
+        cumulativeDuration += clipDurations[i] || 0;
+      }
+      // Remove trailing "; " and clean up
+      filterChain = filterChain.replace(/;\s*$/, "");
+
+      execSync(
+        `ffmpeg ${inputs} -filter_complex "${filterChain}" -map "[vout]" ` +
+          `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p ` +
+          `-y "${xfadedPath}"`,
+        { timeout: 300_000, stdio: "pipe" }
+      );
+      usedXfade = true;
+      console.log(`🎬 [FacelessFactory] ${sceneClipPaths.length} scenes assembled with ${xfadeDuration}s true dissolve crossfades`);
+    } catch (err: any) {
+      console.warn(`[FacelessFactory] xfade failed (falling back to concat): ${err.message?.slice(0, 200)}`);
+    }
+  }
+
+  if (!usedXfade) {
+    // Simple concat fallback
+    const concatLines = sceneClipPaths.map(p => `file '${p}'`);
+    writeFileSync(concatListPath, concatLines.join("\n"));
+    console.log(`🎬 [FacelessFactory] ${sceneClipPaths.length}/${validSegments.length} scene clips rendered (concat, no xfade)`);
+  }
 
   // Ken Burns is now applied per-scene above. Video assembly just concats + applies color grade + hook.
 
@@ -975,8 +1177,14 @@ async function assembleVideo(
   }
 
   // Build the final assembly command:
-  // Scene clips are already pre-rendered with Ken Burns + crossfade above.
-  // Assembly just needs: concat scenes → apply color grade + hook overlay → mix audio.
+  // If xfade succeeded, use the pre-crossfaded video file.
+  // If concat fallback, use the concat list.
+  // Either way: apply color grade + hook overlay → mix audio.
+
+  // Video input source: xfaded file or concat list
+  const videoInput = usedXfade
+    ? `-i "${xfadedPath}"`
+    : `-f concat -safe 0 -i "${concatListPath}"`;
 
   // Audio filter: if music bed exists, mix voice (loud) + music (quiet) via amix.
   const audioFilter = hasMusicBed
@@ -987,7 +1195,7 @@ async function assembleVideo(
 
   try {
     execSync(
-      `ffmpeg -f concat -safe 0 -i "${concatListPath}" -i "${audioPath}" ${musicInput}` +
+      `ffmpeg ${videoInput} -i "${audioPath}" ${musicInput}` +
         `-filter_complex "[0:v]${nicheFilter}${hookOverlay}[v]${hasMusicBed ? ";" + audioFilter : ""}" ` +
         `-map "[v]" ${audioMap} ` +
         `-c:v libx264 -preset fast -crf 23 ` +
@@ -1000,7 +1208,7 @@ async function assembleVideo(
     console.warn(`[FacelessFactory] Color grade/hook failed, trying plain assembly: ${err.message?.slice(0, 200)}`);
     if (hasMusicBed) {
       execSync(
-        `ffmpeg -f concat -safe 0 -i "${concatListPath}" -i "${audioPath}" ${musicInput}` +
+        `ffmpeg ${videoInput} -i "${audioPath}" ${musicInput}` +
           `-filter_complex "${audioFilter}" ` +
           `-map 0:v ${audioMap} ` +
           `-c:v libx264 -preset fast -crf 23 ` +
@@ -1010,7 +1218,7 @@ async function assembleVideo(
       );
     } else {
       execSync(
-        `ffmpeg -f concat -safe 0 -i "${concatListPath}" -i "${audioPath}" ` +
+        `ffmpeg ${videoInput} -i "${audioPath}" ` +
           `-c:v libx264 -preset fast -crf 23 ` +
           `-c:a aac -b:a 192k ` +
           `-shortest -y "${outputPath}"`,
@@ -1127,7 +1335,8 @@ export async function produceFacelessVideo(
 
   // STEP 2: Render TTS audio
   console.log(`🗣️ [FacelessFactory] Rendering voiceover...`);
-  const audioPath = await renderAudio(script, jobId);
+  const audioResult = await renderAudio(script, jobId);
+  const audioPath = audioResult.audioPath;
 
   // STEP 3: Generate scene images (parallel, with rate limiting)
   console.log(`🎨 [FacelessFactory] Generating ${script.segments.length} scene images...`);
@@ -1157,7 +1366,7 @@ export async function produceFacelessVideo(
 
   // STEP 4: Assemble video
   console.log(`🎬 [FacelessFactory] Assembling video...`);
-  const videoPath = await assembleVideo(script, audioPath, imagePaths, jobId, orientation);
+  const videoPath = await assembleVideo(script, audioPath, imagePaths, jobId, orientation, audioResult.segmentDurations);
 
   // Get final duration
   let finalDuration = 0;

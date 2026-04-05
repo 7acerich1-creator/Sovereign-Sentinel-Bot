@@ -310,10 +310,11 @@ RULES:
 - CTA should feel organic, not salesy — "The full protocol is at sovereign-synthesis.com"
 - Return ONLY valid JSON, no markdown code fences, no explanation`;
 
-  // Long-form scripts with 20 segments of 80-130 words each need serious token headroom.
-  // 20 segments × ~120 words × ~1.5 tokens/word = ~3600 tokens just for voiceover text,
-  // plus visual_direction, structure, etc. 12288 gives comfortable room.
-  const maxTokens = targetDuration === "long" ? 12288 : 4096;
+  // Long-form scripts with 20 segments of 80-130 words each need ~5-6k tokens of output.
+  // Groq free tier: 12,000 TPM (tokens per minute) = input + output combined.
+  // With ~2k input tokens, max output must stay under ~8k to avoid 413 errors.
+  // 8192 is plenty for 20 segments. Previous 12288 exceeded Groq's TPM limit.
+  const maxTokens = targetDuration === "long" ? 8192 : 4096;
 
   const response = await llm.generate(
     [{ role: "user", content: prompt }],
@@ -378,6 +379,11 @@ Return ONLY valid JSON:
   { "voiceover": "second segment text", "visual_direction": "visual for second", "duration_hint": 35 }
 ]`;
 
+        // Groq free tier: 12k TPM. Space expansion calls to avoid hitting the per-minute cap.
+        // Each call is ~2.3k tokens. 5 calls in <60s would consume ~11.5k of the 12k budget.
+        if (seg !== segmentsToExpand[0]) {
+          await new Promise(r => setTimeout(r, 3000)); // 3s between expansion calls
+        }
         const expandResponse = await llm.generate(
           [{ role: "user", content: expandPrompt }],
           { maxTokens: 2048, temperature: 0.7 }

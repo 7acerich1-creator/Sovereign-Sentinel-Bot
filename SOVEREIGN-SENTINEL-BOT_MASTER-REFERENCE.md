@@ -8,9 +8,9 @@
 **Mission Metrics:** FIRST CLEAN END-TO-END PIPELINE RUN. All 8 steps green. 1 URL → YouTube long-form + 9 clips + 16 Buffer posts scheduled across 7 days. Two architecture bugs found and fixed: GraphQL enum quoting (killed YouTube/IG Buffer posts) and dual-path distribution (dumped all Shorts at once). Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit `3291382` (Session 24 — Semantic clip extraction).
+- Bot is live on Railway. Latest commit `cd60174` (Session 24 — Scene crossfade + voice reverb).
 - Session 23 commit chain: `c549b79` → `0177d3b` → `2e1d3d0` → `bd6744b` → `050e699` (Alfred auto-pipeline).
-- Session 24 commits: `d2847f7` (timezone fix + stagger) → `2a14154` (Alfred Groq + spacing) → `0706f68` (orientation + cadence + music bed) → `8475da7` (DVP protocol) → `3291382` (semantic clip extraction).
+- Session 24 commits: `d2847f7` (timezone fix) → `2a14154` (Alfred Groq) → `0706f68` (orientation + cadence + music bed) → `8475da7` (DVP) → `3291382` (semantic clips) → `cd60174` (crossfade + reverb).
 - Pipeline ran all 8 steps for video iR4AAwNP3r8: "Beyond The Simulation" (258s, 12 scenes, 9 clips, 16 Buffer posts).
 - YouTube long-form live: https://youtube.com/watch?v=ybjDyM3uVts
 - yt-dlp authenticated via YouTube cookies (YOUTUBE_COOKIES_BASE64 env var in Railway).
@@ -65,9 +65,9 @@
 - [DVP: ADDRESSED] Alfred on Groq — promoted from Gemini (250/day) to Groq (14,400/day). Commit `2a14154`.
 - [DVP: ADDRESSED] Pipeline-safe spacing — Vector moved to 12PM, Content Engine 1:30PM, Stasis 3:30PM. Commit `2a14154`.
 - [DVP: ADDRESSED] Semantic clip extraction — LLM reads Whisper transcript, identifies 8-15 self-contained story moments with titles + hooks. Three-tier fallback: LLM semantic → silence boundaries → math division. captionText carries title|hook for downstream copy gen. Commit `3291382`.
+- [DVP: ADDRESSED] Scene crossfade transitions — each scene pre-rendered as individual video clip (Ken Burns + 0.4s fade-in/fade-out). Smooth dissolve-like transitions between scenes instead of hard cuts. Fallback to raw scale if render fails. Scene clip dir cleaned up after assembly. Commit `cd60174`.
+- [DVP: ADDRESSED] Voice warmth reverb — dual-tap aecho (100ms + 200ms reflections at 25%/15% volume) for long-form only. Creates "dark theater" presence where voice exists in a cinematic space. Shorts stay dry for direct impact. Added to mastering chain after EQ, before loudnorm. Commit `cd60174`.
 - REMAINING (not yet addressed):
-  1. Audio crossfade between scenes (not hard cuts)
-  3. Voice warmth filter (EQ + slight reverb to reduce robotic feel)
   5. Intro bumper + outro CTA card
 - Platform Adaptation Engine needed: Each platform needs slightly different clip versions (TikTok = faster cadence, IG = cover frame optimization, etc.)
 - Distribution Router consolidation: Single entry point instead of split Buffer/direct-API paths

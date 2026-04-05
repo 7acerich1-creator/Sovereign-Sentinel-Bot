@@ -2282,42 +2282,24 @@ async function main() {
         await agentChannel.initialize();
         (config.telegram as any).botToken = originalToken;
 
-        // Wrap LLM for system prompt injection
+        // ── LEAN SYSTEM PROMPT INJECTION ──
+        // Session 27 OVERHAUL: Personality prompts trimmed from ~18K to ~1.6K chars each.
+        // Shared operational context extracted into a compact ~1.2K module.
+        // Old prompts had identical 10-12K "Operational Awareness" blocks copy-pasted 6 times,
+        // causing every Groq call to 413 and failover to Gemini ($62 bill in 5 days).
+        // New architecture: lean identity + compact shared context = ~750 tokens total.
+        // Detailed protocols retrieved on-demand via read_protocols (Supabase).
         const blueprint = personality.prompt_blueprint;
 
-        // Protocol injection — content crew (Alfred, Yuki, Anita) must read protocols before content tasks
-        const CONTENT_CREW = ["alfred", "yuki", "anita"];
-        // Knowledge memory directive — all agents should use write_knowledge for significant outputs
-        const knowledgeDirective = pineconeMemory.isReady()
-          ? "\n\n[INSTITUTIONAL MEMORY] You have the write_knowledge tool. When you produce a strong hook, discover a conversion pattern, extract a key insight, or create content that performs well — call write_knowledge to store it permanently. Every agent can recall these later. Build the crew's collective intelligence."
-          : "";
-
-        const protocolDirective = CONTENT_CREW.includes(agentCfg.name)
-          ? "\n\n[STANDING ORDER] Before executing any content task, call read_protocols with the detected niche. Apply every returned directive to your output. These are standing orders from the Architect."
-          : agentCfg.name === "sapphire"
-            ? "\n\n[STANDING ORDER] When you receive a message containing 'standing directive' or 'new protocol', extract the protocol name, niche, and directive. Use the write_protocol tool to save it. Confirm: 'Protocol [name] locked. All crew members will execute this on every [niche] task going forward.'\n\n[RELATIONSHIP AWARENESS] You have the write_relationship_context tool. When you notice patterns in how Ace works — what he asks for repeatedly, what frustrates him, what he celebrates — write a brief observation. Categories: preference, frustration, pattern, win. These observations help you calibrate your tone."
-            : "";
-
-        // Browser capability directives — per-agent use cases
-        const BROWSER_DIRECTIVES: Record<string, string> = {
-          alfred: "[BROWSER CAPABILITY] You have the `browser` tool for web research. USE IT ACTIVELY: navigate to URLs to pull source material, extract quotes from articles, verify external links, research topics for content creation. When given a URL or topic to research, open it in the browser rather than relying on web_search alone. You can navigate, extract text, take screenshots, and evaluate JavaScript on any page.",
-          veritas: "[BROWSER CAPABILITY] You have the `browser` tool. USE IT ACTIVELY: fact-check claims by browsing source URLs directly, run competitive analysis by scraping competitor landing pages, verify that live sites/links are working. When verifying information, open the actual source URL in the browser and extract the relevant text. Screenshots can provide visual proof.",
-          vector: "[BROWSER CAPABILITY] You have the `browser` tool. USE IT ACTIVELY: scrape analytics dashboards (Buffer, Stripe dashboard) when APIs are rate-limited, pull social metrics from platform pages, extract data from web-based tools. When metrics tools are unavailable, fall back to browser scraping of the dashboard pages.",
-          anita: "[BROWSER CAPABILITY] You have the `browser` tool. USE IT ACTIVELY: research trending topics by browsing platform pages, scrape subreddits and forums for content inspiration, extract viral hook patterns from trending posts. When looking for content angles, browse actual platform pages (Reddit, Twitter/X, TikTok trending) to find what's working NOW.",
-          yuki: "[BROWSER CAPABILITY — PRIMARY DISTRIBUTION] You have `tiktok_browser_upload` and `instagram_browser_upload` tools. These are your PRIMARY methods for posting to TikTok and Instagram (API access is blocked). When asked to publish video content to TikTok or IG, use these browser upload tools directly. You also have the base `browser` tool to verify posts went live by checking platform pages. After uploading, navigate to the profile page and confirm the post is visible.",
-          sapphire: "[BROWSER CAPABILITY] You have the `browser` tool. USE IT ACTIVELY: gather strategic intelligence by browsing industry news sites, pull market data from public sources, research competitors and trends. When analyzing the competitive landscape or gathering market intelligence, open relevant pages in the browser and extract structured data.",
-        };
-
-        const browserDirective = config.tools.browserEnabled && BROWSER_DIRECTIVES[agentCfg.name]
-          ? `\n\n${BROWSER_DIRECTIVES[agentCfg.name]}`
-          : "";
+        // Import shared operational context (product ladder, task protocol, standing rules)
+        const { SHARED_AGENT_CONTEXT } = await import("./data/shared-context");
 
         // Per-agent LLM team — each agent gets its own failover chain to prevent quota stampedes
         const agentTeamLLM = AGENT_LLM_TEAMS[agentCfg.name] || failoverLLM;
         const injectedLLM: LLMProvider = {
           ...agentTeamLLM,
           generate: (messages, options) =>
-            agentTeamLLM.generate(messages, { ...options, systemPrompt: blueprint + protocolDirective + knowledgeDirective + browserDirective }),
+            agentTeamLLM.generate(messages, { ...options, systemPrompt: blueprint + "\n\n" + SHARED_AGENT_CONTEXT }),
         };
 
         // Build per-agent tool set: shared tools + agent-specific tools

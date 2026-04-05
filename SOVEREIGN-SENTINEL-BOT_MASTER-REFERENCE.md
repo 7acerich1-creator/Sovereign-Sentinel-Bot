@@ -44,18 +44,27 @@
   - TikTok: `metadata.tiktok = { title }` — optional but recommended
   - Without these metadata fields, YouTube and Instagram posts would be SILENTLY REJECTED by Buffer
 
-**QUALITY GATE STATUS (Session 24 — DEPLOYED):**
-- ✅ Background ambient music — Railway-safe Node.js WAV generation (sine waves + Voss-McCartney pink noise), niche-aware tones, mixed under voice. No lavfi dependency.
-- ✅ Audio mastering — loudnorm + EQ + compression chain
-- ✅ Silence pads between segments — 1.5s breathing room (upgraded from 0.6s)
-- ✅ Chapter breaks — 2.5s pause every 4 segments for long-form pacing
-- ✅ Hook text overlay — first sentence burned into opening 3s
-- ✅ Smart clip boundaries — silencedetect natural pause points
-- ✅ Segment expansion — LLM expands short scripts to 15+ segments
-- ✅ Slower TTS — 0.80x documentary cadence for long-form (upgraded from 0.85x)
-- ✅ Orientation-aware dimensions — long-form=16:9 (1920×1080), shorts=9:16 (1080×1920). DIMS constant threads through image gen (Pollinations/Imagen4/DALL-E) + ffmpeg assembly.
-- ✅ LLM pacing guidance — script prompt enforces short sentences, breathing room, transitional beats every 4 segments
-- REMAINING Quality Gate items (Session 24+):
+**DEPLOYMENT VERIFICATION PROTOCOL (DVP) — established Session 24:**
+- `[DVP: ADDRESSED]` = Code pushed, no production test yet. DEFAULT after any deploy.
+- `[DVP: VERIFIED]` = Production test confirmed fix works. Must cite test (date/video ID/log).
+- `[DVP: REGRESSED]` = Was verified, later test showed it broke again.
+- Rule: Nothing moves to VERIFIED without Architect confirming test output.
+
+**QUALITY GATE STATUS (Session 24):**
+- [DVP: VERIFIED] Audio mastering — loudnorm + EQ + compression chain *(verified: Session 23 Test 3, video tET-aR-JG-o)*
+- [DVP: VERIFIED] Hook text overlay — first sentence burned into opening 3s *(verified: Session 23 Test 3)*
+- [DVP: VERIFIED] Smart clip boundaries — silencedetect natural pause points *(verified: Session 23 Test 3)*
+- [DVP: VERIFIED] Segment expansion — LLM expands short scripts to 15+ segments *(verified: Session 23 Test 3, 15 scenes)*
+- [DVP: ADDRESSED] Background ambient music — Node.js WAV generation (sine waves + Voss-McCartney pink noise). Replaces lavfi which failed silently on Railway. Commit `0706f68`.
+- [DVP: ADDRESSED] Silence pads — upgraded 0.6s → 1.5s between segments. Commit `0706f68`.
+- [DVP: ADDRESSED] Chapter breaks — 2.5s pause every 4 segments for long-form. Commit `0706f68`.
+- [DVP: ADDRESSED] TTS speed — 0.85x → 0.80x for long-form documentary cadence. Commit `0706f68`.
+- [DVP: ADDRESSED] Orientation-aware dimensions — long-form=16:9 (1920×1080), shorts=9:16 (1080×1920). DIMS constant threads through Pollinations/Imagen4/DALL-E + ffmpeg. Commit `0706f68`.
+- [DVP: ADDRESSED] LLM pacing guidance — short sentences, breathing room, transitional beats every 4 segments. Commit `0706f68`.
+- [DVP: ADDRESSED] Scheduler timezone fix — all getUTCHours, minute-window guards, 10AM CDT day start. Commit `d2847f7`.
+- [DVP: ADDRESSED] Alfred on Groq — promoted from Gemini (250/day) to Groq (14,400/day). Commit `2a14154`.
+- [DVP: ADDRESSED] Pipeline-safe spacing — Vector moved to 12PM, Content Engine 1:30PM, Stasis 3:30PM. Commit `2a14154`.
+- REMAINING (not yet addressed):
   1. Audio crossfade between scenes (not hard cuts)
   3. Voice warmth filter (EQ + slight reverb to reduce robotic feel)
   4. Semantic clip extraction (LLM-driven story moments instead of silence-boundary chopping) — STEP 4, the anchor piece
@@ -253,9 +262,9 @@
 - ✅ 425s/7min video, 15 scenes (up from 258s/12 scenes in Test 2)
 - ✅ All 8 steps green, Groq stayed primary
 - ✅ Content quality is strong — intelligence, hooks, narrative all there
-- ❌→✅ Music bed — was silent failure (Railway ffmpeg missing lavfi anoisesrc). **FIXED Session 24:** Node.js WAV generation (sine waves + Voss-McCartney pink noise), zero lavfi dependency. Commit `0706f68`.
-- ❌→✅ Long-form video is VERTICAL (9:16) — should be HORIZONTAL (16:9) for YouTube. **FIXED Session 24:** DIMS constant with orientation-aware presets threads through all image gen APIs + ffmpeg assembly. Long-form=horizontal, shorts=vertical. Commit `0706f68`.
-- ❌→✅ Delivery cadence still too fast — reads like run-on, needs longer pauses + chapter breaks. **FIXED Session 24:** TTS 0.85→0.80, silence pads 0.6→1.5s, chapter breaks every 4 segments (2.5s), LLM pacing guidance. Commit `0706f68`.
+- ❌→[DVP: ADDRESSED] Music bed — was silent failure (Railway ffmpeg missing lavfi anoisesrc). Session 24: Node.js WAV generation, zero lavfi dependency. Commit `0706f68`. Needs pipeline test to verify.
+- ❌→[DVP: ADDRESSED] Long-form orientation — was 9:16 vertical, should be 16:9 horizontal. Session 24: DIMS constant + orientation threading. Commit `0706f68`. Needs pipeline test to verify.
+- ❌→[DVP: ADDRESSED] Delivery cadence — was too fast/run-on. Session 24: TTS 0.80, pads 1.5s, chapter breaks, pacing guidance. Commit `0706f68`. Needs pipeline test to verify.
 - ❌ Shorts are CLIPS not STORIES — needs semantic extraction, not silence-boundary chopping — **STEP 4 pending**
 
 **NEXT SESSION PRIORITIES (Session 24) — DELIVERY QUALITY:**

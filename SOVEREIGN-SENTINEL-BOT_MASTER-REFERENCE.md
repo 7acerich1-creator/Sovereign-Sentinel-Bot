@@ -27,6 +27,15 @@
 - **Also fixed:** False "Buffer can't handle video" lie was spread across 4 files (vidrush-orchestrator.ts, video-publisher.ts, social-scheduler.ts, content-engine.ts). All false comments eradicated. The social-scheduler now gracefully strips video file URLs from media (posting text-only) instead of blocking the entire post.
 - **CRITICAL RULE FOR ALL FUTURE SESSIONS:** Buffer supports EVERY connected channel. NEVER filter out channels by service type. If Buffer offers a channel, USE IT.
 
+**BUFFER PLATFORM REQUIREMENTS (verified from Buffer docs, Session 21):**
+- **TikTok:** REQUIRES video or images. Text-only WILL FAIL. Video formats: MOV, MP4, WEBM. Max 1GB. 3s-10min.
+- **Instagram:** REQUIRES image or video. Text-only WILL FAIL. Videos become Reels. Max 300MB.
+- **YouTube:** REQUIRES video (Shorts only). NO community posts via Buffer API. Max 10GB.
+- **X/Twitter, Threads, LinkedIn, Facebook:** Text-only works fine.
+- Buffer GraphQL `assets` field supports: `images: [{ url }]` AND `videos: [{ url }]`
+- Platform-specific metadata available: `YoutubePostMetadataInput` (title, categoryId, privacy), `TikTokPostMetadataInput` (title), `InstagramPostMetadataInput` (first comment, geolocation)
+- **CRITICAL:** Clips MUST have `publicUrl` (Supabase storage) to post to TikTok/IG/YouTube. If Supabase upload fails (503), those channels get skipped.
+
 **PENDING — VIDEO PRODUCTION QUALITY GATE (Session 22+):**
 - Current video production has ZERO effects: no background music, no sound effects, no transitions, no text overlays, no intro/outro, no audio processing on voice. It's a Ken Burns slideshow with raw TTS voiceover.
 - Quality Gate system needed (ffmpeg-based, zero cost):
@@ -101,19 +110,25 @@
 4. **social-scheduler.ts VIDEO URL HANDLING FIXED.** Was returning an error and blocking the ENTIRE post if a video URL was in media_url. Now gracefully strips the video URL and posts text-only (video FILE uploads go through publish_video tool).
 5. **content-engine.ts TEXT_OK_PLATFORMS EXPANDED.** Added youtube, linkedin, facebook to the set. Was incorrectly excluding them.
 
+6. **BUFFER PLATFORM MEDIA REQUIREMENTS FIXED.** Research verified: TikTok/Instagram/YouTube REQUIRE video or image media — text-only posts are rejected by Buffer API. Split channels into text-ok (X, Threads, LinkedIn, FB) and media-required (TikTok, IG, YouTube). Media channels now receive clip video URL via `assets.videos`. social-scheduler now detects video URLs and uses `videos` asset type instead of `images`.
+
+**All Session 21 Commits (chronological):**
+- `5b3a88e` — fix: eradicate false Buffer channel filter — posts now go to ALL 9 channels
+- `ecaee6f` — fix: Buffer platform-specific media requirements — TikTok/IG/YouTube need video
+
 **Files modified this session:**
-- `src/engine/vidrush-orchestrator.ts` — Rewrote scheduleBufferWeek(), added SERVICE_TO_COPY_KEY map, removed channel filter
-- `src/tools/social-scheduler.ts` — Fixed video URL detection to non-blocking, made mediaUrl mutable
+- `src/engine/vidrush-orchestrator.ts` — Rewrote scheduleBufferWeek() twice: first removed channel filter, then split into text/media channels with video attachment
+- `src/tools/social-scheduler.ts` — Video URL detection uses `assets.videos` instead of stripping, mediaUrl made mutable
 - `src/tools/video-publisher.ts` — Purged false "Buffer can't handle video" comments/descriptions
 - `src/engine/content-engine.ts` — Expanded TEXT_OK_PLATFORMS, fixed false comments
 
-**NOT YET PUSHED. Must commit and push to trigger Railway deploy.**
+**Both commits pushed. Railway auto-deploying.**
 
-**NEXT SESSION PRIORITIES (Session 22 — Quality Gate + Deploy + Test):**
+**NEXT SESSION PRIORITIES (Session 22 — Test + Quality Gate):**
 
-**STEP 1: COMMIT + PUSH Session 21 code.** Deploy to Railway.
+**STEP 1: TEST BUFFER DISTRIBUTION.** Code is deployed (commit `ecaee6f`). Run `/pipeline` with a YouTube URL. Verify: (a) all 9 channels receive posts, (b) TikTok/IG/YouTube posts include video media, (c) X/Threads get text-only, (d) scheduling is staggered correctly. Check Buffer calendar.
 
-**STEP 2: TEST BUFFER DISTRIBUTION.** Run pipeline or manually trigger buffer_audit to verify all 9 channels receive posts. Check Buffer calendar shows posts on YouTube, Instagram, TikTok channels.
+**STEP 2: IF SUPABASE 503 BLOCKS CLIP UPLOADS** — TikTok/IG/YouTube channels will be skipped (they need publicUrl). If this happens, investigate Supabase storage reliability.
 
 **STEP 3: BUILD QUALITY GATE.** The video production quality standard (see PENDING section above). Add background music, audio crossfade, voice warmth, text overlay, intro/outro to ffmpeg assembly in faceless-factory.ts.
 

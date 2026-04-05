@@ -870,16 +870,18 @@ async function main() {
   // In-memory guard to prevent briefings from firing every 60s during the matching hour
   const briefingFiredDates = { morning: "", evening: "" };
 
-  // Schedule morning briefing
+  // Schedule morning briefing (10:00 AM CDT = 15:00 UTC — first thing, before any agent dispatches)
   scheduler.add({
     name: "Morning Briefing",
     intervalMs: 60_000, // Check every minute
     nextRun: new Date(),
     enabled: true,
     handler: async () => {
-      const hour = new Date().getHours();
-      const dateKey = new Date().toDateString();
-      if (hour === config.scheduler.morningBriefingHour && briefingFiredDates.morning !== dateKey) {
+      const now = new Date();
+      const hour = now.getUTCHours();
+      const minute = now.getUTCMinutes();
+      const dateKey = now.toDateString();
+      if (hour === config.scheduler.morningBriefingHour && minute >= 0 && minute <= 2 && briefingFiredDates.morning !== dateKey) {
         briefingFiredDates.morning = dateKey;
         console.log(`📋 Pulse 1: Morning briefing firing for ${dateKey}`);
         await briefings.morningBriefing();
@@ -887,16 +889,18 @@ async function main() {
     },
   });
 
-  // Schedule evening recap
+  // Schedule evening recap (8:00 PM CDT = 01:00 UTC)
   scheduler.add({
     name: "Evening Recap",
     intervalMs: 60_000,
     nextRun: new Date(),
     enabled: true,
     handler: async () => {
-      const hour = new Date().getHours();
-      const dateKey = new Date().toDateString();
-      if (hour === config.scheduler.eveningRecapHour && briefingFiredDates.evening !== dateKey) {
+      const now = new Date();
+      const hour = now.getUTCHours();
+      const minute = now.getUTCMinutes();
+      const dateKey = now.toDateString();
+      if (hour === config.scheduler.eveningRecapHour && minute >= 0 && minute <= 2 && briefingFiredDates.evening !== dateKey) {
         briefingFiredDates.evening = dateKey;
         console.log(`📋 Pulse 2: Evening recap firing for ${dateKey}`);
         await briefings.eveningRecap();
@@ -910,16 +914,18 @@ async function main() {
 
   const autonomousFiredDates = { vectorSweep: "", alfredScan: "", veritasDirective: "" };
 
-  // Vector — Daily CRO Metrics Sweep (10 AM)
+  // Vector — Daily CRO Metrics Sweep (11:00 AM CDT = 16:00 UTC)
   scheduler.add({
     name: "Vector Daily Metrics Sweep",
     intervalMs: 60_000,
     nextRun: new Date(),
     enabled: true,
     handler: async () => {
-      const hour = new Date().getHours();
-      const dateKey = new Date().toDateString();
-      if (hour === 10 && autonomousFiredDates.vectorSweep !== dateKey) {
+      const now = new Date();
+      const hour = now.getUTCHours();
+      const minute = now.getUTCMinutes();
+      const dateKey = now.toDateString();
+      if (hour === 16 && minute >= 0 && minute <= 2 && autonomousFiredDates.vectorSweep !== dateKey) {
         autonomousFiredDates.vectorSweep = dateKey;
         console.log(`📊 [AutoOps] Vector daily metrics sweep firing for ${dateKey}`);
         try {
@@ -947,16 +953,19 @@ async function main() {
     },
   });
 
-  // Alfred — Daily Trend Scan & Content Brief (8 AM)
+  // Alfred — Daily Trend Scan & Content Brief (10:05 AM CDT = 15:05 UTC — 5min after briefing)
   scheduler.add({
     name: "Alfred Daily Trend Scan",
     intervalMs: 60_000,
     nextRun: new Date(),
     enabled: true,
     handler: async () => {
-      const hour = new Date().getHours();
-      const dateKey = new Date().toDateString();
-      if (hour === 8 && autonomousFiredDates.alfredScan !== dateKey) {
+      const now = new Date();
+      const hour = now.getUTCHours();
+      const minute = now.getUTCMinutes();
+      const dateKey = now.toDateString();
+      if (hour === 15 && minute >= 5 && minute <= 7 && autonomousFiredDates.alfredScan !== dateKey) {
+        autonomousFiredDates.alfredScan = dateKey;
         autonomousFiredDates.alfredScan = dateKey;
         console.log(`🔍 [AutoOps] Alfred daily trend scan firing for ${dateKey}`);
         try {
@@ -988,7 +997,7 @@ async function main() {
     },
   });
 
-  // Veritas — Weekly Strategic Directive (Monday 9 AM)
+  // Veritas — Weekly Strategic Directive (Monday 11:10 AM CDT = 16:10 UTC — 10min after Vector)
   scheduler.add({
     name: "Veritas Weekly Directive",
     intervalMs: 60_000,
@@ -997,7 +1006,7 @@ async function main() {
     handler: async () => {
       const now = new Date();
       const dateKey = now.toDateString();
-      if (now.getDay() === 1 && now.getHours() === 9 && autonomousFiredDates.veritasDirective !== dateKey) {
+      if (now.getUTCDay() === 1 && now.getUTCHours() === 16 && now.getUTCMinutes() >= 10 && now.getUTCMinutes() <= 12 && autonomousFiredDates.veritasDirective !== dateKey) {
         autonomousFiredDates.veritasDirective = dateKey;
         console.log(`🎯 [AutoOps] Veritas weekly strategic directive firing for ${dateKey}`);
         try {
@@ -1026,7 +1035,7 @@ async function main() {
     },
   });
 
-  console.log("⚡ [AutoOps] Scheduled: Vector daily sweep (10AM), Alfred trend scan (8AM), Veritas weekly directive (Mon 9AM)");
+  console.log("⚡ [AutoOps] Scheduled: Alfred trend scan (10:05AM CDT/15:05UTC), Vector daily sweep (11:00AM CDT/16:00UTC), Veritas weekly directive (Mon 11:10AM CDT/16:10UTC)");
 
   // ── Deterministic Content Engine — Daily Production + Distribution ──
   // Master ref Section 23. Posting guide: SOVEREIGN-POSTING-GUIDE.md
@@ -1039,7 +1048,7 @@ async function main() {
     console.warn(`[ContentEngine] Boot channel discovery failed (will retry): ${err.message}`)
   );
 
-  // Daily Content Production (6:30 AM ET = 11:30 UTC — before first posting slot at 7AM ET)
+  // Daily Content Production (12:30 PM CDT = 17:30 UTC — after Alfred pipeline + Vector sweep)
   scheduler.add({
     name: "Content Engine — Daily Production",
     intervalMs: 60_000,
@@ -1051,8 +1060,8 @@ async function main() {
       const minute = now.getUTCMinutes();
       const dateKey = now.toDateString();
 
-      // Fire at 11:30 UTC (6:30 AM ET) — gives 30min buffer before first slot at noon UTC
-      if (hour === 11 && minute >= 28 && minute <= 32 && contentEngineFiredDate.production !== dateKey) {
+      // Fire at 17:30 UTC (12:30 PM CDT) — after Alfred's trend scan and pipeline have had time to run
+      if (hour === 17 && minute >= 28 && minute <= 32 && contentEngineFiredDate.production !== dateKey) {
         contentEngineFiredDate.production = dateKey;
         console.log(`🚀 [ContentEngine] Daily production firing for ${dateKey}`);
         try {
@@ -1089,9 +1098,9 @@ async function main() {
     },
   });
 
-  console.log("⚡ [ContentEngine] Scheduled: Daily production (6:30AM ET), Distribution sweep (every 5min)");
+  console.log("⚡ [ContentEngine] Scheduled: Daily production (12:30PM CDT/17:30UTC), Distribution sweep (every 5min)");
 
-  // ── Stasis Detection — Daily Agent Self-Check (2 PM) ──
+  // ── Stasis Detection — Daily Agent Self-Check (3:00 PM CDT = 20:00 UTC) ──
   const stasisFiredDate = { value: "" };
   const stasisAgents = ["vector", "yuki", "alfred", "anita", "sapphire", "veritas"];
 
@@ -1102,9 +1111,10 @@ async function main() {
     enabled: true,
     handler: async () => {
       const now = new Date();
-      const hour = now.getHours();
+      const hour = now.getUTCHours();
+      const minute = now.getUTCMinutes();
       const dateKey = now.toDateString();
-      if (hour === 14 && stasisFiredDate.value !== dateKey) {
+      if (hour === 20 && minute >= 0 && minute <= 2 && stasisFiredDate.value !== dateKey) {
         stasisFiredDate.value = dateKey;
         console.log(`🔍 [StasisCheck] Dispatching daily stasis self-check to all agents for ${dateKey}`);
         for (const agent of stasisAgents) {

@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-05 (Cowork Session 24 — SCHEDULER TIMEZONE FIX + STAGGER) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-05 (Cowork Session 24 — SCHEDULER FIX + ALFRED GROQ + DELIVERY QUALITY) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -8,9 +8,9 @@
 **Mission Metrics:** FIRST CLEAN END-TO-END PIPELINE RUN. All 8 steps green. 1 URL → YouTube long-form + 9 clips + 16 Buffer posts scheduled across 7 days. Two architecture bugs found and fixed: GraphQL enum quoting (killed YouTube/IG Buffer posts) and dual-path distribution (dumped all Shorts at once). Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit `d2847f7` (Session 24 — Scheduler timezone fix + stagger).
+- Bot is live on Railway. Latest commit `0706f68` (Session 24 — Faceless Factory delivery quality).
 - Session 23 commit chain: `c549b79` → `0177d3b` → `2e1d3d0` → `bd6744b` → `050e699` (Alfred auto-pipeline).
-- Session 24 commit: `d2847f7` (scheduler timezone fix + minute-level staggering).
+- Session 24 commits: `d2847f7` (timezone fix + stagger) → `2a14154` (Alfred Groq + spacing) → `0706f68` (orientation + cadence + music bed).
 - Pipeline ran all 8 steps for video iR4AAwNP3r8: "Beyond The Simulation" (258s, 12 scenes, 9 clips, 16 Buffer posts).
 - YouTube long-form live: https://youtube.com/watch?v=ybjDyM3uVts
 - yt-dlp authenticated via YouTube cookies (YOUTUBE_COOKIES_BASE64 env var in Railway).
@@ -44,20 +44,22 @@
   - TikTok: `metadata.tiktok = { title }` — optional but recommended
   - Without these metadata fields, YouTube and Instagram posts would be SILENTLY REJECTED by Buffer
 
-**QUALITY GATE STATUS (Session 23 — DEPLOYED):**
-- ✅ Background ambient music — niche-aware synthesized drone, mixed under voice
+**QUALITY GATE STATUS (Session 24 — DEPLOYED):**
+- ✅ Background ambient music — Railway-safe Node.js WAV generation (sine waves + Voss-McCartney pink noise), niche-aware tones, mixed under voice. No lavfi dependency.
 - ✅ Audio mastering — loudnorm + EQ + compression chain
-- ✅ Silence pads between segments — 0.6s breathing room
+- ✅ Silence pads between segments — 1.5s breathing room (upgraded from 0.6s)
+- ✅ Chapter breaks — 2.5s pause every 4 segments for long-form pacing
 - ✅ Hook text overlay — first sentence burned into opening 3s
 - ✅ Smart clip boundaries — silencedetect natural pause points
 - ✅ Segment expansion — LLM expands short scripts to 15+ segments
-- ✅ Slower TTS — 0.85x documentary cadence
+- ✅ Slower TTS — 0.80x documentary cadence for long-form (upgraded from 0.85x)
+- ✅ Orientation-aware dimensions — long-form=16:9 (1920×1080), shorts=9:16 (1080×1920). DIMS constant threads through image gen (Pollinations/Imagen4/DALL-E) + ffmpeg assembly.
+- ✅ LLM pacing guidance — script prompt enforces short sentences, breathing room, transitional beats every 4 segments
 - REMAINING Quality Gate items (Session 24+):
   1. Audio crossfade between scenes (not hard cuts)
   3. Voice warmth filter (EQ + slight reverb to reduce robotic feel)
-  4. Text hook overlay burned into first 3 seconds
+  4. Semantic clip extraction (LLM-driven story moments instead of silence-boundary chopping) — STEP 4, the anchor piece
   5. Intro bumper + outro CTA card
-  6. Audio normalization (consistent volume)
 - Platform Adaptation Engine needed: Each platform needs slightly different clip versions (TikTok = faster cadence, IG = cover frame optimization, etc.)
 - Distribution Router consolidation: Single entry point instead of split Buffer/direct-API paths
 
@@ -230,26 +232,31 @@
 **SCHEDULER TIMEZONE FIX + STAGGER (Session 24, commit d2847f7):**
 - **BUG FIXED:** All schedulers used `.getHours()` which returns UTC on Railway, but hour values were written as if local time. Every task fired 3-6:30AM CDT while Architect was asleep. Zero dispatches in 24hr confirms bot may not be running OR tasks fired unnoticed.
 - **FIX:** All `.getHours()` replaced with `.getUTCHours()`. Veritas Monday check uses `.getUTCDay()`. All hour values remapped to Architect's 10AM CDT day start. Minute-window guards added to every scheduler to prevent LLM/Supabase collision.
-- **FINAL SCHEDULE (all CDT, all using getUTCHours + minute guards):**
+- **FINAL SCHEDULE (all CDT, all using getUTCHours + minute guards, pipeline-safe spacing):**
   - 10:00 AM — Morning Briefing (UTC 15, min 0-2) — direct LLM summary to Telegram
-  - 10:05 AM — Alfred Trend Scan (UTC 15, min 5-7) — dispatches to crew_dispatch, Gemini primary
-  - 11:00 AM — Vector Metrics Sweep (UTC 16, min 0-2) — Groq primary
-  - 11:10 AM Mon — Veritas Weekly Directive (UTC 16, min 10-12) — Anthropic primary
-  - 12:30 PM — Content Engine Production (UTC 17, min 28-32) — failoverLLM
-  - 3:00 PM — Stasis Detection (UTC 20, min 0-2) — per-agent teams
+  - 10:05 AM — Alfred Trend Scan (UTC 15, min 5-7) — dispatches to crew_dispatch, **Groq primary** (promoted from Gemini)
+  - ~10:15-11:15 AM — VidRush Pipeline (if Alfred finds URL) — pipelineLLM, Groq primary
+  - 12:00 PM — Vector Metrics Sweep (UTC 17, min 0-2) — Groq primary (45min after pipeline clears)
+  - 12:10 PM Mon — Veritas Weekly Directive (UTC 17, min 10-12) — Anthropic primary
+  - 1:30 PM — Content Engine Production (UTC 18, min 28-32) — failoverLLM
+  - 3:30 PM — Stasis Detection (UTC 20, min 28-32) — per-agent teams
   - 8:00 PM — Evening Recap (UTC 01, min 0-2) — failoverLLM
-- **Config defaults updated:** `MORNING_BRIEFING_HOUR=15`, `EVENING_RECAP_HOUR=1` (in config.ts)
-- **Files changed:** `src/config.ts`, `src/index.ts` (7 scheduler blocks + 2 log lines)
+- **LLM TEAM UPDATE (Session 24):** Alfred promoted from Gemini to Groq primary. New teams:
+  - Alfred + Vector + Yuki → Groq (14,400/day) — staggered so they never overlap
+  - Anita → Gemini (250/day sufficient solo for lighter rewrite tasks)
+  - Sapphire + Veritas → Anthropic (strategic, highest quality)
+- **Config defaults:** `MORNING_BRIEFING_HOUR=15`, `EVENING_RECAP_HOUR=1` (in config.ts)
+- **Files changed:** `src/config.ts`, `src/index.ts` (LLM teams + 7 scheduler blocks + log lines)
 
 **SESSION 23 TEST 3 RESULTS (2026-04-05 ~3AM) — video tET-aR-JG-o:**
 - ✅ 56 posts scheduled (8 slots/day working perfectly)
 - ✅ 425s/7min video, 15 scenes (up from 258s/12 scenes in Test 2)
 - ✅ All 8 steps green, Groq stayed primary
 - ✅ Content quality is strong — intelligence, hooks, narrative all there
-- ❌ Music bed — silent failure (likely Railway ffmpeg missing lavfi anoisesrc)
-- ❌ Long-form video is VERTICAL (9:16) — should be HORIZONTAL (16:9) for YouTube
-- ❌ Delivery cadence still too fast — reads like run-on, needs longer pauses + chapter breaks
-- ❌ Shorts are CLIPS not STORIES — needs semantic extraction, not silence-boundary chopping
+- ❌→✅ Music bed — was silent failure (Railway ffmpeg missing lavfi anoisesrc). **FIXED Session 24:** Node.js WAV generation (sine waves + Voss-McCartney pink noise), zero lavfi dependency. Commit `0706f68`.
+- ❌→✅ Long-form video is VERTICAL (9:16) — should be HORIZONTAL (16:9) for YouTube. **FIXED Session 24:** DIMS constant with orientation-aware presets threads through all image gen APIs + ffmpeg assembly. Long-form=horizontal, shorts=vertical. Commit `0706f68`.
+- ❌→✅ Delivery cadence still too fast — reads like run-on, needs longer pauses + chapter breaks. **FIXED Session 24:** TTS 0.85→0.80, silence pads 0.6→1.5s, chapter breaks every 4 segments (2.5s), LLM pacing guidance. Commit `0706f68`.
+- ❌ Shorts are CLIPS not STORIES — needs semantic extraction, not silence-boundary chopping — **STEP 4 pending**
 
 **NEXT SESSION PRIORITIES (Session 24) — DELIVERY QUALITY:**
 
@@ -552,9 +559,9 @@ Vector scheduled 1 post on X via Buffer. That's 1 out of 84+/day target. Deep au
 
 | Team | Primary | Failover 1 | Failover 2 | Rationale |
 |------|---------|-----------|-----------|-----------|
-| Alfred + Anita | Gemini | Groq | Anthropic | Research/writing tasks, lower call volume |
+| Alfred + Vector + Yuki | Groq (14,400/day) | Gemini | Anthropic | Heavy agents, staggered schedule prevents overlap |
+| Anita | Gemini | Groq | Anthropic | Lighter rewrite/writing tasks, 250/day sufficient solo |
 | Sapphire + Veritas | Anthropic | Gemini | Groq | Strategic agents, less frequent, highest quality |
-| Vector + Yuki | Groq (14,400/day) | Anthropic | Gemini | Yuki = most tool calls, needs highest daily limit |
 
 Code: `AGENT_LLM_TEAMS` map + `buildTeamLLM()` in index.ts. The shared `failoverLLM` still exists for system-level calls (content engine, briefings, sentinel).
 

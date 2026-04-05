@@ -1,43 +1,43 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-05 (Cowork Session 26 — LLM ROUTING FIX + AGENT COMMS PURGE) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-05 (Cowork Session 27 — QUALITY GATE OVERHAUL + LEGACY PURGE) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
-## CRITICAL STATUS REPORT (as of Session 23, 2026-04-05 ~12:00 AM)
+## CRITICAL STATUS REPORT (as of Session 27, 2026-04-05 ~9:00 PM)
 
-**Mission Metrics:** FIRST CLEAN END-TO-END PIPELINE RUN. All 8 steps green. 1 URL → YouTube long-form + 9 clips + 16 Buffer posts scheduled across 7 days. Two architecture bugs found and fixed: GraphQL enum quoting (killed YouTube/IG Buffer posts) and dual-path distribution (dumped all Shorts at once). Revenue still $0.
+**Mission Metrics:** Quality gate overhaul deployed. Imagen 4 restored as primary image gen. Cinematography-grade prompts, upgraded music synthesis, two-pass script gen, intro/outro bumpers. 35 legacy files purged. Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit `509fa4b` (Session 26 — LLM routing fix + AgentComms purge). Auto-deploying.
-- Session 23 commit chain: `c549b79` → `0177d3b` → `2e1d3d0` → `bd6744b` → `050e699` (Alfred auto-pipeline).
-- Session 24 commits: `d2847f7` (timezone fix) → `2a14154` (Alfred Groq) → `0706f68` (orientation + cadence + music bed) → `8475da7` (DVP) → `3291382` (semantic clips) → `cd60174` (crossfade + reverb).
-- Session 25 commit: `5adefce` (black video + timing + scene-audio sync — 6 fixes, 316 insertions, 76 deletions).
-- Session 26 commit: `509fa4b` (5 LLM routing fixes + AgentComms purge — 18 insertions, 11 deletions).
+- Bot is live on Railway. Latest commits `f949bc2` + `e3597c0` (Session 27 — quality gate overhaul + legacy purge). Auto-deploying.
+- Session 27 commits: `f949bc2` (quality gate overhaul — 7 upgrades, 347 insertions, 176 deletions) → `e3597c0` (legacy debris purge — 35 files deleted, .gitignore hardened).
+- Prior: Session 26 `509fa4b` (LLM routing fix), Session 25 `5adefce`, Session 24 chain, Session 23 chain.
 - Pipeline ran all 8 steps for video iR4AAwNP3r8: "Beyond The Simulation" (258s, 12 scenes, 9 clips, 16 Buffer posts).
 - YouTube long-form live: https://youtube.com/watch?v=ybjDyM3uVts
 - yt-dlp authenticated via YouTube cookies (YOUTUBE_COOKIES_BASE64 env var in Railway).
 
-**API Credit Situation (updated Session 26):**
-- **Anthropic:** ~$10 remaining. NOW USED FOR VERITAS BRAIN ONLY (chat, briefings, Sapphire). Low burn rate (~$0.36/month for briefings, ~$0.01/conversation). Estimated runway: 37-74 days.
-- **OpenAI:** -$0.06 credits. DEAD. DALL-E 3 fallback will not fire. TTS via OpenAI will not work.
-- **Gemini:** $50.49 OWED (accumulated debt). Key may still authenticate for Imagen 4 ($0.02-0.06/image) — untested. Gemini text generation is secondary fallback for Veritas/Sapphire teams.
-- **Groq:** FREE tier. 14,400 req/day. DEDICATED to pipeline (VidRush, Alfred trend scan, Vector, Yuki). No longer competing with chat.
-- **ElevenLabs:** Creator plan, 93,842 credits remaining. TTS is working.
+**API Credit Situation (updated Session 27):**
+- **Anthropic:** ~$10 remaining. Used for Veritas brain + Sapphire Sentinel only. Low burn (~$0.36/month briefings). Runway: 37-74 days.
+- **OpenAI:** -$0.06 credits. DEAD. DALL-E 3 and OpenAI TTS will not fire.
+- **Gemini:** $62.30 OWED. API key BLOCKED for all calls (text AND image) until balance paid. Gemini failover position in all chains is effectively dead.
+- **Groq:** FREE tier. 14,400 req/day. Primary for pipeline + content agents (Alfred, Anita, Vector, Yuki).
+- **ElevenLabs:** Creator plan, credits remaining. TTS is working.
+- **Imagen 4:** RESTORED as primary image gen (Session 27). Cost $0.02-0.06/image. Expected $7-12/month. BLOCKED until Gemini $62 bill paid — Pollinations auto-fallback active.
 
-**LLM ROUTING (Session 26 fix — commit 509fa4b):**
-- **ROOT CAUSE of Session 25 unresponsiveness:** Veritas chat, Briefings, Sapphire Sentinel, and Content Engine were ALL wired to `failoverLLM` (Groq-first). When pipeline activity rate-limited Groq (12k TPM), the chain cascaded through dead providers (Gemini debt, OpenAI negative), silently failing.
-- **FIX:** Rewired 5 call sites to use AGENT_LLM_TEAMS (dedicated per-agent failover chains):
-  - `agentLoop` (Veritas chat) → AGENT_LLM_TEAMS.veritas [Anthropic → Gemini → Groq]
-  - `ProactiveBriefings` → AGENT_LLM_TEAMS.veritas [Anthropic → Gemini → Groq]
-  - `SapphireSentinel` → AGENT_LLM_TEAMS.sapphire [Anthropic → Gemini → Groq]
-  - `dailyContentProduction` (scheduled) → AGENT_LLM_TEAMS.anita [Gemini → Groq → Anthropic]
-  - `dailyContentProduction` (manual) → AGENT_LLM_TEAMS.anita [Gemini → Groq → Anthropic]
-- **Also purged:** AgentComms (legacy in-memory message bus). Fully replaced by Supabase crew-dispatch. Import + instantiation removed from index.ts.
-- **Left intentionally on failoverLLM:** AgentSwarm + MeshWorkflow (rare on-demand tools, Groq-first is fine).
-- **[DVP: ADDRESSED]** LLM routing fix — confirm `/status` shows Anthropic-first for Veritas after deploy.
-- **[DVP: ADDRESSED]** Imagen 4 primary — production pipeline will confirm `"via Imagen 4"` in logs. Falls to Pollinations if Gemini key blocked.
-- **[DVP: ADDRESSED]** Sapphire Sentinel v2 — 5 proactive alert rules (pipeline failure, critical glitch, stasis, Buffer health, content engine deadline). Self-verifies on next 2hr scan.
-- **[DVP: ADDRESSED]** `/status` + `/start` display — shows per-agent routing map. Commit `3c2b9ce`.
+**LLM ROUTING (Session 26 fix — commit 509fa4b, updated Session 27):**
+- **AGENT_LLM_TEAMS (unchanged):**
+  - `veritas`: [Anthropic → Gemini → Groq] — strategic brain, briefings
+  - `sapphire`: [Anthropic → Gemini → Groq] — sentinel, proactive observations
+  - `alfred`: [Groq → Gemini → Anthropic] — trend intelligence
+  - `anita`: [Groq → Gemini → Anthropic] — content weaponization (was Gemini-first, caused $62 bill)
+  - `vector`: [Groq → Gemini → Anthropic] — performance analysis
+  - `yuki`: [Groq → Gemini → Anthropic] — distribution
+  - `pipeline`: [Groq → Gemini → Anthropic → OpenAI] — 3 primary retries before failover
+- **Gemini position in ALL chains is dead** until bill paid. Effective routing: Anthropic → Groq (for Veritas/Sapphire) and Groq → Anthropic (for content agents).
+- **[DVP: ADDRESSED]** LLM routing fix — confirm `/status` shows Anthropic-first for Veritas.
+- **[DVP: ADDRESSED]** Imagen 4 primary — will confirm `"via Imagen 4"` in logs once Gemini bill paid. Pollinations fallback active until then.
+- **[DVP: ADDRESSED]** Two-pass script gen — prevents Groq 413 on long-form. Pass 1 (segments 1-13), 8s cooldown, Pass 2 (segments 14-25).
+- **[DVP: ADDRESSED]** Sapphire Sentinel v2 — 5 proactive alert rules. 2hr interval, 10min first-scan on boot.
+- **[DVP: ADDRESSED]** `/status` + `/start` display — shows per-agent routing map.
 
 **RESOLVED — BUFFER POSTING (Session 21 fix):**
 - **ROOT CAUSE:** `scheduleBufferWeek()` in vidrush-orchestrator.ts had a hardcoded filter that ONLY selected channels with service type "twitter", "threads", "linkedin", "facebook", "mastodon". YouTube, Instagram, and TikTok channels were explicitly EXCLUDED. This was based on a false assumption that Buffer can't post to those platforms. Buffer supports ALL connected channels.
@@ -65,31 +65,57 @@
 - `[DVP: REGRESSED]` = Was verified, later test showed it broke again.
 - Rule: Nothing moves to VERIFIED without Architect confirming test output.
 
-**QUALITY GATE STATUS (Session 24):**
+**QUALITY GATE STATUS (Session 27 — major overhaul):**
 - [DVP: VERIFIED] Audio mastering — loudnorm + EQ + compression chain *(verified: Session 23 Test 3, video tET-aR-JG-o)*
 - [DVP: VERIFIED] Hook text overlay — first sentence burned into opening 3s *(verified: Session 23 Test 3)*
 - [DVP: VERIFIED] Smart clip boundaries — silencedetect natural pause points *(verified: Session 23 Test 3)*
 - [DVP: VERIFIED] Segment expansion — LLM expands short scripts to 15+ segments *(verified: Session 23 Test 3, 15 scenes)*
-- [DVP: ADDRESSED] Background ambient music — Node.js WAV generation (sine waves + Voss-McCartney pink noise). Replaces lavfi which failed silently on Railway. Commit `0706f68`.
-- [DVP: ADDRESSED] Silence pads — upgraded 0.6s → 1.5s between segments. Commit `0706f68`.
+- [DVP: ADDRESSED] Background ambient music — UPGRADED Session 27: multi-voice detuned pad chords with per-voice LFO breathing envelopes. Per-niche chord voicings (Am(add9) detuned for dark_psychology, C6/9 for self_improvement, etc.). Replaces sine waves. Commit `f949bc2`.
+- [DVP: ADDRESSED] Silence pads — 1.5s between segments. Commit `0706f68`.
 - [DVP: ADDRESSED] Chapter breaks — 2.5s pause every 4 segments for long-form. Commit `0706f68`.
-- [DVP: ADDRESSED] TTS speed — 0.85x → 0.80x for long-form documentary cadence. Commit `0706f68`.
-- [DVP: ADDRESSED] Orientation-aware dimensions — long-form=16:9 (1920×1080), shorts=9:16 (1080×1920). DIMS constant threads through Pollinations/Imagen4/DALL-E + ffmpeg. Commit `0706f68`.
-- [DVP: ADDRESSED] LLM pacing guidance — short sentences, breathing room, transitional beats every 4 segments. Commit `0706f68`.
-- [DVP: ADDRESSED] Scheduler timezone fix — all getUTCHours, minute-window guards, 10AM CDT day start. Commit `d2847f7`.
-- [DVP: ADDRESSED] Alfred on Groq — promoted from Gemini (250/day) to Groq (14,400/day). Commit `2a14154`.
-- [DVP: ADDRESSED] Pipeline-safe spacing — Vector moved to 12PM, Content Engine 1:30PM, Stasis 3:30PM. Commit `2a14154`.
-- [DVP: ADDRESSED] Semantic clip extraction — LLM reads Whisper transcript, identifies 8-15 self-contained story moments with titles + hooks. Three-tier fallback: LLM semantic → silence boundaries → math division. captionText carries title|hook for downstream copy gen. Commit `3291382`.
-- [DVP: ADDRESSED] Scene crossfade transitions — each scene pre-rendered as individual video clip (Ken Burns + 0.4s fade-in/fade-out). Smooth dissolve-like transitions between scenes instead of hard cuts. Fallback to raw scale if render fails. Scene clip dir cleaned up after assembly. Commit `cd60174`.
-- [DVP: ADDRESSED] Voice warmth reverb — dual-tap aecho (100ms + 200ms reflections at 25%/15% volume) for long-form only. Creates "dark theater" presence where voice exists in a cinematic space. Shorts stay dry for direct impact. Added to mastering chain after EQ, before loudnorm. Commit `cd60174`.
-- REMAINING (not yet addressed):
-  5. Intro bumper + outro CTA card
-  6. **Reverb too heavy** — dial back dual-tap aecho (100ms+200ms reflections). Current settings are audibly "wet". Reduce to single tap or lower volume percentages.
-  7. **Background music not landing** — current WAV sine wave + pink noise generation is placeholder quality. Needs real ambient beds (royalty-free cinematic loops or AI-generated music).
-  8. **Image prompts need major improvement** — especially for Imagen 4 when billing is resolved. Faceless factory visual_direction prompts are too generic. Need cinematic-specific, detailed scene descriptions that leverage Imagen 4's capabilities.
+- [DVP: ADDRESSED] TTS speed — 0.80x for long-form documentary cadence. Commit `0706f68`.
+- [DVP: ADDRESSED] Orientation-aware dimensions — 16:9/9:16. Commit `0706f68`.
+- [DVP: ADDRESSED] Scheduler timezone fix — all getUTCHours. Commit `d2847f7`.
+- [DVP: ADDRESSED] Scene crossfade transitions — Ken Burns + 0.4s fade-in/fade-out. Commit `cd60174`.
+- [DVP: ADDRESSED] Voice warmth reverb — FIXED Session 27: dialed back from dual-tap (100ms+200ms) to single-tap (80ms at 12%). Subtle room presence, not audible wet echo. Commit `f949bc2`.
+- [DVP: ADDRESSED] Imagen 4 restored as PRIMARY image gen — Pollinations fallback. Commit `f949bc2`. (Blocked until Gemini $62 bill paid.)
+- [DVP: ADDRESSED] Cinematography-grade image prompts — SCENE_VISUAL_STYLE completely rewritten. ARRI Alexa 65, anamorphic lenses, Deakins lighting, Kodak Vision3 500T grain. Every niche × brand combo unique. Commit `f949bc2`.
+- [DVP: ADDRESSED] Two-pass script generation — long-form splits into Pass 1 (segments 1-13) + 8s Groq cooldown + Pass 2 (segments 14-25). Prevents Groq 413. Source intel capped at 3000 chars. Commit `f949bc2`.
+- [DVP: ADDRESSED] Video length enforcement — 25 segments, 100-150 words/segment minimum. Commit `f949bc2`.
+- [DVP: ADDRESSED] Intro bumper — 3s branded title card (brand name + video title, white on black, fade-in). Commit `f949bc2`.
+- [DVP: ADDRESSED] Outro CTA card — 5s card with tagline + sovereign-synthesis.com. Commit `f949bc2`.
+- [DVP: ADDRESSED] Script generation prompt upgraded — visual_direction field treated as cinematographer's shot list (camera angle, lighting, physical elements, mood texture). Commit `f949bc2`.
+- [DVP: ADDRESSED] Legacy debris purge — 35 dead files deleted, .gitignore hardened with `_legacy/`, `*.patch`, `commitmsg.txt`. Commit `e3597c0`.
+- REMAINING:
+  - Platform Adaptation Engine: per-platform clip variants (TikTok faster cadence, IG cover frame optimization)
+  - Distribution Router consolidation: single entry point instead of split Buffer/direct-API paths
+  - Midjourney: NO official API exists. Flux by Black Forest Labs ($0.04/img) is best legitimate alternative if Imagen 4 quality insufficient.
 - Platform Adaptation Engine needed: Each platform needs slightly different clip versions (TikTok = faster cadence, IG = cover frame optimization, etc.)
 - Distribution Router consolidation: Single entry point instead of split Buffer/direct-API paths
 - **Funnel Audit skill deployed** — `skills/funnel-audit.md` gives Veritas deep audit methodology for the entire T0→T6 conversion path. Covers distribution, links, Stripe, email, pipeline health, and TCF→Ace handoff.
+
+---
+
+**Session Summary — Cowork Session 27 (2026-04-05):**
+
+**QUALITY GATE OVERHAUL + LEGACY PURGE.** 7 quality upgrades deployed in a single commit (`f949bc2`, 347 insertions, 176 deletions):
+1. **Imagen 4 restored as PRIMARY** — Gemini billing crisis was Anita's 26K-token text gen, NOT image gen ($0.02-0.06/img). Approved $7-12/month for image quality. Pollinations fallback. (Blocked until $62 bill paid.)
+2. **Cinematography-grade image prompts** — SCENE_VISUAL_STYLE rewritten per niche × brand. ARRI Alexa 65, Deakins lighting, Kodak Vision3 500T grain. NO text/watermarks directive.
+3. **Two-pass script generation** — long-form splits Pass 1 (segments 1-13) + 8s Groq TPM cooldown + Pass 2 (segments 14-25). Fixes Groq 413. Source intel capped at 3000 chars.
+4. **Reverb fixed** — dialed back from dual-tap (100ms+200ms at 25%/15%) to single-tap (80ms at 12%). Subtle room presence.
+5. **Music synthesis upgraded** — multi-voice detuned pad chords with per-voice LFO breathing. Per-niche chord voicings. Replaces sine waves.
+6. **Video length enforcement** — 25 segments, 100-150 words/segment minimum.
+7. **Intro bumper (3s) + Outro CTA card (5s)** — branded title card + sovereign-synthesis.com.
+
+Second commit (`e3597c0`): **Legacy debris purge** — 35 dead files deleted, .gitignore hardened.
+
+**Midjourney investigation:** NO official public API. All third-party wrappers violate ToS. Flux by BFL ($0.04/img) is best legitimate alternative.
+
+**Evening pulse failure diagnosed:** Veritas pulse fired from pre-deploy instance. Anthropic HTTP 400 + Gemini connection failure (blocked) + Groq cascade. New deploy should resolve.
+
+**Agent DM prompts created:** Personalized system state updates for all 6 Maven Crew agents (Veritas, Alfred, Anita, Yuki, Vector, Sapphire). Saved to `SESSION-27-AGENT-DM-PROMPTS.md`.
+
+**Commits:** `f949bc2` (quality gate overhaul) → `e3597c0` (legacy purge). Both pushed, Railway auto-deploying.
 
 ---
 

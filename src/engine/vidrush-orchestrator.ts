@@ -990,34 +990,49 @@ export async function executeFullPipeline(
   }
 
   // ── STEP 4: SEMANTIC CLIP EXTRACTION ──
-  await progress("STEP 4/8", "Extracting story moments from long-form video...");
   let clips: ClipMeta[];
-  try {
-    // Dynamic clip params based on source video duration:
-    // - External YT rips (20-60min): 30 clips, 25s each (original defaults)
-    // - Faceless factory output (3-8min): fewer, shorter clips
-    //   e.g. 5min video → ~6-8 clips of 30-45s each (complete standalone moments)
-    const srcDuration = facelessResult.duration || 300;
-    const dynamicClipCount = srcDuration > 600
-      ? 30                                          // long external rips
-      : Math.max(4, Math.min(12, Math.round(srcDuration / 45))); // faceless: ~1 clip per 45s
-    const dynamicClipDuration = srcDuration > 600
-      ? 25                                          // long external rips
-      : Math.max(20, Math.min(55, Math.round(srcDuration / dynamicClipCount))); // sized to source
-    console.log(`📐 [Orchestrator] Dynamic clip params: ${dynamicClipCount} clips × ~${dynamicClipDuration}s (source: ${srcDuration.toFixed(0)}s)`);
+  if (dryRun) {
+    await progress("STEP 4/8", "[DRY RUN] Simulating semantic clip extraction...");
+    // Simulate 8 clips with semantic metadata (title + hook) matching live pipeline output
+    const simClipCount = 8;
+    clips = Array.from({ length: simClipCount }, (_, i) => ({
+      index: i,
+      startSec: i * 30,
+      endSec: (i + 1) * 30,
+      localPath: `${ORCHESTRATOR_DIR}/${jobId}/clip_${i.toString().padStart(2, "0")}.mp4`,
+      publicUrl: null,
+      captionText: `Sovereign Moment ${i + 1}|The architecture of liberation reveals itself in segment ${i + 1}`,
+    }));
+    await progress("STEP 4/8", `✅ [DRY RUN] ${clips.length} clips simulated (semantic)`);
+  } else {
+    await progress("STEP 4/8", "Extracting story moments from long-form video...");
+    try {
+      // Dynamic clip params based on source video duration:
+      // - External YT rips (20-60min): 30 clips, 25s each (original defaults)
+      // - Faceless factory output (3-8min): fewer, shorter clips
+      //   e.g. 5min video → ~6-8 clips of 30-45s each (complete standalone moments)
+      const srcDuration = facelessResult.duration || 300;
+      const dynamicClipCount = srcDuration > 600
+        ? 30                                          // long external rips
+        : Math.max(4, Math.min(12, Math.round(srcDuration / 45))); // faceless: ~1 clip per 45s
+      const dynamicClipDuration = srcDuration > 600
+        ? 25                                          // long external rips
+        : Math.max(20, Math.min(55, Math.round(srcDuration / dynamicClipCount))); // sized to source
+      console.log(`📐 [Orchestrator] Dynamic clip params: ${dynamicClipCount} clips × ~${dynamicClipDuration}s (source: ${srcDuration.toFixed(0)}s)`);
 
-    clips = await chopLongFormIntoClips(
-      facelessResult.localPath,
-      whisperResult.niche,
-      jobId,
-      llm,
-      whisperResult.segments,
-      dynamicClipCount,
-      dynamicClipDuration
-    );
-    await progress("STEP 4/8", `✅ ${clips.length} clips extracted (${clips[0]?.captionText ? "semantic" : "silence-boundary"})`);
-  } catch (err: any) {
-    throw new Error(`Clip chopping failed: ${err.message}`);
+      clips = await chopLongFormIntoClips(
+        facelessResult.localPath,
+        whisperResult.niche,
+        jobId,
+        llm,
+        whisperResult.segments,
+        dynamicClipCount,
+        dynamicClipDuration
+      );
+      await progress("STEP 4/8", `✅ ${clips.length} clips extracted (${clips[0]?.captionText ? "semantic" : "silence-boundary"})`);
+    } catch (err: any) {
+      throw new Error(`Clip chopping failed: ${err.message}`);
+    }
   }
 
   // ── STEP 5: UPLOAD CLIPS TO SUPABASE STORAGE ──

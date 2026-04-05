@@ -695,32 +695,99 @@ async function assembleVideo(
     ? `,drawtext=text='${hookText}':fontsize=42:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h*0.4):enable='between(t,0,3)':alpha='if(lt(t,2),1,(3-t))'`
     : "";
 
+  // ── BACKGROUND MUSIC BED ──
+  // Generate a dark cinematic ambient drone using ffmpeg synthesis.
+  // Zero external dependencies, zero royalty issues — pure math.
+  // Niche-aware: dark_psychology gets darker tones, self_improvement gets warmer.
+  // Mixed at -20dB under voice with 2s fade in and 3s fade out.
+  const musicPath = `${FACELESS_DIR}/${jobId}_music_bed.mp3`;
+  let hasMusicBed = false;
+
+  // Niche-specific tone frequencies (Hz) — sets the emotional color
+  const MUSIC_TONES: Record<string, { base: number; harmonic: number; sub: number }> = {
+    dark_psychology: { base: 110, harmonic: 165, sub: 55 },     // A2 + E3 + A1 — ominous
+    self_improvement: { base: 130.81, harmonic: 196, sub: 65 }, // C3 + G3 + C2 — uplifting
+    burnout: { base: 98, harmonic: 146.83, sub: 49 },           // G2 + D3 + G1 — melancholic
+    quantum: { base: 123.47, harmonic: 185, sub: 61.74 },       // B2 + F#3 + B1 — ethereal
+    brand: { base: 110, harmonic: 164.81, sub: 55 },            // A2 + E3 + A1 — default
+  };
+
+  try {
+    const tones = MUSIC_TONES[script.niche] || MUSIC_TONES.brand;
+    const musicDuration = Math.ceil(audioDuration) + 4; // extra 4s for fade buffer
+
+    // Layer 3 sine waves + filtered noise into a dark ambient pad.
+    // sine waves create the tonal foundation, noise adds texture/atmosphere.
+    // Everything is volume-reduced at the source to avoid clipping when mixed.
+    execSync(
+      `ffmpeg ` +
+        `-f lavfi -i "sine=frequency=${tones.base}:duration=${musicDuration}:sample_rate=44100" ` +
+        `-f lavfi -i "sine=frequency=${tones.harmonic}:duration=${musicDuration}:sample_rate=44100" ` +
+        `-f lavfi -i "sine=frequency=${tones.sub}:duration=${musicDuration}:sample_rate=44100" ` +
+        `-f lavfi -i "anoisesrc=d=${musicDuration}:c=pink:r=44100:a=0.02" ` +
+        `-filter_complex "` +
+          `[0:a]volume=0.3[base];` +        // Base tone
+          `[1:a]volume=0.15[harm];` +        // Harmonic (quieter)
+          `[2:a]volume=0.2[sub];` +          // Sub bass
+          `[3:a]lowpass=f=800[noise];` +     // Filtered pink noise — warmth
+          `[base][harm][sub][noise]amix=inputs=4:duration=first:normalize=0,` + // Mix layers
+          `afade=t=in:st=0:d=2,` +           // 2s fade in
+          `afade=t=out:st=${musicDuration - 3}:d=3,` +  // 3s fade out
+          `lowpass=f=2000,` +                // Roll off highs so it doesn't compete with voice
+          `volume=0.4` +                     // Master level before mixing with voice
+        `[music]" ` +
+        `-map "[music]" -c:a libmp3lame -b:a 128k -y "${musicPath}"`,
+      { timeout: 60_000, stdio: "pipe" }
+    );
+    hasMusicBed = existsSync(musicPath);
+    if (hasMusicBed) {
+      console.log(`🎵 [FacelessFactory] Music bed generated: ${script.niche} ambient (${musicDuration}s)`);
+    }
+  } catch (err: any) {
+    console.warn(`[FacelessFactory] Music bed generation failed (non-fatal): ${err.message?.slice(0, 200)}`);
+  }
+
   // Build the ffmpeg command:
   // 1. Concat images into slideshow
   // 2. Apply Ken Burns (zoompan) effect
   // 3. Apply niche color grade
   // 4. Overlay hook text (first 3s)
-  // 5. Overlay voiceover audio
+  // 5. Mix voiceover + background music
   // 6. Output 9:16 MP4
 
   const kenBurnsFilter = `zoompan=z='min(zoom+0.0005,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${framesPerSegment}:s=1080x1920:fps=${fps}`;
 
+  // Audio filter: if music bed exists, mix voice (loud) + music (quiet) via amix.
+  // Voice gets volume=1.0, music gets volume=0.15 (~-16dB under voice).
+  // amix normalize=0 prevents auto-gain that would pump the music up when voice pauses.
+  const audioFilter = hasMusicBed
+    ? `[1:a]volume=1.0[voice];[2:a]volume=0.15[bg];[voice][bg]amix=inputs=2:duration=first:normalize=0[aout]`
+    : "";
+  const musicInput = hasMusicBed ? `-i "${musicPath}" ` : "";
+  const audioMap = hasMusicBed ? `-map "[aout]"` : `-map 1:a`;
+
   try {
     execSync(
-      `ffmpeg -f concat -safe 0 -i "${concatListPath}" -i "${audioPath}" ` +
-        `-filter_complex "[0:v]${kenBurnsFilter},${nicheFilter}${hookOverlay}[v]" ` +
-        `-map "[v]" -map 1:a ` +
+      `ffmpeg -f concat -safe 0 -i "${concatListPath}" -i "${audioPath}" ${musicInput}` +
+        `-filter_complex "[0:v]${kenBurnsFilter},${nicheFilter}${hookOverlay}[v]${hasMusicBed ? ";" + audioFilter : ""}" ` +
+        `-map "[v]" ${audioMap} ` +
         `-c:v libx264 -preset fast -crf 23 ` +
         `-c:a aac -b:a 192k ` +
         `-shortest -y "${outputPath}"`,
       { timeout: 600_000, stdio: "pipe" }  // 10 min timeout for long-form assembly
     );
   } catch (err: any) {
-    // Fallback: simpler assembly without Ken Burns if zoompan fails
+    // Fallback: simpler assembly without Ken Burns if zoompan fails.
+    // When music bed exists, must use filter_complex for both video + audio (can't mix -vf and -filter_complex).
     console.warn(`[FacelessFactory] Ken Burns failed, trying simple assembly: ${err.message?.slice(0, 200)}`);
+    const fallbackVideoFilter = `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${nicheFilter}${hookOverlay}[v]`;
+    const fallbackFilter = hasMusicBed
+      ? `${fallbackVideoFilter};${audioFilter}`
+      : fallbackVideoFilter;
     execSync(
-      `ffmpeg -f concat -safe 0 -i "${concatListPath}" -i "${audioPath}" ` +
-        `-vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${nicheFilter}${hookOverlay}" ` +
+      `ffmpeg -f concat -safe 0 -i "${concatListPath}" -i "${audioPath}" ${musicInput}` +
+        `-filter_complex "${fallbackFilter}" ` +
+        `-map "[v]" ${audioMap} ` +
         `-c:v libx264 -preset fast -crf 23 ` +
         `-c:a aac -b:a 192k ` +
         `-shortest -y "${outputPath}"`,

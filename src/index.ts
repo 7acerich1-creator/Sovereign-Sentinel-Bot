@@ -21,7 +21,8 @@ import { FailoverLLM } from "./llm/failover";
 // ── Agent ──
 import { AgentLoop } from "./agent/loop";
 import { AgentSwarm, SwarmTool } from "./agent/swarm";
-import { AgentComms, AgentCommsTool } from "./agent/comms";
+// AgentComms REMOVED (Session 26) — legacy in-memory message bus, fully replaced by Supabase crew-dispatch.
+// Source file retained at ./agent/comms.ts for reference but no longer imported or instantiated.
 import { MeshWorkflow, MeshTool } from "./agent/mesh";
 
 // ── Channels ──
@@ -300,11 +301,7 @@ async function main() {
   const swarm = new AgentSwarm(failoverLLM, tools);
   tools.push(new SwarmTool(swarm));
 
-  // Agent Comms (legacy in-memory — kept for backward compat)
-  const comms = new AgentComms();
-  tools.push(new AgentCommsTool(comms));
-
-  // Crew Dispatch (Supabase-backed inter-agent routing — replaces AgentComms for cross-bot work)
+  // Crew Dispatch (Supabase-backed inter-agent routing — the ONLY agent-to-agent system)
   tools.push(new CrewDispatchTool("veritas"));
 
   // Action Surface — Veritas gets all tools (lead agent)
@@ -319,7 +316,11 @@ async function main() {
   }
 
   // ── 4. Initialize Agent Loop ──
-  const agentLoop = new AgentLoop(failoverLLM, tools, memoryProviders);
+  // CRITICAL: Veritas chat must use the Veritas team LLM (Anthropic-first), NOT failoverLLM (Groq-first).
+  // failoverLLM has Groq at position #1, which competes with pipeline for rate limits and burns
+  // the Architect's $10 Anthropic reserve when Groq 429s cascade through the chain.
+  // AGENT_LLM_TEAMS.veritas = ["anthropic", "gemini", "groq"] — strategic brain, not pipeline grunt.
+  const agentLoop = new AgentLoop(AGENT_LLM_TEAMS.veritas, tools, memoryProviders);
   const providersMap = new Map<string, LLMProvider>();
   llmProviders.forEach((p) => providersMap.set(p.model, p));
   agentLoop.setLLMProviders(providersMap);
@@ -864,7 +865,9 @@ async function main() {
   }
 
   // ── 7. Proactive Systems ──
-  const briefings = new ProactiveBriefings(failoverLLM, memoryProviders, telegram, defaultChatId);
+  // Briefings use Veritas team (Anthropic-first) — strategic summaries, not pipeline grunt work.
+  // Low volume (2x/day, ~500 tokens each) so Anthropic cost is negligible (~$0.36/month).
+  const briefings = new ProactiveBriefings(AGENT_LLM_TEAMS.veritas, memoryProviders, telegram, defaultChatId);
   const heartbeat = new HeartbeatSystem(telegram, defaultChatId);
 
   // In-memory guard to prevent briefings from firing every 60s during the matching hour
@@ -1064,7 +1067,9 @@ async function main() {
         contentEngineFiredDate.production = dateKey;
         console.log(`🚀 [ContentEngine] Daily production firing for ${dateKey}`);
         try {
-          const count = await dailyContentProduction(failoverLLM);
+          // Content Engine uses Anita's team (Gemini-first) — writing tasks, 250/day is sufficient.
+          // Keeps pipeline Groq budget untouched and Anthropic reserved for Veritas brain.
+          const count = await dailyContentProduction(AGENT_LLM_TEAMS.anita);
           console.log(`✅ [ContentEngine] Produced ${count} content pieces for today`);
 
           // Notify Architect via Telegram
@@ -1168,7 +1173,8 @@ async function main() {
   console.log("# Heartbeat: Running every 300s — SILENT mode");
 
   // ── Sapphire Sentinel — proactive observations every 2 hours ──
-  const sapphireSentinel = new SapphireSentinel(failoverLLM, telegram, defaultChatId);
+  // Sapphire uses her own team (Anthropic-first) — strategic observations, low volume (12x/day max).
+  const sapphireSentinel = new SapphireSentinel(AGENT_LLM_TEAMS.sapphire, telegram, defaultChatId);
   sapphireSentinel.start();
 
   // ── 8. Webhook Server ──
@@ -1317,7 +1323,8 @@ async function main() {
     try {
       console.log(`🚀 [ContentEngine] MANUAL production trigger for ${dateKey} (force=${force})`);
       contentEngineFiredDate.production = dateKey;
-      const count = await dailyContentProduction(failoverLLM);
+      // Manual trigger uses same Anita team as scheduled — consistent LLM routing.
+      const count = await dailyContentProduction(AGENT_LLM_TEAMS.anita);
       console.log(`✅ [ContentEngine] Manual production complete: ${count} pieces`);
 
       // Notify Architect

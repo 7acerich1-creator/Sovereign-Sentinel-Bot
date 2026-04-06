@@ -2321,6 +2321,9 @@ async function main() {
         // Build per-agent tool set: shared tools + agent-specific tools
         const agentTools: Tool[] = [...tools, new CrewDispatchTool(agentCfg.name)];
 
+        // Content crew: agents that produce/distribute content and need protocol access
+        const CONTENT_CREW = ["alfred", "anita", "yuki"];
+
         // Protocol tools — content crew gets reader, Sapphire gets writer
         if (CONTENT_CREW.includes(agentCfg.name)) {
           agentTools.push(new ProtocolReaderTool());

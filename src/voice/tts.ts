@@ -83,11 +83,17 @@ async function elevenLabsTTS(text: string, speed?: number): Promise<Buffer> {
   const apiKey = config.voice.elevenLabsApiKey;
   if (!apiKey) throw new Error("ElevenLabs API key not configured");
 
-  const voiceId = config.voice.elevenLabsVoiceId || "21m00Tcm4TlvDq8ikWAM"; // Rachel
+  // Voice: Adam — deep, authoritative male. Perfect for dark psychology / sovereignty content.
+  // Old default was Rachel (female) which was wrong for this brand.
+  const voiceId = config.voice.elevenLabsVoiceId || "pNInz6obpgDQGcFmaJgB"; // Adam (deep male)
 
-  // Higher stability = more consistent, measured pacing (0.0 = variable, 1.0 = rigid)
-  // For documentary narration, we want high stability + moderate style for gravitas
-  const stability = speed && speed < 1.0 ? 0.80 : 0.65;
+  // VOICE EXPRESSIVENESS (Session 28 fix):
+  // Old: stability=0.80 made the voice rigid and monotone. Like reading a textbook.
+  // Reference channels (Grim Grit) have DYNAMIC delivery — emphasis, pauses, vocal variation.
+  // stability: 0.45 = expressive but still controlled (not chaotic)
+  // style: 0.60 = dramatic delivery with emphasis on key words
+  // similarity_boost: 0.75 = keeps the voice character but allows variation
+  const stability = speed && speed < 1.0 ? 0.45 : 0.50;
 
   const resp = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
@@ -103,8 +109,8 @@ async function elevenLabsTTS(text: string, speed?: number): Promise<Buffer> {
         model_id: "eleven_multilingual_v2",
         voice_settings: {
           stability,
-          similarity_boost: 0.80,
-          style: 0.35,
+          similarity_boost: 0.75,
+          style: 0.60,
           use_speaker_boost: true,
         },
       }),
@@ -126,8 +132,9 @@ async function elevenLabsTTS(text: string, speed?: number): Promise<Buffer> {
 // Uses edge-tts-node package (WebSocket to speech.platform.bing.com)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-// Edge TTS voice mapping — closest matches to our brand voices
-const EDGE_VOICE = "en-US-AriaNeural"; // Natural female, closest to Rachel
+// Edge TTS voice mapping — deep male voice for sovereignty / dark psychology brand
+// Session 28: switched from AriaNeural (female) to GuyNeural (deep male)
+const EDGE_VOICE = "en-US-GuyNeural"; // Deep natural male, matches brand voice
 
 async function edgeTTS(text: string, speed?: number): Promise<Buffer> {
   // Dynamic import — only loads when needed (keeps bundle light if ElevenLabs works)

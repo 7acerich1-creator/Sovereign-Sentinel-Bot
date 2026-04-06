@@ -1305,153 +1305,81 @@ async function assembleVideo(
   const musicPath = `${FACELESS_DIR}/${jobId}_music_bed.mp3`;
   let hasMusicBed = false;
 
-  // ── CINEMATIC AMBIENT SCORE SYNTHESIS ──
-  // Multi-layer detuned pad with evolving texture. No external deps.
-  // Niche-specific chord voicings create emotional color:
-  //   - Root + fifth + octave (power chord voicing for weight)
-  //   - Each voice slightly detuned (±2-4 Hz) for organic "beating" texture
-  //   - Slow amplitude LFO creates breathing/pulsing movement
-  //   - Filtered noise layer adds "room air" and vinyl-like warmth
-  //   - Sub-bass provides physical weight below the voice
+  // ── CINEMATIC AMBIENT SCORE — FFMPEG-NATIVE SYNTHESIS ──
+  // Session 28 rewrite: Previous version generated ~480MB of Float32Arrays in Node.js
+  // memory for a 15-min video, causing silent OOM crashes on Railway. Music NEVER worked.
+  //
+  // New approach: 100% ffmpeg-native using aevalsrc. Zero Node.js memory allocation.
+  // ffmpeg generates the sine tones, sub-bass, and noise directly in its audio pipeline.
+  // Niche-specific chord voicings for emotional color.
 
-  const MUSIC_CHORDS: Record<string, { voices: number[]; sub: number; mood: string }> = {
-    dark_psychology: {
-      voices: [110, 112, 164.81, 166.5, 220, 222.5, 329.63],  // Am(add9) detuned — ominous, massive
-      sub: 55, mood: "dark"
-    },
-    self_improvement: {
-      voices: [130.81, 132.5, 196, 198, 261.63, 263.5, 392],  // C5 detuned — hopeful, ascending
-      sub: 65.41, mood: "warm"
-    },
-    burnout: {
-      voices: [98, 99.5, 146.83, 148.5, 196, 198, 293.66],    // Gm detuned — melancholic weight
-      sub: 49, mood: "heavy"
-    },
-    quantum: {
-      voices: [123.47, 125, 185.0, 187, 246.94, 249, 370],     // Bmaj detuned — ethereal, floating
-      sub: 61.74, mood: "ethereal"
-    },
-    brand: {
-      voices: [110, 112, 164.81, 166.5, 220, 222.5, 329.63],
-      sub: 55, mood: "dark"
-    },
+  const MUSIC_CHORDS: Record<string, { root: number; fifth: number; octave: number; sub: number; mood: string }> = {
+    dark_psychology: { root: 110, fifth: 164.81, octave: 220, sub: 55, mood: "dark" },
+    self_improvement: { root: 130.81, fifth: 196, octave: 261.63, sub: 65.41, mood: "warm" },
+    burnout: { root: 98, fifth: 146.83, octave: 196, sub: 49, mood: "heavy" },
+    quantum: { root: 123.47, fifth: 185.0, octave: 246.94, sub: 61.74, mood: "ethereal" },
+    brand: { root: 110, fifth: 164.81, octave: 220, sub: 55, mood: "dark" },
   };
 
   try {
     const chord = MUSIC_CHORDS[script.niche] || MUSIC_CHORDS.brand;
     const musicDuration = Math.ceil(audioDuration) + 4;
-    const sampleRate = 44100;
-    const totalSamples = sampleRate * musicDuration;
 
-    /** Write a mono 16-bit WAV file from a Float32 sample buffer */
-    const writeWav = (filePath: string, samples: Float32Array): void => {
-      const numSamples = samples.length;
-      const byteRate = sampleRate * 2;
-      const dataSize = numSamples * 2;
-      const buf = Buffer.alloc(44 + dataSize);
-      buf.write("RIFF", 0);
-      buf.writeUInt32LE(36 + dataSize, 4);
-      buf.write("WAVE", 8);
-      buf.write("fmt ", 12);
-      buf.writeUInt32LE(16, 16);
-      buf.writeUInt16LE(1, 20);
-      buf.writeUInt16LE(1, 22);
-      buf.writeUInt32LE(sampleRate, 24);
-      buf.writeUInt32LE(byteRate, 28);
-      buf.writeUInt16LE(2, 30);
-      buf.writeUInt16LE(16, 32);
-      buf.write("data", 36);
-      buf.writeUInt32LE(dataSize, 40);
-      for (let i = 0; i < numSamples; i++) {
-        const clamped = Math.max(-1, Math.min(1, samples[i]));
-        buf.writeInt16LE(Math.round(clamped * 32767), 44 + i * 2);
-      }
-      writeFileSync(filePath, buf);
-    };
+    // Build aevalsrc expression for detuned pad chord + sub + noise
+    // Each tone pair is slightly detuned (±1.5Hz) for organic beating texture
+    // Slow LFO (0.04Hz) creates breathing movement
+    const r = chord.root, r2 = chord.root + 1.5;
+    const f = chord.fifth, f2 = chord.fifth + 1.8;
+    const o = chord.octave, o2 = chord.octave + 2.2;
+    const s = chord.sub;
 
-    // ── PAD LAYER: detuned chord voices with slow breathing LFO ──
-    // Each voice gets a slightly different amplitude envelope creating organic movement
-    const padSamples = new Float32Array(totalSamples);
-    const voiceAmp = 0.12 / chord.voices.length; // Normalize so total pad volume stays consistent
-    for (const freq of chord.voices) {
-      const lfoRate = 0.03 + Math.random() * 0.04;  // 0.03-0.07 Hz — very slow pulse, different per voice
-      const lfoPhase = Math.random() * Math.PI * 2;  // Random start phase so they don't breathe in sync
-      const step = (2 * Math.PI * freq) / sampleRate;
-      const lfoStep = (2 * Math.PI * lfoRate) / sampleRate;
-      for (let i = 0; i < totalSamples; i++) {
-        // Breathing envelope: amplitude modulates between 0.3 and 1.0
-        const lfo = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(lfoStep * i + lfoPhase));
-        padSamples[i] += Math.sin(step * i) * voiceAmp * lfo;
-      }
-    }
+    // Pad: 6 detuned sine voices with slow breathing LFO per voice
+    // Each voice: sin(2*PI*freq*t) * (0.4 + 0.6*sin(2*PI*lfoHz*t + phase)) * amplitude
+    const padExpr = [
+      `sin(2*PI*${r}*t)*(0.4+0.6*sin(2*PI*0.035*t))`,
+      `sin(2*PI*${r2}*t)*(0.4+0.6*sin(2*PI*0.042*t+1.2))`,
+      `sin(2*PI*${f}*t)*(0.4+0.6*sin(2*PI*0.038*t+2.5))`,
+      `sin(2*PI*${f2}*t)*(0.4+0.6*sin(2*PI*0.047*t+0.8))`,
+      `sin(2*PI*${o}*t)*(0.4+0.6*sin(2*PI*0.033*t+3.7))`,
+      `sin(2*PI*${o2}*t)*(0.4+0.6*sin(2*PI*0.05*t+1.9))`,
+    ].map(v => `(${v})*0.02`).join("+");
 
-    // ── SUB BASS: pure sine with slow swell ──
-    const subSamples = new Float32Array(totalSamples);
-    const subStep = (2 * Math.PI * chord.sub) / sampleRate;
-    const subLfoStep = (2 * Math.PI * 0.02) / sampleRate; // Very slow sub pulse
-    for (let i = 0; i < totalSamples; i++) {
-      const env = 0.5 + 0.5 * Math.sin(subLfoStep * i);
-      subSamples[i] = Math.sin(subStep * i) * 0.18 * env;
-    }
+    // Sub-bass: pure sine with slow swell
+    const subExpr = `sin(2*PI*${s}*t)*(0.5+0.5*sin(2*PI*0.02*t))*0.15`;
 
-    // ── TEXTURE LAYER: filtered pink noise for vinyl/room ambience ──
-    const noiseSamples = new Float32Array(totalSamples);
-    const numOctaves = 8;
-    const octaves = new Float64Array(numOctaves);
-    let runningSum = 0;
-    for (let i = 0; i < totalSamples; i++) {
-      const changed = i === 0 ? (1 << numOctaves) - 1 : i ^ (i - 1);
-      for (let o = 0; o < numOctaves; o++) {
-        if (changed & (1 << o)) {
-          runningSum -= octaves[o];
-          octaves[o] = (Math.random() * 2 - 1);
-          runningSum += octaves[o];
-        }
-      }
-      noiseSamples[i] = (runningSum / numOctaves) * 0.015;
-    }
+    // Combined expression
+    const fullExpr = `${padExpr}+${subExpr}`;
 
-    // Write each layer
-    const padPath = `${FACELESS_DIR}/${jobId}_pad.wav`;
-    const subPath = `${FACELESS_DIR}/${jobId}_sub.wav`;
-    const noisePath = `${FACELESS_DIR}/${jobId}_noise.wav`;
-
-    writeWav(padPath, padSamples);
-    writeWav(subPath, subSamples);
-    writeWav(noisePath, noiseSamples);
-
-    // Mix: pad (main body) + sub (weight) + noise (air)
-    // Apply: fade in/out, lowpass to stay under voice, gentle compression for consistency
+    // Generate music bed using ffmpeg's aevalsrc (zero memory, pure math)
+    // Pipeline: aevalsrc → lowpass (stay under voice) → highpass (remove DC) →
+    //           compress → fade in/out → final level
     execSync(
-      `ffmpeg ` +
-        `-i "${padPath}" ` +
-        `-i "${subPath}" ` +
-        `-i "${noisePath}" ` +
+      `ffmpeg -f lavfi -i "aevalsrc='${fullExpr}':s=44100:d=${musicDuration}" ` +
+        `-f lavfi -i "anoisesrc=d=${musicDuration}:c=pink:r=44100:a=0.008" ` +
         `-filter_complex "` +
-          `[2:a]lowpass=f=600[noise];` +          // Noise: roll off hard, just warmth
-          `[0:a][1:a][noise]amix=inputs=3:duration=first:normalize=0,` +
-          `lowpass=f=1800,` +                      // Keep everything below voice range
-          `highpass=f=30,` +                       // Remove DC offset / ultra-low rumble
-          `acompressor=threshold=-25dB:ratio=4:attack=50:release=200,` +  // Smooth out LFO peaks
-          `afade=t=in:st=0:d=3,` +                // 3s slow fade in
+          `[1:a]lowpass=f=500[noise];` +            // Noise: roll off hard, just warmth
+          `[0:a][noise]amix=inputs=2:duration=first:normalize=0,` +
+          `lowpass=f=1800,` +                        // Keep everything below voice range
+          `highpass=f=30,` +                         // Remove DC offset
+          `acompressor=threshold=-25dB:ratio=4:attack=50:release=200,` +
+          `afade=t=in:st=0:d=3,` +                  // 3s slow fade in
           `afade=t=out:st=${musicDuration - 4}:d=4,` +  // 4s fade out
-          `volume=0.5` +                           // Master level
+          `volume=0.5` +                             // Master level
         `[music]" ` +
         `-map "[music]" -c:a libmp3lame -b:a 128k -y "${musicPath}"`,
-      { timeout: 60_000, stdio: "pipe" }
+      { timeout: 120_000, stdio: "pipe" }
     );
 
     hasMusicBed = existsSync(musicPath);
     if (hasMusicBed) {
-      console.log(`🎵 [FacelessFactory] Cinematic score generated: ${script.niche}/${chord.mood} (${chord.voices.length} voices, ${musicDuration}s)`);
-    }
-
-    // Clean up intermediate WAV files
-    for (const tmp of [padPath, subPath, noisePath]) {
-      try { unlinkSync(tmp); } catch { /* ignore */ }
+      console.log(`🎵 [FacelessFactory] Cinematic score generated (ffmpeg-native): ${script.niche}/${chord.mood} (${musicDuration}s)`);
+    } else {
+      console.error(`❌ [FacelessFactory] Music bed file not created despite no error`);
     }
   } catch (err: any) {
-    console.warn(`[FacelessFactory] Music bed generation failed (non-fatal): ${err.message?.slice(0, 200)}`);
+    console.error(`❌ [FacelessFactory] Music bed generation FAILED: ${err.message?.slice(0, 400)}`);
+    // Log stderr if available for debugging
+    if (err.stderr) console.error(`  STDERR: ${err.stderr.toString().slice(0, 500)}`);
   }
 
   // Build the final assembly command:

@@ -83,9 +83,10 @@ async function elevenLabsTTS(text: string, speed?: number): Promise<Buffer> {
   const apiKey = config.voice.elevenLabsApiKey;
   if (!apiKey) throw new Error("ElevenLabs API key not configured");
 
-  // Voice: Adam — deep, authoritative male. Perfect for dark psychology / sovereignty content.
-  // Old default was Rachel (female) which was wrong for this brand.
-  const voiceId = config.voice.elevenLabsVoiceId || "pNInz6obpgDQGcFmaJgB"; // Adam (deep male)
+  // Voice: Adam Brooding — dark, tough, weathered American male.
+  // THE Sovereign Synthesis voice. Locked Session 28.
+  // Old defaults: Rachel (female, wrong brand), stock Adam (too warm/PBS).
+  const voiceId = config.voice.elevenLabsVoiceId || "IRHApOXLvnW57QJPQH2P"; // Adam Brooding, Dark & Tough
 
   // VOICE EXPRESSIVENESS (Session 28 fix):
   // Old: stability=0.80 made the voice rigid and monotone. Like reading a textbook.
@@ -227,7 +228,7 @@ export async function elevenLabsStreamTTS(
   const apiKey = config.voice.elevenLabsApiKey;
   if (!apiKey) throw new Error("ElevenLabs API key not configured");
 
-  const voiceId = config.voice.elevenLabsVoiceId || "21m00Tcm4TlvDq8ikWAM";
+  const voiceId = config.voice.elevenLabsVoiceId || "IRHApOXLvnW57QJPQH2P"; // Adam Brooding
 
   const resp = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
@@ -241,7 +242,7 @@ export async function elevenLabsStreamTTS(
       body: JSON.stringify({
         text: text.slice(0, 5000),
         model_id: "eleven_multilingual_v2",
-        voice_settings: { stability: 0.65, similarity_boost: 0.80, style: 0.45, use_speaker_boost: true },
+        voice_settings: { stability: 0.45, similarity_boost: 0.75, style: 0.60, use_speaker_boost: true },
       }),
     }
   );

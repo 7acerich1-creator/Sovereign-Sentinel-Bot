@@ -207,22 +207,23 @@ async function main() {
   }
 
   // Team assignments (Session 24 — Alfred promoted to Groq, Session 28 — Anita moved to Groq-first):
-  // ALL content agents → Groq primary (14,400/day). Staggered: Alfred 10:05AM, Vector 12PM, Yuki on-dispatch only.
-  // Anita → Groq primary (was Gemini-first, caused $62 bill in 5 days — 26K token system prompt × cascade dispatches)
-  // Sapphire + Veritas → Anthropic primary (strategic, less frequent, highest quality)
+  // SESSION 28 FIX: Gemini REMOVED from ALL text-gen failover chains.
+  // Root cause: Supabase personality_config was overwriting lean bundled prompts with old 18-20K versions.
+  // Every Groq 413 silently cascaded to Gemini, burning $12+/day on text gen alone.
+  // Gemini API key stays active ONLY for: Imagen 4 (image gen) + gemini-embedding-001 (Pinecone vectors).
+  // Text gen chains: Groq (free) → Anthropic (paid but controlled). No Gemini. No silent burns.
   const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
-    alfred: buildTeamLLM(["groq", "gemini", "anthropic"]),
-    anita: buildTeamLLM(["groq", "gemini", "anthropic"]),
-    sapphire: buildTeamLLM(["anthropic", "gemini", "groq"]),
-    veritas: buildTeamLLM(["anthropic", "gemini", "groq"]),
-    vector: buildTeamLLM(["groq", "gemini", "anthropic"]),
-    yuki: buildTeamLLM(["groq", "gemini", "anthropic"]),
+    alfred: buildTeamLLM(["groq", "anthropic"]),
+    anita: buildTeamLLM(["groq", "anthropic"]),
+    sapphire: buildTeamLLM(["anthropic", "groq"]),
+    veritas: buildTeamLLM(["anthropic", "groq"]),
+    vector: buildTeamLLM(["groq", "anthropic"]),
+    yuki: buildTeamLLM(["groq", "anthropic"]),
   };
 
-  // Pipeline-dedicated LLM: Groq first (14,400 free/day), then Gemini, then paid providers last.
-  // primaryRetries=3: Groq gets 4 total attempts (1 + 3 retries with 3s/6s/9s backoff)
-  // before EVER falling to Gemini. Gemini's JSON output is unreliable for structured generation.
-  const pipelineLLM = buildTeamLLM(["groq", "gemini", "anthropic", "openai"], 3);
+  // Pipeline-dedicated LLM: Groq first (free), Anthropic second, OpenAI last resort.
+  // No Gemini — its JSON output was unreliable for structured generation AND it burned money.
+  const pipelineLLM = buildTeamLLM(["groq", "anthropic", "openai"], 3);
 
   console.log("🔀 [LLM Teams] Provider split active:");
   for (const [agent, team] of Object.entries(AGENT_LLM_TEAMS)) {
@@ -2242,24 +2243,14 @@ async function main() {
       console.error(`❌ [PersonalityLoader] Bundled JSON failed: ${err.message}`);
     }
 
-    // OPTIONAL: Try Supabase for hot-updates (non-blocking, single attempt)
-    if (Object.keys(personalityMap).length > 0) {
-      try {
-        const { data, error } = await supabase
-          .from("personality_config")
-          .select("prompt_blueprint, agent_name");
-        if (!error && data && data.length > 0) {
-          for (const row of data) {
-            personalityMap[row.agent_name] = row;
-          }
-          console.log(`🔄 [PersonalityLoader] Hot-updated ${data.length} personalities from Supabase`);
-        } else {
-          console.log(`ℹ️ [PersonalityLoader] Supabase unavailable (${error?.code || "no data"}) — using bundled`);
-        }
-      } catch {
-        console.log(`ℹ️ [PersonalityLoader] Supabase unreachable — using bundled`);
-      }
-    }
+    // SUPABASE HOT-UPDATE DISABLED — Session 28 root cause analysis:
+    // The personality_config table still had the OLD 18-20K char bloated prompts.
+    // Every boot cycle, lean bundled JSON (~1.6K) loaded first, then Supabase
+    // overwrote it with the bloated versions. This caused Groq 413 → Gemini failover
+    // on EVERY dispatch call, burning ~$12/day.
+    // The bundled personalities.json is now the SOLE authority.
+    // To hot-update prompts, edit personalities.json and redeploy.
+    console.log(`🔒 [PersonalityLoader] Using bundled JSON only (Supabase hot-update disabled — bloated prompts in DB)`);
 
     const loadedCount = Object.keys(personalityMap).length;
     if (loadedCount === 0) {

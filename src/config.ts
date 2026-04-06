@@ -33,9 +33,9 @@ export const config: GravityClawConfig = {
 
   llm: {
     defaultProvider: process.env.LLM_DEFAULT_PROVIDER || "anthropic",
-    // Groq FREE tier first (no cost). Gemini secondary (CAUTION: $62+ balance as of Apr 5 — Anita's 26K prompt was burning it). Anthropic tertiary.
-    // OpenAI last resort. DeepSeek removed — unreliable.
-    failoverOrder: envList("LLM_FAILOVER_ORDER", ["groq", "gemini", "anthropic", "openai"]),
+    // Groq FREE tier first. Anthropic secondary (paid, controlled). OpenAI last resort.
+    // Gemini REMOVED from text-gen chains — kept only for Imagen 4 + embeddings.
+    failoverOrder: envList("LLM_FAILOVER_ORDER", ["groq", "anthropic", "openai"]),
     maxIterations: envInt("LLM_MAX_ITERATIONS", 10),
     providers: {
       gemini: {
@@ -81,7 +81,7 @@ export const config: GravityClawConfig = {
   voice: {
     whisperApiKey: process.env.OPENAI_API_KEY || process.env.WHISPER_API_KEY,
     elevenLabsApiKey: process.env.ELEVENLABS_API_KEY,
-    elevenLabsVoiceId: process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM",
+    elevenLabsVoiceId: process.env.ELEVENLABS_VOICE_ID || "IRHApOXLvnW57QJPQH2P", // Adam Brooding, Dark & Tough
     openaiTtsModel: process.env.OPENAI_TTS_MODEL || "tts-1",
   },
 

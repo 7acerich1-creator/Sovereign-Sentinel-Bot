@@ -51,10 +51,10 @@ export class SapphireSentinel {
   }
 
   start(): void {
-    console.log(`👁️ [SapphireSentinel] Active — proactive alerting every 2 hours`);
-    this.timer = setInterval(() => this.scan(), TWO_HOURS_MS);
-    // First scan after 10 minutes (let the system stabilize)
-    setTimeout(() => this.scan(), 10 * 60 * 1000);
+    // Disabled Session 29 — morning briefing, evening recap, and stasis watchdog
+    // provide sufficient monitoring. Re-enable by restoring the setInterval below.
+    console.log(`👁️ [SapphireSentinel] DISABLED — no-op start(). Monitoring covered by scheduled briefings.`);
+    return;
   }
 
   stop(): void {

@@ -51,7 +51,7 @@
 - **[DVP: ADDRESSED]** LLM routing fix — `/status` shows Anthropic-first for Veritas.
 - **[DVP: ADDRESSED]** Imagen 4 primary — Gemini API is active, Imagen 4 is functional.
 - **[DVP: ADDRESSED]** Three-pass script gen (Session 28) — thesis extraction + narrative arc architecture. Replaces old "fill 25 buckets" prompt with cohesive story structure. Anti-copying directives prevent source parroting. Commit `ab11940`.
-- **[DVP: ADDRESSED]** Sapphire Sentinel v2 — 5 proactive alert rules.
+- **[DVP: DISABLED — Session 29]** Sapphire Sentinel v2 — 5 proactive alert rules. `start()` is now a no-op. Morning briefing + evening recap + stasis watchdog provide sufficient monitoring. Re-enable by restoring `setInterval` in `src/proactive/sapphire-sentinel.ts:start()`.
 - **[DVP: ADDRESSED]** Prompt economy fix — 85% reduction. NEEDS VERIFICATION: check Gemini API logs post-deploy for zero new dispatch calls hitting Gemini.
 
 **RESOLVED — BUFFER POSTING (Session 21 fix):**
@@ -192,6 +192,7 @@ These documents exist in the repo but contain stale information. Do NOT use them
 - `[DVP: ADDRESSED]` Dual Groq key — needs production test (run `/pipeline` and confirm `GROQ_API_KEY_TCF` appears in Railway logs)
 - `[DVP: ADDRESSED]` Cooldown raised to 180s — needs production test
 - `[DVP: ADDRESSED]` Error message fix — passive (only visible on failures)
+- `[DVP: ADDRESSED]` Sapphire Sentinel disabled — `start()` is a no-op. No Supabase polling every 2h. Morning briefing (10 AM CDT), evening recap (8 PM CDT), and stasis watchdog (3:28 PM CDT) cover monitoring needs.
 
 ---
 

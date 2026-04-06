@@ -1,14 +1,15 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-05 (Cowork Session 28 — SCRIPT GENERATION ARCHITECTURE OVERHAUL) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-06 (Cowork Session 28c — GEMINI TEXT-GEN KILL + VOICE LOCK) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
 ## CRITICAL STATUS REPORT (as of Session 28, 2026-04-05)
 
-**Mission Metrics:** Script generation completely overhauled — ROOT CAUSE of trash video quality identified and fixed. Thesis extraction pre-pass + narrative arc architecture deployed. Revenue still $0.
+**Mission Metrics:** Gemini text-gen hemorrhage fully diagnosed and killed. Voice locked. Script gen architecture overhauled. Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit: `f27cf8d` (Session 28b — TTS + music fix) → `ab11940` (Session 28 — script gen overhaul) → `547b0a1` (Session 27c) → prior chain. Auto-deploying.
+- Bot is live on Railway. Latest commit: `624fc28` (Session 28c — Gemini kill + voice lock) → `f27cf8d` (Session 28b — TTS + music fix) → `ab11940` (Session 28 — script gen overhaul) → `547b0a1` (Session 27c) → prior chain. Auto-deploying.
+- Session 28c commit: `624fc28` — Gemini removed from ALL text-gen failover chains. Supabase personality hot-update disabled (was overwriting lean prompts). Adam Brooding voice locked. Railway env var `LLM_FAILOVER_ORDER` updated to `groq,anthropic,openai`.
 - Session 28b commit: `f27cf8d` — TTS voice/expressiveness fix + ffmpeg-native music rewrite.
 - Session 28 commit: `ab11940` — thesis extraction + narrative arc rewrite of faceless-factory.ts.
 - Session 27b commit: `f27633f` — 85% agent prompt reduction. personalities.json rewritten (18K→1.6K chars/agent), shared-context.ts created, index.ts injection simplified.
@@ -21,22 +22,24 @@
 **API Credit Situation (updated Session 27b):**
 - **Anthropic:** ~$10 remaining. Used for Veritas brain + Sapphire Sentinel only. Low burn (~$0.36/month briefings). Runway: 37-74 days.
 - **OpenAI:** -$0.06 credits. DEAD. DALL-E 3 and OpenAI TTS will not fire.
-- **Gemini:** $62.30 OWED but **NOT BLOCKED** — API still accepting calls (confirmed via live API logs, all 200 status codes). This means Gemini failover IS active and WILL burn tokens if Groq 413s. The prompt reduction fix (f27633f) is critical to stop this hemorrhage.
-- **Groq:** FREE tier. 14,400 req/day. Primary for pipeline + content agents (Alfred, Anita, Vector, Yuki). With prompt reduction, ALL dispatch calls should now fit within Groq's per-request token limit.
-- **ElevenLabs:** Creator plan, credits remaining. TTS is working.
+- **Gemini:** $62.30 OWED but NOT BLOCKED. **REMOVED from ALL text-gen failover chains (Session 28c, commit 624fc28).** Gemini API key stays active ONLY for Imagen 4 image generation and gemini-embedding-001 (Pinecone vectors). Railway env var `LLM_FAILOVER_ORDER` updated to `groq,anthropic,openai`. Zero Gemini text-gen burns going forward.
+- **Groq:** FREE tier. 14,400 req/day. Primary for pipeline + content agents (Alfred, Anita, Vector, Yuki). Lean bundled prompts (~750 tokens) fit within Groq per-request limit.
+- **ElevenLabs:** Creator plan, credits remaining. TTS working. Voice: Adam Brooding, Dark & Tough (`IRHApOXLvnW57QJPQH2P`) — locked as permanent Sovereign Synthesis voice (Session 28c).
 - **Imagen 4:** RESTORED as primary image gen (Session 27). Cost $0.02-0.06/image. Expected $7-12/month. Gemini API is active, so Imagen 4 is functional.
 
-**LLM ROUTING (Session 26 fix + Session 27b prompt economy):**
-- **AGENT_LLM_TEAMS (unchanged):**
-  - `veritas`: [Anthropic → Gemini → Groq] — strategic brain, briefings
-  - `sapphire`: [Anthropic → Gemini → Groq] — sentinel, proactive observations
-  - `alfred`: [Groq → Gemini → Anthropic] — trend intelligence
-  - `anita`: [Groq → Gemini → Anthropic] — content weaponization
-  - `vector`: [Groq → Gemini → Anthropic] — performance analysis
-  - `yuki`: [Groq → Gemini → Anthropic] — distribution
-  - `pipeline`: [Groq → Gemini → Anthropic → OpenAI] — 3 primary retries before failover
-- **Gemini is NOT blocked** — API still accepting calls. Gemini failover IS live. The prompt reduction (f27633f) ensures Groq handles all dispatch calls without 413, so Gemini failover should no longer trigger for text gen.
-- **ROOT CAUSE OF $62 BILL (Session 27b diagnosis):** ALL 6 agents had 18-20K char system prompts (~4,500 tokens each) with identical 10-12K "Operational Awareness" blocks copy-pasted 6 times. Every Groq dispatch hit HTTP 413 (too large) and silently fell to Gemini, burning 27K+ tokens per call. The Session 26 routing fix (reordering chains) was a band-aid — it didn't address payload SIZE. Session 27b reduced all prompts by 85%.
+**LLM ROUTING (Session 28c — Gemini REMOVED from text-gen, commit 624fc28):**
+- **AGENT_LLM_TEAMS (updated Session 28c):**
+  - `veritas`: [Anthropic → Groq] — strategic brain, briefings
+  - `sapphire`: [Anthropic → Groq] — sentinel, proactive observations
+  - `alfred`: [Groq → Anthropic] — trend intelligence
+  - `anita`: [Groq → Anthropic] — content weaponization
+  - `vector`: [Groq → Anthropic] — performance analysis
+  - `yuki`: [Groq → Anthropic] — distribution
+  - `pipeline`: [Groq → Anthropic → OpenAI] — 3 primary retries before failover
+- **Gemini REMOVED from text-gen.** API key stays for Imagen 4 + embeddings only. Railway env var `LLM_FAILOVER_ORDER=groq,anthropic,openai`.
+- **ROOT CAUSE OF $62 BILL (Session 28c FINAL diagnosis):** TWO bugs. (1) Bloated 18-20K char system prompts caused Groq 413 → Gemini failover. Session 27b fixed bundled JSON but (2) Supabase `personality_config` table still had OLD bloated prompts. index.ts lines 2246-2253 loaded from Supabase on every boot and OVERWROTE lean bundled JSON. Session 28c disabled Supabase hot-update — bundled JSON is now SOLE authority.
+- **Supabase personality_config** still has old bloated prompts. NOT dangerous (hot-update disabled in code) but should be cleaned up eventually.
+- **[DVP: ADDRESSED]** Gemini text-gen kill — removed from all chains + env var updated. Commit `624fc28`. VERIFY: check Gemini API logs for zero new text-gen calls.
 - **[DVP: ADDRESSED]** LLM routing fix — `/status` shows Anthropic-first for Veritas.
 - **[DVP: ADDRESSED]** Imagen 4 primary — Gemini API is active, Imagen 4 is functional.
 - **[DVP: ADDRESSED]** Three-pass script gen (Session 28) — thesis extraction + narrative arc architecture. Replaces old "fill 25 buckets" prompt with cohesive story structure. Anti-copying directives prevent source parroting. Commit `ab11940`.
@@ -142,14 +145,38 @@ Any new operational knowledge goes into Layer 3 (protocols table). NEVER into La
 
 ---
 
-## PENDING WORK FOR NEXT SESSION (as of end-of-Session 28)
+## PENDING WORK FOR NEXT SESSION (as of end-of-Session 28c)
 
-1. **TEST THE NEW PIPELINE** — Run `/pipeline <youtube_url>` and compare output to reference quality (Grim Grit). The thesis extraction + narrative arc is DVP:ADDRESSED. Needs production test to verify.
-2. **Layer 2 compression pass** — Build tighter ffmpeg compression before Supabase upload. Target: CRF 28-30, scale to 720p max for shorts. NOT YET STARTED.
-3. **Run TCF pipeline** — Command: `/pipeline <youtube_url> tcf only`. The 90s inter-brand cooldown is in place.
-4. **Manual Supabase Storage purge** — Architect must go to Supabase dashboard → Storage → `public-assets` → delete `vidrush/` and `faceless/` folders (308 MB).
-5. **Verify Gemini zero-dispatch** — Check Gemini API logs for zero new dispatch calls hitting Gemini.
-6. **Shorts quality** — Current shorts are still cut from the long-form at timestamp boundaries (extractStoryMoments). If long-form quality improves, shorts should improve too. If not, consider re-scripting shorts independently.
+1. **DIAGNOSE BOTH PIPELINE FAILURES** — Architect ran both pipelines after Session 28c deploy + env var update. BOTH FAILED. Root cause unknown. Check Railway logs for error details. Possible causes: (a) deploy restart killed mid-execution, (b) Vector personality not loading (`[BotInit] No personality for vector — skipping` seen in boot logs), (c) LLM_FAILOVER_ORDER env var format issue. THIS IS PRIORITY 1.
+2. **Investigate Vector personality not loading** — Boot logs show `[BotInit] No personality for vector — skipping`. Check if the personality name in `personalities.json` matches what the bot init loop expects. May be related to pipeline failures.
+3. **Verify Gemini zero-dispatch** — Check Gemini API logs for zero new text-gen calls after Session 28c deploy. The env var `LLM_FAILOVER_ORDER=groq,anthropic,openai` is set. Code also updated. Should be dead.
+4. **TEST THE NEW PIPELINE** — Run `/pipeline <youtube_url>` and compare output to reference quality (Grim Grit). The thesis extraction + narrative arc is DVP:ADDRESSED. Needs production test to verify.
+5. **Layer 2 compression pass** — Build tighter ffmpeg compression before Supabase upload. Target: CRF 28-30, scale to 720p max for shorts. NOT YET STARTED.
+6. **Run TCF pipeline** — Command: `/pipeline <youtube_url> tcf only`. The 90s inter-brand cooldown is in place.
+7. **Manual Supabase Storage purge** — Architect must go to Supabase dashboard → Storage → `public-assets` → delete `vidrush/` and `faceless/` folders (308 MB).
+8. **Clean Supabase personality_config table** — Still has old 18-20K char bloated prompts. Not dangerous (hot-update disabled) but should be cleaned to avoid future confusion.
+9. **Shorts quality** — Current shorts are still cut from the long-form at timestamp boundaries (extractStoryMoments). If long-form quality improves, shorts should improve too. If not, consider re-scripting shorts independently.
+
+---
+
+**Session Summary — Cowork Session 28c (2026-04-06):**
+
+**GEMINI TEXT-GEN KILL + VOICE LOCK + PIPELINE FAILURES.** Architect showed Gemini API logs proving Anita was still sending 31,495 input tokens to gemini-3.1-pro-preview despite Session 27b prompt reduction. Root cause analysis found TWO bugs:
+
+**Bug 1: Supabase personality overwrite.** `index.ts` lines 2246-2253 loaded `personality_config` from Supabase on every boot cycle and OVERWROTE the lean bundled `personalities.json` prompts with old 18-20K char bloated versions. Session 27b only updated the bundled JSON — never touched Supabase. Every Groq dispatch hit 413 on the bloated payload → silently fell to Gemini → burned ~$12/day.
+
+**Bug 2: Railway env var override.** Even after code changes removed Gemini from failover arrays, `LLM_FAILOVER_ORDER` env var on Railway was still set to `groq,gemini,anthropic,openai`. The `envList()` function in config.ts reads env vars first, falling back to code defaults only when unset. Architect manually updated Railway env var to `groq,anthropic,openai`.
+
+**Fixes deployed (commit `624fc28`):**
+1. Disabled Supabase personality hot-update — bundled `personalities.json` is now SOLE authority for agent system prompts.
+2. Removed Gemini from ALL `AGENT_LLM_TEAMS` and `pipelineLLM` in index.ts.
+3. Removed Gemini from default `failoverOrder` in config.ts.
+4. Locked Adam Brooding voice (`IRHApOXLvnW57QJPQH2P`) across all three code locations: tts.ts main function, tts.ts streaming function, config.ts default. Fixed streaming function which was still using Rachel (`21m00Tcm4TlvDq8ikWAM`) with rigid voice_settings.
+5. Aligned streaming voice_settings to expressive config: stability 0.45, similarity_boost 0.75, style 0.60.
+
+**Post-deploy: BOTH PIPELINES FAILED.** Architect ran both pipelines after deploy + env var update. Both failed. Root cause not yet diagnosed. Possible causes: deploy restart killing mid-execution, Vector personality not loading (`[BotInit] No personality for vector — skipping` in boot logs), or LLM chain issue. **NEXT SESSION MUST DIAGNOSE THIS FIRST.**
+
+**Commits:** `624fc28` (Gemini kill + voice lock + Supabase hot-update disable). Pushed, Railway auto-deploying.
 
 ---
 

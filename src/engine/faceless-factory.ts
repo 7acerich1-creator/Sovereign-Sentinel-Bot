@@ -417,7 +417,7 @@ Return ONLY valid JSON, no code fences, no explanation.`;
     const parsed1 = extractJSON(res1.content);
     if (!parsed1 || !parsed1.segments?.length) {
       console.error(`[FacelessFactory] Pass 1 JSON parse failed. Raw (first 500):\n${res1.content.slice(0, 500)}`);
-      throw new Error(`Failed to parse script from LLM. Response starts: ${res1.content.slice(0, 150)}`);
+      throw new Error(`Failed to parse script from LLM. Response starts: ${res1.content.slice(0, 500)}`);
     }
     console.log(`📝 [FacelessFactory] Pass 1 complete: ${parsed1.segments.length} segments, title: "${parsed1.title}"`);
 
@@ -520,7 +520,7 @@ RULES:
     parsed = extractJSON(response.content);
     if (!parsed) {
       console.error(`[FacelessFactory] ALL JSON parse attempts failed. Raw response (first 500 chars):\n${response.content.slice(0, 500)}`);
-      throw new Error(`Failed to parse script from LLM. Response starts: ${response.content.slice(0, 150)}`);
+      throw new Error(`Failed to parse script from LLM. Response starts: ${response.content.slice(0, 500)}`);
     }
   }
 

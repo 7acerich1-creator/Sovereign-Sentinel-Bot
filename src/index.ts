@@ -194,6 +194,10 @@ async function main() {
   const providersByName: Record<string, LLMProvider> = {};
   for (const p of llmProviders) providersByName[p.name] = p;
 
+  // LLM_TIMEOUT_MS env var lets Railway override per-call timeout without a code deploy.
+  // Default 60s is too short for 6144-token Groq completions under rate limiting.
+  const llmTimeoutMs = parseInt(process.env.LLM_TIMEOUT_MS || "60000", 10);
+
   function buildTeamLLM(primaryOrder: string[], primaryRetries = 0): FailoverLLM {
     const chain: LLMProvider[] = [];
     for (const name of primaryOrder) {
@@ -203,7 +207,7 @@ async function main() {
     for (const p of llmProviders) {
       if (!chain.includes(p)) chain.push(p);
     }
-    return new FailoverLLM(chain, 60_000, primaryRetries);
+    return new FailoverLLM(chain, llmTimeoutMs, primaryRetries);
   }
 
   // Team assignments (Session 24 — Alfred promoted to Groq, Session 28 — Anita moved to Groq-first):
@@ -221,9 +225,30 @@ async function main() {
     yuki: buildTeamLLM(["groq", "anthropic"]),
   };
 
-  // Pipeline-dedicated LLM: Groq first (free), Anthropic second, OpenAI last resort.
-  // No Gemini — its JSON output was unreliable for structured generation AND it burned money.
-  const pipelineLLM = buildTeamLLM(["groq", "anthropic", "openai"], 3);
+  // Pipeline-dedicated LLM: Groq first (free), Anthropic second.
+  // OpenAI removed — credits are at -$0.06 (dead). No Gemini — unreliable JSON + burned money.
+  // primaryRetries=2: 3 Groq attempts (not 4) before failover. Saves ~60s per timeout storm.
+  const pipelineLLM = buildTeamLLM(["groq", "anthropic"], 2);
+
+  // TCF pipeline uses a dedicated second Groq account (GROQ_API_KEY_TCF) to avoid rate limit
+  // contention after Ace Richie burns through the primary Groq quota. If the key isn't set,
+  // falls back to the shared pipelineLLM (same behavior as before this change).
+  const groqTcfKey = process.env.GROQ_API_KEY_TCF;
+  let tcfPipelineLLM: FailoverLLM = pipelineLLM;
+  if (groqTcfKey) {
+    const groqTcfProvider = createProvider(
+      "groq",
+      groqTcfKey,
+      config.llm.providers.groq.model,
+      config.llm.providers.groq.baseUrl
+    );
+    const tcfChain: LLMProvider[] = [groqTcfProvider];
+    if (providersByName["anthropic"]) tcfChain.push(providersByName["anthropic"]);
+    tcfPipelineLLM = new FailoverLLM(tcfChain, llmTimeoutMs, 2);
+    console.log(`🔑 [Pipeline] TCF dedicated Groq key active. Chain: [${tcfPipelineLLM.listProviders().join(", ")}]`);
+  } else {
+    console.warn(`⚠️ [Pipeline] GROQ_API_KEY_TCF not set — TCF shares Ace Richie's Groq rate limit pool`);
+  }
 
   console.log("🔀 [LLM Teams] Provider split active:");
   for (const [agent, team] of Object.entries(AGENT_LLM_TEAMS)) {
@@ -771,18 +796,20 @@ async function main() {
                 const brand = brands[bIdx];
                 const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
 
-                // Inter-brand cooldown: Groq rate limits need recovery between heavy pipeline runs.
-                // The first brand burns 25+ LLM calls. Without a pause, the second brand's script
-                // generation times out on all retries. 90s is enough for Groq TPM to reset.
+                // Inter-brand cooldown: even with a dedicated TCF Groq key, other shared resources
+                // (TTS, image gen, Supabase) need breathing room between 50-min pipeline runs.
+                // PIPELINE_COOLDOWN_MS env var overrides. Default raised to 180s (was 90s —
+                // 90s was insufficient even before the dual-key fix).
                 if (bIdx > 0) {
-                  const cooldownSec = 90;
-                  console.log(`⏳ [Pipeline] Inter-brand cooldown: ${cooldownSec}s for Groq rate limit recovery...`);
+                  const cooldownMs = parseInt(process.env.PIPELINE_COOLDOWN_MS || "180000", 10);
+                  const cooldownSec = Math.round(cooldownMs / 1000);
+                  console.log(`⏳ [Pipeline] Inter-brand cooldown: ${cooldownSec}s...`);
                   try {
                     await telegram.sendMessage(message.chatId,
-                      `⏳ Cooling down ${cooldownSec}s before ${brandLabel} pipeline (Groq rate limit recovery)...`
+                      `⏳ Cooling down ${cooldownSec}s before ${brandLabel} pipeline...`
                     );
                   } catch { /* non-critical */ }
-                  await new Promise(r => setTimeout(r, cooldownSec * 1000));
+                  await new Promise(r => setTimeout(r, cooldownMs));
                 }
 
                 try {
@@ -791,10 +818,14 @@ async function main() {
                   );
                 } catch { /* non-critical */ }
 
+                // Use brand-dedicated LLM: TCF gets its own Groq key (GROQ_API_KEY_TCF) to avoid
+                // rate limit contention after Ace Richie burns through the primary Groq quota.
+                const activePipelineLLM = brand === "containment_field" ? tcfPipelineLLM : pipelineLLM;
+
                 try {
                   const result = await executeFullPipeline(
                     liveYoutubeUrl,
-                    pipelineLLM,  // Groq-first: free 14,400/day, won't burn Anthropic/OpenAI credits
+                    activePipelineLLM,
                     brand,
                     async (step: string, detail: string) => {
                       try {
@@ -1394,6 +1425,8 @@ async function main() {
     diag.pipeline_llm_chain = pipelineLLM.listProviders();
     diag.pipeline_llm_first = pipelineLLM.listProviders()[0] || "NONE";
     diag.groq_in_pipeline = pipelineLLM.listProviders().some(p => p.startsWith("groq"));
+    diag.tcf_pipeline_llm_chain = tcfPipelineLLM.listProviders();
+    diag.tcf_groq_dedicated = !!process.env.GROQ_API_KEY_TCF;
 
     // ── TTS chain verification ──
     diag.tts_chain = [];
@@ -2743,16 +2776,17 @@ async function main() {
                             const brand = autoBrands[bIdx];
                             const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
 
-                            // Inter-brand cooldown for Groq rate limit recovery
+                            // Inter-brand cooldown (same env var as manual pipeline: PIPELINE_COOLDOWN_MS)
                             if (bIdx > 0) {
-                              const cooldownSec = 90;
+                              const cooldownMs = parseInt(process.env.PIPELINE_COOLDOWN_MS || "180000", 10);
+                              const cooldownSec = Math.round(cooldownMs / 1000);
                               console.log(`⏳ [AutoPipeline] Inter-brand cooldown: ${cooldownSec}s...`);
                               try {
                                 await channel.sendMessage(task.chat_id || defaultChatId,
                                   `⏳ Cooling down ${cooldownSec}s before ${brandLabel} pipeline...`
                                 );
                               } catch { /* non-critical */ }
-                              await new Promise(r => setTimeout(r, cooldownSec * 1000));
+                              await new Promise(r => setTimeout(r, cooldownMs));
                             }
 
                             try {
@@ -2762,7 +2796,7 @@ async function main() {
                             try {
                               const result = await executeFullPipeline(
                                 autoUrl,
-                                pipelineLLM,
+                                brand === "containment_field" ? tcfPipelineLLM : pipelineLLM,
                                 brand,
                                 async (step: string, detail: string) => {
                                   try {

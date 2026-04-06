@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-06 (Cowork Session 28c — GEMINI TEXT-GEN KILL + VOICE LOCK) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-06 (Cowork Session 29 — DUAL GROQ KEY + PIPELINE STABILITY) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -8,7 +8,7 @@
 **Mission Metrics:** Gemini text-gen hemorrhage fully diagnosed and killed. Voice locked. Script gen architecture overhauled. Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit: `624fc28` (Session 28c — Gemini kill + voice lock) → `f27cf8d` (Session 28b — TTS + music fix) → `ab11940` (Session 28 — script gen overhaul) → `547b0a1` (Session 27c) → prior chain. Auto-deploying.
+- Bot is live on Railway. Latest commit: Session 29 (dual Groq key + pipeline stability) → `624fc28` (Session 28c — Gemini kill + voice lock) → `f27cf8d` (Session 28b — TTS + music fix) → `ab11940` (Session 28 — script gen overhaul) → `547b0a1` (Session 27c) → prior chain. Auto-deploying.
 - Session 28c commit: `624fc28` — Gemini removed from ALL text-gen failover chains. Supabase personality hot-update disabled (was overwriting lean prompts). Adam Brooding voice locked. Railway env var `LLM_FAILOVER_ORDER` updated to `groq,anthropic,openai`.
 - Session 28b commit: `f27cf8d` — TTS voice/expressiveness fix + ffmpeg-native music rewrite.
 - Session 28 commit: `ab11940` — thesis extraction + narrative arc rewrite of faceless-factory.ts.
@@ -27,7 +27,7 @@
 - **ElevenLabs:** Creator plan, credits remaining. TTS working. Voice: Adam Brooding, Dark & Tough (`IRHApOXLvnW57QJPQH2P`) — locked as permanent Sovereign Synthesis voice (Session 28c).
 - **Imagen 4:** RESTORED as primary image gen (Session 27). Cost $0.02-0.06/image. Expected $7-12/month. Gemini API is active, so Imagen 4 is functional.
 
-**LLM ROUTING (Session 28c — Gemini REMOVED from text-gen, commit 624fc28):**
+**LLM ROUTING (Session 29 — dual Groq key + Session 28c — Gemini REMOVED from text-gen):**
 - **AGENT_LLM_TEAMS (updated Session 28c):**
   - `veritas`: [Anthropic → Groq] — strategic brain, briefings
   - `sapphire`: [Anthropic → Groq] — sentinel, proactive observations
@@ -35,8 +35,16 @@
   - `anita`: [Groq → Anthropic] — content weaponization
   - `vector`: [Groq → Anthropic] — performance analysis
   - `yuki`: [Groq → Anthropic] — distribution
-  - `pipeline`: [Groq → Anthropic → OpenAI] — 3 primary retries before failover
+  - `pipeline (Ace Richie)`: [Groq (primary account) → Anthropic] — 2 primary retries before failover
+  - `pipeline (TCF)`: [Groq (TCF dedicated account, GROQ_API_KEY_TCF) → Anthropic] — 2 primary retries
 - **Gemini REMOVED from text-gen.** API key stays for Imagen 4 + embeddings only. Railway env var `LLM_FAILOVER_ORDER=groq,anthropic,openai`.
+- **OpenAI REMOVED from pipeline failover chain** (Session 29). Credits at -$0.06, dead. Was wasting a retry slot.
+
+**DUAL GROQ KEY ARCHITECTURE (Session 29):**
+- Problem: Ace Richie pipeline burns 25+ Groq calls over ~50 min. TCF pipeline starts immediately after 90s cooldown and hits exhausted Groq quota → all 3 retries × 60s = 3-minute timeout storm before Anthropic gets a shot.
+- Solution: Architect registered a second Groq account. Railway env var `GROQ_API_KEY_TCF` holds the TCF-dedicated key. `tcfPipelineLLM` in `src/index.ts` is built from that key, giving TCF its own fresh rate limit pool.
+- If `GROQ_API_KEY_TCF` is not set, TCF falls back to the shared `pipelineLLM` (old behavior, with warning in logs).
+- Both pipeline LLMs (Ace Richie and TCF) use the same Anthropic provider as the failover — they share Anthropic's $10 reserve. Keep an eye on Anthropic credit burn if both pipelines hit Groq limits simultaneously.
 - **ROOT CAUSE OF $62 BILL (Session 28c FINAL diagnosis):** TWO bugs. (1) Bloated 18-20K char system prompts caused Groq 413 → Gemini failover. Session 27b fixed bundled JSON but (2) Supabase `personality_config` table still had OLD bloated prompts. index.ts lines 2246-2253 loaded from Supabase on every boot and OVERWROTE lean bundled JSON. Session 28c disabled Supabase hot-update — bundled JSON is now SOLE authority.
 - **Supabase personality_config** still has old bloated prompts. NOT dangerous (hot-update disabled in code) but should be cleaned up eventually.
 - **[DVP: ADDRESSED]** Gemini text-gen kill — removed from all chains + env var updated. Commit `624fc28`. VERIFY: check Gemini API logs for zero new text-gen calls.
@@ -145,17 +153,45 @@ Any new operational knowledge goes into Layer 3 (protocols table). NEVER into La
 
 ---
 
-## PENDING WORK FOR NEXT SESSION (as of end-of-Session 28c)
+## PENDING WORK FOR NEXT SESSION (as of end-of-Session 29)
 
-1. **DIAGNOSE BOTH PIPELINE FAILURES** — Architect ran both pipelines after Session 28c deploy + env var update. BOTH FAILED. Root cause unknown. Check Railway logs for error details. Possible causes: (a) deploy restart killed mid-execution, (b) Vector personality not loading (`[BotInit] No personality for vector — skipping` seen in boot logs), (c) LLM_FAILOVER_ORDER env var format issue. THIS IS PRIORITY 1.
-2. **Investigate Vector personality not loading** — Boot logs show `[BotInit] No personality for vector — skipping`. Check if the personality name in `personalities.json` matches what the bot init loop expects. May be related to pipeline failures.
-3. **Verify Gemini zero-dispatch** — Check Gemini API logs for zero new text-gen calls after Session 28c deploy. The env var `LLM_FAILOVER_ORDER=groq,anthropic,openai` is set. Code also updated. Should be dead.
-4. **TEST THE NEW PIPELINE** — Run `/pipeline <youtube_url>` and compare output to reference quality (Grim Grit). The thesis extraction + narrative arc is DVP:ADDRESSED. Needs production test to verify.
-5. **Layer 2 compression pass** — Build tighter ffmpeg compression before Supabase upload. Target: CRF 28-30, scale to 720p max for shorts. NOT YET STARTED.
-6. **Run TCF pipeline** — Command: `/pipeline <youtube_url> tcf only`. The 90s inter-brand cooldown is in place.
-7. **Manual Supabase Storage purge** — Architect must go to Supabase dashboard → Storage → `public-assets` → delete `vidrush/` and `faceless/` folders (308 MB).
-8. **Clean Supabase personality_config table** — Still has old 18-20K char bloated prompts. Not dangerous (hot-update disabled) but should be cleaned to avoid future confusion.
-9. **Shorts quality** — Current shorts are still cut from the long-form at timestamp boundaries (extractStoryMoments). If long-form quality improves, shorts should improve too. If not, consider re-scripting shorts independently.
+1. **[PRIORITY 1] TEST THE DUAL-PIPELINE** — Run `/pipeline <youtube_url>` (no modifiers — fires both Ace Richie + TCF). Verify: (a) Ace Richie completes all 8 steps, (b) 180s cooldown fires, (c) TCF uses `GROQ_API_KEY_TCF` (check Railway logs for `[Pipeline] TCF dedicated Groq key active`), (d) TCF Step 2 succeeds. If either fails, check Railway logs for full error (now 500 chars, was 150).
+2. **Investigate Vector personality not loading** — Boot logs show `[BotInit] No personality for vector — skipping`. Check if personality name in `personalities.json` matches what the bot init loop expects.
+3. **Verify Gemini zero-dispatch** — Check Gemini API logs for zero text-gen calls post-Session 28c deploy.
+4. **[TODO] TCF needs its own long-form YouTube upload** — Currently `executeFullPipeline` uploads the long-form video to Ace Richie's YouTube channel (Step 3). TCF brand has no YouTube long-form destination. Need to either: (a) create a separate `executeFullPipeline` variant for TCF that skips the YT upload, or (b) add a TCF YouTube channel and credential set. Until resolved, TCF only produces shorts + Buffer posts, not a long-form video.
+5. **[TODO] TCF needs brand-differentiated video angles** — The TCF faceless factory currently uses the same `produceFacelessVideo` flow as Ace Richie. TCF brand is "dark, clinical, intelligence analyst" — the image prompts (SCENE_VISUAL_STYLE) do have TCF variants, but the script orientations and orientations should be reviewed. Consider a separate `orientation: "horizontal"` default for TCF (long-form documentary vs Ace Richie's vertical shorts).
+6. **Layer 2 compression pass** — Tighter ffmpeg compression before Supabase upload. Target: CRF 28-30, scale to 720p max for shorts. NOT YET STARTED.
+7. **Manual Supabase Storage purge** — Go to Supabase dashboard → Storage → `public-assets` → delete `vidrush/` and `faceless/` folders (308 MB old clips from past runs).
+8. **Clean Supabase personality_config table** — Still has old 18-20K char bloated prompts. Not dangerous (hot-update disabled) but should be cleaned.
+
+---
+
+## KNOWN MISALIGNMENTS (documents that are OUT OF DATE)
+
+These documents exist in the repo but contain stale information. Do NOT use them for pipeline architecture reference without cross-checking against this master reference.
+
+- **Mission Control Master Reference** — Still references Make.com Scenarios E/F and OpusClip as part of the Vid Rush pipeline. Both are no longer used. The pipeline is fully in-house: Whisper → faceless-factory.ts → ffmpeg → Supabase → Buffer. Any reference to Make.com or OpusClip in pipeline docs is dead history.
+- **Sovereign Posting Guide** — Contains old scheduling logic referencing Make.com webhook triggers. Actual scheduling is now done by `scheduleBufferWeek()` in `vidrush-orchestrator.ts` via Buffer's GraphQL API. The guide's "Scenario F" section is entirely obsolete.
+- **If in doubt:** `src/engine/vidrush-orchestrator.ts` is the ground truth for what the pipeline actually does, step by step.
+
+---
+
+**Session Summary — Cowork Session 29 (2026-04-06):**
+
+**DUAL GROQ KEY + PIPELINE STABILITY FIXES.** Architect diagnosed persistent TCF Step 2 timeout — root cause was Ace Richie burning Groq TPM quota over 50+ min, then TCF hitting exhausted rate limits after a 90s cooldown. Fix: Architect registered a second Groq account; Railway env var `GROQ_API_KEY_TCF` holds the TCF-dedicated key. Code now builds a separate `tcfPipelineLLM` using that key, giving TCF a fresh rate limit pool.
+
+**Fixes deployed (Session 29):**
+1. **Dual Groq key** — `src/index.ts`: `tcfPipelineLLM` built from `GROQ_API_KEY_TCF` if set. Falls back to `pipelineLLM` with a warning if env var is missing. Both manual `/pipeline` and auto-pipeline (Alfred trigger) use brand-based LLM selection.
+2. **OpenAI removed from pipeline failover** — Credits at -$0.06, dead. Removed from `buildTeamLLM(["groq", "anthropic", "openai"], 3)` → now `buildTeamLLM(["groq", "anthropic"], 2)`. Saves 60s per dead retry slot.
+3. **primaryRetries reduced 3→2** — Groq gets 3 attempts (was 4) before Anthropic failover. Saves 60s + 9s delay per timeout storm: total Groq burn drops from 258s to ~195s.
+4. **LLM timeout configurable** — `LLM_TIMEOUT_MS` Railway env var (default 60000). Code change is `parseInt(process.env.LLM_TIMEOUT_MS || "60000", 10)` in `buildTeamLLM`. Can now be raised without a deploy.
+5. **Inter-brand cooldown raised 90s→180s** — `PIPELINE_COOLDOWN_MS` Railway env var (default 180000). Was 90s — insufficient even before the dual-key fix. Both manual and auto pipelines use the same env var.
+6. **Error message slice 150→500** — `faceless-factory.ts` lines 420 + 523. The 150-char slice was hiding Anthropic and OpenAI failure entries, making it look like only Groq was tried. Now shows full failover chain on failure.
+
+**DVP Status:**
+- `[DVP: ADDRESSED]` Dual Groq key — needs production test (run `/pipeline` and confirm `GROQ_API_KEY_TCF` appears in Railway logs)
+- `[DVP: ADDRESSED]` Cooldown raised to 180s — needs production test
+- `[DVP: ADDRESSED]` Error message fix — passive (only visible on failures)
 
 ---
 

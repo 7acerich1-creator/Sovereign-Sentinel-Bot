@@ -1,18 +1,19 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-05 (Cowork Session 27b — PROMPT ECONOMY FIX + ARCHITECTURAL DIRECTIVES) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-05 (Cowork Session 28 — SCRIPT GENERATION ARCHITECTURE OVERHAUL) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
-## CRITICAL STATUS REPORT (as of Session 27b, 2026-04-05)
+## CRITICAL STATUS REPORT (as of Session 28, 2026-04-05)
 
-**Mission Metrics:** 85% system prompt reduction deployed — ROOT CAUSE of $62 Gemini bill fixed. Quality gate overhaul deployed. Imagen 4 restored as primary image gen. Revenue still $0.
+**Mission Metrics:** Script generation completely overhauled — ROOT CAUSE of trash video quality identified and fixed. Thesis extraction pre-pass + narrative arc architecture deployed. Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit chain: `f27633f` (Session 27b — prompt economy fix) → `f949bc2` + `e3597c0` (Session 27 — quality gate + legacy purge). Auto-deploying.
+- Bot is live on Railway. Latest commit: `ab11940` (Session 28 — script gen overhaul) → `547b0a1` (Session 27c) → prior chain. Auto-deploying.
+- Session 28 commit: `ab11940` — thesis extraction + narrative arc rewrite of faceless-factory.ts (196 insertions, 89 deletions).
 - Session 27b commit: `f27633f` — 85% agent prompt reduction. personalities.json rewritten (18K→1.6K chars/agent), shared-context.ts created, index.ts injection simplified.
 - Session 27 commits: `f949bc2` (quality gate overhaul) → `e3597c0` (legacy purge — 35 files deleted).
 - Prior: Session 26 `509fa4b` (LLM routing fix), Session 25 `5adefce`, Session 24 chain, Session 23 chain.
-- Pipeline ran all 8 steps for video iR4AAwNP3r8: "Beyond The Simulation" (258s, 12 scenes, 9 clips, 16 Buffer posts).
+- Pipeline ran all 8 steps for video iR4AAwNP3r8: "Beyond The Simulation" (258s, 12 scenes, 9 clips, 16 Buffer posts). Ace Richie pipeline successful. TCF pipeline failed (Groq timeout) — fixed with 90s cooldown, needs re-run.
 - YouTube long-form live: https://youtube.com/watch?v=ybjDyM3uVts
 - yt-dlp authenticated via YouTube cookies (YOUTUBE_COOKIES_BASE64 env var in Railway).
 
@@ -37,7 +38,7 @@
 - **ROOT CAUSE OF $62 BILL (Session 27b diagnosis):** ALL 6 agents had 18-20K char system prompts (~4,500 tokens each) with identical 10-12K "Operational Awareness" blocks copy-pasted 6 times. Every Groq dispatch hit HTTP 413 (too large) and silently fell to Gemini, burning 27K+ tokens per call. The Session 26 routing fix (reordering chains) was a band-aid — it didn't address payload SIZE. Session 27b reduced all prompts by 85%.
 - **[DVP: ADDRESSED]** LLM routing fix — `/status` shows Anthropic-first for Veritas.
 - **[DVP: ADDRESSED]** Imagen 4 primary — Gemini API is active, Imagen 4 is functional.
-- **[DVP: ADDRESSED]** Two-pass script gen — prevents Groq 413 on long-form.
+- **[DVP: ADDRESSED]** Three-pass script gen (Session 28) — thesis extraction + narrative arc architecture. Replaces old "fill 25 buckets" prompt with cohesive story structure. Anti-copying directives prevent source parroting. Commit `ab11940`.
 - **[DVP: ADDRESSED]** Sapphire Sentinel v2 — 5 proactive alert rules.
 - **[DVP: ADDRESSED]** Prompt economy fix — 85% reduction. NEEDS VERIFICATION: check Gemini API logs post-deploy for zero new dispatch calls hitting Gemini.
 
@@ -137,6 +138,55 @@ Any new operational knowledge goes into Layer 3 (protocols table). NEVER into La
 - Platform Adaptation Engine needed: Each platform needs slightly different clip versions (TikTok = faster cadence, IG = cover frame optimization, etc.)
 - Distribution Router consolidation: Single entry point instead of split Buffer/direct-API paths
 - **Funnel Audit skill deployed** — `skills/funnel-audit.md` gives Veritas deep audit methodology for the entire T0→T6 conversion path. Covers distribution, links, Stripe, email, pipeline health, and TCF→Ace handoff.
+
+---
+
+## PENDING WORK FOR NEXT SESSION (as of end-of-Session 28)
+
+1. **TEST THE NEW PIPELINE** — Run `/pipeline <youtube_url>` and compare output to reference quality (Grim Grit). The thesis extraction + narrative arc is DVP:ADDRESSED. Needs production test to verify.
+2. **Layer 2 compression pass** — Build tighter ffmpeg compression before Supabase upload. Target: CRF 28-30, scale to 720p max for shorts. NOT YET STARTED.
+3. **Run TCF pipeline** — Command: `/pipeline <youtube_url> tcf only`. The 90s inter-brand cooldown is in place.
+4. **Manual Supabase Storage purge** — Architect must go to Supabase dashboard → Storage → `public-assets` → delete `vidrush/` and `faceless/` folders (308 MB).
+5. **Verify Gemini zero-dispatch** — Check Gemini API logs for zero new dispatch calls hitting Gemini.
+6. **Shorts quality** — Current shorts are still cut from the long-form at timestamp boundaries (extractStoryMoments). If long-form quality improves, shorts should improve too. If not, consider re-scripting shorts independently.
+
+---
+
+**Session Summary — Cowork Session 28 (2026-04-05):**
+
+**SCRIPT GENERATION ARCHITECTURE OVERHAUL.** Architect flagged video quality as "fucking bad" — long-form scripts were compilations of disconnected shorts-length paragraphs that parroted source transcripts word-for-word. Reference channels (Grim Grit) tell ONE cohesive story with narrative arc. Root cause was architectural: raw Whisper transcript dumped as "source intelligence," prompt said "generate 25 segments" with no story structure.
+
+**3-part fix deployed (commit `ab11940`, 196 insertions, 89 deletions in faceless-factory.ts):**
+1. **NEW: Thesis extraction pre-pass** (`extractNarrativeBlueprint()`) — Before writing any script, the LLM distills the raw transcript into: thesis, title, hook, 3-act narrative arc, 5-7 key arguments in escalating order, emotional journey. This is the intelligence extraction step that was completely missing.
+2. **REWRITTEN: Long-form script prompts** — LLM now receives the narrative BLUEPRINT (not raw transcript). Pass 1 writes ACT 1 + ACT 2 (hook + setup + escalation, 13 segments). Pass 2 writes ACT 3 (revelation + resolution + CTA, 12 segments). Segments must flow into each other with forward momentum, transition beats, and callback language.
+3. **NEW: Anti-copying directives** — Prompts explicitly command "NEVER copy or closely paraphrase the source" and "use as INSPIRATION only." Source transcript never appears in the script generation prompts (only in the blueprint extraction step).
+4. **REWRITTEN: Short-form prompt** — Now focuses on ONE powerful idea with setup/twist/payoff instead of summarizing source material.
+
+**Token budget impact:** One additional LLM call (blueprint extraction, ~800 tokens input). Total pipeline: 3 calls instead of 2. Fits within Groq free tier. Additional time: ~5s cooldown.
+
+**DVP Status:**
+- [DVP: ADDRESSED] Thesis extraction pre-pass — needs production test
+- [DVP: ADDRESSED] Narrative arc script generation — needs production test
+- [DVP: ADDRESSED] Anti-copying directives — needs production test
+- [DVP: ADDRESSED] Short-form prompt rewrite — needs production test
+
+**Commits:** `ab11940` (script gen overhaul). Pushed, Railway auto-deploying.
+
+---
+
+**Session Summary — Cowork Session 27c (2026-04-05):**
+
+**SUPABASE EGRESS CONTROL + PIPELINE STABILITY + BUILD FIX.** Supabase sent a quota warning — 5.5 GB egress on free tier (5 GB limit). Root cause: 308 MB of video clips in `public-assets` bucket served as publicUrls to 9 Buffer channels, never deleted. Every pipeline run accumulated clips forever.
+
+**Fixes deployed:**
+1. **Storage cleanup after Buffer scheduling** (commit `99a7cd8`) — `cleanupSupabaseStorage()` deletes clips from Supabase Storage after Step 8 confirms Buffer scheduling succeeded. Buffer already downloaded them; keeping them just burns egress.
+2. **Inter-brand 90s cooldown** (commit `99a7cd8`) — Dual-brand pipeline (Ace Richie → TCF) now pauses 90 seconds between brands. TCF was dying because Groq rate limits weren't recovering after Ace Richie's 25+ LLM calls. All 3 retries timed out at 60s. Both manual `/pipeline` and auto-pipeline patched.
+3. **CONTENT_CREW build fix** (commit `25c8773`) — `CONTENT_CREW` constant was referenced 3 times but never defined. Lost in Session 27 legacy purge. Railway build failed on `tsc --noEmit`. Added `const CONTENT_CREW = ["alfred", "anita", "yuki"]`.
+4. **Human-readable storage names** (commit `547b0a1`) — Storage paths now include brand, niche, and title slug: `vidrush/ace_richie_quantum_firmware_update_1775430704664/clip_00.mp4`. No more mystery folders. Cleanup function extracts paths from publicUrl instead of hardcoding.
+
+**Manual action needed:** Go to Supabase dashboard → Storage → `public-assets` → delete `vidrush/` and `faceless/` folders (308 MB of old clips from past runs). Automated cleanup only applies to future runs.
+
+**Commits:** `99a7cd8` (egress control + cooldown) → `25c8773` (CONTENT_CREW fix) → `547b0a1` (readable names). All pushed, Railway auto-deploying.
 
 ---
 

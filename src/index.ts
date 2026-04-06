@@ -766,8 +766,24 @@ async function main() {
             if (setPipelineRunning) setPipelineRunning(true);
 
             try {
-              for (const brand of brands) {
+              for (let bIdx = 0; bIdx < brands.length; bIdx++) {
+                const brand = brands[bIdx];
                 const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
+
+                // Inter-brand cooldown: Groq rate limits need recovery between heavy pipeline runs.
+                // The first brand burns 25+ LLM calls. Without a pause, the second brand's script
+                // generation times out on all retries. 90s is enough for Groq TPM to reset.
+                if (bIdx > 0) {
+                  const cooldownSec = 90;
+                  console.log(`⏳ [Pipeline] Inter-brand cooldown: ${cooldownSec}s for Groq rate limit recovery...`);
+                  try {
+                    await telegram.sendMessage(message.chatId,
+                      `⏳ Cooling down ${cooldownSec}s before ${brandLabel} pipeline (Groq rate limit recovery)...`
+                    );
+                  } catch { /* non-critical */ }
+                  await new Promise(r => setTimeout(r, cooldownSec * 1000));
+                }
+
                 try {
                   await telegram.sendMessage(message.chatId,
                     `--- ${brandLabel} PIPELINE ---`
@@ -2729,8 +2745,22 @@ async function main() {
                         if (setPipelineRunning) setPipelineRunning(true);
                         const autoBrands: Array<"ace_richie" | "containment_field"> = ["ace_richie", "containment_field"];
                         try {
-                          for (const brand of autoBrands) {
+                          for (let bIdx = 0; bIdx < autoBrands.length; bIdx++) {
+                            const brand = autoBrands[bIdx];
                             const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
+
+                            // Inter-brand cooldown for Groq rate limit recovery
+                            if (bIdx > 0) {
+                              const cooldownSec = 90;
+                              console.log(`⏳ [AutoPipeline] Inter-brand cooldown: ${cooldownSec}s...`);
+                              try {
+                                await channel.sendMessage(task.chat_id || defaultChatId,
+                                  `⏳ Cooling down ${cooldownSec}s before ${brandLabel} pipeline...`
+                                );
+                              } catch { /* non-critical */ }
+                              await new Promise(r => setTimeout(r, cooldownSec * 1000));
+                            }
+
                             try {
                               await channel.sendMessage(task.chat_id || defaultChatId, `--- ${brandLabel} AUTO-PIPELINE ---`);
                             } catch { /* non-critical */ }

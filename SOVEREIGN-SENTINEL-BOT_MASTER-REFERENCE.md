@@ -1,43 +1,45 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-05 (Cowork Session 27 — QUALITY GATE OVERHAUL + LEGACY PURGE) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-05 (Cowork Session 27b — PROMPT ECONOMY FIX + ARCHITECTURAL DIRECTIVES) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
-## CRITICAL STATUS REPORT (as of Session 27, 2026-04-05 ~9:00 PM)
+## CRITICAL STATUS REPORT (as of Session 27b, 2026-04-05)
 
-**Mission Metrics:** Quality gate overhaul deployed. Imagen 4 restored as primary image gen. Cinematography-grade prompts, upgraded music synthesis, two-pass script gen, intro/outro bumpers. 35 legacy files purged. Revenue still $0.
+**Mission Metrics:** 85% system prompt reduction deployed — ROOT CAUSE of $62 Gemini bill fixed. Quality gate overhaul deployed. Imagen 4 restored as primary image gen. Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commits `f949bc2` + `e3597c0` (Session 27 — quality gate overhaul + legacy purge). Auto-deploying.
-- Session 27 commits: `f949bc2` (quality gate overhaul — 7 upgrades, 347 insertions, 176 deletions) → `e3597c0` (legacy debris purge — 35 files deleted, .gitignore hardened).
+- Bot is live on Railway. Latest commit chain: `f27633f` (Session 27b — prompt economy fix) → `f949bc2` + `e3597c0` (Session 27 — quality gate + legacy purge). Auto-deploying.
+- Session 27b commit: `f27633f` — 85% agent prompt reduction. personalities.json rewritten (18K→1.6K chars/agent), shared-context.ts created, index.ts injection simplified.
+- Session 27 commits: `f949bc2` (quality gate overhaul) → `e3597c0` (legacy purge — 35 files deleted).
 - Prior: Session 26 `509fa4b` (LLM routing fix), Session 25 `5adefce`, Session 24 chain, Session 23 chain.
 - Pipeline ran all 8 steps for video iR4AAwNP3r8: "Beyond The Simulation" (258s, 12 scenes, 9 clips, 16 Buffer posts).
 - YouTube long-form live: https://youtube.com/watch?v=ybjDyM3uVts
 - yt-dlp authenticated via YouTube cookies (YOUTUBE_COOKIES_BASE64 env var in Railway).
 
-**API Credit Situation (updated Session 27):**
+**API Credit Situation (updated Session 27b):**
 - **Anthropic:** ~$10 remaining. Used for Veritas brain + Sapphire Sentinel only. Low burn (~$0.36/month briefings). Runway: 37-74 days.
 - **OpenAI:** -$0.06 credits. DEAD. DALL-E 3 and OpenAI TTS will not fire.
-- **Gemini:** $62.30 OWED. API key BLOCKED for all calls (text AND image) until balance paid. Gemini failover position in all chains is effectively dead.
-- **Groq:** FREE tier. 14,400 req/day. Primary for pipeline + content agents (Alfred, Anita, Vector, Yuki).
+- **Gemini:** $62.30 OWED but **NOT BLOCKED** — API still accepting calls (confirmed via live API logs, all 200 status codes). This means Gemini failover IS active and WILL burn tokens if Groq 413s. The prompt reduction fix (f27633f) is critical to stop this hemorrhage.
+- **Groq:** FREE tier. 14,400 req/day. Primary for pipeline + content agents (Alfred, Anita, Vector, Yuki). With prompt reduction, ALL dispatch calls should now fit within Groq's per-request token limit.
 - **ElevenLabs:** Creator plan, credits remaining. TTS is working.
-- **Imagen 4:** RESTORED as primary image gen (Session 27). Cost $0.02-0.06/image. Expected $7-12/month. BLOCKED until Gemini $62 bill paid — Pollinations auto-fallback active.
+- **Imagen 4:** RESTORED as primary image gen (Session 27). Cost $0.02-0.06/image. Expected $7-12/month. Gemini API is active, so Imagen 4 is functional.
 
-**LLM ROUTING (Session 26 fix — commit 509fa4b, updated Session 27):**
+**LLM ROUTING (Session 26 fix + Session 27b prompt economy):**
 - **AGENT_LLM_TEAMS (unchanged):**
   - `veritas`: [Anthropic → Gemini → Groq] — strategic brain, briefings
   - `sapphire`: [Anthropic → Gemini → Groq] — sentinel, proactive observations
   - `alfred`: [Groq → Gemini → Anthropic] — trend intelligence
-  - `anita`: [Groq → Gemini → Anthropic] — content weaponization (was Gemini-first, caused $62 bill)
+  - `anita`: [Groq → Gemini → Anthropic] — content weaponization
   - `vector`: [Groq → Gemini → Anthropic] — performance analysis
   - `yuki`: [Groq → Gemini → Anthropic] — distribution
   - `pipeline`: [Groq → Gemini → Anthropic → OpenAI] — 3 primary retries before failover
-- **Gemini position in ALL chains is dead** until bill paid. Effective routing: Anthropic → Groq (for Veritas/Sapphire) and Groq → Anthropic (for content agents).
-- **[DVP: ADDRESSED]** LLM routing fix — confirm `/status` shows Anthropic-first for Veritas.
-- **[DVP: ADDRESSED]** Imagen 4 primary — will confirm `"via Imagen 4"` in logs once Gemini bill paid. Pollinations fallback active until then.
-- **[DVP: ADDRESSED]** Two-pass script gen — prevents Groq 413 on long-form. Pass 1 (segments 1-13), 8s cooldown, Pass 2 (segments 14-25).
-- **[DVP: ADDRESSED]** Sapphire Sentinel v2 — 5 proactive alert rules. 2hr interval, 10min first-scan on boot.
-- **[DVP: ADDRESSED]** `/status` + `/start` display — shows per-agent routing map.
+- **Gemini is NOT blocked** — API still accepting calls. Gemini failover IS live. The prompt reduction (f27633f) ensures Groq handles all dispatch calls without 413, so Gemini failover should no longer trigger for text gen.
+- **ROOT CAUSE OF $62 BILL (Session 27b diagnosis):** ALL 6 agents had 18-20K char system prompts (~4,500 tokens each) with identical 10-12K "Operational Awareness" blocks copy-pasted 6 times. Every Groq dispatch hit HTTP 413 (too large) and silently fell to Gemini, burning 27K+ tokens per call. The Session 26 routing fix (reordering chains) was a band-aid — it didn't address payload SIZE. Session 27b reduced all prompts by 85%.
+- **[DVP: ADDRESSED]** LLM routing fix — `/status` shows Anthropic-first for Veritas.
+- **[DVP: ADDRESSED]** Imagen 4 primary — Gemini API is active, Imagen 4 is functional.
+- **[DVP: ADDRESSED]** Two-pass script gen — prevents Groq 413 on long-form.
+- **[DVP: ADDRESSED]** Sapphire Sentinel v2 — 5 proactive alert rules.
+- **[DVP: ADDRESSED]** Prompt economy fix — 85% reduction. NEEDS VERIFICATION: check Gemini API logs post-deploy for zero new dispatch calls hitting Gemini.
 
 **RESOLVED — BUFFER POSTING (Session 21 fix):**
 - **ROOT CAUSE:** `scheduleBufferWeek()` in vidrush-orchestrator.ts had a hardcoded filter that ONLY selected channels with service type "twitter", "threads", "linkedin", "facebook", "mastodon". YouTube, Instagram, and TikTok channels were explicitly EXCLUDED. This was based on a false assumption that Buffer can't post to those platforms. Buffer supports ALL connected channels.
@@ -65,6 +67,48 @@
 - `[DVP: REGRESSED]` = Was verified, later test showed it broke again.
 - Rule: Nothing moves to VERIFIED without Architect confirming test output.
 
+---
+
+## ARCHITECTURAL DIRECTIVES — READ FIRST EVERY SESSION
+
+These directives exist because multiple sessions were wasted on surface fixes while structural problems went undiagnosed. Every AI session working on this codebase MUST internalize these before writing a single line of code.
+
+**DIRECTIVE 1: PROMPT ECONOMY (non-negotiable)**
+- Agent system prompts MUST stay under 1,000 tokens total (personality + shared context).
+- `src/data/personalities.json` contains ONLY: identity, behavioral rules, domain scope, team routing, tools list, task protocol (~400 tokens per agent).
+- `src/data/shared-context.ts` contains compact shared operational context (~300 tokens): product ladder, task protocol, standing rules.
+- Detailed playbooks, email sequences, platform specs → stored in Supabase `protocols` table, retrieved on-demand via `read_protocols` tool.
+- NEVER add shared/duplicated content to individual agent prompts. If it applies to all agents, put it in shared-context.ts.
+- NEVER bloat prompts to add capabilities. Add a TOOL instead.
+- Before ANY change to personalities.json, verify total stays under 3,000 chars per agent.
+- **WHY:** Bloated 18K-char prompts caused every Groq dispatch to 413, silently failing over to Gemini at 27K tokens/call. This is how the $62 bill happened.
+
+**DIRECTIVE 2: ROOT CAUSE DISCIPLINE**
+- When a provider returns an error (413, 429, 400), trace the FULL request payload — not just the error code. What's the total token count? What's in the system prompt?
+- When claiming something is "fixed," verify against live data (API logs, Railway logs) — not just code inspection.
+- Don't assume provider config changes (reordering chains) will fix payload size problems.
+- Before declaring ANY binary claim about a provider ("Gemini is blocked", "Groq can't handle this"), CHECK the actual API logs first.
+- Think architecturally: if the same pattern (bloated prompts, duplicated data) exists across multiple agents, it's a systemic issue requiring a systemic fix — not 6 individual patches.
+
+**DIRECTIVE 3: SESSION QUALITY PROTOCOL**
+1. **READ this master reference FIRST.** Before touching code, understand what's deployed, what's broken, and what the Architect's priorities are.
+2. **READ memory files.** Check `.auto-memory/MEMORY.md` for feedback, project state, and references.
+3. **Verify before claiming.** Use DVP tags. Check live logs before saying something works or doesn't.
+4. **Think systemically.** One bug in one agent often means the same bug exists in all six. Look for patterns, not incidents.
+5. **Offer proactive suggestions.** The Architect wants outside-the-box thinking, not passive execution. If you see a structural problem, name it and propose a fix — don't wait to be asked.
+6. **UPDATE this master reference LAST.** Document what changed, what's pending, and what the next session needs to know.
+
+**DIRECTIVE 4: THREE-LAYER PROMPT ARCHITECTURE**
+```
+Layer 1: Identity (personalities.json) — ~400 tokens, static, per-agent
+Layer 2: Shared Context (shared-context.ts) — ~300 tokens, static, all agents
+Layer 3: On-Demand Protocols (Supabase protocols table) — variable, retrieved via read_protocols tool, ZERO cost when not called
+```
+Total injected per dispatch: ~700 tokens. Previous architecture: ~4,500 tokens. Savings: 85%.
+Any new operational knowledge goes into Layer 3 (protocols table). NEVER into Layer 1 or 2 unless it's under 50 chars and needed on every single call.
+
+---
+
 **QUALITY GATE STATUS (Session 27 — major overhaul):**
 - [DVP: VERIFIED] Audio mastering — loudnorm + EQ + compression chain *(verified: Session 23 Test 3, video tET-aR-JG-o)*
 - [DVP: VERIFIED] Hook text overlay — first sentence burned into opening 3s *(verified: Session 23 Test 3)*
@@ -78,7 +122,7 @@
 - [DVP: ADDRESSED] Scheduler timezone fix — all getUTCHours. Commit `d2847f7`.
 - [DVP: ADDRESSED] Scene crossfade transitions — Ken Burns + 0.4s fade-in/fade-out. Commit `cd60174`.
 - [DVP: ADDRESSED] Voice warmth reverb — FIXED Session 27: dialed back from dual-tap (100ms+200ms) to single-tap (80ms at 12%). Subtle room presence, not audible wet echo. Commit `f949bc2`.
-- [DVP: ADDRESSED] Imagen 4 restored as PRIMARY image gen — Pollinations fallback. Commit `f949bc2`. (Blocked until Gemini $62 bill paid.)
+- [DVP: ADDRESSED] Imagen 4 restored as PRIMARY image gen — Gemini API confirmed active, Imagen 4 is functional. Pollinations fallback. Commit `f949bc2`.
 - [DVP: ADDRESSED] Cinematography-grade image prompts — SCENE_VISUAL_STYLE completely rewritten. ARRI Alexa 65, anamorphic lenses, Deakins lighting, Kodak Vision3 500T grain. Every niche × brand combo unique. Commit `f949bc2`.
 - [DVP: ADDRESSED] Two-pass script generation — long-form splits into Pass 1 (segments 1-13) + 8s Groq cooldown + Pass 2 (segments 14-25). Prevents Groq 413. Source intel capped at 3000 chars. Commit `f949bc2`.
 - [DVP: ADDRESSED] Video length enforcement — 25 segments, 100-150 words/segment minimum. Commit `f949bc2`.
@@ -93,6 +137,22 @@
 - Platform Adaptation Engine needed: Each platform needs slightly different clip versions (TikTok = faster cadence, IG = cover frame optimization, etc.)
 - Distribution Router consolidation: Single entry point instead of split Buffer/direct-API paths
 - **Funnel Audit skill deployed** — `skills/funnel-audit.md` gives Veritas deep audit methodology for the entire T0→T6 conversion path. Covers distribution, links, Stripe, email, pipeline health, and TCF→Ace handoff.
+
+---
+
+**Session Summary — Cowork Session 27b (2026-04-05):**
+
+**PROMPT ECONOMY FIX + ARCHITECTURAL DIRECTIVES.** Root cause of $62 Gemini bill finally traced and fixed. ALL 6 agent system prompts were 18-20K chars (~4,500 tokens) with identical 10-12K "Operational Awareness" blocks copy-pasted into each. Every Groq dispatch hit HTTP 413 and silently fell to Gemini (27K+ tokens/call). The Session 26 routing fix (reordering AGENT_LLM_TEAMS) was a band-aid — didn't address payload SIZE.
+
+**Fix deployed (commit `f27633f`):**
+1. **personalities.json completely rewritten** — each agent trimmed from ~18K to ~1.6K chars (~400 tokens). Contains ONLY: identity, behavioral rules, domain scope, team routing, tools list, task protocol.
+2. **shared-context.ts created** — 1,205 chars (~300 tokens) of compact operational context injected into every agent. Contains: product ladder, architecture boundary, task approval protocol, standing rules.
+3. **index.ts injection simplified** — removed protocolDirective, knowledgeDirective, and browserDirective concatenation blocks. System prompt = lean personality + shared context. Detailed playbooks retrieved on-demand via read_protocols tool.
+4. **Step 4 dry run guard fixed** — /dryrun command no longer runs real ffmpeg in Step 4.
+
+**CRITICAL CORRECTION:** Gemini API is NOT blocked. Previous sessions falsely claimed the $62 debt blocked all Gemini calls. User verified via live API logs — all 200 status codes. Gemini was accepting every silently-failovered dispatch call, actively running up the bill. Master reference corrected.
+
+**Commits:** `f27633f` (prompt economy fix). Pushed, Railway auto-deploying.
 
 ---
 

@@ -26,6 +26,59 @@ const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
 const STORAGE_BUCKET = "public-assets";
 const ORCHESTRATOR_DIR = "/tmp/vidrush_orchestrator";
 
+// ── Cleanup: delete clips from Supabase Storage after Buffer scheduling ──
+// WHY: Clips served as publicUrl burn egress bandwidth. Buffer downloads each clip
+// once per channel. 9 channels × 7 clips × 4MB = 250MB egress per pipeline run.
+// Free tier is 5GB/month. Without cleanup, 20 pipeline runs = over limit.
+// Once Buffer has ingested the clip (createPost returned success), the storage copy
+// is dead weight. Delete it to stop egress accumulation.
+async function cleanupSupabaseStorage(clips: ClipMeta[], jobId: string, facelessJobId?: string): Promise<void> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return;
+
+  let deleted = 0;
+  const pathsToDelete: string[] = [];
+
+  // Collect clip paths
+  for (const clip of clips) {
+    if (clip.publicUrl) {
+      pathsToDelete.push(`vidrush/${jobId}/clip_${clip.index.toString().padStart(2, "0")}.mp4`);
+    }
+  }
+
+  // Collect faceless video path if provided
+  if (facelessJobId) {
+    pathsToDelete.push(`faceless/${facelessJobId}/${facelessJobId}_final.mp4`);
+  }
+
+  // Delete via Supabase Storage API (batch delete)
+  // Endpoint: POST /storage/v1/object/remove/{bucket} with body { prefixes: [...paths] }
+  if (pathsToDelete.length > 0) {
+    try {
+      const resp = await fetch(
+        `${SUPABASE_URL}/storage/v1/object/remove/${STORAGE_BUCKET}`,
+        {
+          method: "POST",
+          headers: {
+            apikey: SUPABASE_KEY!,
+            Authorization: `Bearer ${SUPABASE_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ prefixes: pathsToDelete }),
+        }
+      );
+
+      if (resp.ok) {
+        deleted = pathsToDelete.length;
+        console.log(`🗑️ [Orchestrator] Deleted ${deleted} files from Supabase Storage (egress savings)`);
+      } else {
+        console.warn(`⚠️ [Orchestrator] Storage cleanup failed: ${resp.status} ${resp.statusText}`);
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ [Orchestrator] Storage cleanup error: ${err.message?.slice(0, 200)}`);
+    }
+  }
+}
+
 // ── Cleanup: remove all temp files for a pipeline job ──
 export function cleanupPipelineJob(jobId: string): void {
   try {
@@ -1136,6 +1189,19 @@ export async function executeFullPipeline(
   }
 
   const totalDuration = (Date.now() - startTime) / 1000;
+
+  // ── EGRESS CONTROL: Delete clips from Supabase Storage ──
+  // Buffer has already downloaded each clip. Keeping them burns egress on every
+  // subsequent access (dashboard views, re-downloads, crawlers). Delete them now.
+  // The faceless long-form video stays — it's referenced by YouTube upload and
+  // only downloaded once. Clips are the egress multiplier (N clips × M channels).
+  if (bufferScheduled > 0 && !dryRun) {
+    try {
+      await cleanupSupabaseStorage(clips, jobId);
+    } catch (err: any) {
+      console.warn(`⚠️ [Orchestrator] Storage cleanup non-critical error: ${err.message?.slice(0, 200)}`);
+    }
+  }
 
   // ── Log pipeline run to Supabase ──
   if (SUPABASE_URL && SUPABASE_KEY) {

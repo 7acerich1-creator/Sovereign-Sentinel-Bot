@@ -8,8 +8,9 @@
 **Mission Metrics:** Script generation completely overhauled — ROOT CAUSE of trash video quality identified and fixed. Thesis extraction pre-pass + narrative arc architecture deployed. Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit: `ab11940` (Session 28 — script gen overhaul) → `547b0a1` (Session 27c) → prior chain. Auto-deploying.
-- Session 28 commit: `ab11940` — thesis extraction + narrative arc rewrite of faceless-factory.ts (196 insertions, 89 deletions).
+- Bot is live on Railway. Latest commit: `f27cf8d` (Session 28b — TTS + music fix) → `ab11940` (Session 28 — script gen overhaul) → `547b0a1` (Session 27c) → prior chain. Auto-deploying.
+- Session 28b commit: `f27cf8d` — TTS voice/expressiveness fix + ffmpeg-native music rewrite.
+- Session 28 commit: `ab11940` — thesis extraction + narrative arc rewrite of faceless-factory.ts.
 - Session 27b commit: `f27633f` — 85% agent prompt reduction. personalities.json rewritten (18K→1.6K chars/agent), shared-context.ts created, index.ts injection simplified.
 - Session 27 commits: `f949bc2` (quality gate overhaul) → `e3597c0` (legacy purge — 35 files deleted).
 - Prior: Session 26 `509fa4b` (LLM routing fix), Session 25 `5adefce`, Session 24 chain, Session 23 chain.
@@ -169,6 +170,8 @@ Any new operational knowledge goes into Layer 3 (protocols table). NEVER into La
 - [DVP: ADDRESSED] Narrative arc script generation — needs production test
 - [DVP: ADDRESSED] Anti-copying directives — needs production test
 - [DVP: ADDRESSED] Short-form prompt rewrite — needs production test
+- [DVP: ADDRESSED] TTS voice switch to Adam (deep male) + expressiveness fix — needs production test
+- [DVP: ADDRESSED] Music bed rewrite (ffmpeg-native, zero Node.js memory) — needs production test. Music has NEVER worked before; this is the first time it should actually produce audio.
 
 **Commits:** `ab11940` (script gen overhaul). Pushed, Railway auto-deploying.
 

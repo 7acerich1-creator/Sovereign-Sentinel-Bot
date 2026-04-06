@@ -32,22 +32,19 @@ const ORCHESTRATOR_DIR = "/tmp/vidrush_orchestrator";
 // Free tier is 5GB/month. Without cleanup, 20 pipeline runs = over limit.
 // Once Buffer has ingested the clip (createPost returned success), the storage copy
 // is dead weight. Delete it to stop egress accumulation.
-async function cleanupSupabaseStorage(clips: ClipMeta[], jobId: string, facelessJobId?: string): Promise<void> {
+async function cleanupSupabaseStorage(clips: ClipMeta[]): Promise<void> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return;
 
   let deleted = 0;
   const pathsToDelete: string[] = [];
 
-  // Collect clip paths
+  // Extract actual storage paths from publicUrl — these already contain the correct folder names
+  // publicUrl format: {SUPABASE_URL}/storage/v1/object/public/{BUCKET}/{storagePath}
+  const prefix = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/`;
   for (const clip of clips) {
-    if (clip.publicUrl) {
-      pathsToDelete.push(`vidrush/${jobId}/clip_${clip.index.toString().padStart(2, "0")}.mp4`);
+    if (clip.publicUrl?.startsWith(prefix)) {
+      pathsToDelete.push(clip.publicUrl.slice(prefix.length));
     }
-  }
-
-  // Collect faceless video path if provided
-  if (facelessJobId) {
-    pathsToDelete.push(`faceless/${facelessJobId}/${facelessJobId}_final.mp4`);
   }
 
   // Delete via Supabase Storage API (batch delete)
@@ -513,8 +510,17 @@ async function chopLongFormIntoClips(
 // STEP 5: UPLOAD CLIPS TO SUPABASE STORAGE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-async function uploadClipsToStorage(clips: ClipMeta[], jobId: string): Promise<void> {
+async function uploadClipsToStorage(clips: ClipMeta[], jobId: string, meta?: { brand?: string; niche?: string; title?: string }): Promise<void> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return;
+
+  // Build a human-readable folder name: vidrush/ace_richie_quantum_firmware_update_1775430704664/
+  // so you can tell what's what when browsing Supabase Storage
+  const slugParts = [
+    meta?.brand || "unknown",
+    meta?.niche || "general",
+    (meta?.title || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 40).replace(/_+$/, ""),
+  ].filter(Boolean);
+  const folderName = slugParts.join("_") + "_" + jobId.split("_").pop(); // keep timestamp for uniqueness
 
   const MAX_RETRIES = 3;
 
@@ -524,7 +530,7 @@ async function uploadClipsToStorage(clips: ClipMeta[], jobId: string): Promise<v
     for (let attempt = 1; attempt <= MAX_RETRIES && !uploaded; attempt++) {
       try {
         const fileBuffer = readFileSync(clip.localPath);
-        const storagePath = `vidrush/${jobId}/clip_${clip.index.toString().padStart(2, "0")}.mp4`;
+        const storagePath = `vidrush/${folderName}/clip_${clip.index.toString().padStart(2, "0")}.mp4`;
 
         const resp = await fetch(
           `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
@@ -1098,7 +1104,7 @@ export async function executeFullPipeline(
   } else {
     await progress("STEP 5/8", `Uploading ${clips.length} clips to Supabase Storage...`);
     try {
-      await uploadClipsToStorage(clips, jobId);
+      await uploadClipsToStorage(clips, jobId, { brand, niche: whisperResult.niche, title: facelessResult.title });
       const uploadedCount = clips.filter(c => c.publicUrl).length;
       await progress("STEP 5/8", `✅ ${uploadedCount}/${clips.length} clips uploaded`);
     } catch (err: any) {
@@ -1197,7 +1203,7 @@ export async function executeFullPipeline(
   // only downloaded once. Clips are the egress multiplier (N clips × M channels).
   if (bufferScheduled > 0 && !dryRun) {
     try {
-      await cleanupSupabaseStorage(clips, jobId);
+      await cleanupSupabaseStorage(clips);
     } catch (err: any) {
       console.warn(`⚠️ [Orchestrator] Storage cleanup non-critical error: ${err.message?.slice(0, 200)}`);
     }

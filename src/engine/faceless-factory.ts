@@ -1409,12 +1409,16 @@ async function assembleVideo(
 async function uploadAndQueue(
   videoPath: string,
   script: FacelessScript,
-  jobId: string
+  jobId: string,
+  meta?: { brand?: string; niche?: string }
 ): Promise<string | null> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return null;
 
-  // Upload to storage
-  const storagePath = `faceless/${jobId}/${jobId}_final.mp4`;
+  // Build human-readable storage path: faceless/ace_richie_quantum_firmware_update_1775430704664/
+  const titleSlug = (script.title || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 40).replace(/_+$/, "");
+  const folderParts = [meta?.brand || "unknown", meta?.niche || "general", titleSlug].filter(Boolean);
+  const folderName = folderParts.join("_") + "_" + jobId.split("_").pop();
+  const storagePath = `faceless/${folderName}/${folderName}_final.mp4`;
   try {
     const fileBuffer = readFileSync(videoPath);
     const resp = await fetch(
@@ -1551,7 +1555,7 @@ export async function produceFacelessVideo(
 
   // STEP 5: Upload + queue
   console.log(`📤 [FacelessFactory] Uploading to Supabase...`);
-  const videoUrl = await uploadAndQueue(videoPath, script, jobId);
+  const videoUrl = await uploadAndQueue(videoPath, script, jobId, { brand, niche });
 
   // Clean up intermediate files (TTS segments, raw audio, images, concat lists)
   // Keep the final video — orchestrator needs it for chopping

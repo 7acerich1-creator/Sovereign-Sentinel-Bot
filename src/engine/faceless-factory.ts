@@ -254,7 +254,84 @@ const NICHE_FILTERS: Record<string, string> = {
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// STEP 1: Generate Script from Source Intelligence
+// STEP 0: THESIS EXTRACTION — Transform raw transcript into narrative blueprint
+// This is the critical missing piece. Without this, the LLM just parrots the source.
+// Reference quality channels (Grim Grit, etc.) tell ONE cohesive story with a thesis.
+// Our old pipeline dumped raw transcript and said "make 25 segments" → compilation garbage.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+interface NarrativeBlueprint {
+  thesis: string;        // The ONE argument the entire video makes
+  title: string;         // Punchy title derived from thesis
+  hook: string;          // Scroll-stopping opening line
+  narrative_arc: string; // 3-act structure summary
+  key_arguments: string[]; // 5-7 supporting arguments in order
+  emotional_journey: string; // How the viewer should FEEL across the video
+}
+
+async function extractNarrativeBlueprint(
+  llm: LLMProvider,
+  sourceIntelligence: string,
+  niche: string,
+  brand: Brand
+): Promise<NarrativeBlueprint> {
+  const brandContext = brand === "ace_richie"
+    ? "Sovereign Synthesis (Ace Richie) — sovereign, zero-fear, cracked-the-code energy"
+    : "The Containment Field — dark, clinical, intelligence-analyst exposing hidden control systems";
+
+  const blueprintPrompt = `You are a narrative architect for a faceless YouTube documentary channel: ${brandContext}.
+
+You have raw transcript material from a source video. Your job is NOT to summarize it. Your job is to EXTRACT THE DEEPEST TRUTH from it and architect an ORIGINAL narrative around that truth.
+
+Think like a documentary filmmaker: What is the ONE powerful thesis buried in this material? What story does it tell about human nature, power, psychology, or consciousness?
+
+RAW SOURCE MATERIAL (use as INSPIRATION only — do NOT copy phrases or structure):
+${sourceIntelligence.slice(0, 2500)}
+
+NICHE: ${niche.replace(/_/g, " ")}
+
+Extract a narrative blueprint as JSON:
+{
+  "thesis": "The ONE bold claim the entire video argues (1 sentence, provocative, specific — NOT generic like 'mindset matters')",
+  "title": "Punchy video title derived from the thesis (max 60 chars, pattern-interrupt energy)",
+  "hook": "The first 2 sentences spoken — must create an open loop or challenge a belief (NOT a question — a STATEMENT that makes them need to hear more)",
+  "narrative_arc": "3-act summary: ACT 1 (setup — what most people believe / the surface-level truth) → ACT 2 (escalation — the hidden mechanism, the evidence, the uncomfortable reality) → ACT 3 (revelation — the deeper truth, the shift, what this means for the viewer)",
+  "key_arguments": ["argument 1 that supports thesis", "argument 2...", "...up to 7 total, in narrative ORDER — each builds on the previous"],
+  "emotional_journey": "How the viewer should FEEL: curious → unsettled → mind-blown → empowered (or whatever arc fits)"
+}
+
+RULES:
+- The thesis must be SPECIFIC and PROVOCATIVE, not generic self-help ("Most people are running someone else's code and calling it ambition" NOT "mindset is important")
+- The title should make someone stop scrolling. Use power words, irony, or challenge assumptions
+- Key arguments must ESCALATE — each one deeper than the last, building toward the revelation
+- Do NOT just list topics from the source. Find the THREAD that connects them into one argument
+- Return ONLY valid JSON`;
+
+  console.log(`🧠 [FacelessFactory] Extracting narrative blueprint...`);
+  const response = await llm.generate(
+    [{ role: "user", content: blueprintPrompt }],
+    { maxTokens: 2048, temperature: 0.7 }
+  );
+
+  const parsed = extractJSON(response.content);
+  if (!parsed || !parsed.thesis) {
+    console.warn(`⚠️ [FacelessFactory] Blueprint extraction failed, using fallback`);
+    return {
+      thesis: "The system you're operating in was designed before you were born — and it was never designed for you to win.",
+      title: "The Architecture Nobody Told You About",
+      hook: "Everything you were taught about success is an instruction manual for someone else's dream. And the worst part... you've been following it perfectly.",
+      narrative_arc: "ACT 1: Surface truth everyone accepts → ACT 2: Hidden mechanisms of control → ACT 3: The sovereign alternative",
+      key_arguments: ["The default path is engineered", "Compliance is rewarded, not capability", "The exit exists but is hidden", "Awareness is the first step", "Sovereignty requires active architecture"],
+      emotional_journey: "comfortable → unsettled → angry → empowered → sovereign"
+    };
+  }
+
+  console.log(`🧠 [FacelessFactory] Blueprint: "${parsed.title}" — Thesis: "${parsed.thesis?.slice(0, 80)}..."`);
+  return parsed as NarrativeBlueprint;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 1: Generate Script from Narrative Blueprint
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export async function generateScript(
@@ -268,75 +345,71 @@ export async function generateScript(
   const voice = SCRIPT_VOICE[brand];
   const segmentCount = targetDuration === "short" ? 5 : 25;
   const durationRange = targetDuration === "short" ? "30-60 seconds" : "10-15 minutes";
-  const perSegmentGuidance = targetDuration === "short"
-    ? `Each segment's voiceover should be 2-4 natural spoken sentences (about 30-50 words).`
-    : `Each segment's voiceover MUST be 6-10 natural spoken sentences (about 100-150 words MINIMUM per segment). This is the SINGLE MOST CRITICAL RULE — if segments are short, the video will be 3-4 minutes instead of 10-15 minutes and the content is USELESS. Write as if you're narrating a documentary scene for Netflix. Let ideas breathe with rhetorical pauses. Paint the picture slowly. Include real examples, analogies, and "think about this" moments. Each segment should feel like a complete mini-chapter. If a segment has fewer than 80 words, it's a FAILURE.`;
   const durationHintExample = targetDuration === "short" ? 8 : 35;
-  const durationHintNote = targetDuration === "short"
-    ? `duration_hint is approximate seconds per segment (total should sum to ~45s)`
-    : `duration_hint MUST be 30-45 seconds per segment. Total across ALL 25 segments should sum to 750-1125 seconds (12.5-18.75 minutes). The target sweet spot is 800-900 seconds (13-15 minutes). Do NOT use values under 25. If the voiceover text for a segment is only 2-3 sentences, the duration_hint MUST still be 30+ because YOU NEED TO WRITE MORE TEXT.`;
 
-  // Source intelligence truncation:
-  // Short-form: 2500 chars (tight, Groq TPM friendly)
-  // Long-form: 3000 chars — balance between source depth and staying under Groq's limits.
-  // The prompt template itself is ~2500 tokens. With 3000 chars of intel (~800 tokens),
-  // total input is ~3300 tokens. Groq's per-request max is ~6K tokens for 70b models,
-  // leaving ~2700 tokens for output. With 25 segments, that's tight — so we use a
-  // two-pass approach for long-form (generate in two batches, merge).
-  const intelLimit = targetDuration === "long" ? 3000 : 2500;
-  const truncatedIntel = sourceIntelligence.slice(0, intelLimit);
-  const prompt = `${voice}
+  // ── LONG-FORM: Blueprint-driven narrative architecture ──
+  // Short-form: single-pass, no blueprint needed (it's one idea, 30-60s)
+  // Long-form: extract thesis first, then write a STORY, not a compilation
 
-SOURCE INTELLIGENCE (extracted from research):
-${truncatedIntel}
-
-TARGET: ${durationRange} faceless video with ${segmentCount} visual segments.
-NICHE: ${niche.replace(/_/g, " ")}
-
-Generate a voiceover script as a JSON object with this exact structure:
-{
-  "title": "Short punchy title for the video (max 60 chars)",
-  "hook": "The first 1-2 sentences — the scroll-stopping opening line",
-  "segments": [
-    {
-      "voiceover": "The text to be spoken aloud for this segment",
-      "visual_direction": "Brief description of what the viewer SEES during this segment",
-      "duration_hint": ${durationHintExample}
-    }
-  ],
-  "cta": "Closing call-to-action directing to sovereign-synthesis.com"
-}
-
-RULES:
-- The hook MUST stop someone mid-scroll in under 3 seconds
-- ${perSegmentGuidance}
-- PACING: Write for a MEASURED, documentary-style voiceover — not a fast-talking YouTuber. Include natural pauses with ellipses (...) and rhetorical questions. Use SHORT sentences. Let ideas land. Leave space between thoughts. The listener should feel like they're being let in on a secret, not being sold something. Every 4 segments, write a transitional beat — a sentence that signals a shift in the narrative ("But here's where it gets interesting..." or "Now... consider this.").
-- visual_direction is THE MOST IMPORTANT FIELD for image quality. Write it like a cinematographer's shot list, not a vague concept. Include: camera angle (low angle, overhead, close-up, wide establishing), lighting (single source amber, backlit silhouette, cold fluorescent), specific physical elements (cracked concrete wall, rain on glass, smoke curling through light beam), mood texture (grain, haze, shallow DOF). Example: "Low angle shot looking up at a solitary figure standing at the edge of a rooftop at dusk, city lights creating bokeh below, wind catching their coat, amber backlight from setting sun creating a halo rim light, atmospheric haze softening the background skyscrapers"
-- FORMAT: ${orientation === "horizontal" ? "LANDSCAPE 16:9 — compose for widescreen. Sweeping vistas, wide establishing shots, cinematic framing with negative space." : "VERTICAL 9:16 — compose for mobile. Center subject, close crops, portrait framing."}
-- ${durationHintNote}
-- CTA should feel organic, not salesy — "The full protocol is at sovereign-synthesis.com"
-- Return ONLY valid JSON, no markdown code fences, no explanation`;
-
-  // ── TWO-PASS SCRIPT GENERATION (long-form only) ──
-  // Groq 413 root cause: llama-3.3-70b has a ~6K per-request limit.
-  // 25 segments × 100-150 words × ~1.3 tokens/word = ~4000+ output tokens.
-  // Combined with ~3300 input tokens, it blows the limit.
-  // FIX: For long-form, split into two passes (13 + 12 segments), each under the limit.
-  // Short-form (5 segments) fits in a single pass easily.
   const maxTokens = targetDuration === "long" ? 6144 : 4096;
-
   let parsed: any;
 
   if (targetDuration === "long") {
-    // PASS 1: Generate segments 1-13 (the first half + hook + title + CTA)
-    const pass1SegCount = 13;
-    const pass1Prompt = prompt
-      .replace(`${segmentCount} visual segments`, `${pass1SegCount} visual segments (PART 1 of 2 — the opening half)`)
-      .replace(`Total across ALL 25 segments`, `Total across these ${pass1SegCount} segments`)
-      .replace(`750-1125 seconds (12.5-18.75 minutes)`, `375-560 seconds (6-9 minutes for this half)`)
-      .replace(`800-900 seconds (13-15 minutes)`, `400-450 seconds (6.5-7.5 minutes for this half)`);
+    // ── STEP 0: Extract narrative blueprint from raw source ──
+    const blueprint = await extractNarrativeBlueprint(llm, sourceIntelligence, niche, brand);
 
-    console.log(`📝 [FacelessFactory] Pass 1: Generating segments 1-${pass1SegCount}...`);
+    await new Promise(r => setTimeout(r, 5000)); // Groq TPM cooldown
+
+    // ── PASS 1: ACT 1 + ACT 2 (segments 1-13) ──
+    const pass1Prompt = `${voice}
+
+You are writing a 10-15 minute documentary-style voiceover script. This is NOT a compilation of short clips. This is ONE COHESIVE STORY with a beginning, middle, and end — like a Netflix documentary scene.
+
+NARRATIVE BLUEPRINT:
+- THESIS: ${blueprint.thesis}
+- TITLE: "${blueprint.title}"
+- HOOK: "${blueprint.hook}"
+- STORY ARC: ${blueprint.narrative_arc}
+- KEY ARGUMENTS (in order): ${blueprint.key_arguments.map((a, i) => `${i + 1}. ${a}`).join(" | ")}
+- EMOTIONAL JOURNEY: ${blueprint.emotional_journey}
+
+You are writing PART 1: The HOOK + ACT 1 (setup) + ACT 2 (escalation). This covers the first 6-8 minutes.
+Write 13 segments that tell a CONTINUOUS STORY. Each segment FLOWS into the next — not standalone paragraphs.
+
+CRITICAL WRITING RULES:
+1. NEVER copy or closely paraphrase the source material. You are writing ORIGINAL content inspired by the thesis.
+2. Each segment must END with a sentence that creates FORWARD MOMENTUM — making the listener need to hear the next segment.
+3. Use specific examples, vivid metaphors, and "imagine this..." moments. Abstract lecturing is death.
+4. Write like you're TELLING someone a story over a drink — not reading a textbook.
+5. Vary sentence length dramatically. Short punch. Then a longer, flowing thought that lets the idea breathe and settle into the listener's mind. Then another short hit.
+6. Every 3-4 segments, include a TRANSITION BEAT: "But here's what nobody talks about..." or "Now... pay attention to this part..." or "And this is where it gets dark..."
+7. Each segment MUST be 100-150 words MINIMUM (6-10 sentences). Under 80 words = FAILURE.
+8. The video should feel like a REVELATION unfolding — not a list of tips.
+
+Generate as JSON:
+{
+  "title": "${blueprint.title}",
+  "hook": "${blueprint.hook}",
+  "segments": [
+    {
+      "voiceover": "The spoken text for this segment — conversational, measured, documentary cadence",
+      "visual_direction": "Cinematographer shot list: camera angle, lighting, physical elements, mood texture, specific objects",
+      "duration_hint": 35
+    }
+  ],
+  "cta": "Organic closing directing to sovereign-synthesis.com"
+}
+
+VISUAL DIRECTION RULES:
+- Write like a cinematographer's shot list, NOT a vague concept
+- Include: camera angle (low angle, overhead, close-up), lighting (amber single-source, cold fluorescent, backlit), physical elements (cracked concrete, rain on glass, smoke through light), mood (grain, haze, shallow DOF)
+- Each segment's visual should MATCH the emotional beat of the voiceover
+- FORMAT: ${orientation === "horizontal" ? "LANDSCAPE 16:9 — wide establishing shots, negative space, cinematic framing" : "VERTICAL 9:16 — center subject, close crops, portrait framing"}
+
+duration_hint MUST be 30-45 seconds per segment. Total for these 13 segments: 390-585 seconds.
+Return ONLY valid JSON, no code fences, no explanation.`;
+
+    console.log(`📝 [FacelessFactory] Pass 1: ACT 1 + ACT 2 (13 segments)...`);
     const res1 = await llm.generate(
       [{ role: "user", content: pass1Prompt }],
       { maxTokens, temperature: 0.8 }
@@ -348,42 +421,52 @@ RULES:
     }
     console.log(`📝 [FacelessFactory] Pass 1 complete: ${parsed1.segments.length} segments, title: "${parsed1.title}"`);
 
-    // Brief pause to avoid Groq TPM rate limit (12K tokens/minute)
-    await new Promise(r => setTimeout(r, 8000));
+    await new Promise(r => setTimeout(r, 8000)); // Groq TPM cooldown
 
-    // PASS 2: Continue the script with segments 14-25
+    // ── PASS 2: ACT 3 — revelation + resolution + CTA (segments 14-25) ──
     const pass2SegCount = segmentCount - parsed1.segments.length;
-    const lastSegVoiceover = parsed1.segments[parsed1.segments.length - 1]?.voiceover || "";
+    const lastSegText = parsed1.segments[parsed1.segments.length - 1]?.voiceover || "";
+
     const pass2Prompt = `${voice}
 
-You are writing PART 2 of a voiceover script. Part 1 already covered the HOOK and ${parsed1.segments.length} segments.
+You are writing PART 2 of a documentary-style voiceover. Part 1 covered the HOOK, SETUP, and ESCALATION (${parsed1.segments.length} segments). Now you write the REVELATION and RESOLUTION — ACT 3.
 
-THE VIDEO SO FAR: "${parsed1.title}"
-LAST SEGMENT FROM PART 1: "${lastSegVoiceover.slice(0, 200)}"
-SOURCE INTELLIGENCE: ${truncatedIntel.slice(0, 2000)}
-NICHE: ${niche.replace(/_/g, " ")}
+NARRATIVE BLUEPRINT:
+- THESIS: ${blueprint.thesis}
+- TITLE: "${blueprint.title}"
+- STORY ARC: ${blueprint.narrative_arc}
+- REMAINING ARGUMENTS: ${blueprint.key_arguments.slice(3).map((a, i) => `${i + 4}. ${a}`).join(" | ")}
+- EMOTIONAL JOURNEY: ${blueprint.emotional_journey}
+- WHERE WE LEFT OFF (last segment): "${lastSegText.slice(0, 300)}"
 
-NOW CONTINUE with ${pass2SegCount} MORE segments that build on what came before. Deepen the analysis, introduce new angles, and build toward the CTA.
+Write ${pass2SegCount} MORE segments that:
+1. ESCALATE to the revelation — the moment the thesis lands with full force
+2. Show the IMPLICATIONS — what this means for the viewer's life
+3. Deliver the SOVEREIGN ALTERNATIVE — not just "here's the problem" but "here's the architecture to break free"
+4. Build to a natural, powerful conclusion (not an abrupt stop)
+5. End with an organic CTA
 
-Generate ONLY the continuation segments as a JSON object:
+CRITICAL: These segments must feel like a CONTINUATION of the story, not a restart. Reference ideas from Part 1. Use callback language ("Remember what we said about..." or "This is exactly why...").
+
+Each segment: 100-150 words MINIMUM (6-10 sentences). Under 80 words = FAILURE.
+Vary sentence length. Short punches mixed with flowing thoughts.
+Include 2-3 transition beats across these segments.
+
+Generate as JSON:
 {
   "segments": [
     {
-      "voiceover": "The text to be spoken aloud",
-      "visual_direction": "Cinematographer-quality shot description — camera angle, lighting, physical elements, mood texture",
+      "voiceover": "Spoken text — measured, documentary cadence, building toward revelation",
+      "visual_direction": "Cinematographer shot list: camera angle, lighting, elements, mood",
       "duration_hint": 35
     }
   ]
 }
 
-RULES:
-- ${perSegmentGuidance}
-- PACING: Documentary cadence. Short sentences. Rhetorical questions. Let ideas breathe.
-- visual_direction is THE MOST IMPORTANT FIELD for image quality. Write it like a cinematographer's shot list with camera angle, lighting, physical elements, and mood.
-- ${durationHintNote.replace("ALL 25", `these ${pass2SegCount}`).replace("750-1125", "375-560").replace("800-900", "400-450")}
-- Return ONLY valid JSON, no markdown code fences, no explanation`;
+duration_hint: 30-45 seconds each. Total for these ${pass2SegCount} segments: ${pass2SegCount * 30}-${pass2SegCount * 45} seconds.
+Return ONLY valid JSON, no code fences.`;
 
-    console.log(`📝 [FacelessFactory] Pass 2: Generating segments ${parsed1.segments.length + 1}-${segmentCount}...`);
+    console.log(`📝 [FacelessFactory] Pass 2: ACT 3 — revelation + resolution (${pass2SegCount} segments)...`);
     const res2 = await llm.generate(
       [{ role: "user", content: pass2Prompt }],
       { maxTokens, temperature: 0.8 }
@@ -394,26 +477,50 @@ RULES:
       parsed = parsed1;
     } else {
       console.log(`📝 [FacelessFactory] Pass 2 complete: ${parsed2.segments.length} segments`);
-      // Merge: title/hook/cta from pass 1, all segments combined
       parsed = {
-        title: parsed1.title,
-        hook: parsed1.hook,
+        title: parsed1.title || blueprint.title,
+        hook: parsed1.hook || blueprint.hook,
         segments: [...parsed1.segments, ...parsed2.segments],
-        cta: parsed1.cta,
+        cta: parsed1.cta || "The full protocol is at sovereign-synthesis.com",
       };
     }
     console.log(`📝 [FacelessFactory] Merged script: ${parsed.segments.length} total segments`);
+
   } else {
-    // Short-form: single pass
+    // ── SHORT-FORM: Single pass, tighter prompt ──
+    const shortPrompt = `${voice}
+
+You have source material to draw INSPIRATION from (do NOT copy it):
+${sourceIntelligence.slice(0, 2500)}
+
+Write a ${durationRange} voiceover script for a ${niche.replace(/_/g, " ")} faceless short. ONE powerful idea, not a summary.
+
+Generate as JSON:
+{
+  "title": "Punchy title (max 60 chars)",
+  "hook": "Opening line that stops the scroll — a STATEMENT, not a question",
+  "segments": [
+    { "voiceover": "2-4 spoken sentences (30-50 words)", "visual_direction": "camera angle, lighting, elements, mood", "duration_hint": ${durationHintExample} }
+  ],
+  "cta": "Organic CTA to sovereign-synthesis.com"
+}
+
+RULES:
+- 5 segments total. ONE idea with setup → twist → payoff
+- Write ORIGINAL content. The source is inspiration, not a script to rewrite
+- Hook must stop mid-scroll in 3 seconds
+- FORMAT: ${orientation === "horizontal" ? "LANDSCAPE 16:9" : "VERTICAL 9:16"}
+- duration_hint per segment ~8-12s, total ~45s
+- Return ONLY valid JSON`;
+
     const response = await llm.generate(
-      [{ role: "user", content: prompt }],
+      [{ role: "user", content: shortPrompt }],
       { maxTokens, temperature: 0.8 }
     );
-    const result = response.content;
-    parsed = extractJSON(result);
+    parsed = extractJSON(response.content);
     if (!parsed) {
-      console.error(`[FacelessFactory] ALL JSON parse attempts failed. Raw response (first 500 chars):\n${result.slice(0, 500)}`);
-      throw new Error(`Failed to parse script from LLM. Response starts: ${result.slice(0, 150)}`);
+      console.error(`[FacelessFactory] ALL JSON parse attempts failed. Raw response (first 500 chars):\n${response.content.slice(0, 500)}`);
+      throw new Error(`Failed to parse script from LLM. Response starts: ${response.content.slice(0, 150)}`);
     }
   }
 

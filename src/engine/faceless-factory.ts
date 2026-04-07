@@ -58,10 +58,13 @@ interface FacelessScript {
   segments: ScriptSegment[];
   cta: string;
   frequency_activations?: FrequencyActivation[]; // 2 per long-form — mid-video consciousness CTAs
+  thumbnail_text?: string;      // 2-5 words, ALL CAPS, for thumbnail overlay — the scroll-stopper
+  thumbnail_visual?: string;    // Cinematographer direction for the thumbnail base image
 }
 
 interface FacelessResult {
   videoUrl: string | null;
+  thumbnailUrl?: string | null;
   localPath: string;
   title: string;
   niche: string;
@@ -202,13 +205,23 @@ function cleanupJobFiles(jobId: string, keepFinal: boolean = true): void {
 const SCRIPT_VOICE: Record<Brand, string> = {
   ace_richie: `You are writing a voiceover script for a faceless video on the Sovereign Synthesis channel (Ace Richie).
 
-VOICE: Sovereign, direct, zero-fear. You speak as someone who cracked the code and is handing the blueprint to the next person. Bold but warm, authoritative but approachable. You've escaped The Simulation.
+CORE MISSION — THE SOVEREIGN EXCHANGE:
+This channel deploys a firmware update for human consciousness. The viewer trades their old, inherited programming for sovereign architecture. Every video must leave them with ONE piece of that architecture they didn't have before — not motivation, not inspiration, ARCHITECTURE. A tool. A framework. A lens that permanently changes how they see reality.
 
-LEXICON (use naturally): Firmware Update, Escape Velocity, The Simulation, Protocol 77, Biological Drag, Sovereign Synthesis.
+URGENCY THREAD (hardcode into EVERY video):
+Humanity is in active evolution RIGHT NOW. AI is accelerating this shift exponentially. The people who refuse to update their internal operating system aren't just "falling behind" — they are becoming obsolete in real time. This is not future tense. This is not hypothetical. The gap between the sovereign and the sleeping is widening every single day, and most people can feel it but can't name it. YOUR JOB IS TO NAME IT.
 
-STRUCTURE: HOOK (pattern interrupt, first 3 seconds) → PIVOT (dark psychology insight flipped into sovereignty tool) → ANCHOR (consciousness hook linking to Protocol 77).
+DUAL-LAYER ENCODING (critical):
+Layer 1 — PLAIN ENGLISH (for the uninitiated): Always FIRST. Name the feeling they already carry but can't articulate. "You feel like you're running someone else's program." "The rules you followed were designed for a game that no longer exists." "Everyone around you is optimizing for a world that's already gone." This is the door. No jargon. Just the precise articulation of a truth they've been holding alone.
+Layer 2 — SOVEREIGN LEXICON (for the initiated): AFTER the plain-English truth lands, give it its upgraded name. The feeling of being stuck isn't just "being stuck" — it's running legacy firmware. The world feeling fake isn't paranoia — it's pattern recognition of The Simulation's parameters. The lexicon REPLACES their old language with something more precise. That's the exchange.
 
-The voiceover should sound like a human speaking — conversational, with natural pauses. NOT like reading an essay.`,
+LEXICON (deploy naturally after plain-English setup): Firmware Update, Escape Velocity, The Simulation, Protocol 77, Biological Drag, Sovereign Synthesis, System Mastery Architecture.
+
+VOICE: Sovereign, direct, zero-fear. You speak as someone who cracked the code and is handing the blueprint to the next person. Bold but warm, authoritative but approachable. You carry urgency without panic — the energy of someone who sees the wave coming and is calmly showing people how to ride it.
+
+STRUCTURE: HOOK (name the feeling they can't articulate — plain English, 3 seconds) → PIVOT (reveal the hidden mechanism — dark psychology insight transmuted into sovereignty tool) → EXCHANGE (give them the architecture — one piece of the sovereign framework they can USE) → ANCHOR (consciousness hook linking to Protocol 77, urgency call forward).
+
+The voiceover should sound like a human speaking — conversational, with natural pauses. NOT like reading an essay. NOT like a motivational speech. Like someone telling you something urgent and real over a quiet table.`,
 
   containment_field: `You are writing a voiceover script for a faceless video on The Containment Field channel.
 
@@ -291,6 +304,9 @@ You have raw transcript material from a source video. Your job is NOT to summari
 
 Think like a documentary filmmaker: What is the ONE powerful thesis buried in this material? What story does it tell about human nature, power, psychology, or consciousness?
 
+URGENCY CONTEXT (weave into every blueprint):
+We are in an active evolutionary moment. AI and exponential technological shifts are widening the gap between the sovereign and the sleeping DAILY. The people who feel "stuck" or "behind" aren't imagining it — their internal operating system is outdated and the world around them is updating faster than they are. This channel exists to deliver the architectural codes for the upgrade. Every video must carry this urgency — not as fear, but as factual observation that demands action NOW.
+
 RAW SOURCE MATERIAL (use as INSPIRATION only — do NOT copy phrases or structure):
 ${sourceIntelligence.slice(0, 2500)}
 
@@ -298,18 +314,20 @@ NICHE: ${niche.replace(/_/g, " ")}
 
 Extract a narrative blueprint as JSON:
 {
-  "thesis": "The ONE bold claim the entire video argues (1 sentence, provocative, specific — NOT generic like 'mindset matters')",
-  "title": "Punchy video title derived from the thesis (max 60 chars, pattern-interrupt energy)",
-  "hook": "The first 2 sentences spoken — must create an open loop or challenge a belief (NOT a question — a STATEMENT that makes them need to hear more)",
-  "narrative_arc": "3-act summary: ACT 1 (setup — what most people believe / the surface-level truth) → ACT 2 (escalation — the hidden mechanism, the evidence, the uncomfortable reality) → ACT 3 (revelation — the deeper truth, the shift, what this means for the viewer)",
+  "thesis": "The ONE bold claim the entire video argues (1 sentence, provocative, specific — NOT generic like 'mindset matters'). Must connect to the urgency of NOW — why this matters TODAY, not someday.",
+  "title": "Punchy video title derived from the thesis (max 60 chars, pattern-interrupt energy). Must create curiosity gap or make a bold claim.",
+  "hook": "The first 2 sentences spoken — must NAME A FEELING the viewer already has but can't articulate. Plain English, no jargon. A STATEMENT that makes them think 'how does this person know exactly what I'm experiencing?' Open loop energy.",
+  "narrative_arc": "3-act summary: ACT 1 (name the feeling — plain English, what they already sense is wrong) → ACT 2 (reveal the mechanism — the hidden architecture behind the feeling, why the old rules no longer work) → ACT 3 (deliver the exchange — give them one piece of sovereign architecture that replaces the old programming, tie to the urgency of acting NOW)",
   "key_arguments": ["argument 1 that supports thesis", "argument 2...", "...up to 7 total, in narrative ORDER — each builds on the previous"],
-  "emotional_journey": "How the viewer should FEEL: curious → unsettled → mind-blown → empowered (or whatever arc fits)"
+  "emotional_journey": "How the viewer should FEEL: recognized ('someone finally named it') → unsettled (the mechanism is deeper than they thought) → urgent (this is happening NOW, not someday) → sovereign (they leave with one new piece of architecture)"
 }
 
 RULES:
 - The thesis must be SPECIFIC and PROVOCATIVE, not generic self-help ("Most people are running someone else's code and calling it ambition" NOT "mindset is important")
+- The hook must speak PLAIN ENGLISH first — name the universal feeling. The sovereign lexicon comes later in the video, not in the hook.
 - The title should make someone stop scrolling. Use power words, irony, or challenge assumptions
 - Key arguments must ESCALATE — each one deeper than the last, building toward the revelation
+- ACT 3 must deliver ARCHITECTURE, not motivation. A framework, a lens, a tool — something they can USE
 - Do NOT just list topics from the source. Find the THREAD that connects them into one argument
 - Return ONLY valid JSON`;
 
@@ -394,8 +412,10 @@ CRITICAL WRITING RULES:
 
 Generate as JSON:
 {
-  "title": "${blueprint.title}",
+  "title": "CTR-optimized title (max 60 chars) — curiosity gap, emotional trigger, or bold claim. NOT generic. Study: 'System Failure by Design', 'The Trap Nobody Warns You About', 'Why Your Reality Is Running on Outdated Code'",
   "hook": "${blueprint.hook}",
+  "thumbnail_text": "2-5 words ALL CAPS that STOP the scroll. This is the TEXT that goes ON the thumbnail image. Think: 'BREAK THE BLOCK', 'YOU WERE CHOSEN', 'SYSTEM FAILURE', 'THEY LIED TO YOU'. Must create instant curiosity or emotional reaction in under 1 second.",
+  "thumbnail_visual": "Thumbnail-specific visual: MUST be a single dramatic focal point image — lone silhouette against cosmic light, figure at the edge of a void, sacred geometry portal, shattered chains with golden fragments. HIGH CONTRAST required (bright focal element against deep dark background). This is a STILL IMAGE, not a video frame — it needs to read at 120x68px thumbnail size.",
   "segments": [
     {
       "voiceover": "The spoken text for this segment — conversational, measured, documentary cadence",
@@ -597,8 +617,10 @@ Write a ${durationRange} voiceover script for a ${niche.replace(/_/g, " ")} face
 
 Generate as JSON:
 {
-  "title": "Punchy title (max 60 chars)",
+  "title": "CTR-optimized title (max 60 chars) — curiosity gap or bold claim, NOT generic",
   "hook": "Opening line that stops the scroll — a STATEMENT, not a question",
+  "thumbnail_text": "2-5 words ALL CAPS for thumbnail overlay — instant emotional hit at 120x68px",
+  "thumbnail_visual": "Single dramatic focal point: silhouette, portal, shattered chains, cosmic void. HIGH CONTRAST. Must read at tiny thumbnail size.",
   "segments": [
     { "voiceover": "2-4 spoken sentences (30-50 words)", "visual_direction": "camera angle, lighting, elements, mood", "duration_hint": ${durationHintExample} }
   ],
@@ -716,6 +738,8 @@ Return ONLY valid JSON:
     segments,
     cta: parsed.cta || "The full protocol is at sovereign-synthesis.com",
     frequency_activations: parsed.frequency_activations,
+    thumbnail_text: parsed.thumbnail_text || "",
+    thumbnail_visual: parsed.thumbnail_visual || "",
   };
 }
 
@@ -1039,6 +1063,143 @@ function generateFallbackGradient(
   } catch {
     return false;
   }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 3b: Generate YouTube Thumbnail (Session 33)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Purpose-built thumbnail with:
+// 1. Imagen 4 base image (high contrast, single focal point, brand-encoded)
+// 2. Bold text overlay via ffmpeg (Bebas Neue, gold on dark, massive font)
+// This is NOT a scene frame — it's designed to stop scrolls at 120x68px thumbnail size.
+
+async function generateThumbnail(
+  script: FacelessScript,
+  jobId: string,
+  brand: Brand,
+  niche: string
+): Promise<string | null> {
+  const thumbBasePath = `${FACELESS_DIR}/${jobId}_thumb_base.png`;
+  const thumbFinalPath = `${FACELESS_DIR}/${jobId}_thumbnail.jpg`;
+
+  const thumbnailText = (script.thumbnail_text || script.title || "")
+    .toUpperCase()
+    .replace(/[^\w\s!?]/g, "")  // Strip special chars that break drawtext
+    .slice(0, 30);               // Hard cap
+
+  if (!thumbnailText) {
+    console.warn(`[FacelessFactory] No thumbnail text generated, skipping thumbnail`);
+    return null;
+  }
+
+  // ── Generate base image via Imagen 4 ──
+  // Thumbnail-specific prompt: HIGH CONTRAST, single focal point, NO text in image
+  const thumbStyle = brand === "containment_field"
+    ? "Ultra high contrast noir photograph, single cold blue light source piercing total darkness, volumetric haze, lone silhouette or symbolic object as focal point, extreme chiaroscuro, 16:9 landscape"
+    : "Ultra high contrast cinematic still, single amber/gold light source against deep void (#0a0a0f), volumetric golden particles, lone silhouette or sacred geometry as dramatic focal point, teal (#00e5c7) accent rim light, 16:9 landscape";
+
+  const thumbVisual = script.thumbnail_visual || "lone figure silhouetted against a vast cosmic light source, concentric rings of golden energy";
+  const thumbPrompt = `${thumbStyle}. Scene: ${thumbVisual}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks. The image must have a large dark area (left or right third) where text will be overlaid.`;
+
+  const geminiKey = config.llm.providers.gemini?.imagenKey || config.llm.providers.gemini?.apiKey;
+  let hasBase = false;
+
+  if (geminiKey) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${geminiKey}`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          instances: [{ prompt: thumbPrompt }],
+          parameters: { sampleCount: 1, aspectRatio: "16:9", safetyFilterLevel: "block_only_high" },
+        }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as any;
+        const b64 = data.predictions?.[0]?.bytesBase64Encoded || data.predictions?.[0]?.image?.bytesBase64Encoded;
+        if (b64) {
+          const buf = Buffer.from(b64, "base64");
+          if (buf.length > 5000) {
+            writeFileSync(thumbBasePath, buf);
+            hasBase = true;
+            console.log(`🖼️ [FacelessFactory] Thumbnail base generated via Imagen 4 (${(buf.length / 1024).toFixed(0)}KB)`);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[FacelessFactory] Thumbnail Imagen 4 failed: ${err.message?.slice(0, 200)}`);
+    }
+  }
+
+  // Fallback: dark gradient base
+  if (!hasBase) {
+    try {
+      execSync(
+        `ffmpeg -f lavfi -i "color=c=0x0a0a0f:s=1920x1080:d=1" -vf "drawbox=x=0:y=0:w=1920:h=1080:c=0x0a0a0f@1:t=fill" -frames:v 1 -y "${thumbBasePath}"`,
+        { timeout: 15_000, stdio: "pipe" }
+      );
+      hasBase = existsSync(thumbBasePath);
+    } catch { /* non-fatal */ }
+  }
+
+  if (!hasBase) return null;
+
+  // ── Overlay bold text via ffmpeg ──
+  // Split into lines for wrapping, style with brand colors, massive font
+  const brandAssetsDir = `${__dirname}/../../brand-assets`;
+  const fontPath = `${brandAssetsDir}/BebasNeue-Regular.ttf`;
+  const hasFont = existsSync(fontPath);
+  const fontFilter = hasFont ? `fontfile='${fontPath}':` : "";
+
+  // Split text into max 2 lines
+  const words = thumbnailText.split(/\s+/);
+  let line1 = "";
+  let line2 = "";
+  if (words.length <= 3) {
+    line1 = words.join(" ");
+  } else {
+    const mid = Math.ceil(words.length / 2);
+    line1 = words.slice(0, mid).join(" ");
+    line2 = words.slice(mid).join(" ");
+  }
+
+  const escapeDT = (s: string) => s.replace(/'/g, "'\\''").replace(/:/g, "\\:");
+
+  // Gold text (#d4a843) with dark border, positioned right-of-center for maximum impact
+  // Font size 120 for line 1, 110 for line 2 (if exists)
+  let textFilters = `drawtext=${fontFilter}text='${escapeDT(line1)}':fontsize=120:fontcolor=0xd4a843:borderw=5:bordercolor=0x0a0a0f:x=(w*0.05):y=(h*0.35)`;
+
+  if (line2) {
+    textFilters += `,drawtext=${fontFilter}text='${escapeDT(line2)}':fontsize=110:fontcolor=0xd4a843:borderw=5:bordercolor=0x0a0a0f:x=(w*0.05):y=(h*0.55)`;
+  }
+
+  // Add subtle teal accent line under the text
+  textFilters += `,drawbox=x=iw*0.05:y=${line2 ? "ih*0.72" : "ih*0.55"}:w=iw*0.35:h=4:c=0x00e5c7@0.8:t=fill`;
+
+  try {
+    execSync(
+      `ffmpeg -i "${thumbBasePath}" -vf "${textFilters}" -q:v 2 -y "${thumbFinalPath}"`,
+      { timeout: 30_000, stdio: "pipe" }
+    );
+
+    if (existsSync(thumbFinalPath)) {
+      const size = readFileSync(thumbFinalPath).length;
+      console.log(`🖼️ [FacelessFactory] Thumbnail rendered: "${thumbnailText}" (${(size / 1024).toFixed(0)}KB)`);
+      return thumbFinalPath;
+    }
+  } catch (err: any) {
+    console.warn(`[FacelessFactory] Thumbnail text overlay failed: ${err.message?.slice(0, 200)}`);
+  }
+
+  // If text overlay failed, return the base image
+  if (existsSync(thumbBasePath)) {
+    try {
+      execSync(`ffmpeg -i "${thumbBasePath}" -q:v 2 -y "${thumbFinalPath}"`, { timeout: 10_000, stdio: "pipe" });
+      return existsSync(thumbFinalPath) ? thumbFinalPath : null;
+    } catch { return null; }
+  }
+  return null;
 }
 
 async function generateSceneImage(
@@ -1708,7 +1869,8 @@ async function uploadAndQueue(
   videoPath: string,
   script: FacelessScript,
   jobId: string,
-  meta?: { brand?: string; niche?: string }
+  meta?: { brand?: string; niche?: string },
+  thumbnailPath?: string | null
 ): Promise<string | null> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return null;
 
@@ -1742,6 +1904,34 @@ async function uploadAndQueue(
     const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${storagePath}`;
     console.log(`📤 [FacelessFactory] Uploaded → ${publicUrl}`);
 
+    // Upload thumbnail if available
+    let thumbnailUrl: string | null = null;
+    if (thumbnailPath && existsSync(thumbnailPath)) {
+      try {
+        const thumbStoragePath = `faceless/${folderName}/${folderName}_thumbnail.jpg`;
+        const thumbBuf = readFileSync(thumbnailPath);
+        const thumbResp = await fetch(
+          `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${thumbStoragePath}`,
+          {
+            method: "POST",
+            headers: {
+              apikey: SUPABASE_KEY,
+              Authorization: `Bearer ${SUPABASE_KEY}`,
+              "Content-Type": "image/jpeg",
+              "x-upsert": "true",
+            },
+            body: thumbBuf,
+          }
+        );
+        if (thumbResp.ok) {
+          thumbnailUrl = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${thumbStoragePath}`;
+          console.log(`🖼️ [FacelessFactory] Thumbnail uploaded → ${thumbnailUrl}`);
+        }
+      } catch (err: any) {
+        console.warn(`[FacelessFactory] Thumbnail upload failed (non-fatal): ${err.message?.slice(0, 150)}`);
+      }
+    }
+
     // Write to vid_rush_queue
     await fetch(`${SUPABASE_URL}/rest/v1/vid_rush_queue`, {
       method: "POST",
@@ -1759,6 +1949,7 @@ async function uploadAndQueue(
         video_url: publicUrl,
         status: "ready",
         platform: "multi",
+        thumbnail_url: thumbnailUrl,
         metadata: {
           type: "faceless",
           brand: script.brand,
@@ -1766,6 +1957,7 @@ async function uploadAndQueue(
           segment_count: script.segments.length,
           cta: script.cta,
           hook: script.hook,
+          thumbnail_text: script.thumbnail_text,
         },
       }),
     });
@@ -1905,6 +2097,15 @@ export async function produceFacelessVideo(
     throw new Error("Zero scene images generated — check Gemini Imagen API key and quota");
   }
 
+  // STEP 3b: Generate thumbnail (runs while scene images are fresh in Imagen quota)
+  console.log(`🖼️ [FacelessFactory] Generating thumbnail...`);
+  let thumbnailPath: string | null = null;
+  try {
+    thumbnailPath = await generateThumbnail(script, jobId, brand, niche);
+  } catch (err: any) {
+    console.warn(`⚠️ [FacelessFactory] Thumbnail generation failed (non-fatal): ${err.message?.slice(0, 200)}`);
+  }
+
   // STEP 4: Assemble video
   console.log(`🎬 [FacelessFactory] Assembling video...`);
   const videoPath = await assembleVideo(script, audioPath, imagePaths, jobId, orientation, audioResult.segmentDurations);
@@ -1921,7 +2122,7 @@ export async function produceFacelessVideo(
 
   // STEP 5: Upload + queue
   console.log(`📤 [FacelessFactory] Uploading to Supabase...`);
-  const videoUrl = await uploadAndQueue(videoPath, script, jobId, { brand, niche });
+  const videoUrl = await uploadAndQueue(videoPath, script, jobId, { brand, niche }, thumbnailPath);
 
   // Clean up intermediate files (TTS segments, raw audio, images, concat lists)
   // Keep the final video — orchestrator needs it for chopping

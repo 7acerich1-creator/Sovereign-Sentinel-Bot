@@ -15,6 +15,7 @@ export class FailoverLLM implements LLMProvider {
   private timeoutMs: number;
   private primaryRetries: number;
   private lastUsedProvider: string = "";
+  private _primaryOnly: boolean = false;
 
   /**
    * @param providers - Ordered list of LLM providers (first = primary)
@@ -32,6 +33,16 @@ export class FailoverLLM implements LLMProvider {
     }
   }
 
+  /**
+   * SESSION 33: Primary-only mode for dispatch tasks.
+   * When enabled, the failover chain ONLY tries the primary provider (Groq).
+   * If Groq is down, it fails fast instead of cascading to Anthropic and burning credits.
+   * Call setPrimaryOnly(true) before dispatch processing, setPrimaryOnly(false) after.
+   */
+  setPrimaryOnly(enabled: boolean): void {
+    this._primaryOnly = enabled;
+  }
+
   get activeProvider(): string {
     return this.lastUsedProvider;
   }
@@ -39,7 +50,12 @@ export class FailoverLLM implements LLMProvider {
   async generate(messages: LLMMessage[], options?: LLMOptions): Promise<LLMResponse> {
     const errors: string[] = [];
 
-    for (let providerIdx = 0; providerIdx < this.providers.length; providerIdx++) {
+    // SESSION 33: If primary-only mode is active, only try the first provider.
+    // This prevents dispatch tasks from cascading to paid providers (Anthropic)
+    // when the free primary (Groq) is rate-limited.
+    const providerLimit = this._primaryOnly ? 1 : this.providers.length;
+
+    for (let providerIdx = 0; providerIdx < providerLimit; providerIdx++) {
       const provider = this.providers[providerIdx];
       const isPrimary = providerIdx === 0;
       // Primary gets extra retries with backoff. Secondaries get 1 shot each (original behavior).

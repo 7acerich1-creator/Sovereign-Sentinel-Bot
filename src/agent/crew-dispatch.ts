@@ -276,23 +276,34 @@ export async function triggerPipelineHandoffs(
   const routes = PIPELINE_ROUTES[fromAgent];
   if (!routes) return [];
 
+  // ── CIRCUIT BREAKER: Don't cascade failures ──
+  // If the upstream agent's response is an error/failure, STOP the chain.
+  // This prevents the death spiral: failed task → briefing about failure → dispatch about briefing → repeat.
+  const response = typeof outputs.response === "string" ? outputs.response : "";
+  const isFailure = response.toLowerCase().includes("all llm providers failed") ||
+    response.toLowerCase().includes("error:") ||
+    response.toLowerCase().includes("tool execution error") ||
+    response.startsWith("⚠️") ||
+    response.includes("SYSTEM STATUS: DEGRADED") ||
+    response.includes("completely broken");
+
+  if (isFailure) {
+    console.warn(`🛑 [CrewDispatch] CIRCUIT BREAKER: ${fromAgent} output is a failure/error — NOT dispatching downstream. Stopping cascade.`);
+    return [];
+  }
+
   const dispatchIds: string[] = [];
 
   for (const route of routes) {
-    // Try the specific payload key first, then fall back to the full response
-    let payloadData = outputs[route.payloadKey];
-    let usedFallback = false;
-
-    if (!payloadData && outputs.response) {
-      // Fallback: the agent produced freeform text instead of structured keys.
-      // Pass the full response so the downstream agent can work with it.
-      payloadData = outputs.response;
-      usedFallback = true;
-      console.log(`[CrewDispatch] ${fromAgent} → ${route.to}: "${route.payloadKey}" not found, forwarding full response`);
-    }
+    // ONLY dispatch if the agent produced the SPECIFIC structured payload key.
+    // Session 33 FIX: Removed the "full response fallback" that was causing infinite ping-pong loops.
+    // Old behavior: if payloadKey wasn't found, forwarded the entire freeform response.
+    // This meant EVERY agent completion dispatched downstream, even error messages and briefings.
+    // New behavior: no structured key = no dispatch. Agents must produce the expected output format.
+    const payloadData = outputs[route.payloadKey];
 
     if (!payloadData) {
-      console.log(`[CrewDispatch] Skipping ${fromAgent} → ${route.to}: no "${route.payloadKey}" and no response in outputs`);
+      console.log(`[CrewDispatch] Skipping ${fromAgent} → ${route.to}: no "${route.payloadKey}" in outputs (no fallback)`);
       continue;
     }
 
@@ -302,9 +313,6 @@ export async function triggerPipelineHandoffs(
       task_type: route.task_type,
       payload: {
         [route.payloadKey]: payloadData,
-        directive: usedFallback
-          ? `Process this ${route.task_type} task using the content provided. The upstream agent (${fromAgent}) provided a freeform response — extract what you need.`
-          : undefined,
         source_agent: fromAgent,
         pipeline: true,
       },

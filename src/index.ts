@@ -2630,6 +2630,13 @@ async function main() {
           return;
         }
 
+        // SESSION 33: Enable primary-only mode on ALL agent LLM teams during dispatch.
+        // This prevents Groq failures from cascading to Anthropic ($$) for automated tasks.
+        // Direct user messages (via Telegram) still get the full failover chain.
+        for (const team of Object.values(AGENT_LLM_TEAMS)) {
+          team.setPrimaryOnly(true);
+        }
+
         try {
           // ONE query for ALL agents instead of 6 separate queries
           const tasksByAgent = await claimAllPending(agentNames, 1);
@@ -2725,7 +2732,21 @@ async function main() {
                 const isHeavyTask = HEAVY_TASKS.has(task.task_type);
                 const iterCap = isHeavyTask ? 6 : 4;
                 const response = await agentLoop.processMessage(dispatchMessage, undefined, iterCap);
-                await completeDispatch(task.id, "completed", response.slice(0, 4000));
+
+                // SESSION 33: Detect if the response is actually a failure — mark appropriately.
+                // Prevents "completed" status on tasks where all LLM providers failed,
+                // and blocks downstream handoffs from cascading error messages.
+                const isErrorResponse = response.toLowerCase().includes("all llm providers failed") ||
+                  response.startsWith("⚠️") ||
+                  response.includes("SYSTEM STATUS: DEGRADED") ||
+                  response.includes("completely broken");
+                const dispatchStatus = isErrorResponse ? "failed" as const : "completed" as const;
+                await completeDispatch(task.id, dispatchStatus, response.slice(0, 4000));
+
+                if (isErrorResponse) {
+                  console.warn(`🛑 [DispatchPoller] ${agentName} task ${task.task_type} produced error response — marked FAILED, skipping handoffs`);
+                  continue; // Skip handoffs and auto-pipeline trigger
+                }
 
                 // Auto-trigger pipeline handoffs if this agent has downstream routes
                 try {
@@ -2946,6 +2967,12 @@ async function main() {
           } else {
             console.error(`[DispatchPoller] Fatal poll error: ${err.message}`);
           }
+        }
+
+        // SESSION 33: Restore full failover chain after dispatch processing.
+        // Direct user messages still get Groq→Anthropic failover.
+        for (const team of Object.values(AGENT_LLM_TEAMS)) {
+          team.setPrimaryOnly(false);
         }
 
         // Schedule next poll (dynamic interval for backoff)

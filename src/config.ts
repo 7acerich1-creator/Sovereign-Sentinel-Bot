@@ -78,10 +78,6 @@ export const config: GravityClawConfig = {
     sqlitePath: process.env.SQLITE_PATH || "./gravity-claw.db",
     supabaseUrl: process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL,
     supabaseKey: process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    // SESSION 31: Service role key bypasses RLS for server-side writes.
-    // crew_dispatch, briefings, and tasks tables were all returning 401 because
-    // anon key doesn't have INSERT/UPDATE privileges through RLS policies.
-    // Falls back to anon key if not set (old behavior, will still fail on RLS-protected tables).
     supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
     pineconeApiKey: process.env.PINECONE_API_KEY,
     pineconeIndex: process.env.PINECONE_INDEX,
@@ -133,4 +129,12 @@ export const config: GravityClawConfig = {
     makeScenarioEWebhook: process.env.MAKE_SCENARIO_E_WEBHOOK || "",
     makeScenarioFWebhook: process.env.MAKE_SCENARIO_F_WEBHOOK || "",
     bufferApiKey: process.env.BUFFER_API_KEY || "",
-    bufferO
+    bufferOrgId: process.env.BUFFER_ORG_ID || "69c613a244dbc563b3e05050",
+  },
+
+  security: {
+    maxAgentIterations: envInt("MAX_AGENT_ITERATIONS", 10),
+    dangerousCommandConfirmation: process.env.DANGEROUS_COMMAND_CONFIRMATION !== "false",
+    auditLogPath: process.env.AUDIT_LOG_PATH || "./.agent/logs",
+  },
+};

@@ -194,36 +194,25 @@ async function main() {
   const failoverLLM = new FailoverLLM(llmProviders);
 
   // ── 2B. Per-Agent LLM Provider Teams ──
-  // SESSION 31 OVERHAUL: Dual Groq key distribution across ALL agents.
-  // Previously only TCF pipeline used the second key. Now agents are split across
-  // both keys to halve the rate limit pressure on each. Groq free tier = 30 RPM
-  // and 6000 TPM per key. With 6 agents + 2 pipelines on one key, every call 429'd.
+  // Split providers across agents to prevent quota stampedes.
+  // When all agents share one chain, a Gemini quota hit cascades to ALL agents simultaneously.
+  // This gives each team its own primary, with the others as failover.
   const providersByName: Record<string, LLMProvider> = {};
   for (const p of llmProviders) providersByName[p.name] = p;
 
   // LLM_TIMEOUT_MS env var lets Railway override per-call timeout without a code deploy.
+  // Default 60s is too short for 6144-token Groq completions under rate limiting.
   const llmTimeoutMs = parseInt(process.env.LLM_TIMEOUT_MS || "60000", 10);
 
-  // ── Dual Groq Key Setup ──
-  // GROQ_API_KEY = primary key (config.llm.providers.groq)
-  // GROQ_API_KEY_TCF = secondary key (originally for TCF pipeline only)
-  // SESSION 31: Now split across ALL agents — half use key A, half use key B.
-  // This doubles our effective rate limit from 30 RPM → 60 RPM across the system.
+  // Session 31: Dual Groq key distribution across agents AND pipelines.
+  // GROQ_API_KEY = Key A (primary), GROQ_API_KEY_TCF = Key B (secondary).
+  // Splits 30 RPM / 6000 TPM per key across agents to prevent rate limit stampedes.
   const groqTcfKey = process.env.GROQ_API_KEY_TCF;
   let groqProviderB: LLMProvider | null = null;
   if (groqTcfKey) {
-    groqProviderB = createProvider(
-      "groq",
-      groqTcfKey,
-      config.llm.providers.groq.model,
-      config.llm.providers.groq.baseUrl
-    );
-    console.log(`🔑 [LLM] Dual Groq keys active. Splitting agents across both rate limit pools.`);
-  } else {
-    console.warn(`⚠️ [LLM] GROQ_API_KEY_TCF not set — all agents share one Groq rate limit pool`);
+    groqProviderB = createProvider("groq", groqTcfKey, config.llm.providers.groq.model, config.llm.providers.groq.baseUrl);
   }
 
-  // Helper: build a failover chain with a specific Groq provider
   function buildTeamLLM(primaryOrder: string[], primaryRetries = 0, useGroqB = false): FailoverLLM {
     const chain: LLMProvider[] = [];
     for (const name of primaryOrder) {
@@ -233,19 +222,11 @@ async function main() {
         chain.push(providersByName[name]);
       }
     }
-    // STRICT: Only use providers explicitly listed in primaryOrder.
-    // DO NOT add other providers as silent fallback — this was the root cause of
-    // the Gemini billing leak (Session 29c). Every agent had Gemini as a hidden
-    // tail-end fallback that fired when Anthropic credits died + Groq timed out.
     return new FailoverLLM(chain, llmTimeoutMs, primaryRetries);
   }
 
-  // SESSION 31 AGENT SPLIT:
-  // Key A (GROQ_API_KEY):     alfred, vector, yuki + Ace Richie pipeline
-  // Key B (GROQ_API_KEY_TCF): anita + TCF pipeline
-  // Veritas + Sapphire: Anthropic-first (no Groq pressure from strategic agents)
-  // This means: during pipeline runs, Key A handles Ace Richie pipeline + 3 agents,
-  // Key B handles TCF pipeline + Anita. Much better than 6+2 on one key.
+  // Session 31: Agent-to-key assignments. Key A = alfred, vector. Key B = anita, yuki.
+  // Sapphire + Veritas = Anthropic-first (brain agents, not pipeline grunts).
   const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
     alfred: buildTeamLLM(["groq", "anthropic"], 0, false),    // Key A
     anita: buildTeamLLM(["groq", "anthropic"], 0, true),      // Key B
@@ -255,18 +236,19 @@ async function main() {
     yuki: buildTeamLLM(["groq", "anthropic"], 0, true),       // Key B
   };
 
-  // Pipeline LLMs: Ace Richie on Key A, TCF on Key B.
-  // primaryRetries=1: 2 Groq attempts before failover (down from 3).
-  // With Session 31 fetchWithRetry fix (5s cap), each attempt is ~6s max = 12s worst case.
-  const pipelineLLM = buildTeamLLM(["groq", "anthropic"], 1, false);
-  const tcfPipelineLLM = buildTeamLLM(["groq", "anthropic"], 1, true);
+  const pipelineLLM = buildTeamLLM(["groq", "anthropic"], 1, false);     // Key A
+  const tcfPipelineLLM = buildTeamLLM(["groq", "anthropic"], 1, true);   // Key B
 
-  console.log("🔀 [LLM Teams] Provider split active (Session 31 — dual key distribution):");
+  if (groqTcfKey) {
+    console.log(`🔑 [LLM Teams] Dual Groq key active. Key A: alfred,vector,pipeline. Key B: anita,yuki,tcf-pipeline.`);
+  } else {
+    console.warn(`⚠️ [LLM Teams] GROQ_API_KEY_TCF not set — all agents share one Groq key (30 RPM)`);
+  }
+
+  console.log("🔀 [LLM Teams] Provider split active:");
   for (const [agent, team] of Object.entries(AGENT_LLM_TEAMS)) {
     console.log(`   ${agent}: ${team.listProviders().join(" → ")}`);
   }
-  console.log(`   pipeline (Ace): ${pipelineLLM.listProviders().join(" → ")}`);
-  console.log(`   pipeline (TCF): ${tcfPipelineLLM.listProviders().join(" → ")}`);
 
   // ── 3. Initialize Tools ──
   const tools: Tool[] = [
@@ -464,12 +446,7 @@ async function main() {
 
       // ── Send immediate processing signal ──
       const processingMsg = await telegram.sendMessage(message.chatId, "⚡ _Veritas Processing..._", { parseMode: "Markdown" });
-      // SESSION 31: Raised from 120s to 180s.
-      // Root cause: Groq 429 burned 60s in timeout race, failover to Anthropic took 20-40s
-      // for 22K-token contexts, and multi-iteration loops (tool call → result → LLM again)
-      // easily exceeded 120s. With the fetchWithRetry fix (5s cap), Groq attempts now take
-      // max 12s before failover, but Anthropic multi-iteration still needs headroom.
-      const HANDLER_TIMEOUT_MS = 180_000;
+      const HANDLER_TIMEOUT_MS = 180_000; // Session 31: raised from 120s — Veritas multi-iteration loops with Anthropic at 22K tokens need more time
 
       const response = await Promise.race([
         agentLoop.processMessage(
@@ -477,7 +454,7 @@ async function main() {
           () => telegram.sendTyping(message.chatId)
         ),
         new Promise<string>((_, reject) =>
-          setTimeout(() => reject(new Error("Agent loop timed out after 120s")), HANDLER_TIMEOUT_MS)
+          setTimeout(() => reject(new Error("Agent loop timed out after 180s")), HANDLER_TIMEOUT_MS)
         ),
       ]);
 
@@ -2272,7 +2249,7 @@ async function main() {
   if (process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)) {
     const supabase = (await import("@supabase/supabase-js")).createClient(
       process.env.SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY!
+      (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)!
     );
 
     // ── PERSONALITY LOADER: Bundled JSON (zero network dependency) ──
@@ -2887,8 +2864,8 @@ async function main() {
                   await fetch(`${process.env.SUPABASE_URL}/rest/v1/activity_log`, {
                     method: "POST",
                     headers: {
-                      apikey: (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)!,
-                      Authorization: `Bearer ${(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)!}`,
+                      apikey: process.env.SUPABASE_ANON_KEY!,
+                      Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY!}`,
                       "Content-Type": "application/json",
                       Prefer: "return=minimal",
                     },
@@ -3152,4 +3129,33 @@ async function main() {
     await mcpBridge.shutdown();
     await router.shutdownAll();
 
-    // Shutdo
+    // Shutdown agent channels
+    for (const chan of agentChannels) {
+      await chan.shutdown();
+    }
+
+    for (const provider of memoryProviders) {
+      await provider.close();
+    }
+    knowledgeGraph.close();
+    selfEvolvingMemory.close();
+    process.exit(0);
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
+  process.on("uncaughtException", (err) => {
+    console.error("💥 Uncaught Exception:", err);
+  });
+
+  process.on("unhandledRejection", (reason: any) => {
+    console.error("💥 Unhandled Rejection:", reason);
+  });
+}
+
+// ── Launch ──
+main().catch((err) => {
+  console.error("❌ Fatal startup error:", err);
+  process.exit(1);
+});

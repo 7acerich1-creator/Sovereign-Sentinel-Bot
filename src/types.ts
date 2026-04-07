@@ -279,3 +279,5 @@ export interface MCPServerConfig {
   args: string[];
   env?: Record<string, string>;
   transport: "stdio" | "sse";
+  url?: string;
+}

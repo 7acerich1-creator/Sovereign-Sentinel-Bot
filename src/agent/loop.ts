@@ -77,57 +77,95 @@ export class AgentLoop {
     console.log(`🤖 [AgentLoop] Active Persona: ${persona.name} (${persona.role})`);
     console.log(`📡 [AgentLoop] Active Model: ${activeLLM.model} `);
 
-    // 1. Build context from memory
-    console.log(`🧠 [AgentLoop] Building context for message: "${message.content.slice(0, 50)}"`);
-    const context = await this.buildContext(message);
-    console.log(`🧠 [AgentLoop] Context built: ${context.length} messages`);
+    // SESSION 35: DISPATCH MODE — bypass all memory loading for dispatch tasks.
+    // Root cause of 25-27K token bloat: buildContext() loads 20 messages × 3 providers
+    // + 50 facts + 3 summaries + 9 search results + 3 Pinecone recalls = ~48 context
+    // messages for a simple dispatch task that only needs the payload.
+    // Dispatch tasks carry their own instructions — memory/history is pure waste.
+    const isDispatch = message.metadata?.isDispatch === true;
 
-    // 1b. Pinecone semantic recall — inject relevant past intelligence
-    if (this.pinecone?.isReady() && message.content.length > 10) {
-      try {
-        const recalls = await this.pinecone.queryRelevant(
-          message.content,
-          3,
-          this.identity.namespace, // Query agent's own namespace for focused recall
-          0.75 // Similarity threshold per spec
-        );
-        if (recalls.length > 0) {
-          const recallText = recalls.map(
-            (r, i) => `[${i + 1}] (${r.agent}/${r.type}, score: ${r.score.toFixed(2)}) ${r.content}`
-          ).join("\n");
-          context.push({
-            role: "system",
-            content: `[RELEVANT PAST INTELLIGENCE — from crew semantic memory]\n${recallText}`,
-          });
-          console.log(`🔮 [Pinecone] Injected ${recalls.length} relevant memories (scores: ${recalls.map(r => r.score.toFixed(2)).join(", ")})`);
+    // 1. Build context from memory (SKIP for dispatch — they carry their own payload)
+    let context: LLMMessage[];
+    if (isDispatch) {
+      context = [];
+      console.log(`⚡ [AgentLoop] DISPATCH MODE — skipping memory load (zero-context)`);
+    } else {
+      console.log(`🧠 [AgentLoop] Building context for message: "${message.content.slice(0, 50)}"`);
+      context = await this.buildContext(message);
+      console.log(`🧠 [AgentLoop] Context built: ${context.length} messages`);
+
+      // 1b. Pinecone semantic recall — inject relevant past intelligence (user chat only)
+      if (this.pinecone?.isReady() && message.content.length > 10) {
+        try {
+          const recalls = await this.pinecone.queryRelevant(
+            message.content,
+            3,
+            this.identity.namespace,
+            0.75
+          );
+          if (recalls.length > 0) {
+            const recallText = recalls.map(
+              (r, i) => `[${i + 1}] (${r.agent}/${r.type}, score: ${r.score.toFixed(2)}) ${r.content}`
+            ).join("\n");
+            context.push({
+              role: "system",
+              content: `[RELEVANT PAST INTELLIGENCE — from crew semantic memory]\n${recallText}`,
+            });
+            console.log(`🔮 [Pinecone] Injected ${recalls.length} relevant memories (scores: ${recalls.map(r => r.score.toFixed(2)).join(", ")})`);
+          }
+        } catch (err: any) {
+          console.error(`[Pinecone recall] ${err.message}`);
         }
-      } catch (err: any) {
-        console.error(`[Pinecone recall] ${err.message}`);
       }
     }
 
     // 2. Add user message
     context.push({ role: "user", content: message.content });
 
-    // 3. Build tool definitions — CAP at 64 to prevent LLM context overflow
-    // 459 tools will choke most LLM providers
+    // 3. Build tool definitions
     const allTools = Array.from(this.tools.values());
-    const TOOL_CAP = 64;
-    const coreToolNames = new Set([
-      // Built-in tools that should always be available
-      "shell_exec", "file_read", "file_write", "file_list",
-      "web_search", "web_browse", "memory_search", "memory_save",
-      "send_message", "schedule_task", "calendar_search",
-      "email_search", "email_send", "knowledge_graph_query",
-      "write_knowledge", "read_protocols", "write_protocol",
-      "write_relationship_context",
-    ]);
-    // Prioritize core tools, then fill remaining slots
-    const coreTools = allTools.filter((t) => coreToolNames.has(t.definition.name));
-    const otherTools = allTools.filter((t) => !coreToolNames.has(t.definition.name));
-    const selectedTools = [...coreTools, ...otherTools].slice(0, TOOL_CAP);
-    const toolDefs: ToolDefinition[] = selectedTools.map((t) => t.definition);
-    console.log(`🔧 [AgentLoop] Sending ${toolDefs.length}/${allTools.length} tools to LLM`);
+
+    let toolDefs: ToolDefinition[];
+    if (isDispatch) {
+      // SESSION 35: DISPATCH MODE — only include tools the agent actually needs.
+      // Sending 33+ tool schemas (each 200-500 tokens) to every dispatch call
+      // was adding ~5-8K tokens of dead weight. Dispatch tasks have explicit
+      // execution directives that name the tools they need.
+      const dispatchCoreTools = new Set([
+        // Every dispatch task needs these to complete/report
+        "crew_dispatch", "save_content_draft", "propose_task", "check_approved_tasks",
+        // Content/distribution tasks need posting tools
+        "social_scheduler_create_post", "social_scheduler_list_profiles",
+        "publish_video", "generate_image",
+        // Analysis tasks need data access
+        "web_search", "web_browse",
+        // Knowledge persistence
+        "write_knowledge", "read_protocols",
+        // Stripe for Vector's metrics sweeps
+        "stripe_metrics",
+        // Briefing tool for summary agents
+        "file_briefing",
+      ]);
+      const dispatchTools = allTools.filter((t) => dispatchCoreTools.has(t.definition.name));
+      toolDefs = dispatchTools.map((t) => t.definition);
+      console.log(`⚡ [AgentLoop] DISPATCH TOOLS: ${toolDefs.length}/${allTools.length} (lean mode)`);
+    } else {
+      // Full mode for user chat — cap at 64 to prevent context overflow
+      const TOOL_CAP = 64;
+      const coreToolNames = new Set([
+        "shell_exec", "file_read", "file_write", "file_list",
+        "web_search", "web_browse", "memory_search", "memory_save",
+        "send_message", "schedule_task", "calendar_search",
+        "email_search", "email_send", "knowledge_graph_query",
+        "write_knowledge", "read_protocols", "write_protocol",
+        "write_relationship_context",
+      ]);
+      const coreTools = allTools.filter((t) => coreToolNames.has(t.definition.name));
+      const otherTools = allTools.filter((t) => !coreToolNames.has(t.definition.name));
+      const selectedTools = [...coreTools, ...otherTools].slice(0, TOOL_CAP);
+      toolDefs = selectedTools.map((t) => t.definition);
+      console.log(`🔧 [AgentLoop] Sending ${toolDefs.length}/${allTools.length} tools to LLM`);
+    }
 
     // 4. Agent loop
     let iterations = 0;
@@ -155,15 +193,20 @@ export class AgentLoop {
       if (!response.toolCalls || response.toolCalls.length === 0 || response.finishReason !== "tool_use") {
         const finalResponse = response.content || "⚠️ No response generated.";
 
-        // Fire-and-forget: save to memory
-        this.saveToMemory(message, finalResponse).catch((err) =>
-          console.error("Memory save failed:", err.message)
-        );
+        // SESSION 35: Skip memory save + Pinecone embed for dispatch tasks.
+        // Dispatch payloads are system-generated, not conversation. Saving them
+        // pollutes chat memory and wastes Pinecone writes + embedding API calls.
+        if (!isDispatch) {
+          // Fire-and-forget: save to memory
+          this.saveToMemory(message, finalResponse).catch((err) =>
+            console.error("Memory save failed:", err.message)
+          );
 
-        // Fire-and-forget: extract and embed key insight to Pinecone
-        this.extractAndEmbed(message.content, finalResponse).catch((err) =>
-          console.error("[Pinecone embed] failed:", err.message)
-        );
+          // Fire-and-forget: extract and embed key insight to Pinecone
+          this.extractAndEmbed(message.content, finalResponse).catch((err) =>
+            console.error("[Pinecone embed] failed:", err.message)
+          );
+        }
 
         return finalResponse;
       }
@@ -206,50 +249,57 @@ export class AgentLoop {
   private async buildContext(message: Message): Promise<LLMMessage[]> {
     const context: LLMMessage[] = [];
 
-    for (const provider of this.memoryProviders) {
-      try {
-        // Load core facts
-        const facts = await provider.getFacts(message.chatId);
-        if (facts.length > 0) {
-          const factText = facts.map((f) => `- ${f.key}: ${f.value}`).join("\n");
-          context.push({
-            role: "system",
-            content: `[CORE MEMORY]\n${factText}`,
-          });
-        }
+    // SESSION 35: Use ONLY the first (primary) memory provider for context.
+    // Previously iterated ALL 3 providers (SQLite + Markdown + Supabase Vector),
+    // each loading 20 messages + 50 facts + summary + 3 search results.
+    // That's 60+ duplicate messages per call. SQLite is the canonical store.
+    const provider = this.memoryProviders[0]; // SQLite (primary)
+    if (!provider) return context;
 
-        // Load conversation summary
-        const summary = await provider.getSummary(message.chatId);
-        if (summary) {
-          context.push({
-            role: "system",
-            content: `[CONVERSATION SUMMARY]\n${summary}`,
-          });
-        }
-
-        // Load recent messages
-        const recent = await provider.getRecentMessages(message.chatId, 20);
-        for (const msg of recent) {
-          context.push({
-            role: msg.role as "user" | "assistant",
-            content: msg.content,
-          });
-        }
-
-        // Semantic search for relevant memories
-        if (message.content.length > 5) {
-          const searchResults = await provider.search(message.content, 3);
-          if (searchResults.length > 0) {
-            const memText = searchResults.map((r) => `[${r.source}] ${r.content}`).join("\n");
-            context.push({
-              role: "system",
-              content: `[RELEVANT MEMORIES]\n${memText}`,
-            });
-          }
-        }
-      } catch (err: any) {
-        console.error(`Memory provider ${provider.name} error:`, err.message);
+    try {
+      // Load core facts (cap at 15 most recent — was 50, most are stale)
+      const facts = await provider.getFacts(message.chatId);
+      if (facts.length > 0) {
+        const cappedFacts = facts.slice(0, 15);
+        const factText = cappedFacts.map((f) => `- ${f.key}: ${f.value}`).join("\n");
+        context.push({
+          role: "system",
+          content: `[CORE MEMORY]\n${factText}`,
+        });
       }
+
+      // Load conversation summary (compressed history — good for context)
+      const summary = await provider.getSummary(message.chatId);
+      if (summary) {
+        // Cap summary at 1500 chars to prevent runaway compaction blobs
+        context.push({
+          role: "system",
+          content: `[CONVERSATION SUMMARY]\n${summary.slice(0, 1500)}`,
+        });
+      }
+
+      // Load recent messages — 10 is enough for conversational continuity (was 20×3=60)
+      const recent = await provider.getRecentMessages(message.chatId, 10);
+      for (const msg of recent) {
+        context.push({
+          role: msg.role as "user" | "assistant",
+          content: msg.content,
+        });
+      }
+
+      // Semantic search for relevant memories (keep at 3 — useful for user chat)
+      if (message.content.length > 5) {
+        const searchResults = await provider.search(message.content, 3);
+        if (searchResults.length > 0) {
+          const memText = searchResults.map((r) => `[${r.source}] ${r.content}`).join("\n");
+          context.push({
+            role: "system",
+            content: `[RELEVANT MEMORIES]\n${memText}`,
+          });
+        }
+      }
+    } catch (err: any) {
+      console.error(`Memory provider ${provider.name} error:`, err.message);
     }
 
     return context;

@@ -1220,8 +1220,8 @@ async function generateSceneImage(
   // Session 27: RESTORED as primary. Billing crisis was caused by Anita text-gen (26K tokens),
   // NOT image generation ($0.02-0.06/image). Architect approved Imagen 4 for quality priority.
   // Midjourney or Flux may replace this — Imagen 4 holds the line until then.
-  // Use dedicated Imagen key (GEMINI_IMAGEN_KEY) to isolate image gen costs from text-gen
-  const geminiKey = config.llm.providers.gemini?.imagenKey || config.llm.providers.gemini?.apiKey;
+  // SESSION 35: Use ONLY imagenKey. No fallback to apiKey (old project ghost).
+  const geminiKey = config.llm.providers.gemini?.imagenKey;
   if (geminiKey) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${geminiKey}`;

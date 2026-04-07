@@ -98,6 +98,21 @@ async function main() {
   const memoryProviders: MemoryProvider[] = [sqliteMemory, markdownMemory, supabaseMemory];
   console.log("# ✅ Environment validated");
 
+  // SESSION 35: Gemini key audit — detect the "zero logs" ghost
+  if (process.env.GEMINI_API_KEY && !process.env.GEMINI_IMAGEN_KEY) {
+    console.warn(`🔴 [KEY AUDIT] GEMINI_IMAGEN_KEY is NOT SET! Imagen 4 + embeddings will use Pollinations fallback or fail.`);
+    console.warn(`   → Set GEMINI_IMAGEN_KEY on Railway to the "vid rush gen-lang-client" project key.`);
+    console.warn(`   → GEMINI_API_KEY (old project) should ONLY be used if you intentionally want the old key for embeddings.`);
+  } else if (process.env.GEMINI_IMAGEN_KEY) {
+    const imgKeyPrefix = process.env.GEMINI_IMAGEN_KEY.slice(0, 8);
+    const apiKeyPrefix = process.env.GEMINI_API_KEY?.slice(0, 8) || "NOT SET";
+    const sameKey = process.env.GEMINI_IMAGEN_KEY === process.env.GEMINI_API_KEY;
+    console.log(`✅ [KEY AUDIT] GEMINI_IMAGEN_KEY: ${imgKeyPrefix}... | GEMINI_API_KEY: ${apiKeyPrefix}... | Same key: ${sameKey}`);
+    if (sameKey) {
+      console.warn(`⚠️ [KEY AUDIT] Both Gemini keys are identical — image gen and embeddings are NOT isolated from text-gen billing.`);
+    }
+  }
+
   // Knowledge Graph
   const knowledgeGraph = new KnowledgeGraph();
   await knowledgeGraph.initialize();
@@ -225,24 +240,31 @@ async function main() {
     return new FailoverLLM(chain, llmTimeoutMs, primaryRetries);
   }
 
-  // Session 31: Agent-to-key assignments. Key A = alfred, vector. Key B = anita, yuki.
-  // Sapphire + Veritas = Anthropic-first (brain agents, not pipeline grunts).
+  // Session 34: LLM ROUTING REDESIGN — "Right tool for the right job"
+  // PRINCIPLE: Anthropic handles ALL conversational/dispatch tasks (cheap, reliable, always answers).
+  //            Groq handles ONLY heavy batch work (pipeline script gen, content engine daily production).
+  // WHY: Groq free tier = 1,000 req/day + 500K tokens/day PER ORG (not per key).
+  //      A single VidRush pipeline burns 30-50 calls. That leaves nothing for agents.
+  //      Anthropic (claude-sonnet) costs ~$0.003/dispatch call (~700 tokens). $10 = ~3,300 calls = months of runway.
+  //      Groq's strength is speed on bulk sequential work, not availability for on-demand agent tasks.
   const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
-    alfred: buildTeamLLM(["groq", "anthropic"], 0, false),    // Key A
-    anita: buildTeamLLM(["groq", "anthropic"], 0, true),      // Key B
-    sapphire: buildTeamLLM(["anthropic", "groq"]),             // Anthropic-first
-    veritas: buildTeamLLM(["anthropic", "groq"]),              // Anthropic-first
-    vector: buildTeamLLM(["groq", "anthropic"], 0, false),    // Key A
-    yuki: buildTeamLLM(["groq", "anthropic"], 0, true),       // Key B
+    alfred: buildTeamLLM(["anthropic", "groq"], 0, false),    // Anthropic-first — dispatches + user chat
+    anita: buildTeamLLM(["anthropic", "groq"], 0, true),      // Anthropic-first — dispatches + user chat
+    sapphire: buildTeamLLM(["anthropic", "groq"]),             // Anthropic-first (unchanged)
+    veritas: buildTeamLLM(["anthropic", "groq"]),              // Anthropic-first (unchanged)
+    vector: buildTeamLLM(["anthropic", "groq"], 0, false),    // Anthropic-first — dispatches + user chat
+    yuki: buildTeamLLM(["anthropic", "groq"], 0, true),       // Anthropic-first — dispatches + user chat
   };
 
-  const pipelineLLM = buildTeamLLM(["groq", "anthropic"], 1, false);     // Key A
-  const tcfPipelineLLM = buildTeamLLM(["groq", "anthropic"], 1, true);   // Key B
+  // Pipeline LLMs stay Groq-first — these are heavy batch jobs (25+ sequential calls)
+  // where Groq's speed matters and we WANT to burn the free tier here, not on chat.
+  const pipelineLLM = buildTeamLLM(["groq", "anthropic"], 1, false);     // Key A — Ace pipeline
+  const tcfPipelineLLM = buildTeamLLM(["groq", "anthropic"], 1, true);   // Key B — TCF pipeline
 
   if (groqTcfKey) {
-    console.log(`🔑 [LLM Teams] Dual Groq key active. Key A: alfred,vector,pipeline. Key B: anita,yuki,tcf-pipeline.`);
+    console.log(`🔑 [LLM Teams] Session 34 routing: ALL agents Anthropic-first. Groq reserved for pipelines only. Key A: pipeline. Key B: tcf-pipeline.`);
   } else {
-    console.warn(`⚠️ [LLM Teams] GROQ_API_KEY_TCF not set — all agents share one Groq key (30 RPM)`);
+    console.warn(`⚠️ [LLM Teams] GROQ_API_KEY_TCF not set — TCF pipeline shares Groq Key A with Ace pipeline.`);
   }
 
   console.log("🔀 [LLM Teams] Provider split active:");
@@ -1137,8 +1159,9 @@ async function main() {
         contentEngineFiredDate.production = dateKey;
         console.log(`🚀 [ContentEngine] Daily production firing for ${dateKey}`);
         try {
-          // Content Engine uses Anita's team (Groq-first, Gemini failover) — writing tasks.
-          // Session 28: Moved from Gemini-first to stop $12/day token burn from 26K system prompt.
+          // Session 34: ContentEngine uses Anita's team (now Anthropic-first).
+          // Agents switched to Anthropic-first in Session 34 to stop Groq quota exhaustion.
+          // ContentEngine generates 12 posts/day — ~18K tokens total, costs ~$0.05/day on Anthropic.
           const count = await dailyContentProduction(AGENT_LLM_TEAMS.anita);
           console.log(`✅ [ContentEngine] Produced ${count} content pieces for today`);
 
@@ -1393,7 +1416,7 @@ async function main() {
     try {
       console.log(`🚀 [ContentEngine] MANUAL production trigger for ${dateKey} (force=${force})`);
       contentEngineFiredDate.production = dateKey;
-      // Manual trigger uses same Anita team as scheduled — Groq-first, consistent LLM routing.
+      // Manual trigger uses same Anita team as scheduled — Anthropic-first (Session 34).
       const count = await dailyContentProduction(AGENT_LLM_TEAMS.anita);
       console.log(`✅ [ContentEngine] Manual production complete: ${count} pieces`);
 
@@ -1431,11 +1454,14 @@ async function main() {
     if (process.env.OPENAI_API_KEY) (diag.tts_chain as string[]).push("openai");
 
     // ── API key status ──
-    const geminiKey = process.env.GEMINI_API_KEY;
+    const geminiKey = process.env.GEMINI_IMAGEN_KEY; // SESSION 35: diagnose uses the IMAGEN key, not the old text-gen key
+    const geminiTextKey = process.env.GEMINI_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
     const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
-    diag.gemini_key_set = !!geminiKey;
-    diag.gemini_key_length = geminiKey?.length || 0;
+    diag.gemini_imagen_key_set = !!geminiKey;
+    diag.gemini_imagen_key_length = geminiKey?.length || 0;
+    diag.gemini_text_key_set = !!geminiTextKey;
+    diag.gemini_keys_same = geminiKey === geminiTextKey;
     diag.openai_key_set = !!openaiKey;
     diag.openai_key_length = openaiKey?.length || 0;
     diag.elevenlabs_key_set = !!elevenLabsKey;
@@ -2630,12 +2656,14 @@ async function main() {
           return;
         }
 
-        // SESSION 33: Enable primary-only mode on ALL agent LLM teams during dispatch.
-        // This prevents Groq failures from cascading to Anthropic ($$) for automated tasks.
-        // Direct user messages (via Telegram) still get the full failover chain.
-        for (const team of Object.values(AGENT_LLM_TEAMS)) {
-          team.setPrimaryOnly(true);
-        }
+        // SESSION 34: Primary-only mode REMOVED.
+        // Session 33 added setPrimaryOnly(true) to prevent Anthropic spend on dispatch tasks.
+        // ROOT CAUSE DISCOVERY (Session 34): This is why ALL agent tasks fail when Groq 429s.
+        // Groq free tier = 1,000 req/day shared across the ENTIRE org. One VidRush pipeline
+        // burns 30-50 calls. By 10 AM, daily quota is cooked. setPrimaryOnly blocks failover
+        // to Anthropic, so every dispatch task (Alfred trend scan, Vector metrics sweep) dies.
+        // FIX: Agents are now Anthropic-first (cheap, reliable). Groq reserved for pipelines only.
+        // Anthropic dispatch cost: ~$0.003/call (700 tokens). Full failover chain stays active.
 
         try {
           // ONE query for ALL agents instead of 6 separate queries
@@ -2969,11 +2997,7 @@ async function main() {
           }
         }
 
-        // SESSION 33: Restore full failover chain after dispatch processing.
-        // Direct user messages still get Groq→Anthropic failover.
-        for (const team of Object.values(AGENT_LLM_TEAMS)) {
-          team.setPrimaryOnly(false);
-        }
+        // SESSION 34: setPrimaryOnly removed — agents are Anthropic-first now, no need to toggle.
 
         // Schedule next poll (dynamic interval for backoff)
         dispatchPollTimer = setTimeout(runDispatchPoll, dispatchPollMs);

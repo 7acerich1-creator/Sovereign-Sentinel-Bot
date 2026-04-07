@@ -28,8 +28,10 @@ export interface PineconeMatch {
 // so we don't pull in extra SDK dependencies for a single call.
 // NOTE: text-embedding-004 was deprecated Jan 14 2026, replaced by gemini-embedding-001
 async function embedText(text: string): Promise<number[]> {
-  // Use dedicated Imagen/embedding key to isolate from text-gen billing
-  const geminiKey = config.llm.providers.gemini?.imagenKey || config.llm.providers.gemini?.apiKey;
+  // SESSION 35: Use ONLY the dedicated Imagen key for embeddings.
+  // Old code fell back to GEMINI_API_KEY (old project) — that's the "zero logs" ghost.
+  // If imagenKey is empty, skip Gemini and fall through to OpenAI.
+  const geminiKey = config.llm.providers.gemini?.imagenKey;
   const openaiKey = config.llm.providers.openai?.apiKey;
 
   // Primary: Gemini embedding (1024d via Matryoshka Representation Learning)

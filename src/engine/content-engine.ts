@@ -194,9 +194,9 @@ async function uploadImageToStorage(
   storagePath: string
 ): Promise<string | null> {
   const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_ANON_KEY;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseKey) {
-    console.error("[ContentEngine] Cannot upload image — SUPABASE_URL or SUPABASE_ANON_KEY missing");
+    console.error("[ContentEngine] Cannot upload image — SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing");
     return null;
   }
   try {
@@ -279,8 +279,9 @@ async function generateContentImage(
 
   // ── STEP 2: Fallback to Gemini Imagen 4 ──
   if (!imageBuffer) {
-    // Use dedicated Imagen key to isolate image gen costs from text-gen
-    const geminiKey = process.env.GEMINI_IMAGEN_KEY || process.env.GEMINI_API_KEY;
+    // SESSION 35: Use ONLY GEMINI_IMAGEN_KEY. No fallback to GEMINI_API_KEY.
+    // Old fallback was the "zero logs" ghost — all calls hit the old API project.
+    const geminiKey = process.env.GEMINI_IMAGEN_KEY;
     if (geminiKey) {
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${geminiKey}`;
@@ -469,7 +470,10 @@ export function invalidateChannelCache(): void {
 
 async function supabasePost(table: string, data: Record<string, unknown>): Promise<string | null> {
   const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_ANON_KEY;
+  // Session 34 FIX: Use SERVICE_ROLE_KEY to bypass RLS.
+  // ANON_KEY was causing 401 "new row violates row-level security policy" on every insert.
+  // Same fix applied to crew_dispatch/action-surface in Session 31 — ContentEngine was missed.
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
   if (!url || !key) return null;
 
   try {
@@ -499,7 +503,7 @@ async function supabasePost(table: string, data: Record<string, unknown>): Promi
 
 async function supabaseQuery(table: string, query: string): Promise<any[]> {
   const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_ANON_KEY;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
   if (!url || !key) return [];
 
   try {
@@ -518,7 +522,8 @@ async function supabaseQuery(table: string, query: string): Promise<any[]> {
 
 async function supabasePatch(table: string, id: string, data: Record<string, unknown>): Promise<void> {
   const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_ANON_KEY;  if (!url || !key) return;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!url || !key) return;
 
   try {
     await fetch(`${url}/rest/v1/${table}?id=eq.${id}`, {
@@ -662,6 +667,13 @@ ${platforms.map((p) => `  "${p}": "Platform-adapted version for ${p}"`).join(",\
     let jsonStr = response.content.trim();
     // Strip markdown code fences if present
     jsonStr = jsonStr.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+    // Session 34 FIX: Strip control characters that break JSON.parse().
+    // Groq's llama-3.3-70b returns newlines/tabs inside JSON string values,
+    // producing "Bad control character in string literal" errors on EVERY call.
+    // This was causing 100% LLM generation failure in the ContentEngine.
+    jsonStr = jsonStr.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, ""); // Keep \n(\x0a), \r(\x0d), \t(\x09)
+    // Also fix unescaped newlines inside JSON string values
+    jsonStr = jsonStr.replace(/(?<=":[\s]*"[^"]*)\n(?=[^"]*")/g, "\\n");
 
     const parsed = JSON.parse(jsonStr);
     const universal = parsed.universal || "";

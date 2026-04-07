@@ -42,10 +42,13 @@ export const config: GravityClawConfig = {
         apiKey: process.env.GEMINI_API_KEY || "",
         model: process.env.GEMINI_MODEL || "gemini-3.1-pro-preview",
         baseUrl: process.env.GEMINI_BASE_URL,
-        // Separate key for Imagen 4 image generation + embeddings ONLY.
-        // Falls back to GEMINI_API_KEY if not set. This prevents text-gen
-        // from burning the image gen budget (Session 29c billing leak fix).
-        imagenKey: process.env.GEMINI_IMAGEN_KEY || process.env.GEMINI_API_KEY || "",
+        // SESSION 35: GEMINI_IMAGEN_KEY must be set explicitly on Railway.
+        // The old fallback to GEMINI_API_KEY was the "zero logs" ghost —
+        // all Imagen/embedding calls silently used the old API project key
+        // instead of the dedicated "vid rush gen-lang-client" key.
+        // If GEMINI_IMAGEN_KEY is not set, imagenKey will be empty and
+        // image gen will use Pollinations (free) instead.
+        imagenKey: process.env.GEMINI_IMAGEN_KEY || "",
       },
       anthropic: {
         apiKey: process.env.ANTHROPIC_API_KEY || "",

@@ -4,6 +4,8 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { config } from "../config";
+import { execSync } from "child_process";
+import { writeFileSync, readFileSync, unlinkSync, existsSync } from "fs";
 
 export type TTSProvider = "openai" | "elevenlabs" | "edge";
 
@@ -137,7 +139,8 @@ async function elevenLabsTTS(text: string, speed?: number): Promise<Buffer> {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Provider 2: Edge TTS (FREE — Microsoft's neural voices)
 // No API key, no auth, no billing. Unlimited.
-// Uses edge-tts-node package (WebSocket to speech.platform.bing.com)
+// Uses Python edge-tts CLI (pip install edge-tts) — battle-tested, 10M+ installs.
+// The Node.js edge-tts-node WebSocket library was unreliable on Railway.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 // Edge TTS voice mapping — deep male voice for sovereignty / dark psychology brand
@@ -145,51 +148,41 @@ async function elevenLabsTTS(text: string, speed?: number): Promise<Buffer> {
 const EDGE_VOICE = "en-US-GuyNeural"; // Deep natural male, matches brand voice
 
 async function edgeTTS(text: string, speed?: number): Promise<Buffer> {
-  // Dynamic import — only loads when needed (keeps bundle light if ElevenLabs works)
-  const { MsEdgeTTS, OUTPUT_FORMAT } = await import("edge-tts-node");
+  const ts = Date.now();
+  const tmpInput = `/tmp/edge_tts_input_${ts}.txt`;
+  const tmpOutput = `/tmp/edge_tts_output_${ts}.mp3`;
 
-  const tts = new MsEdgeTTS({});
-  await tts.setMetadata(EDGE_VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3);
+  // Write text to temp file (avoids shell escaping issues with quotes, apostrophes, etc.)
+  writeFileSync(tmpInput, text.slice(0, 10000));
 
   // Map speed param: 0.9 = "-10%", 1.0 = "+0%", 1.1 = "+10%"
   const rateStr = speed && speed !== 1.0
     ? `${speed < 1.0 ? "-" : "+"}${Math.round(Math.abs(1.0 - speed) * 100)}%`
     : "+0%";
 
-  const readable = tts.toStream(text.slice(0, 10000), { rate: rateStr }); // Edge TTS has generous limits
+  try {
+    execSync(
+      `edge-tts --voice "${EDGE_VOICE}" --rate="${rateStr}" --file "${tmpInput}" --write-media "${tmpOutput}"`,
+      { timeout: 90_000, stdio: "pipe" }
+    );
 
-  return new Promise<Buffer>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    const timeout = setTimeout(() => {
-      readable.destroy();
-      reject(new Error("Edge TTS timed out after 60s"));
-    }, 60_000);
+    if (!existsSync(tmpOutput)) {
+      throw new Error("Edge TTS produced no output file");
+    }
 
-    readable.on("data", (chunk: Buffer) => {
-      // edge-tts-node emits objects with audio property or raw buffers
-      if (Buffer.isBuffer(chunk)) {
-        chunks.push(chunk);
-      } else if (chunk && (chunk as any).audio) {
-        chunks.push(Buffer.from((chunk as any).audio));
-      }
-    });
+    const buffer = readFileSync(tmpOutput);
 
-    readable.on("end", () => {
-      clearTimeout(timeout);
-      const buf = Buffer.concat(chunks);
-      if (buf.length === 0) {
-        reject(new Error("Edge TTS returned empty audio"));
-      } else {
-        console.log(`🔊 [EdgeTTS] Generated ${(buf.length / 1024).toFixed(0)}KB audio via ${EDGE_VOICE}`);
-        resolve(buf);
-      }
-    });
+    if (buffer.length === 0) {
+      throw new Error("Edge TTS returned empty audio file");
+    }
 
-    readable.on("error", (err: Error) => {
-      clearTimeout(timeout);
-      reject(new Error(`Edge TTS stream error: ${err.message}`));
-    });
-  });
+    console.log(`🔊 [EdgeTTS] Generated ${(buffer.length / 1024).toFixed(0)}KB audio via ${EDGE_VOICE} (Python CLI)`);
+    return buffer;
+  } finally {
+    // Cleanup temp files
+    try { unlinkSync(tmpInput); } catch {}
+    try { unlinkSync(tmpOutput); } catch {}
+  }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

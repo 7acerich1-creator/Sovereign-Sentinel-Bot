@@ -34,8 +34,10 @@ COPY soul.md ./soul.md
 COPY claude.md ./claude.md
 COPY skills ./skills
 
-# Install Python deps for sovereign clip pipeline (yt-dlp only — whisper uses OpenAI API)
-RUN pip3 install --no-cache-dir --break-system-packages yt-dlp
+# Install Python deps for sovereign clip pipeline
+# yt-dlp: video download for Whisper extraction
+# edge-tts: FREE Microsoft neural TTS (replaced unreliable edge-tts-node WebSocket library)
+RUN pip3 install --no-cache-dir --break-system-packages yt-dlp edge-tts
 
 # Configure yt-dlp globally: JS runtime + anti-bot-detection defaults
 # YouTube 2025+ requires JS runtime for sig decryption + blocks datacenter IPs

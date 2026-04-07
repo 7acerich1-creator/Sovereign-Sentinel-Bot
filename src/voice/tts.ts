@@ -33,12 +33,19 @@ export async function textToSpeech(
   }
 
   // ── AUTOMATIC FALLBACK CHAIN ──
-  // 1. ElevenLabs (if key exists)
-  // 2. Edge TTS (FREE — always available)
-  // 3. OpenAI (if key exists — last resort)
+  // Priority: Edge TTS (FREE, unlimited) → ElevenLabs (paid, if credits available) → OpenAI (last resort)
+  // Edge TTS is promoted to primary to prevent burning paid credits on routine pipeline runs.
+  // Set FORCE_ELEVENLABS=true env var to restore ElevenLabs as primary when credits are replenished.
   const chain: TTSProvider[] = [];
-  if (config.voice.elevenLabsApiKey) chain.push("elevenlabs");
-  chain.push("edge"); // Always in chain — free, no auth
+  const forceElevenLabs = process.env.FORCE_ELEVENLABS === "true";
+
+  if (forceElevenLabs && config.voice.elevenLabsApiKey) {
+    chain.push("elevenlabs"); // Only first if explicitly forced
+  }
+  chain.push("edge"); // FREE — always primary unless forced otherwise
+  if (!forceElevenLabs && config.voice.elevenLabsApiKey) {
+    chain.push("elevenlabs"); // Demoted to fallback
+  }
   if (config.voice.whisperApiKey) chain.push("openai");
 
   let lastError: Error | null = null;

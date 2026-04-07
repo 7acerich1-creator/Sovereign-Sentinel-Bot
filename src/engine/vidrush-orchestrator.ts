@@ -15,6 +15,16 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { execSync } from "child_process";
+
+// Configurable ffmpeg per-clip timeout. Default 180s — enough for a 45s clip encode on a
+// throttled Railway container. Raise via FFMPEG_CLIP_TIMEOUT_MS env var if clips 7+ still
+// timeout (symptom: spawnSync /bin/sh ETIMEDOUT after 120s).
+const FFMPEG_CLIP_TIMEOUT_MS = parseInt(process.env.FFMPEG_CLIP_TIMEOUT_MS || "180000", 10);
+
+// Hard cap on clips produced per pipeline run. Silence detection on a 10-min video can
+// find 30+ boundaries — uncapped, this generates 30+ sequential ffmpeg encodes and exhausts
+// the container. 10 clips is enough for a week of Buffer posts across all channels.
+const MAX_CLIPS_PER_RUN = parseInt(process.env.MAX_CLIPS_PER_RUN || "10", 10);
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync, rmSync } from "fs";
 import { extractWhisperIntel, type WhisperResult } from "./whisper-extract";
 import { produceFacelessVideo } from "./faceless-factory";
@@ -353,18 +363,26 @@ async function chopLongFormIntoClips(
     const PAD_BEFORE = 0.3;
     const PAD_AFTER = 0.2;
 
-    for (let i = 0; i < storyMoments.length; i++) {
-      const moment = storyMoments[i];
+    // Cap to MAX_CLIPS_PER_RUN — even in semantic mode, 10 moments is enough
+    const momentsToCut = storyMoments.slice(0, MAX_CLIPS_PER_RUN);
+    if (storyMoments.length > MAX_CLIPS_PER_RUN) {
+      console.log(`✂️ [Orchestrator] Capping ${storyMoments.length} moments to ${MAX_CLIPS_PER_RUN} (MAX_CLIPS_PER_RUN)`);
+    }
+
+    for (let i = 0; i < momentsToCut.length; i++) {
+      const moment = momentsToCut[i];
       const clipPath = `${clipDir}/clip_${i.toString().padStart(2, "0")}.mp4`;
 
       // Apply padding, clamped to video boundaries and non-overlapping with neighbors
-      const prevEnd = i > 0 ? storyMoments[i - 1].endSec : 0;
+      const prevEnd = i > 0 ? momentsToCut[i - 1].endSec : 0;
       const paddedStart = Math.max(0, Math.max(prevEnd, moment.startSec - PAD_BEFORE));
       const paddedEnd = Math.min(totalDuration, moment.endSec + PAD_AFTER);
 
       try {
         // Use -ss before -i for fast seeking, then -t for duration (more reliable than -to with -ss before -i)
         const duration = paddedEnd - paddedStart;
+        // stdio:"ignore" — drops ffmpeg progress noise from Node.js heap.
+        // "pipe" was buffering megabytes of encode output per clip, bloating memory across 10+ clips.
         execSync(
           `ffmpeg -ss ${paddedStart.toFixed(2)} -i "${videoPath}" ` +
             `-t ${duration.toFixed(2)} ` +
@@ -373,7 +391,7 @@ async function chopLongFormIntoClips(
             `-c:a aac -b:a 128k ` +
             `-af "afade=t=in:st=0:d=0.15,afade=t=out:st=${Math.max(0, duration - 0.3).toFixed(2)}:d=0.3" ` +
             `-y "${clipPath}"`,
-          { timeout: 120_000, stdio: "pipe" }
+          { timeout: FFMPEG_CLIP_TIMEOUT_MS, stdio: "ignore" }
         );
 
         clips.push({
@@ -465,6 +483,14 @@ async function chopLongFormIntoClips(
 
   cutPoints.push(totalDuration);
 
+  // Hard cap: silence detection can produce 30+ cut points on a 10-min video.
+  // Trim to MAX_CLIPS_PER_RUN boundaries (keep first N+1 points for N clips).
+  if (cutPoints.length - 1 > MAX_CLIPS_PER_RUN) {
+    console.log(`✂️ [Orchestrator] Capping ${cutPoints.length - 1} silence-boundary clips to ${MAX_CLIPS_PER_RUN} (MAX_CLIPS_PER_RUN)`);
+    cutPoints.splice(MAX_CLIPS_PER_RUN + 1);
+    cutPoints[cutPoints.length - 1] = totalDuration;
+  }
+
   // ── CUT CLIPS ──
   const clipDir = `${ORCHESTRATOR_DIR}/${jobId}/clips`;
   if (!existsSync(clipDir)) mkdirSync(clipDir, { recursive: true });
@@ -478,6 +504,8 @@ async function chopLongFormIntoClips(
     const clipPath = `${clipDir}/clip_${i.toString().padStart(2, "0")}.mp4`;
 
     try {
+      // stdio:"ignore" — drops ffmpeg encode progress from Node.js heap.
+      // Previously "pipe" was buffering megabytes per clip, bloating memory across 10+ clips.
       execSync(
         `ffmpeg -i "${videoPath}" ` +
           `-ss ${startSec.toFixed(2)} -to ${endSec.toFixed(2)} ` +
@@ -485,7 +513,7 @@ async function chopLongFormIntoClips(
           `-c:v libx264 -preset fast -crf 23 ` +
           `-c:a aac -b:a 128k ` +
           `-y "${clipPath}"`,
-        { timeout: 120_000, stdio: "pipe" }
+        { timeout: FFMPEG_CLIP_TIMEOUT_MS, stdio: "ignore" }
       );
 
       clips.push({

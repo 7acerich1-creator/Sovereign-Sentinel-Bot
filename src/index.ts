@@ -98,19 +98,16 @@ async function main() {
   const memoryProviders: MemoryProvider[] = [sqliteMemory, markdownMemory, supabaseMemory];
   console.log("# ✅ Environment validated");
 
-  // SESSION 35: Gemini key audit — detect the "zero logs" ghost
-  if (process.env.GEMINI_API_KEY && !process.env.GEMINI_IMAGEN_KEY) {
-    console.warn(`🔴 [KEY AUDIT] GEMINI_IMAGEN_KEY is NOT SET! Imagen 4 + embeddings will use Pollinations fallback or fail.`);
-    console.warn(`   → Set GEMINI_IMAGEN_KEY on Railway to the "vid rush gen-lang-client" project key.`);
-    console.warn(`   → GEMINI_API_KEY (old project) should ONLY be used if you intentionally want the old key for embeddings.`);
-  } else if (process.env.GEMINI_IMAGEN_KEY) {
-    const imgKeyPrefix = process.env.GEMINI_IMAGEN_KEY.slice(0, 8);
-    const apiKeyPrefix = process.env.GEMINI_API_KEY?.slice(0, 8) || "NOT SET";
-    const sameKey = process.env.GEMINI_IMAGEN_KEY === process.env.GEMINI_API_KEY;
-    console.log(`✅ [KEY AUDIT] GEMINI_IMAGEN_KEY: ${imgKeyPrefix}... | GEMINI_API_KEY: ${apiKeyPrefix}... | Same key: ${sameKey}`);
-    if (sameKey) {
-      console.warn(`⚠️ [KEY AUDIT] Both Gemini keys are identical — image gen and embeddings are NOT isolated from text-gen billing.`);
-    }
+  // SESSION 35: Gemini key audit
+  const hasGeminiApi = !!process.env.GEMINI_API_KEY;
+  const hasGeminiImagen = !!process.env.GEMINI_IMAGEN_KEY;
+  const hasOpenAi = !!process.env.OPENAI_API_KEY;
+  console.log(`🔑 [KEY AUDIT] GEMINI_API_KEY: ${hasGeminiApi ? "SET" : "NOT SET"} | GEMINI_IMAGEN_KEY: ${hasGeminiImagen ? "SET" : "NOT SET"} | OPENAI_API_KEY: ${hasOpenAi ? "SET" : "NOT SET"}`);
+  if (!hasGeminiApi && !hasOpenAi) {
+    console.warn(`⚠️ [KEY AUDIT] No embedding provider — Pinecone writes DISABLED (reads still work). Add GEMINI_API_KEY or OPENAI_API_KEY to enable.`);
+  }
+  if (!hasGeminiImagen) {
+    console.warn(`⚠️ [KEY AUDIT] GEMINI_IMAGEN_KEY not set — Imagen 4 disabled, using Pollinations (free) for images.`);
   }
 
   // Knowledge Graph

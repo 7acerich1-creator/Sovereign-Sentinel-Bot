@@ -28,14 +28,21 @@ export interface PineconeMatch {
 // so we don't pull in extra SDK dependencies for a single call.
 // NOTE: text-embedding-004 was deprecated Jan 14 2026, replaced by gemini-embedding-001
 async function embedText(text: string): Promise<number[]> {
-  // SESSION 35 HOTFIX: Embeddings are TEXT operations — use GEMINI_API_KEY, not imagenKey.
-  // imagenKey is for IMAGE GENERATION only. The 403 errors on boot were because the Imagen key
-  // doesn't have embedding API access. GEMINI_API_KEY is the correct key for embeddings.
-  // The "zero logs ghost" fix only applies to IMAGE gen paths (content-engine, faceless-factory).
+  // SESSION 35: GEMINI_API_KEY was nuked from Railway (billing crisis).
+  // GEMINI_IMAGEN_KEY gets 403 on embeddings (wrong API scope).
+  // OPENAI_API_KEY is not set.
+  // So: embeddings are DISABLED until an embedding-capable key is added.
+  // Pinecone read (queryRelevant) still works — vectors already exist.
+  // Only writes (new embeddings) are blocked.
   const geminiKey = config.llm.providers.gemini?.apiKey;
   const openaiKey = config.llm.providers.openai?.apiKey;
 
-  // Primary: Gemini embedding (1024d via Matryoshka Representation Learning)
+  // Early exit: no embedding provider available — return empty (don't throw/spam)
+  if (!geminiKey && !openaiKey) {
+    return []; // Empty vector = caller skips the upsert
+  }
+
+  // Primary: Gemini embedding (1024d)
   if (geminiKey) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${geminiKey}`;
     const res = await fetch(url, {
@@ -44,7 +51,7 @@ async function embedText(text: string): Promise<number[]> {
       body: JSON.stringify({
         model: "models/gemini-embedding-001",
         content: { parts: [{ text: text.slice(0, 2000) }] },
-        outputDimensionality: 1024, // Match Pinecone index dimensions (gravity-claw = 1024d)
+        outputDimensionality: 1024,
       }),
     });
     if (res.ok) {
@@ -54,7 +61,7 @@ async function embedText(text: string): Promise<number[]> {
     console.warn(`[Pinecone] Gemini embed failed (${res.status}), trying OpenAI fallback...`);
   }
 
-  // Fallback: OpenAI text-embedding-3-small (1536d) — only if Pinecone index matches
+  // Fallback: OpenAI text-embedding-3-small
   if (openaiKey) {
     const res = await fetch("https://api.openai.com/v1/embeddings", {
       method: "POST",
@@ -65,7 +72,7 @@ async function embedText(text: string): Promise<number[]> {
       body: JSON.stringify({
         model: "text-embedding-3-small",
         input: text.slice(0, 2000),
-        dimensions: 768, // Match Gemini dimension for index compatibility
+        dimensions: 768,
       }),
     });
     if (res.ok) {
@@ -74,7 +81,7 @@ async function embedText(text: string): Promise<number[]> {
     }
   }
 
-  throw new Error("No embedding provider available (need GEMINI_API_KEY or OPENAI_API_KEY)");
+  return []; // Graceful degradation — no spam, no throw
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

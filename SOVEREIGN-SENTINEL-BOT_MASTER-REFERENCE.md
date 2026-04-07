@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-07 (Cowork Session 32 — MUSIC + AUDIO FIX: aevalsrc→sine music bed, intro/outro signature audio composite, scene count 25→12) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-07 (Session 35 — Token bloat exorcism: dispatch 25K→3K tokens, Gemini key isolation, embedding disable, boot storm cap, briefing timezone fix) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -2273,3 +2273,46 @@ Posts appeared in Buffer but with TWO critical bugs:
 
 **BUG CE-1: Only X and Threads receive posts. IG, TikTok, YouTube at zero.** ✅ PARTIALLY FIXED (2026-04-02)
 - Root cause: Content engine sends text-only posts (no `media_url`). IG and TikTok require images — Buffer silently rejects text-only
+
+## 24. SESSION 35 — TOKEN BLOAT EXORCISM + AGENT GAP ANALYSIS (2026-04-07)
+
+### What Was Fixed
+1. **Per-call token bloat (25-27K → 3-4K):** AgentLoop.processMessage() loaded 48+ context messages (3 memory providers × 20 msgs + facts + summaries + search + Pinecone) for every dispatch task. Dispatch mode now skips all memory loading.
+2. **Tool schema bloat (33 → 13):** Dispatch tasks only receive tools they actually need.
+3. **Gemini key ghost:** Removed silent `GEMINI_API_KEY` fallback from all Imagen paths. Imagen uses ONLY `GEMINI_IMAGEN_KEY`.
+4. **Embedding graceful disable:** `GEMINI_API_KEY` nuked from Railway, `GEMINI_IMAGEN_KEY` gets 403 on embeddings. Embeddings return empty vector (no throw, no spam). Pinecone reads still work (vectors already exist).
+5. **Boot storm cap:** Vector sync capped at 25 nodes/deploy (was 1000).
+6. **Vanguard label → Gravity Claw.**
+
+Commits: 18f1a9a → 3e0ac4f → [pending hotfix 2]
+
+### Briefing Timezone Fix (Railway Env Vars)
+`MORNING_BRIEFING_HOUR` was 8 (3 AM CDT). Changed to **15** (10 AM CDT).
+`EVENING_RECAP_HOUR` was 21 (4 PM CDT). Changed to **1** (8 PM CDT).
+Ace is CDT (UTC-5). Code uses `getUTCHours()`.
+
+### The LLM-to-Agent Gap (Architect Directive)
+The gap between "personalized LLMs" and "personalized agents" is this: they need a working execution chain and a clear command surface. The infrastructure is built — tools exist, dispatch routing exists, Buffer integration exists. The bloat fix should unblock the execution chain. But the Architect-facing command interface (schedule future runs, batch plan a week, review/approve before posting) — that's the next layer to build.
+
+**Every dispatch MUST have an intentional end result: live content produced and scheduled for publication.** Dispatches that don't produce publishable output are waste.
+
+### Current Scheduled Dispatches — Audit
+| Job | Fires | Result | Verdict |
+|---|---|---|---|
+| Morning Briefing | Daily 10 AM CDT | Telegram message to Ace | KEEP — low cost, useful |
+| Evening Recap | Daily 8 PM CDT | Telegram message to Ace | KEEP — low cost, useful |
+| Alfred Trend Scan | Daily 10:05 AM CDT | Searches topics, finds YouTube URL for pipeline | KEEP — feeds VidRush |
+| Vector Metrics Sweep | Daily 12 PM CDT | Pulls Stripe data, reports | REVIEW — no sales yet, pure waste |
+| ContentEngine Production | Daily 1:30 PM CDT | 12 posts generated deterministically | KEEP — produces content |
+| Distribution Sweep | Every 5 min | Posts ready drafts to Buffer | KEEP — zero LLM cost |
+| Stasis Detection | Daily 3:30 PM CDT | 6 LLM calls asking "are you idle?" | WASTE — all agents are idle |
+| Veritas Weekly Directive | Mon 12:10 PM CDT | Strategic assessment | REVIEW — no activity to assess |
+
+### API Key State (Railway)
+- `GEMINI_API_KEY`: **NUKED** (billing crisis)
+- `GEMINI_IMAGEN_KEY`: SET (AIzaSyAk...) — for Imagen 4 image gen only
+- `GROQ_API_KEY`: SET — pipelines only
+- `GROQ_API_KEY_TCF`: SET — TCF pipelines only
+- `ANTHROPIC_API_KEY`: SET — all agent dispatches + user chat
+- `OPENAI_API_KEY`: NOT SET
+- Pinecone embeddings: **DISABLED** (no embedding-capable key)

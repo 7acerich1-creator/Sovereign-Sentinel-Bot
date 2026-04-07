@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-06 (Cowork Session 29c — BRAND IDENTITY + FREQUENCY ACTIVATION CTAs) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-07 (Cowork Session 30 — TCF BACKGROUND COMPOSITES + BRAND TOKEN ALIGNMENT AUDIT) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -8,7 +8,7 @@
 **Mission Metrics:** Gemini text-gen hemorrhage fully diagnosed and killed. Voice locked. Script gen architecture overhauled. Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit: Session 29c `b82c2e2` (brand identity system + frequency activation CTAs) → Session 29b2 `4d79938` (voice swap + music rewrite + anti-repetition) → Session 29b `22861db` (Dockerfile cp fix + Edge TTS primary) → Session 29 `30f0b80` (Edge TTS Python CLI + dual Groq key) → prior chain. Auto-deploying.
+- Bot is live on Railway. Latest commit: Session 30 `c975912` (TCF background composites) → Session 29d `6530e2d` (SS golden bg composites + TCF placeholders + brand routing) → Session 29c3 `13d9a09` (Gemini billing leak kill + GEMINI_IMAGEN_KEY) → Session 29c `b82c2e2` (brand identity system + frequency activation CTAs) → Session 29b2 `4d79938` (voice swap + music rewrite + anti-repetition) → Session 29b `22861db` (Dockerfile cp fix + Edge TTS primary) → Session 29 `30f0b80` (Edge TTS Python CLI + dual Groq key) → prior chain. Auto-deploying.
 - Session 29c commit: `b82c2e2` — Brand identity system: pre-rendered intro/outro videos (Bebas Neue font, audio signatures), Frequency Activation CTAs (2 per long-form), Dockerfile updated to include brand-assets.
 - Session 29b2 commit: `4d79938` — Edge TTS voice swap to AndrewMultilingualNeural, music bed rewrite (30s loop + stream_loop), Pass 2 anti-repetition fix.
 - Session 29b commit: `22861db` — Fixed Dockerfile cp nesting bug.
@@ -217,7 +217,9 @@ These documents exist in the repo but contain stale information. Do NOT use them
 7. **Anti-repetition fix** — Pass 2 now receives full Pass 1 topic summary with explicit anti-repetition rules. No more rehashing.
 
 **Pending:**
-- Imagen 4 cinematic background image — prompt crafted, user needs to generate via Google AI Studio and drop into brand-assets/. Once provided, intros/outro will be re-composited with the image as background.
+- ~~Imagen 4 cinematic background image~~ — DONE. SS golden sacred geometry + TCF concrete bunker corridor backgrounds generated, uploaded to Supabase, composited into all intro/outro videos. Commits `6530e2d`, `c975912`.
+- **Brand Token Alignment (Session 30):** Canonical `design-tokens.json` created at `.claude/skills/brand-identity/resources/design-tokens.json`. Blood red (#CC0000) purged from VISUAL-PRODUCTION-SPEC — was never in any live product. Three-tier brand identity locked: SS=gold(#d4a843)+teal(#00e5c7), TCF=cold blue(#5A9CF5)+teal, Gravity Claw=cyan/teal(#00e5c7)+gold (infrastructure only, never consumer-facing). Full product funnel T0-T7 mapped in tokens file.
+- **Gravity Claw Icon:** User has a designed icon (mechanical claw gripping energy orb, sacred geometry ring, "77" mark, shattering glass). Integrate into: Telegram bot avatar, Mission Control dashboard splash/loading, system notifications. NOT consumer-facing.
 - Mid-video Frequency Activation CTAs need production test to verify TTS + rendering + insertion timing.
 
 ---

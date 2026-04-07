@@ -1,0 +1,138 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "created": "2026-04-07",
+    "authority": "Canonical design tokens — SINGLE SOURCE OF TRUTH",
+    "sources": [
+      "sovereign-synthesis.com index.html CSS variables (LIVE)",
+      "email-templates/01-welcome-email.html (LIVE)",
+      "Mission Control dashboard skill (LIVE)",
+      "Brand video assets in brand-assets/ (DEPLOYED)"
+    ]
+  },
+
+  "colors": {
+    "background": {
+      "void": "#0a0a0f",
+      "deepest": "#0D0D0D",
+      "surface": "#121212",
+      "card": "#111118",
+      "elevated": "#1E1E1E",
+      "hover": "#252525",
+      "border": "#222222",
+      "border-light": "#252525",
+      "_notes": "void = landing page bg. deepest = email/MC sidebar. surface = email card bg. card = landing page card bg. Use void for consumer-facing, deepest for operational."
+    },
+
+    "accent": {
+      "gold": "#d4a843",
+      "gold-hover": "#e8bf5a",
+      "orange": "#E5850F",
+      "teal": "#00e5c7",
+      "blue": "#5A9CF5",
+      "green": "#2ECC8F",
+      "red": "#D95555",
+      "_notes": "gold = primary CTA buttons (landing page, Stripe checkout). orange = headings/labels/badges (emails, MC dashboard). teal = accent links, highlights, badges (landing page). blue = secondary info labels (email 'Your Access Package'). green = success/completion/growth (MC). red = priority/warning (MC only — NOT a brand color for TCF)."
+    },
+
+    "text": {
+      "primary": "#FFFFFF",
+      "body": "#e8e8e8",
+      "secondary": "#CCCCCC",
+      "muted": "#AAAAAA",
+      "dim": "#888888",
+      "ghost": "#555555",
+      "invisible": "#444444"
+    },
+
+    "brands": {
+      "sovereign_synthesis": {
+        "primary": "#d4a843",
+        "accent": "#00e5c7",
+        "background": "#0a0a0f",
+        "video_text": "#d4a843",
+        "gradient": "linear-gradient(90deg, #E5850F 0%, #5A9CF5 50%, #2ECC8F 100%)",
+        "_notes": "Gold + teal on near-black. Warm, sovereign, elevated."
+      },
+      "the_containment_field": {
+        "primary": "#5A9CF5",
+        "accent": "#00e5c7",
+        "background": "#0a0a0f",
+        "video_text": "#88CCFF",
+        "_notes": "Cold blue + teal on near-black. Clinical, detached, observational. NO blood red."
+      },
+      "gravity_claw": {
+        "primary": "#00e5c7",
+        "accent": "#d4a843",
+        "background": "#0D0D0D",
+        "_notes": "Cyan/teal + gold accents. Infrastructure identity. Architect-facing only. Never consumer-facing."
+      }
+    },
+
+    "light_theme": {
+      "background": "#f5f4f0",
+      "card": "#FFFFFF",
+      "text": "#1a1a2e",
+      "text-dim": "#555555",
+      "border": "#ddd8d0",
+      "_notes": "Landing page light mode override. Same accents apply."
+    }
+  },
+
+  "typography": {
+    "consumer_facing": {
+      "serif": "'EB Garamond', Georgia, serif",
+      "mono": "'Courier Prime', 'Courier New', monospace",
+      "_notes": "Used on sovereign-synthesis.com landing pages. Refined, literary, sovereign."
+    },
+    "video_production": {
+      "display": "Bebas Neue",
+      "_notes": "Used on video intros/outros/CTAs. Tall condensed, high impact. File: brand-assets/BebasNeue-Regular.ttf"
+    },
+    "operational": {
+      "sans": "'Helvetica Neue', Helvetica, Arial, sans-serif",
+      "_notes": "Email templates, Mission Control UI."
+    },
+    "sizing": {
+      "badge": "11px",
+      "body": "16-17px",
+      "heading_small": "20px",
+      "heading_medium": "24-28px",
+      "heading_large": "42px",
+      "letter_spacing_caps": "2-3px"
+    }
+  },
+
+  "product_funnel": {
+    "T0": { "name": "Free Landing", "price": 0, "page": "/", "purpose": "Email capture via Reality Override Manual" },
+    "T1": { "name": "Free Diagnostic", "price": 0, "page": "/tier-1/diagnostic", "purpose": "Interactive self-assessment, deepens engagement" },
+    "T2": { "name": "The Shield: Protocol 77", "price": 77, "stripe_id": "prod_UAvCSFqyO1DhOt", "page": "/tier-2/protocol-77" },
+    "T3": { "name": "The Map: Navigation Override", "price": 177, "stripe_id": "prod_UAvCuJRCaw6VNE", "page": "/tier-3/manifesto" },
+    "T4": { "name": "The Architect: Foundation Protocol", "price": 477, "stripe_id": "prod_UAvCaUUJF45gtE", "page": "/tier-4/defense-protocol" },
+    "T5": { "name": "The Architect: Adversarial Systems", "price": 1497, "stripe_id": "prod_UAvCbyZdNcV9Q0", "page": "/tier-5/phase-2" },
+    "T6": { "name": "The Architect: Sovereign Integration", "price": 3777, "stripe_id": "prod_UAvCJAItedto70", "page": "/tier-6/phase-3" },
+    "T7": { "name": "Inner Circle: Sovereign Licensing", "price": 12000, "stripe_id": "prod_UAvCmnkjzGOpN2", "page": "/tier-7/inner-circle" }
+  },
+
+  "brand_identities": {
+    "sovereign_synthesis": {
+      "role": "Personal brand, primary revenue driver",
+      "tone": "Sovereign, warm, authoritative",
+      "visual": "Gold-hour, sacred geometry, upward movement",
+      "audience": "Consumer-facing, all tiers"
+    },
+    "the_containment_field": {
+      "role": "Anonymous dark psychology feeder, top-of-funnel only",
+      "tone": "Clinical, detached, observational",
+      "visual": "Cold blue, industrial, surveillance aesthetic",
+      "audience": "Consumer-facing, funnels to sovereign-synthesis.com"
+    },
+    "gravity_claw": {
+      "role": "Infrastructure identity, bot/dashboard layer",
+      "tone": "System operational",
+      "visual": "Cyan/teal + gold, mechanical claw icon, Protocol 77 sacred geometry ring",
+      "icon": "Gravity Claw icon — mechanical claw gripping energy orb, sacred geometry ring, '77' mark",
+      "audience": "Architect-facing ONLY, never consumer-facing"
+    }
+  }
+}

@@ -45,6 +45,11 @@ interface ScriptSegment {
   duration_hint: number; // seconds
 }
 
+interface FrequencyActivation {
+  declaration: string;    // "I am starting to see" — the viewer's conviction statement
+  context_line: string;   // Brief line the narrator says BEFORE the declaration to set it up
+}
+
 interface FacelessScript {
   title: string;
   niche: string;
@@ -52,6 +57,7 @@ interface FacelessScript {
   hook: string;
   segments: ScriptSegment[];
   cta: string;
+  frequency_activations?: FrequencyActivation[]; // 2 per long-form — mid-video consciousness CTAs
 }
 
 interface FacelessResult {
@@ -500,6 +506,73 @@ Return ONLY valid JSON, no code fences.`;
     }
     console.log(`📝 [FacelessFactory] Merged script: ${parsed.segments.length} total segments`);
 
+    // ── FREQUENCY ACTIVATION CTAs — 2 consciousness declarations for long-form ──
+    // These are NOT traditional CTAs. They are conviction declarations the viewer types
+    // in the comments — an energy exchange, accepting codes, unlocking frequencies.
+    // Inserted at ~1/3 and ~2/3 marks during video assembly.
+    try {
+      await new Promise(r => setTimeout(r, 3000)); // Brief cooldown before activation gen
+      const activationPrompt = `You are writing 2 FREQUENCY ACTIVATION moments for a documentary-style video.
+
+These are NOT calls to action. These are CONSCIOUSNESS ACTIVATION DECLARATIONS — moments where the viewer makes a sovereign declaration of their own awakening. Like accepting a frequency code.
+
+VIDEO CONTEXT:
+- Title: "${parsed.title}"
+- Thesis: "${blueprint.thesis}"
+- Niche: ${niche.replace(/_/g, " ")}
+
+For each activation, write:
+1. A "context_line" — what the narrator says to set up the moment (1 sentence, builds anticipation)
+2. A "declaration" — what the viewer types in the comments (short, powerful, first-person, present tense)
+
+EXAMPLES of great declarations:
+- "I am starting to see."
+- "I am aligning."
+- "I accept this frequency."
+- "The code is activating."
+- "I am no longer running their program."
+- "My firmware is updating."
+
+RULES:
+- Declarations must be TOPIC-SPECIFIC — tied to THIS video's thesis, not generic
+- First-person, present tense ONLY ("I am..." / "I choose..." / "I see...")
+- Max 8 words per declaration — punchy, declarative, sovereign
+- The context_line should frame it as an energy exchange: "If you feel this truth resonating..." or "Those who are ready will know..."
+- NO begging ("please subscribe"), NO manipulation ("smash that like button") — this is FREQUENCY ALIGNMENT
+
+Return as JSON array:
+[
+  { "context_line": "narrator setup line", "declaration": "I AM DECLARATION" },
+  { "context_line": "narrator setup line", "declaration": "I AM DECLARATION" }
+]
+
+Return ONLY valid JSON.`;
+
+      const activationRes = await llm.generate(
+        [{ role: "user", content: activationPrompt }],
+        { maxTokens: 512, temperature: 0.8 }
+      );
+      const activations = extractJSON(activationRes.content);
+      if (Array.isArray(activations) && activations.length >= 2) {
+        parsed.frequency_activations = activations.slice(0, 2);
+        console.log(`⚡ [FacelessFactory] Frequency Activations generated:`);
+        console.log(`   1: "${activations[0].declaration}" (${activations[0].context_line?.slice(0, 60)}...)`);
+        console.log(`   2: "${activations[1].declaration}" (${activations[1].context_line?.slice(0, 60)}...)`);
+      } else {
+        console.warn(`⚠️ [FacelessFactory] Frequency Activation parse failed, using defaults`);
+        parsed.frequency_activations = [
+          { context_line: "If this truth is resonating with something deep inside you... type these words in the comments right now.", declaration: "I AM STARTING TO SEE" },
+          { context_line: "Those who are ready will feel this. Declare it below.", declaration: "MY FREQUENCY IS SHIFTING" },
+        ];
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ [FacelessFactory] Frequency Activation generation failed: ${err.message?.slice(0, 150)}`);
+      parsed.frequency_activations = [
+        { context_line: "If this truth is resonating with something deep inside you... type these words in the comments right now.", declaration: "I AM STARTING TO SEE" },
+        { context_line: "Those who are ready will feel this. Declare it below.", declaration: "MY FREQUENCY IS SHIFTING" },
+      ];
+    }
+
   } else {
     // ── SHORT-FORM: Single pass, tighter prompt ──
     const shortPrompt = `${voice}
@@ -630,6 +703,7 @@ Return ONLY valid JSON:
     hook: parsed.hook || parsed.segments?.[0]?.voiceover || "",
     segments,
     cta: parsed.cta || "The full protocol is at sovereign-synthesis.com",
+    frequency_activations: parsed.frequency_activations,
   };
 }
 
@@ -1140,8 +1214,9 @@ async function assembleVideo(
   const fps = 30;
   const xfadeDuration = 0.6; // 0.6s true dissolve between scenes (not fade-to-black)
 
-  // ── GENERATE INTRO BUMPER (3s branded title card) ──
-  // Dark background with title text fade-in. Brand presence from frame 1.
+  // ── PRE-RENDERED BRAND INTRO (from brand-assets/) ──
+  // Uses permanent intro videos rendered with Bebas Neue + audio signature.
+  // Long-form = intro_long.mp4 (6s, 1920x1080), Shorts = intro_short.mp4 (2s, 1080x1920)
   const sceneClipDir = `${FACELESS_DIR}/${jobId}_scenes`;
   if (!existsSync(sceneClipDir)) mkdirSync(sceneClipDir, { recursive: true });
   const dim = DIMS[orientation];
@@ -1152,29 +1227,36 @@ async function assembleVideo(
     ace_richie: "SOVEREIGN SYNTHESIS",
     containment_field: "THE CONTAINMENT FIELD",
   };
-  const brandName = BRAND_NAMES[script.brand] || "SOVEREIGN SYNTHESIS";
-  const introPath = `${sceneClipDir}/intro_bumper.mp4`;
-  const introDuration = 3.0;
-  const introTitle = script.title
-    .replace(/'/g, "'\\''")
-    .replace(/:/g, "\\:")
-    .slice(0, 60);
-  const introBrand = brandName.replace(/'/g, "'\\''").replace(/:/g, "\\:");
 
-  try {
-    // Pure ffmpeg: black background → brand name (small, top) + title (large, center) with fade-in
-    execSync(
-      `ffmpeg -f lavfi -i "color=c=black:s=${dim.width}x${dim.height}:d=${introDuration}:r=30" ` +
-        `-vf "drawtext=text='${introBrand}':fontsize=24:fontcolor=white@0.6:x=(w-text_w)/2:y=(h*0.35):alpha='min(t/1.5,1)',` +
-        `drawtext=text='${introTitle}':fontsize=52:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=(h*0.45):alpha='min(t/2,1)'" ` +
-        `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p -y "${introPath}"`,
-      { timeout: 30_000, stdio: "pipe" }
-    );
-    sceneClipPaths.push(introPath);
+  // Brand asset paths — these are baked into the Docker image via brand-assets/
+  const brandAssetsDir = `${__dirname}/../../brand-assets`;
+  const introAsset = orientation === "horizontal"
+    ? `${brandAssetsDir}/intro_long.mp4`
+    : `${brandAssetsDir}/intro_short.mp4`;
+  const introDuration = orientation === "horizontal" ? 6.0 : 2.0;
+
+  if (existsSync(introAsset)) {
+    sceneClipPaths.push(introAsset);
     clipDurations.push(introDuration);
-    console.log(`🎬 [FacelessFactory] Intro bumper generated: ${brandName} / "${script.title}"`);
-  } catch (err: any) {
-    console.warn(`[FacelessFactory] Intro bumper failed (non-fatal): ${err.message?.slice(0, 150)}`);
+    console.log(`🎬 [FacelessFactory] Brand intro loaded: ${introAsset} (${introDuration}s)`);
+  } else {
+    // Fallback: generate basic intro if brand assets not found (dev/local)
+    const introPath = `${sceneClipDir}/intro_bumper.mp4`;
+    const brandName = BRAND_NAMES[script.brand] || "SOVEREIGN SYNTHESIS";
+    const introBrand = brandName.replace(/'/g, "'\\''").replace(/:/g, "\\:");
+    try {
+      execSync(
+        `ffmpeg -f lavfi -i "color=c=0x0a0a0f:s=${dim.width}x${dim.height}:d=3:r=30" ` +
+          `-vf "drawtext=text='${introBrand}':fontsize=48:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2:alpha='min(t/1.5,1)'" ` +
+          `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p -y "${introPath}"`,
+        { timeout: 30_000, stdio: "pipe" }
+      );
+      sceneClipPaths.push(introPath);
+      clipDurations.push(3.0);
+      console.log(`🎬 [FacelessFactory] Fallback intro generated (brand assets not found)`);
+    } catch (err: any) {
+      console.warn(`[FacelessFactory] Intro generation failed (non-fatal): ${err.message?.slice(0, 150)}`);
+    }
   }
 
   // ── PRE-RENDER EACH SCENE AS A VIDEO CLIP (Ken Burns, NO fade — xfade handles transitions) ──
@@ -1221,31 +1303,96 @@ async function assembleVideo(
     throw new Error("All scene clip renders failed — cannot assemble video");
   }
 
-  // ── GENERATE OUTRO CTA CARD (5s branded call-to-action) ──
-  const outroPath = `${sceneClipDir}/outro_cta.mp4`;
-  const outroDuration = 5.0;
-  const ctaText = (script.cta || "sovereign-synthesis.com")
-    .replace(/'/g, "'\\''")
-    .replace(/:/g, "\\:")
-    .slice(0, 80);
-  const outroTagline = script.brand === "containment_field"
-    ? "THE FIELD IS OPEN"
-    : "THE PROTOCOL AWAITS";
+  // ── FREQUENCY ACTIVATION CTAs (long-form only, 2 per video) ──
+  // Inserted at ~1/3 and ~2/3 of the scene clips. Each is a 4-second card:
+  // Dark background → narrator context line (TTS) → declaration text overlay (gold, Bebas Neue)
+  // These are consciousness activation moments, NOT traditional CTAs.
+  if (orientation === "horizontal" && script.frequency_activations?.length) {
+    const fontPath = `${brandAssetsDir}/BebasNeue-Regular.ttf`;
+    const hasFont = existsSync(fontPath);
+    const totalScenes = sceneClipPaths.length; // includes intro
+    const insertPoints = [
+      Math.floor(totalScenes * 0.33),  // ~1/3 mark
+      Math.floor(totalScenes * 0.66),  // ~2/3 mark
+    ];
 
-  try {
-    execSync(
-      `ffmpeg -f lavfi -i "color=c=black:s=${dim.width}x${dim.height}:d=${outroDuration}:r=30" ` +
-        `-vf "drawtext=text='${outroTagline.replace(/'/g, "'\\''").replace(/:/g, "\\:")}':fontsize=28:fontcolor=white@0.5:x=(w-text_w)/2:y=(h*0.35):alpha='min(t/1.5,1)',` +
-        `drawtext=text='sovereign-synthesis.com':fontsize=48:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=(h*0.48):alpha='min(t/2,1)',` +
-        `drawtext=text='${ctaText}':fontsize=22:fontcolor=white@0.7:x=(w-text_w)/2:y=(h*0.58):alpha='min((t-1)/1.5,1)'" ` +
-        `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p -y "${outroPath}"`,
-      { timeout: 30_000, stdio: "pipe" }
-    );
-    sceneClipPaths.push(outroPath);
-    clipDurations.push(outroDuration);
-    console.log(`🎬 [FacelessFactory] Outro CTA card generated: ${outroTagline} → sovereign-synthesis.com`);
-  } catch (err: any) {
-    console.warn(`[FacelessFactory] Outro CTA card failed (non-fatal): ${err.message?.slice(0, 150)}`);
+    let insertOffset = 0; // track how many we've inserted (shifts indices)
+    for (let ai = 0; ai < Math.min(2, script.frequency_activations.length); ai++) {
+      const activation = script.frequency_activations[ai];
+      const actPath = `${sceneClipDir}/freq_activation_${ai}.mp4`;
+      const actDuration = 5.0;
+
+      // Escape text for ffmpeg drawtext
+      const declaration = (activation.declaration || "I AM AWAKENING")
+        .toUpperCase()
+        .replace(/'/g, "'\\''")
+        .replace(/:/g, "\\:");
+      const contextLine = (activation.context_line || "Type this in the comments below.")
+        .replace(/'/g, "'\\''")
+        .replace(/:/g, "\\:");
+
+      try {
+        // Render TTS of the context line (uses the same textToSpeech imported at top)
+        const ctaAudioBuf = await textToSpeech(activation.context_line || "Type this in the comments below.");
+        const ctaAudioPath = `${sceneClipDir}/freq_activation_${ai}.mp3`;
+        writeFileSync(ctaAudioPath, ctaAudioBuf);
+
+        // Build the activation card: dark bg + context text (white, small) + declaration (gold, large)
+        const fontFilter = hasFont ? `fontfile='${fontPath}':` : "";
+        execSync(
+          `ffmpeg -f lavfi -i "color=c=0x0a0a0f:s=${dim.width}x${dim.height}:d=${actDuration}:r=30" ` +
+            `-i "${ctaAudioPath}" ` +
+            `-filter_complex "` +
+              `[0:v]noise=alls=2:allf=t,` +
+              `drawtext=${fontFilter}text='${contextLine}':fontsize=26:fontcolor=white@0.7:x=(w-text_w)/2:y=(h*0.35):alpha='if(lt(t,1),t,if(gt(t,${actDuration - 1}),(${actDuration}-t),1))',` +
+              `drawtext=${fontFilter}text='${declaration}':fontsize=64:fontcolor=0xCCA050:x=(w-text_w)/2:y=(h*0.50):alpha='if(lt(t,1.5),(t-0.5)/1.0,if(gt(t,${actDuration - 1}),(${actDuration}-t),1))',` +
+              `drawtext=${fontFilter}text='\\[ TYPE THIS IN THE COMMENTS \\]':fontsize=20:fontcolor=white@0.4:x=(w-text_w)/2:y=(h*0.62):alpha='if(lt(t,2),(t-1.5)/0.5,if(gt(t,${actDuration - 1}),(${actDuration}-t),1))'[v]` +
+            `" ` +
+            `-map "[v]" -map 1:a -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k ` +
+            `-t ${actDuration} -shortest -y "${actPath}"`,
+          { timeout: 60_000, stdio: "pipe" }
+        );
+
+        // Insert at the calculated position
+        const insertIdx = insertPoints[ai] + insertOffset;
+        sceneClipPaths.splice(insertIdx, 0, actPath);
+        clipDurations.splice(insertIdx, 0, actDuration);
+        insertOffset++;
+        console.log(`⚡ [FacelessFactory] Frequency Activation ${ai + 1} inserted at position ${insertIdx}: "${activation.declaration}"`);
+      } catch (err: any) {
+        console.warn(`⚠️ [FacelessFactory] Frequency Activation ${ai + 1} render failed (non-fatal): ${err.message?.slice(0, 200)}`);
+      }
+    }
+  }
+
+  // ── PRE-RENDERED BRAND OUTRO (long-form only) ──
+  // Shorts = NO outro (kills algorithm retention). Long-form = outro_long.mp4 (7s)
+  if (orientation === "horizontal") {
+    const outroAsset = `${brandAssetsDir}/outro_long.mp4`;
+    const outroDuration = 7.0;
+    if (existsSync(outroAsset)) {
+      sceneClipPaths.push(outroAsset);
+      clipDurations.push(outroDuration);
+      console.log(`🎬 [FacelessFactory] Brand outro loaded: ${outroAsset} (${outroDuration}s)`);
+    } else {
+      // Fallback outro
+      const outroPath = `${sceneClipDir}/outro_cta.mp4`;
+      const outroTagline = script.brand === "containment_field" ? "THE FIELD IS OPEN" : "THE PROTOCOL AWAITS";
+      try {
+        execSync(
+          `ffmpeg -f lavfi -i "color=c=0x0a0a0f:s=${dim.width}x${dim.height}:d=5:r=30" ` +
+            `-vf "drawtext=text='${outroTagline.replace(/'/g, "'\\''").replace(/:/g, "\\:")}':fontsize=28:fontcolor=white@0.5:x=(w-text_w)/2:y=(h*0.35):alpha='min(t/1.5,1)',` +
+            `drawtext=text='sovereign-synthesis.com':fontsize=48:fontcolor=white:x=(w-text_w)/2:y=(h*0.48):alpha='min(t/2,1)'" ` +
+            `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p -y "${outroPath}"`,
+          { timeout: 30_000, stdio: "pipe" }
+        );
+        sceneClipPaths.push(outroPath);
+        clipDurations.push(5.0);
+        console.log(`🎬 [FacelessFactory] Fallback outro generated (brand assets not found)`);
+      } catch (err: any) {
+        console.warn(`[FacelessFactory] Outro generation failed (non-fatal): ${err.message?.slice(0, 150)}`);
+      }
+    }
   }
 
   // ── TRUE CROSSFADE via xfade filter ──

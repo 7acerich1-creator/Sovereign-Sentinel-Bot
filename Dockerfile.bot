@@ -34,6 +34,9 @@ COPY soul.md ./soul.md
 COPY claude.md ./claude.md
 COPY skills ./skills
 
+# Brand assets (intro/outro videos, audio signatures, Bebas Neue font)
+COPY brand-assets ./brand-assets
+
 # Install Python deps for sovereign clip pipeline
 # yt-dlp: video download for Whisper extraction
 # edge-tts: FREE Microsoft neural TTS (replaced unreliable edge-tts-node WebSocket library)

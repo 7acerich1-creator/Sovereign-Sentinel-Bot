@@ -28,10 +28,11 @@ export interface PineconeMatch {
 // so we don't pull in extra SDK dependencies for a single call.
 // NOTE: text-embedding-004 was deprecated Jan 14 2026, replaced by gemini-embedding-001
 async function embedText(text: string): Promise<number[]> {
-  // SESSION 35: Use ONLY the dedicated Imagen key for embeddings.
-  // Old code fell back to GEMINI_API_KEY (old project) — that's the "zero logs" ghost.
-  // If imagenKey is empty, skip Gemini and fall through to OpenAI.
-  const geminiKey = config.llm.providers.gemini?.imagenKey;
+  // SESSION 35 HOTFIX: Embeddings are TEXT operations — use GEMINI_API_KEY, not imagenKey.
+  // imagenKey is for IMAGE GENERATION only. The 403 errors on boot were because the Imagen key
+  // doesn't have embedding API access. GEMINI_API_KEY is the correct key for embeddings.
+  // The "zero logs ghost" fix only applies to IMAGE gen paths (content-engine, faceless-factory).
+  const geminiKey = config.llm.providers.gemini?.apiKey;
   const openaiKey = config.llm.providers.openai?.apiKey;
 
   // Primary: Gemini embedding (1024d via Matryoshka Representation Learning)
@@ -464,10 +465,16 @@ export class PineconeMemory {
         return 0;
       }
 
-      console.log(`🔄 [Vector Sync] ${toSync.length} unembedded nodes found — syncing to Pinecone...`);
+      // SESSION 35: Cap boot sync to 25 nodes per deploy to prevent API rate-limit storms.
+      // 1000 nodes × embedText() at boot was hammering Gemini embedding API with 1000 calls
+      // in ~10 seconds, causing 403s and saturating the network egress.
+      // Remaining nodes will be picked up on subsequent deploys (25/deploy).
+      const BOOT_SYNC_CAP = 25;
+      const cappedSync = toSync.slice(0, BOOT_SYNC_CAP);
+      console.log(`🔄 [Vector Sync] ${toSync.length} unembedded nodes found — syncing ${cappedSync.length} this boot (cap: ${BOOT_SYNC_CAP})...`);
 
       let synced_count = 0;
-      for (const node of toSync) {
+      for (const node of cappedSync) {
         try {
           const vector = await embedText(node.content);
           if (vector.length === 0) continue;

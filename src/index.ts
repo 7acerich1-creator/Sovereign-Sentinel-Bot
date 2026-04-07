@@ -2246,7 +2246,7 @@ async function main() {
     groupManager.setBotUsername(telegram.botUsername);
     console.log(`[Veritas] GroupManager updated to real username: @${telegram.botUsername}`);
   }
-  console.log("# ✅ Vanguard is LIVE");
+  console.log("# ✅ Gravity Claw is LIVE");
 
   // Register channel in router
   router.registerChannel(telegram);

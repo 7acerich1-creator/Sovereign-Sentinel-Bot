@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-06 (Cowork Session 29b — EDGE TTS + DOCKERFILE FIX) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-06 (Cowork Session 29c — BRAND IDENTITY + FREQUENCY ACTIVATION CTAs) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -8,8 +8,10 @@
 **Mission Metrics:** Gemini text-gen hemorrhage fully diagnosed and killed. Voice locked. Script gen architecture overhauled. Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit: Session 29b `22861db` (Dockerfile cp fix + Edge TTS primary) → Session 29 `30f0b80` (Edge TTS Python CLI + personalities.json restore + dual Groq key) → `624fc28` (Session 28c — Gemini kill + voice lock) → `f27cf8d` (Session 28b — TTS + music fix) → `ab11940` (Session 28 — script gen overhaul) → prior chain. Auto-deploying.
-- Session 29b commit: `22861db` — Fixed Dockerfile `cp -r src/data dist/data` → `cp src/data/*.json dist/data/` to prevent nesting when dist/data/ already exists from tsc.
+- Bot is live on Railway. Latest commit: Session 29c `b82c2e2` (brand identity system + frequency activation CTAs) → Session 29b2 `4d79938` (voice swap + music rewrite + anti-repetition) → Session 29b `22861db` (Dockerfile cp fix + Edge TTS primary) → Session 29 `30f0b80` (Edge TTS Python CLI + dual Groq key) → prior chain. Auto-deploying.
+- Session 29c commit: `b82c2e2` — Brand identity system: pre-rendered intro/outro videos (Bebas Neue font, audio signatures), Frequency Activation CTAs (2 per long-form), Dockerfile updated to include brand-assets.
+- Session 29b2 commit: `4d79938` — Edge TTS voice swap to AndrewMultilingualNeural, music bed rewrite (30s loop + stream_loop), Pass 2 anti-repetition fix.
+- Session 29b commit: `22861db` — Fixed Dockerfile cp nesting bug.
 - Session 29 commits: `30f0b80` (Edge TTS Python CLI replaces unreliable edge-tts-node WebSocket), `99fa7ed` (restore truncated index.ts), `3392daa` (promote Edge TTS to primary).
 - Session 28c commit: `624fc28` — Gemini removed from ALL text-gen failover chains. Supabase personality hot-update disabled (was overwriting lean prompts). Adam Brooding voice locked. Railway env var `LLM_FAILOVER_ORDER` updated to `groq,anthropic,openai`.
 - Session 28b commit: `f27cf8d` — TTS voice/expressiveness fix + ffmpeg-native music rewrite.
@@ -27,7 +29,7 @@
 - **Gemini:** $62.30 OWED but NOT BLOCKED. **REMOVED from ALL text-gen failover chains (Session 28c, commit 624fc28).** Gemini API key stays active ONLY for Imagen 4 image generation and gemini-embedding-001 (Pinecone vectors). Railway env var `LLM_FAILOVER_ORDER` updated to `groq,anthropic,openai`. Zero Gemini text-gen burns going forward.
 - **Groq:** FREE tier. 14,400 req/day. Primary for pipeline + content agents (Alfred, Anita, Vector, Yuki). Lean bundled prompts (~750 tokens) fit within Groq per-request limit.
 - **ElevenLabs:** Creator plan, credits EXHAUSTED (Session 29b, April 2026). DEMOTED to fallback. Edge TTS (FREE, Microsoft neural voices) is now primary. Set `FORCE_ELEVENLABS=true` env var to restore ElevenLabs when credits renew. Voice: Adam Brooding, Dark & Tough (`IRHApOXLvnW57QJPQH2P`) — locked as permanent Sovereign Synthesis voice (Session 28c).
-- **Edge TTS:** FREE, unlimited, no API key. Python `edge-tts` CLI (pip install). Voice: `en-US-GuyNeural` (deep male). Installed in Docker production stage. Primary TTS provider as of Session 29.
+- **Edge TTS:** FREE, unlimited, no API key. Python `edge-tts` CLI (pip install). Voice: `en-US-AndrewMultilingualNeural` (deep, cinematic, intonation-rich — Sovereign Synthesis signature voice). Swapped from GuyNeural (too flat/newscastery) in Session 29b2. Installed in Docker production stage. Primary TTS provider as of Session 29.
 - **Imagen 4:** RESTORED as primary image gen (Session 27). Cost $0.02-0.06/image. Expected $7-12/month. Gemini API is active, so Imagen 4 is functional.
 
 **LLM ROUTING (Session 29 — dual Groq key + Session 28c — Gemini REMOVED from text-gen):**
@@ -196,6 +198,27 @@ These documents exist in the repo but contain stale information. Do NOT use them
 - `[DVP: ADDRESSED]` Cooldown raised to 180s — needs production test
 - `[DVP: ADDRESSED]` Error message fix — passive (only visible on failures)
 - `[DVP: ADDRESSED]` Sapphire Sentinel disabled — `start()` is a no-op. No Supabase polling every 2h. Morning briefing (10 AM CDT), evening recap (8 PM CDT), and stasis watchdog (3:28 PM CDT) cover monitoring needs.
+
+---
+
+**Session Summary — Cowork Session 29c (2026-04-06):**
+
+**BRAND IDENTITY SYSTEM + FREQUENCY ACTIVATION CTAs.** Built permanent brand assets and wired them into the faceless video pipeline. Every video now opens with the Sovereign Synthesis brand intro and closes with the brand outro (long-form only — shorts skip outro to protect algorithm retention). Two Frequency Activation CTAs are inserted at 1/3 and 2/3 marks in long-form videos — these are LLM-generated consciousness declarations tied to the video's thesis, not traditional CTAs.
+
+**Changes deployed (Session 29c, commit `b82c2e2`):**
+1. **Brand assets created** — `brand-assets/` directory: `intro_long.mp4` (6s, 1920x1080), `intro_short.mp4` (2s, 1080x1920), `outro_long.mp4` (7s, 1920x1080), 3 audio signatures (MP3), `BebasNeue-Regular.ttf` font.
+2. **Pre-rendered intro/outro replace per-video generation** — `assembleVideo()` now loads brand assets from `brand-assets/` instead of generating text-on-black cards per video. Graceful fallback to basic generation if assets not found.
+3. **Frequency Activation CTA system** — New `FrequencyActivation` interface. LLM generates 2 topic-specific declarations per long-form video after Pass 2 merge. Each renders as a 5s card: dark bg + narrator context line (TTS) + gold declaration text (Bebas Neue) + "TYPE THIS IN THE COMMENTS" prompt. Inserted at ~1/3 and ~2/3 of scene clips.
+4. **Dockerfile updated** — `COPY brand-assets ./brand-assets` added to production stage.
+
+**Also deployed earlier in Session 29b2 (commit `4d79938`):**
+5. **Edge TTS voice swap** — `en-US-GuyNeural` (flat newsreader) → `en-US-AndrewMultilingualNeural` (cinematic, intonation-rich). Sovereign Synthesis signature voice locked.
+6. **Music bed rewrite** — Full-duration aevalsrc synthesis (OOM/timeout) → 30s seamless loop + `stream_loop` tiling. Music finally works.
+7. **Anti-repetition fix** — Pass 2 now receives full Pass 1 topic summary with explicit anti-repetition rules. No more rehashing.
+
+**Pending:**
+- Imagen 4 cinematic background image — prompt crafted, user needs to generate via Google AI Studio and drop into brand-assets/. Once provided, intros/outro will be re-composited with the image as background.
+- Mid-video Frequency Activation CTAs need production test to verify TTS + rendering + insertion timing.
 
 ---
 

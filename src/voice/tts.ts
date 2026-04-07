@@ -145,7 +145,7 @@ async function elevenLabsTTS(text: string, speed?: number): Promise<Buffer> {
 
 // Edge TTS voice mapping — deep male voice for sovereignty / dark psychology brand
 // Session 28: switched from AriaNeural (female) to GuyNeural (deep male)
-const EDGE_VOICE = "en-US-GuyNeural"; // Deep natural male, matches brand voice
+const EDGE_VOICE = "en-US-AndrewMultilingualNeural"; // Deep, cinematic, intonation-rich — Sovereign Synthesis signature voice
 
 async function edgeTTS(text: string, speed?: number): Promise<Buffer> {
   const ts = Date.now();

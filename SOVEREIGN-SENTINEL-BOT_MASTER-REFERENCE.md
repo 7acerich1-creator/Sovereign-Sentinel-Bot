@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-06 (Cowork Session 29 — DUAL GROQ KEY + PIPELINE STABILITY) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-06 (Cowork Session 29b — EDGE TTS + DOCKERFILE FIX) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -8,7 +8,9 @@
 **Mission Metrics:** Gemini text-gen hemorrhage fully diagnosed and killed. Voice locked. Script gen architecture overhauled. Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit: Session 29 (dual Groq key + pipeline stability) → `624fc28` (Session 28c — Gemini kill + voice lock) → `f27cf8d` (Session 28b — TTS + music fix) → `ab11940` (Session 28 — script gen overhaul) → `547b0a1` (Session 27c) → prior chain. Auto-deploying.
+- Bot is live on Railway. Latest commit: Session 29b `22861db` (Dockerfile cp fix + Edge TTS primary) → Session 29 `30f0b80` (Edge TTS Python CLI + personalities.json restore + dual Groq key) → `624fc28` (Session 28c — Gemini kill + voice lock) → `f27cf8d` (Session 28b — TTS + music fix) → `ab11940` (Session 28 — script gen overhaul) → prior chain. Auto-deploying.
+- Session 29b commit: `22861db` — Fixed Dockerfile `cp -r src/data dist/data` → `cp src/data/*.json dist/data/` to prevent nesting when dist/data/ already exists from tsc.
+- Session 29 commits: `30f0b80` (Edge TTS Python CLI replaces unreliable edge-tts-node WebSocket), `99fa7ed` (restore truncated index.ts), `3392daa` (promote Edge TTS to primary).
 - Session 28c commit: `624fc28` — Gemini removed from ALL text-gen failover chains. Supabase personality hot-update disabled (was overwriting lean prompts). Adam Brooding voice locked. Railway env var `LLM_FAILOVER_ORDER` updated to `groq,anthropic,openai`.
 - Session 28b commit: `f27cf8d` — TTS voice/expressiveness fix + ffmpeg-native music rewrite.
 - Session 28 commit: `ab11940` — thesis extraction + narrative arc rewrite of faceless-factory.ts.
@@ -24,7 +26,8 @@
 - **OpenAI:** -$0.06 credits. DEAD. DALL-E 3 and OpenAI TTS will not fire.
 - **Gemini:** $62.30 OWED but NOT BLOCKED. **REMOVED from ALL text-gen failover chains (Session 28c, commit 624fc28).** Gemini API key stays active ONLY for Imagen 4 image generation and gemini-embedding-001 (Pinecone vectors). Railway env var `LLM_FAILOVER_ORDER` updated to `groq,anthropic,openai`. Zero Gemini text-gen burns going forward.
 - **Groq:** FREE tier. 14,400 req/day. Primary for pipeline + content agents (Alfred, Anita, Vector, Yuki). Lean bundled prompts (~750 tokens) fit within Groq per-request limit.
-- **ElevenLabs:** Creator plan, credits remaining. TTS working. Voice: Adam Brooding, Dark & Tough (`IRHApOXLvnW57QJPQH2P`) — locked as permanent Sovereign Synthesis voice (Session 28c).
+- **ElevenLabs:** Creator plan, credits EXHAUSTED (Session 29b, April 2026). DEMOTED to fallback. Edge TTS (FREE, Microsoft neural voices) is now primary. Set `FORCE_ELEVENLABS=true` env var to restore ElevenLabs when credits renew. Voice: Adam Brooding, Dark & Tough (`IRHApOXLvnW57QJPQH2P`) — locked as permanent Sovereign Synthesis voice (Session 28c).
+- **Edge TTS:** FREE, unlimited, no API key. Python `edge-tts` CLI (pip install). Voice: `en-US-GuyNeural` (deep male). Installed in Docker production stage. Primary TTS provider as of Session 29.
 - **Imagen 4:** RESTORED as primary image gen (Session 27). Cost $0.02-0.06/image. Expected $7-12/month. Gemini API is active, so Imagen 4 is functional.
 
 **LLM ROUTING (Session 29 — dual Groq key + Session 28c — Gemini REMOVED from text-gen):**
@@ -2262,77 +2265,4 @@ Posts appeared in Buffer but with TWO critical bugs:
 Each day reserves **1 slot (1 PM across both brands)** as a "trending override." This slot is NOT pre-filled by the weekly batch. Instead, Alfred's 8 AM trend scan produces a real-time hook, and the 1 PM slot picks it up. If no trending content exists by 12:30 PM, the engine falls back to a pre-generated evergreen post for that slot.
 
 **Niche rotation still applies per day:**
-The weekly batch follows the existing rotation (Mon=dark psych, Tue=self improvement, etc.) so each day's content matches its assigned niche. Weekend slots pull top performers from the week as before.
-
-**Implementation changes needed in `content-engine.ts`:**
-1. Add a `weekly_production_job` that generates 7 days of content in one run
-2. Change the daily production job to a **gap-filler only** — checks if today's slots exist, generates any missing ones (handles the trending override slot + any failures from the weekly batch)
-3. Add a `batch_id` column to `content_engine_queue` so each weekly batch can be tracked/audited
-4. Add a Telegram notification: "Weekly batch generated: X/84 items queued for [date range]"
-
-**Stale content protection:**
-7 days is the max batch window because trend-adjacent hooks (dark psych angles on current events, etc.) lose punch after ~5 days. The niche rotation helps — Monday's "dark psychology" hooks reference timeless manipulation patterns, not last week's news. The 1 PM trending slot handles anything time-sensitive.
-
-**Platform Frequency Overrides (from Posting Guide):**
-The weekly batch must respect the IG cap: Instagram (Ace) = 3 slots/day (7 AM, 1 PM, 7 PM), Instagram (CF) = 2 slots/day (10 AM, 4 PM). When generating the weekly batch, IG-excluded time slots should still generate content for all other platforms but skip IG channel IDs.
-
-**BUILD STATUS:** 📋 PLANNED — requires modification to existing `content-engine.ts`. Current daily engine works and should continue running until the weekly batch upgrade is built and tested.
-
-**To deploy:**
-1. Push to GitHub main → Railway auto-deploys
-2. Watch Railway logs at 11:30 UTC for `[ContentEngine] Daily production firing`
-3. Watch every 5 minutes for `[ContentEngine] Distribution sweep posted X piece(s)`
-4. Check Supabase `content_engine_queue` table for rows
-5. Check Buffer queue at buffer.com for scheduled posts
-
-### Other Coordination Gaps — Future Fix Backlog
-
-**GAP 7: Agent Stasis Detection lacks teeth**
-- Daily 2PM stasis check dispatches self-check tasks to all agents. But the check just asks agents to report — no automated consequence if they've produced nothing.
-- **Recommendation:** Add a metric: "posts_created_today" per agent. If zero by 2PM, escalate to Architect via Telegram.
-
-**GAP 8: Weekend repost logic doesn't exist**
-- Posting guide says Sat/Sun = repeat top performers. No code identifies or reposts top performers.
-- **Recommendation:** Vector's 10AM sweep should query `content_transmissions` for highest-engagement posts of the week. On Sat/Sun, the Deterministic Engine should pull from a `repost_queue` table instead of generating new content.
-
-**GAP 9: Comic book asset pipeline has no storage**
-- Posting guide describes comic panels as high-value assets. No panels are stored in Supabase Storage or any accessible location.
-- **Recommendation:** Ace uploads panels → Supabase Storage `comic-panels` bucket. Yuki references them by URL in posts. Blocked by: Ace hasn't uploaded panels yet.
-
-**GAP 10: Anita's content drafts may be orphaned**
-- Section 16 asks "What happened after Anita's content was approved?" — still unanswered.
-- Content may be sitting in `content_drafts` table with no mechanism to move it to distribution.
-- **Recommendation:** The Deterministic Engine should also check `content_drafts` for Anita-produced content with `status=approved` and include it in the distribution queue.
-
-**GAP 11: Alfred's trend scan output doesn't feed content production**
-- Alfred's 8AM scan produces a briefing. It does NOT produce structured content that the Deterministic Engine can consume.
-- **Recommendation:** Alfred's scan output should include a `suggested_hooks` array in structured JSON. The daily content production job can optionally consume these instead of generating from scratch.
-
-**GAP 12: No image generation in the posting loop** ✅ FIXED (2026-04-02 Cowork Session 5)
-- The posting guide assumes image+text posts. The image generator tool exists (`src/tools/image-generator.ts`) but was not integrated into the content production workflow.
-- **Fix applied:** `dailyContentProduction()` in `content-engine.ts` now calls `generateContentImage()` after LLM text generation. Flow: (1) LLM generates text variants, (2) `generateContentImage()` builds a niche+brand-aware image prompt from the post text, (3) calls Gemini Imagen 3 (primary) or DALL-E 3 (fallback), (4) uploads the PNG buffer directly to Supabase Storage `public-assets` bucket at path `content-images/{date}/{brand}_{niche}_{slot}_{timestamp}.png`, (5) writes the public URL to `media_url` on the `content_engine_queue` row. The distribution sweep already passes `media_url` as `assets.images[0].url` to Buffer's GraphQL mutation. If image generation fails, the post goes out text-only (graceful degradation — IG/TikTok skipped, all other channels still fire).
-- **Result:** IG and TikTok posting is UNBLOCKED. Full 329/week cadence achievable once deployed.
-- **Push status:** Code in sandbox — needs push to GitHub → Railway auto-deploy.
-
----
-
-## Section 28: Gemini Billing Crisis — Root Cause & Fix (2026-04-05, Session 28)
-
-**Problem:** Gemini API billed $62.16 in Apr 1-5 (vs $17.20 for all of March). Card declining.
-
-**Root Cause:** Anita was configured as Gemini-first (`["gemini", "groq", "anthropic"]`). Every dispatched task sent ~26K input tokens to `gemini-3.1-pro-preview`. The 26K breaks down as: 4.5K system prompt (prompt_blueprint) + ~20K accumulated context (conversation summary + last 20 messages from SQLite + semantic memory search + Pinecone recalls + dispatch payload). Pipeline cascade multiplied this — one Alfred scan triggers 5-8 downstream Gemini calls via `triggerPipelineHandoffs()`.
-
-**Fix Applied (commit a66af35):** Flipped Anita to Groq-first (`["groq", "gemini", "anthropic"]`). Groq is free tier. Gemini remains as failover only. All other agents were already Groq-first or Anthropic-first.
-
-**Current LLM Team Assignments:**
-- Alfred, Vector, Yuki, **Anita** → Groq primary (free, 14,400/day)
-- Sapphire, Veritas → Anthropic primary (strategic, highest quality)
-- Pipeline → Groq primary with Gemini failover
-- Gemini is now FAILOVER ONLY for all agents
-
-**FUTURE OPTIMIZATION (Option C) — Not urgent, queue for later:**
-The real token bloat is NOT the system prompt (4.5K is fine). It's the context accumulation in `agent/loop.ts` `buildContext()` which loads conversation summary + 20 recent messages + memory search + Pinecone recalls for EVERY dispatch call. Dispatch tasks share the agent loop's conversation history, so each successive cascade call gets heavier. The optimization would be: clear agent loop context between dispatch tasks so each starts clean (~6-8K per call instead of ~26K). This is free on Groq so no cost urgency, but would improve response quality (less noise in context) and reduce latency. File: `src/agent/loop.ts` around line 230.
-
----
-
-*This document is the sovereign source of truth. If it doesn't know it, the session doesn't know it. Update it or lose it.*
+The weekl

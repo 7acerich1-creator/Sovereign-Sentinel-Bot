@@ -427,6 +427,11 @@ Return ONLY valid JSON, no code fences, no explanation.`;
     const pass2SegCount = segmentCount - parsed1.segments.length;
     const lastSegText = parsed1.segments[parsed1.segments.length - 1]?.voiceover || "";
 
+    // Build a summary of what Pass 1 already covered so Pass 2 doesn't repeat
+    const pass1TopicSummary = parsed1.segments
+      .map((seg: any, i: number) => `Seg ${i + 1}: ${(seg.voiceover || "").slice(0, 80)}...`)
+      .join("\n");
+
     const pass2Prompt = `${voice}
 
 You are writing PART 2 of a documentary-style voiceover. Part 1 covered the HOOK, SETUP, and ESCALATION (${parsed1.segments.length} segments). Now you write the REVELATION and RESOLUTION — ACT 3.
@@ -437,7 +442,11 @@ NARRATIVE BLUEPRINT:
 - STORY ARC: ${blueprint.narrative_arc}
 - REMAINING ARGUMENTS: ${blueprint.key_arguments.slice(3).map((a, i) => `${i + 4}. ${a}`).join(" | ")}
 - EMOTIONAL JOURNEY: ${blueprint.emotional_journey}
-- WHERE WE LEFT OFF (last segment): "${lastSegText.slice(0, 300)}"
+
+WHAT WAS ALREADY COVERED IN PART 1 (DO NOT REPEAT THESE TOPICS — BUILD ON THEM):
+${pass1TopicSummary}
+
+LAST SEGMENT (where you pick up): "${lastSegText.slice(0, 300)}"
 
 Write ${pass2SegCount} MORE segments that:
 1. ESCALATE to the revelation — the moment the thesis lands with full force
@@ -446,7 +455,12 @@ Write ${pass2SegCount} MORE segments that:
 4. Build to a natural, powerful conclusion (not an abrupt stop)
 5. End with an organic CTA
 
-CRITICAL: These segments must feel like a CONTINUATION of the story, not a restart. Reference ideas from Part 1. Use callback language ("Remember what we said about..." or "This is exactly why...").
+CRITICAL ANTI-REPETITION RULES:
+- You have the FULL summary of Part 1 above. DO NOT rehash those points. ADVANCE the story.
+- If Part 1 established a problem, Part 2 reveals the MECHANISM behind it
+- If Part 1 showed evidence, Part 2 delivers the IMPLICATIONS and the WAY OUT
+- Reference Part 1 ideas as callbacks ("This is exactly why..." / "Remember when we said...") but DO NOT re-explain them
+- Each segment must introduce NEW territory — new angles, new evidence, new frameworks
 
 Each segment: 100-150 words MINIMUM (6-10 sentences). Under 80 words = FAILURE.
 Vary sentence length. Short punches mixed with flowing thoughts.
@@ -1298,20 +1312,15 @@ async function assembleVideo(
     : "";
 
   // ── BACKGROUND MUSIC BED ──
-  // Generate a dark cinematic ambient drone using ffmpeg synthesis.
-  // Zero external dependencies, zero royalty issues — pure math.
-  // Niche-aware: dark_psychology gets darker tones, self_improvement gets warmer.
-  // Mixed at -20dB under voice with 2s fade in and 3s fade out.
+  // Session 29b rewrite: Generate a SHORT 30s ambient loop, then stream_loop it to full duration.
+  // Previous versions tried to synthesize the full 10-15min duration which caused:
+  //   - Node.js OOM (Session 27: 480MB Float32Arrays)
+  //   - ffmpeg timeout (Session 28: aevalsrc for full duration = 40M samples through filter graph)
+  // Fix: 30s loop = ~1.3M samples. Trivial. Then -stream_loop extends to any length.
+  // Niche-aware chord voicings. Zero external deps, zero royalty.
+  const musicLoopPath = `${FACELESS_DIR}/${jobId}_music_loop.mp3`;
   const musicPath = `${FACELESS_DIR}/${jobId}_music_bed.mp3`;
   let hasMusicBed = false;
-
-  // ── CINEMATIC AMBIENT SCORE — FFMPEG-NATIVE SYNTHESIS ──
-  // Session 28 rewrite: Previous version generated ~480MB of Float32Arrays in Node.js
-  // memory for a 15-min video, causing silent OOM crashes on Railway. Music NEVER worked.
-  //
-  // New approach: 100% ffmpeg-native using aevalsrc. Zero Node.js memory allocation.
-  // ffmpeg generates the sine tones, sub-bass, and noise directly in its audio pipeline.
-  // Niche-specific chord voicings for emotional color.
 
   const MUSIC_CHORDS: Record<string, { root: number; fifth: number; octave: number; sub: number; mood: string }> = {
     dark_psychology: { root: 110, fifth: 164.81, octave: 220, sub: 55, mood: "dark" },
@@ -1324,17 +1333,14 @@ async function assembleVideo(
   try {
     const chord = MUSIC_CHORDS[script.niche] || MUSIC_CHORDS.brand;
     const musicDuration = Math.ceil(audioDuration) + 4;
+    const LOOP_DURATION = 30; // seconds — short enough to never OOM or timeout
 
-    // Build aevalsrc expression for detuned pad chord + sub + noise
-    // Each tone pair is slightly detuned (±1.5Hz) for organic beating texture
-    // Slow LFO (0.04Hz) creates breathing movement
+    // Build aevalsrc expression for detuned pad chord + sub
     const r = chord.root, r2 = chord.root + 1.5;
     const f = chord.fifth, f2 = chord.fifth + 1.8;
     const o = chord.octave, o2 = chord.octave + 2.2;
     const s = chord.sub;
 
-    // Pad: 6 detuned sine voices with slow breathing LFO per voice
-    // Each voice: sin(2*PI*freq*t) * (0.4 + 0.6*sin(2*PI*lfoHz*t + phase)) * amplitude
     const padExpr = [
       `sin(2*PI*${r}*t)*(0.4+0.6*sin(2*PI*0.035*t))`,
       `sin(2*PI*${r2}*t)*(0.4+0.6*sin(2*PI*0.042*t+1.2))`,
@@ -1343,43 +1349,48 @@ async function assembleVideo(
       `sin(2*PI*${o}*t)*(0.4+0.6*sin(2*PI*0.033*t+3.7))`,
       `sin(2*PI*${o2}*t)*(0.4+0.6*sin(2*PI*0.05*t+1.9))`,
     ].map(v => `(${v})*0.02`).join("+");
-
-    // Sub-bass: pure sine with slow swell
     const subExpr = `sin(2*PI*${s}*t)*(0.5+0.5*sin(2*PI*0.02*t))*0.15`;
-
-    // Combined expression
     const fullExpr = `${padExpr}+${subExpr}`;
 
-    // Generate music bed using ffmpeg's aevalsrc (zero memory, pure math)
-    // Pipeline: aevalsrc → lowpass (stay under voice) → highpass (remove DC) →
-    //           compress → fade in/out → final level
+    // STEP 1: Generate SHORT 30s seamless loop (trivial for ffmpeg — ~1.3M samples)
     execSync(
-      `ffmpeg -f lavfi -i "aevalsrc='${fullExpr}':s=44100:d=${musicDuration}" ` +
-        `-f lavfi -i "anoisesrc=d=${musicDuration}:c=pink:r=44100:a=0.008" ` +
+      `ffmpeg -f lavfi -i "aevalsrc='${fullExpr}':s=44100:d=${LOOP_DURATION + 2}" ` +
+        `-f lavfi -i "anoisesrc=d=${LOOP_DURATION + 2}:c=pink:r=44100:a=0.008" ` +
         `-filter_complex "` +
-          `[1:a]lowpass=f=500[noise];` +            // Noise: roll off hard, just warmth
+          `[1:a]lowpass=f=500[noise];` +
           `[0:a][noise]amix=inputs=2:duration=first:normalize=0,` +
-          `lowpass=f=1800,` +                        // Keep everything below voice range
-          `highpass=f=30,` +                         // Remove DC offset
+          `lowpass=f=1800,highpass=f=30,` +
           `acompressor=threshold=-25dB:ratio=4:attack=50:release=200,` +
-          `afade=t=in:st=0:d=3,` +                  // 3s slow fade in
-          `afade=t=out:st=${musicDuration - 4}:d=4,` +  // 4s fade out
-          `volume=0.5` +                             // Master level
-        `[music]" ` +
-        `-map "[music]" -c:a libmp3lame -b:a 128k -y "${musicPath}"`,
-      { timeout: 120_000, stdio: "pipe" }
+          `afade=t=in:st=0:d=2,` +
+          `afade=t=out:st=${LOOP_DURATION}:d=2,` +
+          `volume=0.5[loop]" ` +
+        `-map "[loop]" -t ${LOOP_DURATION} -c:a libmp3lame -b:a 128k -y "${musicLoopPath}"`,
+      { timeout: 30_000, stdio: "pipe" }
+    );
+
+    if (!existsSync(musicLoopPath)) throw new Error("Loop file not created");
+    console.log(`🎵 [FacelessFactory] 30s music loop generated: ${script.niche}/${chord.mood}`);
+
+    // STEP 2: Loop it to full video duration with fade in/out
+    const loopCount = Math.ceil(musicDuration / LOOP_DURATION);
+    execSync(
+      `ffmpeg -stream_loop ${loopCount} -i "${musicLoopPath}" ` +
+        `-af "afade=t=in:st=0:d=3,afade=t=out:st=${musicDuration - 4}:d=4" ` +
+        `-t ${musicDuration} -c:a libmp3lame -b:a 128k -y "${musicPath}"`,
+      { timeout: 30_000, stdio: "pipe" }
     );
 
     hasMusicBed = existsSync(musicPath);
     if (hasMusicBed) {
-      console.log(`🎵 [FacelessFactory] Cinematic score generated (ffmpeg-native): ${script.niche}/${chord.mood} (${musicDuration}s)`);
+      console.log(`🎵 [FacelessFactory] Music bed: ${musicDuration}s (${loopCount} loops of ${LOOP_DURATION}s) — ${script.niche}/${chord.mood}`);
     } else {
       console.error(`❌ [FacelessFactory] Music bed file not created despite no error`);
     }
+    try { unlinkSync(musicLoopPath); } catch {}
   } catch (err: any) {
     console.error(`❌ [FacelessFactory] Music bed generation FAILED: ${err.message?.slice(0, 400)}`);
-    // Log stderr if available for debugging
     if (err.stderr) console.error(`  STDERR: ${err.stderr.toString().slice(0, 500)}`);
+    try { unlinkSync(musicLoopPath); } catch {}
   }
 
   // Build the final assembly command:

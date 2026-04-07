@@ -137,7 +137,8 @@ async function main() {
   // (set before Groq was added) didn't list it. Pipeline ran without its free LLM.
   const llmProviders: LLMProvider[] = [];
   // First pass: initialize in failoverOrder sequence
-  for (const providerName of config.llm.failoverOrder) {
+  // Gemini is EXCLUDED from text-gen — reserved for Imagen 4 + embeddings only (Session 29c)
+  for (const providerName of config.llm.failoverOrder.filter((n: string) => n !== "gemini")) {
     const providerConfig = (config.llm.providers as Record<string, any>)[providerName];
     if (providerConfig?.apiKey) {
       try {
@@ -155,9 +156,14 @@ async function main() {
     }
   }
 
-  // Second pass: catch any providers with keys that were NOT in failoverOrder
-  // This prevents env var overrides from silently killing providers
+  // Second pass: catch any providers with keys that were NOT in failoverOrder.
+  // EXCLUDES gemini — Gemini is reserved for Imagen 4 image gen + embeddings ONLY.
+  // Session 29c fix: Gemini in text-gen chains was the root cause of the billing leak.
+  // The GEMINI_IMAGEN_KEY env var is read directly by faceless-factory, content-engine,
+  // and pinecone embeddings — it never enters the text-gen provider pool.
+  const TEXT_GEN_EXCLUDED = new Set(["gemini"]);
   for (const providerName of Object.keys(config.llm.providers)) {
+    if (TEXT_GEN_EXCLUDED.has(providerName)) continue; // Gemini = image/embedding only
     if (llmProviders.some(p => p.name === providerName)) continue; // Already initialized
     const providerConfig = (config.llm.providers as Record<string, any>)[providerName];
     if (providerConfig?.apiKey) {
@@ -203,10 +209,10 @@ async function main() {
     for (const name of primaryOrder) {
       if (providersByName[name]) chain.push(providersByName[name]);
     }
-    // Add any remaining providers not in the explicit order as fallback
-    for (const p of llmProviders) {
-      if (!chain.includes(p)) chain.push(p);
-    }
+    // STRICT: Only use providers explicitly listed in primaryOrder.
+    // DO NOT add other providers as silent fallback — this was the root cause of
+    // the Gemini billing leak (Session 29c). Every agent had Gemini as a hidden
+    // tail-end fallback that fired when Anthropic credits died + Groq timed out.
     return new FailoverLLM(chain, llmTimeoutMs, primaryRetries);
   }
 

@@ -279,7 +279,8 @@ async function generateContentImage(
 
   // ── STEP 2: Fallback to Gemini Imagen 4 ──
   if (!imageBuffer) {
-    const geminiKey = process.env.GEMINI_API_KEY;
+    // Use dedicated Imagen key to isolate image gen costs from text-gen
+    const geminiKey = process.env.GEMINI_IMAGEN_KEY || process.env.GEMINI_API_KEY;
     if (geminiKey) {
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${geminiKey}`;

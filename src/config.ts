@@ -42,6 +42,10 @@ export const config: GravityClawConfig = {
         apiKey: process.env.GEMINI_API_KEY || "",
         model: process.env.GEMINI_MODEL || "gemini-3.1-pro-preview",
         baseUrl: process.env.GEMINI_BASE_URL,
+        // Separate key for Imagen 4 image generation + embeddings ONLY.
+        // Falls back to GEMINI_API_KEY if not set. This prevents text-gen
+        // from burning the image gen budget (Session 29c billing leak fix).
+        imagenKey: process.env.GEMINI_IMAGEN_KEY || process.env.GEMINI_API_KEY || "",
       },
       anthropic: {
         apiKey: process.env.ANTHROPIC_API_KEY || "",

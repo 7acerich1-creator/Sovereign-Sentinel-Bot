@@ -3110,4 +3110,57 @@ async function main() {
   // ── 10. Memory heartbeat log ──
   const mem = process.memoryUsage();
   console.log("\n━━━ GRAVITY CLAW v3.0 — FULLY ONLINE ━━━");
-  console.log(`🧠 Memo
+  console.log(`🧠 Memory: ${memoryProviders.map((m) => m.name).join(" + ")}`);
+  console.log(`🔧 Tools: ${tools.length} loaded`);
+  console.log(`🧬 LLM: ${failoverLLM.listProviders().join(" → ")}`);
+  console.log(`📡 Channels: ${router.listChannels().join(", ")}`);
+  console.log(`✅ Maven Crew ONLINE — [${activeBotHandles.join(", ")}]`);
+  console.log(`📊 Process Memory — RSS: ${Math.round(mem.rss / 1024 / 1024)}MB | Heap: ${Math.round(mem.heapUsed / 1024 / 1024)}/${Math.round(mem.heapTotal / 1024 / 1024)}MB | External: ${Math.round(mem.external / 1024 / 1024)}MB`);
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+  // ── Memory Monitor (every 5 min) ──
+  setInterval(() => {
+    const m = process.memoryUsage();
+    console.log(`📊 [MemWatch] RSS: ${Math.round(m.rss / 1024 / 1024)}MB | Heap: ${Math.round(m.heapUsed / 1024 / 1024)}/${Math.round(m.heapTotal / 1024 / 1024)}MB`);
+  }, 300_000);
+
+  // ── Graceful Shutdown ──
+  const shutdown = async () => {
+    console.log("🛑 GRAVITY CLAW shutting down...");
+    heartbeat.stop();
+    sapphireSentinel.stop();
+    scheduler.shutdown();
+    await webhookServer.shutdown();
+    await mcpBridge.shutdown();
+    await router.shutdownAll();
+
+    // Shutdown agent channels
+    for (const chan of agentChannels) {
+      await chan.shutdown();
+    }
+
+    for (const provider of memoryProviders) {
+      await provider.close();
+    }
+    knowledgeGraph.close();
+    selfEvolvingMemory.close();
+    process.exit(0);
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
+  process.on("uncaughtException", (err) => {
+    console.error("💥 Uncaught Exception:", err);
+  });
+
+  process.on("unhandledRejection", (reason: any) => {
+    console.error("💥 Unhandled Rejection:", reason);
+  });
+}
+
+// ── Launch ──
+main().catch((err) => {
+  console.error("❌ Fatal startup error:", err);
+  process.exit(1);
+});

@@ -1229,11 +1229,13 @@ async function assembleVideo(
     containment_field: "THE CONTAINMENT FIELD",
   };
 
-  // Brand asset paths — these are baked into the Docker image via brand-assets/
+  // Brand asset paths — baked into Docker image via brand-assets/
+  // SS = warm gold aesthetic, TCF = cold clinical blue aesthetic
   const brandAssetsDir = `${__dirname}/../../brand-assets`;
+  const brandSuffix = script.brand === "containment_field" ? "_tcf" : "";
   const introAsset = orientation === "horizontal"
-    ? `${brandAssetsDir}/intro_long.mp4`
-    : `${brandAssetsDir}/intro_short.mp4`;
+    ? `${brandAssetsDir}/intro_long${brandSuffix}.mp4`
+    : `${brandAssetsDir}/intro_short${brandSuffix}.mp4`;
   const introDuration = orientation === "horizontal" ? 6.0 : 2.0;
 
   if (existsSync(introAsset)) {
@@ -1369,7 +1371,7 @@ async function assembleVideo(
   // ── PRE-RENDERED BRAND OUTRO (long-form only) ──
   // Shorts = NO outro (kills algorithm retention). Long-form = outro_long.mp4 (7s)
   if (orientation === "horizontal") {
-    const outroAsset = `${brandAssetsDir}/outro_long.mp4`;
+    const outroAsset = `${brandAssetsDir}/outro_long${brandSuffix}.mp4`;
     const outroDuration = 7.0;
     if (existsSync(outroAsset)) {
       sceneClipPaths.push(outroAsset);

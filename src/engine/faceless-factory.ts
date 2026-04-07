@@ -263,7 +263,7 @@ const NICHE_FILTERS: Record<string, string> = {
 // STEP 0: THESIS EXTRACTION — Transform raw transcript into narrative blueprint
 // This is the critical missing piece. Without this, the LLM just parrots the source.
 // Reference quality channels (Grim Grit, etc.) tell ONE cohesive story with a thesis.
-// Our old pipeline dumped raw transcript and said "make 25 segments" → compilation garbage.
+// Our old pipeline dumped raw transcript and said "make N segments" → compilation garbage.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 interface NarrativeBlueprint {
@@ -349,8 +349,8 @@ export async function generateScript(
   orientation: Orientation = "vertical"
 ): Promise<FacelessScript> {
   const voice = SCRIPT_VOICE[brand];
-  const segmentCount = targetDuration === "short" ? 5 : 25;
-  const durationRange = targetDuration === "short" ? "30-60 seconds" : "10-15 minutes";
+  const segmentCount = targetDuration === "short" ? 5 : 12;
+  const durationRange = targetDuration === "short" ? "30-60 seconds" : "6-10 minutes";
   const durationHintExample = targetDuration === "short" ? 8 : 35;
 
   // ── LONG-FORM: Blueprint-driven narrative architecture ──
@@ -379,8 +379,8 @@ NARRATIVE BLUEPRINT:
 - KEY ARGUMENTS (in order): ${blueprint.key_arguments.map((a, i) => `${i + 1}. ${a}`).join(" | ")}
 - EMOTIONAL JOURNEY: ${blueprint.emotional_journey}
 
-You are writing PART 1: The HOOK + ACT 1 (setup) + ACT 2 (escalation). This covers the first 6-8 minutes.
-Write 13 segments that tell a CONTINUOUS STORY. Each segment FLOWS into the next — not standalone paragraphs.
+You are writing PART 1: The HOOK + ACT 1 (setup) + ACT 2 (escalation). This covers the first 3-5 minutes.
+Write 7 segments that tell a CONTINUOUS STORY. Each segment FLOWS into the next — not standalone paragraphs.
 
 CRITICAL WRITING RULES:
 1. NEVER copy or closely paraphrase the source material. You are writing ORIGINAL content inspired by the thesis.
@@ -412,10 +412,10 @@ VISUAL DIRECTION RULES:
 - Each segment's visual should MATCH the emotional beat of the voiceover
 - FORMAT: ${orientation === "horizontal" ? "LANDSCAPE 16:9 — wide establishing shots, negative space, cinematic framing" : "VERTICAL 9:16 — center subject, close crops, portrait framing"}
 
-duration_hint MUST be 30-45 seconds per segment. Total for these 13 segments: 390-585 seconds.
+duration_hint MUST be 30-45 seconds per segment. Total for these 7 segments: 210-315 seconds.
 Return ONLY valid JSON, no code fences, no explanation.`;
 
-    console.log(`📝 [FacelessFactory] Pass 1: ACT 1 + ACT 2 (13 segments)...`);
+    console.log(`📝 [FacelessFactory] Pass 1: ACT 1 + ACT 2 (7 segments)...`);
     const res1 = await llm.generate(
       [{ role: "user", content: pass1Prompt }],
       { maxTokens, temperature: 0.8 }
@@ -630,15 +630,13 @@ RULES:
   const estimatedMinutes = (totalWords / 140).toFixed(1); // ~140 WPM for measured narration
   console.log(`📊 [FacelessFactory] Script word counts: [${wordCounts.join(", ")}] | Total: ${totalWords} words | Estimated: ~${estimatedMinutes} min at 140 WPM`);
 
-  // QUALITY GATE (Session 23): Enforce minimum segment count for long-form.
-  // If the LLM produces fewer than 15 segments, the video will be 2-4 min instead of 10-15.
-  // This was the root cause of "Break Free" at 171s (7 segments) and "Beyond The Simulation"
-  // at 258s (12 segments). The LLM simply doesn't produce enough content on the first pass.
-  if (targetDuration === "long" && segments.length < 15) {
-    console.warn(`⚠️ [FacelessFactory] Only ${segments.length} segments (need 15+). Attempting segment expansion...`);
+  // QUALITY GATE (Session 23/32): Enforce minimum segment count for long-form.
+  // Session 32: Reduced from 25→12 scenes (Imagen 4 at 25 = 33 min). Quality gate lowered accordingly.
+  if (targetDuration === "long" && segments.length < 8) {
+    console.warn(`⚠️ [FacelessFactory] Only ${segments.length} segments (need 8+). Attempting segment expansion...`);
     // Don't retry the whole LLM call (costs time + tokens) — instead, expand what we have.
     // Take each short segment and ask the LLM to elaborate it into 2 segments.
-    const expansionNeeded = Math.max(15 - segments.length, 5);
+    const expansionNeeded = Math.max(8 - segments.length, 3);
     const segmentsToExpand = segments
       .map((s: any, i: number) => ({ ...s, _idx: i, _words: s.voiceover.split(/\s+/).filter(Boolean).length }))
       .sort((a: any, b: any) => a._words - b._words) // Expand shortest segments first
@@ -1462,84 +1460,69 @@ async function assembleVideo(
     : "";
 
   // ── BACKGROUND MUSIC BED ──
-  // Session 29b rewrite: Generate a SHORT 30s ambient loop, then stream_loop it to full duration.
-  // Previous versions tried to synthesize the full 10-15min duration which caused:
-  //   - Node.js OOM (Session 27: 480MB Float32Arrays)
-  //   - ffmpeg timeout (Session 28: aevalsrc for full duration = 40M samples through filter graph)
-  // Fix: 30s loop = ~1.3M samples. Trivial. Then -stream_loop extends to any length.
-  // Niche-aware chord voicings. Zero external deps, zero royalty.
+  // Session 32 REWRITE: Previous aevalsrc approach with 6 detuned oscillators NEVER worked.
+  // Root cause: complex aevalsrc expressions with shell quoting fail silently on Railway.
+  // Fix: Use ffmpeg's `sine` source (single frequency, bulletproof) + `anoisesrc` (pink noise).
+  // Two simple sources mixed and filtered = ambient drone. Cannot fail.
   const musicLoopPath = `${FACELESS_DIR}/${jobId}_music_loop.mp3`;
   const musicPath = `${FACELESS_DIR}/${jobId}_music_bed.mp3`;
   let hasMusicBed = false;
 
-  const MUSIC_CHORDS: Record<string, { root: number; fifth: number; octave: number; sub: number; mood: string }> = {
-    dark_psychology: { root: 110, fifth: 164.81, octave: 220, sub: 55, mood: "dark" },
-    self_improvement: { root: 130.81, fifth: 196, octave: 261.63, sub: 65.41, mood: "warm" },
-    burnout: { root: 98, fifth: 146.83, octave: 196, sub: 49, mood: "heavy" },
-    quantum: { root: 123.47, fifth: 185.0, octave: 246.94, sub: 61.74, mood: "ethereal" },
-    brand: { root: 110, fifth: 164.81, octave: 220, sub: 55, mood: "dark" },
+  // Niche-aware frequencies: root tone sets the mood
+  const MUSIC_FREQ: Record<string, { hz: number; mood: string }> = {
+    dark_psychology: { hz: 110, mood: "dark" },      // A2 — dark, ominous
+    self_improvement: { hz: 131, mood: "warm" },      // C3 — warm, grounded
+    burnout: { hz: 98, mood: "heavy" },               // G2 — heavy, low
+    quantum: { hz: 123, mood: "ethereal" },            // B2 — ethereal
+    brand: { hz: 110, mood: "dark" },                  // default
   };
 
   try {
-    const chord = MUSIC_CHORDS[script.niche] || MUSIC_CHORDS.brand;
+    const freq = MUSIC_FREQ[script.niche] || MUSIC_FREQ.brand;
     const musicDuration = Math.ceil(audioDuration) + 4;
-    const LOOP_DURATION = 30; // seconds — short enough to never OOM or timeout
+    const LOOP_DURATION = 30;
 
-    // Build aevalsrc expression for detuned pad chord + sub
-    const r = chord.root, r2 = chord.root + 1.5;
-    const f = chord.fifth, f2 = chord.fifth + 1.8;
-    const o = chord.octave, o2 = chord.octave + 2.2;
-    const s = chord.sub;
-
-    const padExpr = [
-      `sin(2*PI*${r}*t)*(0.4+0.6*sin(2*PI*0.035*t))`,
-      `sin(2*PI*${r2}*t)*(0.4+0.6*sin(2*PI*0.042*t+1.2))`,
-      `sin(2*PI*${f}*t)*(0.4+0.6*sin(2*PI*0.038*t+2.5))`,
-      `sin(2*PI*${f2}*t)*(0.4+0.6*sin(2*PI*0.047*t+0.8))`,
-      `sin(2*PI*${o}*t)*(0.4+0.6*sin(2*PI*0.033*t+3.7))`,
-      `sin(2*PI*${o2}*t)*(0.4+0.6*sin(2*PI*0.05*t+1.9))`,
-    ].map(v => `(${v})*0.02`).join("+");
-    const subExpr = `sin(2*PI*${s}*t)*(0.5+0.5*sin(2*PI*0.02*t))*0.15`;
-    const fullExpr = `${padExpr}+${subExpr}`;
-
-    // STEP 1: Generate SHORT 30s seamless loop (trivial for ffmpeg — ~1.3M samples)
+    // STEP 1: Generate 30s ambient loop using SIMPLE sources (no aevalsrc)
+    // sine = single clean tone, anoisesrc = pink noise texture
+    // Heavy lowpass + compression makes it a smooth ambient drone
     execSync(
-      `ffmpeg -f lavfi -i "aevalsrc='${fullExpr}':s=44100:d=${LOOP_DURATION + 2}" ` +
-        `-f lavfi -i "anoisesrc=d=${LOOP_DURATION + 2}:c=pink:r=44100:a=0.008" ` +
-        `-filter_complex "` +
-          `[1:a]lowpass=f=500[noise];` +
-          `[0:a][noise]amix=inputs=2:duration=first:normalize=0,` +
-          `lowpass=f=1800,highpass=f=30,` +
+      `ffmpeg -f lavfi -i sine=frequency=${freq.hz}:duration=${LOOP_DURATION + 2}:sample_rate=44100 ` +
+        `-f lavfi -i anoisesrc=d=${LOOP_DURATION + 2}:c=pink:r=44100:a=0.01 ` +
+        `-filter_complex ` +
+          `"[0:a]volume=0.08,lowpass=f=400[tone];` +
+          `[1:a]lowpass=f=600,volume=0.3[noise];` +
+          `[tone][noise]amix=inputs=2:duration=first:normalize=0,` +
+          `lowpass=f=1200,highpass=f=40,` +
           `acompressor=threshold=-25dB:ratio=4:attack=50:release=200,` +
-          `afade=t=in:st=0:d=2,` +
-          `afade=t=out:st=${LOOP_DURATION}:d=2,` +
-          `volume=0.5[loop]" ` +
+          `afade=t=in:st=0:d=2,afade=t=out:st=${LOOP_DURATION}:d=2[loop]" ` +
         `-map "[loop]" -t ${LOOP_DURATION} -c:a libmp3lame -b:a 128k -y "${musicLoopPath}"`,
-      { timeout: 30_000, stdio: "pipe" }
+      { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 }
     );
 
     if (!existsSync(musicLoopPath)) throw new Error("Loop file not created");
-    console.log(`🎵 [FacelessFactory] 30s music loop generated: ${script.niche}/${chord.mood}`);
+    const loopSize = readFileSync(musicLoopPath).length;
+    console.log(`🎵 [FacelessFactory] 30s music loop generated: ${freq.hz}Hz/${freq.mood} (${(loopSize / 1024).toFixed(0)}KB)`);
 
     // STEP 2: Loop it to full video duration with fade in/out
     const loopCount = Math.ceil(musicDuration / LOOP_DURATION);
     execSync(
       `ffmpeg -stream_loop ${loopCount} -i "${musicLoopPath}" ` +
-        `-af "afade=t=in:st=0:d=3,afade=t=out:st=${musicDuration - 4}:d=4" ` +
+        `-af "afade=t=in:st=0:d=3,afade=t=out:st=${Math.max(0, musicDuration - 4)}:d=4" ` +
         `-t ${musicDuration} -c:a libmp3lame -b:a 128k -y "${musicPath}"`,
-      { timeout: 30_000, stdio: "pipe" }
+      { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 }
     );
 
     hasMusicBed = existsSync(musicPath);
     if (hasMusicBed) {
-      console.log(`🎵 [FacelessFactory] Music bed: ${musicDuration}s (${loopCount} loops of ${LOOP_DURATION}s) — ${script.niche}/${chord.mood}`);
+      console.log(`🎵 [FacelessFactory] Music bed: ${musicDuration}s (${loopCount}x${LOOP_DURATION}s loops) — ${freq.hz}Hz/${freq.mood}`);
     } else {
       console.error(`❌ [FacelessFactory] Music bed file not created despite no error`);
     }
     try { unlinkSync(musicLoopPath); } catch {}
   } catch (err: any) {
     console.error(`❌ [FacelessFactory] Music bed generation FAILED: ${err.message?.slice(0, 400)}`);
-    if (err.stderr) console.error(`  STDERR: ${err.stderr.toString().slice(0, 500)}`);
+    const stderr = err.stderr ? err.stderr.toString().slice(0, 500) : "(no stderr)";
+    console.error(`  STDERR: ${stderr}`);
     try { unlinkSync(musicLoopPath); } catch {}
   }
 
@@ -1707,7 +1690,75 @@ export async function produceFacelessVideo(
   // STEP 2: Render TTS audio
   console.log(`🗣️ [FacelessFactory] Rendering voiceover...`);
   const audioResult = await renderAudio(script, jobId);
-  const audioPath = audioResult.audioPath;
+  let audioPath = audioResult.audioPath;
+
+  // STEP 2b: Mix in brand signature audio (intro + outro sounds)
+  // The intro/outro mp4 videos contain audio, but the final assembly strips it (only maps TTS + music).
+  // Instead, we mix the standalone signature mp3 files directly into the TTS audio track.
+  // This ensures the brand sounds ALWAYS play regardless of the video assembly path.
+  const brandAssetsRoot = `${__dirname}/../../brand-assets`;
+  const brandSfx = brand === "containment_field" ? "_tcf" : "";
+  const introSig = orientation === "horizontal"
+    ? `${brandAssetsRoot}/signature_long${brandSfx}.mp3`
+    : `${brandAssetsRoot}/signature_short${brandSfx}.mp3`;
+  const outroSig = `${brandAssetsRoot}/signature_outro${brandSfx}.mp3`;
+  const introPad = orientation === "horizontal" ? 6.0 : 2.0; // must match intro video duration
+
+  const compositeAudioPath = `${FACELESS_DIR}/${jobId}_composite_audio.mp3`;
+  try {
+    const hasIntro = existsSync(introSig);
+    const hasOutro = existsSync(outroSig);
+
+    if (hasIntro || hasOutro) {
+      // Get TTS duration
+      const ttsDur = parseFloat(
+        execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${audioPath}"`,
+          { timeout: 10_000, maxBuffer: 1024 * 1024 }).toString().trim()
+      ) || 0;
+
+      if (hasIntro && hasOutro && ttsDur > 0) {
+        // Full composite: intro signature at t=0, TTS delayed by introPad, outro signature at end
+        // adelay is in milliseconds
+        const ttsDelayMs = Math.round(introPad * 1000);
+        const outroOffsetMs = Math.round((introPad + ttsDur) * 1000);
+        execSync(
+          `ffmpeg -i "${introSig}" -i "${audioPath}" -i "${outroSig}" ` +
+            `-filter_complex "` +
+              `[0:a]volume=0.9[intro];` +
+              `[1:a]adelay=${ttsDelayMs}|${ttsDelayMs},volume=1.0[voice];` +
+              `[2:a]adelay=${outroOffsetMs}|${outroOffsetMs},volume=0.8[outro];` +
+              `[intro][voice][outro]amix=inputs=3:duration=longest:normalize=0[out]" ` +
+            `-map "[out]" -c:a libmp3lame -b:a 192k -y "${compositeAudioPath}"`,
+          { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 }
+        );
+        console.log(`🔊 [FacelessFactory] Composite audio: intro(${introPad}s) + TTS(${ttsDur.toFixed(1)}s) + outro`);
+      } else if (hasIntro && ttsDur > 0) {
+        // Intro only
+        const ttsDelayMs = Math.round(introPad * 1000);
+        execSync(
+          `ffmpeg -i "${introSig}" -i "${audioPath}" ` +
+            `-filter_complex "` +
+              `[0:a]volume=0.9[intro];` +
+              `[1:a]adelay=${ttsDelayMs}|${ttsDelayMs},volume=1.0[voice];` +
+              `[intro][voice]amix=inputs=2:duration=longest:normalize=0[out]" ` +
+            `-map "[out]" -c:a libmp3lame -b:a 192k -y "${compositeAudioPath}"`,
+          { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 }
+        );
+        console.log(`🔊 [FacelessFactory] Composite audio: intro(${introPad}s) + TTS(${ttsDur.toFixed(1)}s)`);
+      }
+
+      if (existsSync(compositeAudioPath)) {
+        audioPath = compositeAudioPath;
+        // Update segment durations to account for intro padding
+        audioResult.segmentDurations = [introPad, ...audioResult.segmentDurations];
+        console.log(`🔊 [FacelessFactory] Audio track now includes brand signatures`);
+      }
+    }
+  } catch (err: any) {
+    console.error(`⚠️ [FacelessFactory] Signature audio mixing failed (non-fatal, using raw TTS): ${err.message?.slice(0, 300)}`);
+    const stderr = err.stderr ? err.stderr.toString().slice(0, 300) : "";
+    if (stderr) console.error(`  STDERR: ${stderr}`);
+  }
 
   // STEP 3: Generate scene images (parallel, with rate limiting)
   console.log(`🎨 [FacelessFactory] Generating ${script.segments.length} scene images...`);

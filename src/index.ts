@@ -194,20 +194,44 @@ async function main() {
   const failoverLLM = new FailoverLLM(llmProviders);
 
   // ── 2B. Per-Agent LLM Provider Teams ──
-  // Split providers across agents to prevent quota stampedes.
-  // When all agents share one chain, a Gemini quota hit cascades to ALL agents simultaneously.
-  // This gives each team its own primary, with the others as failover.
+  // SESSION 31 OVERHAUL: Dual Groq key distribution across ALL agents.
+  // Previously only TCF pipeline used the second key. Now agents are split across
+  // both keys to halve the rate limit pressure on each. Groq free tier = 30 RPM
+  // and 6000 TPM per key. With 6 agents + 2 pipelines on one key, every call 429'd.
   const providersByName: Record<string, LLMProvider> = {};
   for (const p of llmProviders) providersByName[p.name] = p;
 
   // LLM_TIMEOUT_MS env var lets Railway override per-call timeout without a code deploy.
-  // Default 60s is too short for 6144-token Groq completions under rate limiting.
   const llmTimeoutMs = parseInt(process.env.LLM_TIMEOUT_MS || "60000", 10);
 
-  function buildTeamLLM(primaryOrder: string[], primaryRetries = 0): FailoverLLM {
+  // ── Dual Groq Key Setup ──
+  // GROQ_API_KEY = primary key (config.llm.providers.groq)
+  // GROQ_API_KEY_TCF = secondary key (originally for TCF pipeline only)
+  // SESSION 31: Now split across ALL agents — half use key A, half use key B.
+  // This doubles our effective rate limit from 30 RPM → 60 RPM across the system.
+  const groqTcfKey = process.env.GROQ_API_KEY_TCF;
+  let groqProviderB: LLMProvider | null = null;
+  if (groqTcfKey) {
+    groqProviderB = createProvider(
+      "groq",
+      groqTcfKey,
+      config.llm.providers.groq.model,
+      config.llm.providers.groq.baseUrl
+    );
+    console.log(`🔑 [LLM] Dual Groq keys active. Splitting agents across both rate limit pools.`);
+  } else {
+    console.warn(`⚠️ [LLM] GROQ_API_KEY_TCF not set — all agents share one Groq rate limit pool`);
+  }
+
+  // Helper: build a failover chain with a specific Groq provider
+  function buildTeamLLM(primaryOrder: string[], primaryRetries = 0, useGroqB = false): FailoverLLM {
     const chain: LLMProvider[] = [];
     for (const name of primaryOrder) {
-      if (providersByName[name]) chain.push(providersByName[name]);
+      if (name === "groq" && useGroqB && groqProviderB) {
+        chain.push(groqProviderB);
+      } else if (providersByName[name]) {
+        chain.push(providersByName[name]);
+      }
     }
     // STRICT: Only use providers explicitly listed in primaryOrder.
     // DO NOT add other providers as silent fallback — this was the root cause of
@@ -216,50 +240,33 @@ async function main() {
     return new FailoverLLM(chain, llmTimeoutMs, primaryRetries);
   }
 
-  // Team assignments (Session 24 — Alfred promoted to Groq, Session 28 — Anita moved to Groq-first):
-  // SESSION 28 FIX: Gemini REMOVED from ALL text-gen failover chains.
-  // Root cause: Supabase personality_config was overwriting lean bundled prompts with old 18-20K versions.
-  // Every Groq 413 silently cascaded to Gemini, burning $12+/day on text gen alone.
-  // Gemini API key stays active ONLY for: Imagen 4 (image gen) + gemini-embedding-001 (Pinecone vectors).
-  // Text gen chains: Groq (free) → Anthropic (paid but controlled). No Gemini. No silent burns.
+  // SESSION 31 AGENT SPLIT:
+  // Key A (GROQ_API_KEY):     alfred, vector, yuki + Ace Richie pipeline
+  // Key B (GROQ_API_KEY_TCF): anita + TCF pipeline
+  // Veritas + Sapphire: Anthropic-first (no Groq pressure from strategic agents)
+  // This means: during pipeline runs, Key A handles Ace Richie pipeline + 3 agents,
+  // Key B handles TCF pipeline + Anita. Much better than 6+2 on one key.
   const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
-    alfred: buildTeamLLM(["groq", "anthropic"]),
-    anita: buildTeamLLM(["groq", "anthropic"]),
-    sapphire: buildTeamLLM(["anthropic", "groq"]),
-    veritas: buildTeamLLM(["anthropic", "groq"]),
-    vector: buildTeamLLM(["groq", "anthropic"]),
-    yuki: buildTeamLLM(["groq", "anthropic"]),
+    alfred: buildTeamLLM(["groq", "anthropic"], 0, false),    // Key A
+    anita: buildTeamLLM(["groq", "anthropic"], 0, true),      // Key B
+    sapphire: buildTeamLLM(["anthropic", "groq"]),             // Anthropic-first
+    veritas: buildTeamLLM(["anthropic", "groq"]),              // Anthropic-first
+    vector: buildTeamLLM(["groq", "anthropic"], 0, false),    // Key A
+    yuki: buildTeamLLM(["groq", "anthropic"], 0, true),       // Key B
   };
 
-  // Pipeline-dedicated LLM: Groq first (free), Anthropic second.
-  // OpenAI removed — credits are at -$0.06 (dead). No Gemini — unreliable JSON + burned money.
-  // primaryRetries=2: 3 Groq attempts (not 4) before failover. Saves ~60s per timeout storm.
-  const pipelineLLM = buildTeamLLM(["groq", "anthropic"], 2);
+  // Pipeline LLMs: Ace Richie on Key A, TCF on Key B.
+  // primaryRetries=1: 2 Groq attempts before failover (down from 3).
+  // With Session 31 fetchWithRetry fix (5s cap), each attempt is ~6s max = 12s worst case.
+  const pipelineLLM = buildTeamLLM(["groq", "anthropic"], 1, false);
+  const tcfPipelineLLM = buildTeamLLM(["groq", "anthropic"], 1, true);
 
-  // TCF pipeline uses a dedicated second Groq account (GROQ_API_KEY_TCF) to avoid rate limit
-  // contention after Ace Richie burns through the primary Groq quota. If the key isn't set,
-  // falls back to the shared pipelineLLM (same behavior as before this change).
-  const groqTcfKey = process.env.GROQ_API_KEY_TCF;
-  let tcfPipelineLLM: FailoverLLM = pipelineLLM;
-  if (groqTcfKey) {
-    const groqTcfProvider = createProvider(
-      "groq",
-      groqTcfKey,
-      config.llm.providers.groq.model,
-      config.llm.providers.groq.baseUrl
-    );
-    const tcfChain: LLMProvider[] = [groqTcfProvider];
-    if (providersByName["anthropic"]) tcfChain.push(providersByName["anthropic"]);
-    tcfPipelineLLM = new FailoverLLM(tcfChain, llmTimeoutMs, 2);
-    console.log(`🔑 [Pipeline] TCF dedicated Groq key active. Chain: [${tcfPipelineLLM.listProviders().join(", ")}]`);
-  } else {
-    console.warn(`⚠️ [Pipeline] GROQ_API_KEY_TCF not set — TCF shares Ace Richie's Groq rate limit pool`);
-  }
-
-  console.log("🔀 [LLM Teams] Provider split active:");
+  console.log("🔀 [LLM Teams] Provider split active (Session 31 — dual key distribution):");
   for (const [agent, team] of Object.entries(AGENT_LLM_TEAMS)) {
     console.log(`   ${agent}: ${team.listProviders().join(" → ")}`);
   }
+  console.log(`   pipeline (Ace): ${pipelineLLM.listProviders().join(" → ")}`);
+  console.log(`   pipeline (TCF): ${tcfPipelineLLM.listProviders().join(" → ")}`);
 
   // ── 3. Initialize Tools ──
   const tools: Tool[] = [
@@ -457,7 +464,12 @@ async function main() {
 
       // ── Send immediate processing signal ──
       const processingMsg = await telegram.sendMessage(message.chatId, "⚡ _Veritas Processing..._", { parseMode: "Markdown" });
-      const HANDLER_TIMEOUT_MS = 120_000;
+      // SESSION 31: Raised from 120s to 180s.
+      // Root cause: Groq 429 burned 60s in timeout race, failover to Anthropic took 20-40s
+      // for 22K-token contexts, and multi-iteration loops (tool call → result → LLM again)
+      // easily exceeded 120s. With the fetchWithRetry fix (5s cap), Groq attempts now take
+      // max 12s before failover, but Anthropic multi-iteration still needs headroom.
+      const HANDLER_TIMEOUT_MS = 180_000;
 
       const response = await Promise.race([
         agentLoop.processMessage(
@@ -2257,10 +2269,10 @@ async function main() {
   // Register Veritas in the dispatch map so system-dispatched tasks reach the lead agent
   agentLoops.set("veritas", { loop: agentLoop, channel: telegram });
 
-  if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
+  if (process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)) {
     const supabase = (await import("@supabase/supabase-js")).createClient(
       process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY!
     );
 
     // ── PERSONALITY LOADER: Bundled JSON (zero network dependency) ──
@@ -2591,8 +2603,8 @@ async function main() {
           await fetch(`${process.env.SUPABASE_URL}/rest/v1/activity_log`, {
             method: "POST",
             headers: {
-              apikey: process.env.SUPABASE_ANON_KEY!,
-              Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY!}`,
+              apikey: (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)!,
+              Authorization: `Bearer ${(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)!}`,
               "Content-Type": "application/json",
               Prefer: "return=minimal",
             },
@@ -2875,8 +2887,8 @@ async function main() {
                   await fetch(`${process.env.SUPABASE_URL}/rest/v1/activity_log`, {
                     method: "POST",
                     headers: {
-                      apikey: process.env.SUPABASE_ANON_KEY!,
-                      Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY!}`,
+                      apikey: (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)!,
+                      Authorization: `Bearer ${(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)!}`,
                       "Content-Type": "application/json",
                       Prefer: "return=minimal",
                     },
@@ -2983,7 +2995,7 @@ async function main() {
 
       try {
         const supabaseUrl = process.env.SUPABASE_URL!;
-        const supabaseKey = process.env.SUPABASE_ANON_KEY!;
+        const supabaseKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)!;
 
         // Fetch approved AI tasks (status = "In Progress", type = "ai")
         const resp = await fetch(
@@ -3140,33 +3152,4 @@ async function main() {
     await mcpBridge.shutdown();
     await router.shutdownAll();
 
-    // Shutdown agent channels
-    for (const chan of agentChannels) {
-      await chan.shutdown();
-    }
-
-    for (const provider of memoryProviders) {
-      await provider.close();
-    }
-    knowledgeGraph.close();
-    selfEvolvingMemory.close();
-    process.exit(0);
-  };
-
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
-
-  process.on("uncaughtException", (err) => {
-    console.error("💥 Uncaught Exception:", err);
-  });
-
-  process.on("unhandledRejection", (reason: any) => {
-    console.error("💥 Unhandled Rejection:", reason);
-  });
-}
-
-// ── Launch ──
-main().catch((err) => {
-  console.error("❌ Fatal startup error:", err);
-  process.exit(1);
-});
+    // Shutdo

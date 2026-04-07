@@ -7,10 +7,15 @@ import { GoogleGenerativeAI, Content, Part, FunctionDeclarationSchema } from "@g
 import type { LLMProvider, LLMMessage, LLMOptions, LLMResponse, ToolDefinition, ToolCall } from "../types";
 
 // ── Rate-limit retry with exponential backoff ──
-// Retries on 429 (and 529 for Anthropic overload) up to 3 times
-// with exponential backoff: 2s → 4s → 8s, plus jitter
-const MAX_RETRIES = 3;
+// SESSION 31 FIX: Reduced MAX_RETRIES from 3→1 and capped retry-after to 5s.
+// ROOT CAUSE: fetchWithRetry's internal retry loop (up to 3 × 30s waits = 90s+)
+// was racing against FailoverLLM's 60s outer timeout. Groq's retry-after header
+// said 30s, so attempt 1 waited 30s, attempt 2 waited 30s → 60s total → timeout
+// fired BEFORE retries finished. Groq NEVER got a fair shot. Now: 1 retry with
+// max 5s wait = ~6s worst case, then fail fast to let FailoverLLM handle it.
+const MAX_RETRIES = 1;
 const BASE_DELAY_MS = 2000;
+const MAX_RETRY_AFTER_MS = 5000; // Cap server-requested delay — don't let a 30s retry-after burn the timeout
 
 async function fetchWithRetry(url: string, init: RequestInit, providerName: string): Promise<Response> {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -29,10 +34,13 @@ async function fetchWithRetry(url: string, init: RequestInit, providerName: stri
         return resp;
       }
       const retryAfter = resp.headers.get("retry-after");
-      const delayMs = retryAfter
-        ? Math.min(parseInt(retryAfter, 10) * 1000, 30_000)
+      const serverDelay = retryAfter ? parseInt(retryAfter, 10) * 1000 : 0;
+      // Cap retry-after to MAX_RETRY_AFTER_MS — server may ask for 30-60s which would
+      // burn the FailoverLLM timeout before we even get a second chance.
+      const delayMs = serverDelay > 0
+        ? Math.min(serverDelay, MAX_RETRY_AFTER_MS)
         : BASE_DELAY_MS * Math.pow(2, attempt) + Math.random() * 1000;
-      console.warn(`⏳ ${providerName} rate-limited (${resp.status}), retry ${attempt + 1}/${MAX_RETRIES} in ${Math.round(delayMs / 1000)}s...`);
+      console.warn(`⏳ ${providerName} rate-limited (${resp.status}), retry ${attempt + 1}/${MAX_RETRIES} in ${Math.round(delayMs / 1000)}s...${serverDelay > MAX_RETRY_AFTER_MS ? ` (server asked for ${Math.round(serverDelay / 1000)}s, capped)` : ""}`);
       await new Promise((resolve) => setTimeout(resolve, delayMs));
       continue;
     }

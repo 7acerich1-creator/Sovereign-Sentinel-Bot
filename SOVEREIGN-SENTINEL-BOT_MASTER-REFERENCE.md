@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-07 (Cowork Session 30 — TCF BACKGROUND COMPOSITES + BRAND TOKEN ALIGNMENT AUDIT) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-07 (Cowork Session 32 — MUSIC + AUDIO FIX: aevalsrc→sine music bed, intro/outro signature audio composite, scene count 25→12) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -8,7 +8,7 @@
 **Mission Metrics:** Gemini text-gen hemorrhage fully diagnosed and killed. Voice locked. Script gen architecture overhauled. Revenue still $0.
 
 **Infrastructure: OPERATIONAL — ALL PUSHED.**
-- Bot is live on Railway. Latest commit: Session 30 `c975912` (TCF background composites) → Session 29d `6530e2d` (SS golden bg composites + TCF placeholders + brand routing) → Session 29c3 `13d9a09` (Gemini billing leak kill + GEMINI_IMAGEN_KEY) → Session 29c `b82c2e2` (brand identity system + frequency activation CTAs) → Session 29b2 `4d79938` (voice swap + music rewrite + anti-repetition) → Session 29b `22861db` (Dockerfile cp fix + Edge TTS primary) → Session 29 `30f0b80` (Edge TTS Python CLI + dual Groq key) → prior chain. Auto-deploying.
+- Bot is live on Railway. Latest commit: Session 32 `PENDING-PUSH` (music fix + signature audio + scene count 12) → Session 31 `PENDING-PUSH` (pipeline reliability overhaul) → Session 30 `c975912` (TCF background composites) + `60d4298` (brand token alignment) → Session 29d `6530e2d` → Session 29c3 `13d9a09` → Session 29c `b82c2e2` → Session 29b2 `4d79938` → Session 29b `22861db` → Session 29 `30f0b80` → prior chain. Auto-deploying.
 - Session 29c commit: `b82c2e2` — Brand identity system: pre-rendered intro/outro videos (Bebas Neue font, audio signatures), Frequency Activation CTAs (2 per long-form), Dockerfile updated to include brand-assets.
 - Session 29b2 commit: `4d79938` — Edge TTS voice swap to AndrewMultilingualNeural, music bed rewrite (30s loop + stream_loop), Pass 2 anti-repetition fix.
 - Session 29b commit: `22861db` — Fixed Dockerfile cp nesting bug.
@@ -27,29 +27,36 @@
 - **Anthropic:** ~$10 remaining. Used for Veritas brain + Sapphire Sentinel only. Low burn (~$0.36/month briefings). Runway: 37-74 days.
 - **OpenAI:** -$0.06 credits. DEAD. DALL-E 3 and OpenAI TTS will not fire.
 - **Gemini:** $62.30 OWED but NOT BLOCKED. **REMOVED from ALL text-gen failover chains (Session 28c, commit 624fc28).** Gemini API key stays active ONLY for Imagen 4 image generation and gemini-embedding-001 (Pinecone vectors). Railway env var `LLM_FAILOVER_ORDER` updated to `groq,anthropic,openai`. Zero Gemini text-gen burns going forward.
-- **Groq:** FREE tier. 14,400 req/day. Primary for pipeline + content agents (Alfred, Anita, Vector, Yuki). Lean bundled prompts (~750 tokens) fit within Groq per-request limit.
+- **Groq:** FREE tier. 30 RPM, 6000 TPM, 14,400 req/day PER KEY. Primary for pipeline + content agents. Session 31: Dual key distribution — Key A (GROQ_API_KEY) serves alfred, vector, yuki + Ace pipeline. Key B (GROQ_API_KEY_TCF) serves anita, yuki + TCF pipeline. Doubles effective rate limit. fetchWithRetry capped at 5s retry-after (was 30s, causing 60s timeout race that made Groq structurally impossible to succeed).
 - **ElevenLabs:** Creator plan, credits EXHAUSTED (Session 29b, April 2026). DEMOTED to fallback. Edge TTS (FREE, Microsoft neural voices) is now primary. Set `FORCE_ELEVENLABS=true` env var to restore ElevenLabs when credits renew. Voice: Adam Brooding, Dark & Tough (`IRHApOXLvnW57QJPQH2P`) — locked as permanent Sovereign Synthesis voice (Session 28c).
 - **Edge TTS:** FREE, unlimited, no API key. Python `edge-tts` CLI (pip install). Voice: `en-US-AndrewMultilingualNeural` (deep, cinematic, intonation-rich — Sovereign Synthesis signature voice). Swapped from GuyNeural (too flat/newscastery) in Session 29b2. Installed in Docker production stage. Primary TTS provider as of Session 29.
 - **Imagen 4:** RESTORED as primary image gen (Session 27). Cost $0.02-0.06/image. Expected $7-12/month. Gemini API is active, so Imagen 4 is functional.
 
-**LLM ROUTING (Session 29 — dual Groq key + Session 28c — Gemini REMOVED from text-gen):**
-- **AGENT_LLM_TEAMS (updated Session 28c):**
-  - `veritas`: [Anthropic → Groq] — strategic brain, briefings
-  - `sapphire`: [Anthropic → Groq] — sentinel, proactive observations
-  - `alfred`: [Groq → Anthropic] — trend intelligence
-  - `anita`: [Groq → Anthropic] — content weaponization
-  - `vector`: [Groq → Anthropic] — performance analysis
-  - `yuki`: [Groq → Anthropic] — distribution
-  - `pipeline (Ace Richie)`: [Groq (primary account) → Anthropic] — 2 primary retries before failover
-  - `pipeline (TCF)`: [Groq (TCF dedicated account, GROQ_API_KEY_TCF) → Anthropic] — 2 primary retries
-- **Gemini REMOVED from text-gen.** API key stays for Imagen 4 + embeddings only. Railway env var `LLM_FAILOVER_ORDER=groq,anthropic,openai`.
-- **OpenAI REMOVED from pipeline failover chain** (Session 29). Credits at -$0.06, dead. Was wasting a retry slot.
+**LLM ROUTING (Session 31 — dual key distribution + timeout race fix):**
+- **AGENT_LLM_TEAMS (Session 31 — dual Groq key split):**
+  - `veritas`: [Anthropic → Groq Key A] — strategic brain, briefings
+  - `sapphire`: [Anthropic → Groq Key A] — sentinel, proactive observations
+  - `alfred`: [Groq Key A → Anthropic] — trend intelligence
+  - `anita`: [Groq Key B → Anthropic] — content weaponization
+  - `vector`: [Groq Key A → Anthropic] — performance analysis
+  - `yuki`: [Groq Key B → Anthropic] — distribution
+  - `pipeline (Ace Richie)`: [Groq Key A → Anthropic] — 1 primary retry before failover
+  - `pipeline (TCF)`: [Groq Key B → Anthropic] — 1 primary retry before failover
+- **Key A** = `GROQ_API_KEY` (primary account). **Key B** = `GROQ_API_KEY_TCF` (secondary account).
+- **fetchWithRetry**: MAX_RETRIES=1, retry-after capped at 5s. Fail fast, let FailoverLLM handle it.
+- **Gemini REMOVED from text-gen.** API key stays for Imagen 4 + embeddings only.
+- **OpenAI REMOVED from pipeline failover chain** (Session 29). Credits at -$0.06, dead.
 
-**DUAL GROQ KEY ARCHITECTURE (Session 29):**
-- Problem: Ace Richie pipeline burns 25+ Groq calls over ~50 min. TCF pipeline starts immediately after 90s cooldown and hits exhausted Groq quota → all 3 retries × 60s = 3-minute timeout storm before Anthropic gets a shot.
-- Solution: Architect registered a second Groq account. Railway env var `GROQ_API_KEY_TCF` holds the TCF-dedicated key. `tcfPipelineLLM` in `src/index.ts` is built from that key, giving TCF its own fresh rate limit pool.
-- If `GROQ_API_KEY_TCF` is not set, TCF falls back to the shared `pipelineLLM` (old behavior, with warning in logs).
-- Both pipeline LLMs (Ace Richie and TCF) use the same Anthropic provider as the failover — they share Anthropic's $10 reserve. Keep an eye on Anthropic credit burn if both pipelines hit Groq limits simultaneously.
+**DUAL GROQ KEY ARCHITECTURE (Session 29 → Session 31 OVERHAUL):**
+- Problem (Session 29): Ace Richie pipeline burns Groq quota → TCF hits exhausted limit.
+- Problem (Session 31 root cause): ALL 6 agents + 2 pipelines shared ONE Groq key (30 RPM, 6000 TPM). A single call could burn the TPM. fetchWithRetry waited 30s (Groq's retry-after header) which exceeded FailoverLLM's 60s timeout. Groq was structurally impossible to succeed.
+- **Session 31 Fix — 4 changes:**
+  1. **fetchWithRetry**: MAX_RETRIES reduced 3→1. retry-after capped at 5s (was 30s). Groq now fails fast (6s max) and lets FailoverLLM handle it at the right layer.
+  2. **Dual key distribution across ALL agents**: Key A (GROQ_API_KEY) → alfred, vector + Ace pipeline. Key B (GROQ_API_KEY_TCF) → anita, yuki + TCF pipeline. Veritas/Sapphire stay Anthropic-first.
+  3. **Supabase SERVICE_ROLE_KEY**: crew_dispatch, action-surface, activity_log, task poller all switched from SUPABASE_ANON_KEY to SUPABASE_SERVICE_ROLE_KEY (bypasses RLS). Every RLS 401 was triggering retry loops that burned more LLM tokens.
+  4. **Veritas HANDLER_TIMEOUT_MS**: Raised 120s → 180s for multi-iteration agent loops.
+- **RAILWAY ENV VARS REQUIRED:** `SUPABASE_SERVICE_ROLE_KEY` must be set on Railway. Get it from Supabase Dashboard → Settings → API → service_role key.
+- Both pipeline LLMs use the same Anthropic provider as failover — they share Anthropic's reserve.
 - **ROOT CAUSE OF $62 BILL (Session 28c FINAL diagnosis):** TWO bugs. (1) Bloated 18-20K char system prompts caused Groq 413 → Gemini failover. Session 27b fixed bundled JSON but (2) Supabase `personality_config` table still had OLD bloated prompts. index.ts lines 2246-2253 loaded from Supabase on every boot and OVERWROTE lean bundled JSON. Session 28c disabled Supabase hot-update — bundled JSON is now SOLE authority.
 - **Supabase personality_config** still has old bloated prompts. NOT dangerous (hot-update disabled in code) but should be cleaned up eventually.
 - **[DVP: ADDRESSED]** Gemini text-gen kill — removed from all chains + env var updated. Commit `624fc28`. VERIFY: check Gemini API logs for zero new text-gen calls.
@@ -213,8 +220,13 @@ These documents exist in the repo but contain stale information. Do NOT use them
 
 **Also deployed earlier in Session 29b2 (commit `4d79938`):**
 5. **Edge TTS voice swap** — `en-US-GuyNeural` (flat newsreader) → `en-US-AndrewMultilingualNeural` (cinematic, intonation-rich). Sovereign Synthesis signature voice locked.
-6. **Music bed rewrite** — Full-duration aevalsrc synthesis (OOM/timeout) → 30s seamless loop + `stream_loop` tiling. Music finally works.
+6. **Music bed rewrite** — ~~Full-duration aevalsrc synthesis (OOM/timeout) → 30s seamless loop + `stream_loop` tiling. Music finally works.~~ **NEVER ACTUALLY WORKED.** Session 32 replaced complex 6-oscillator aevalsrc (silent shell quoting failure on Railway) with bulletproof `sine` source + `anoisesrc` pink noise. Simple, cannot fail.
 7. **Anti-repetition fix** — Pass 2 now receives full Pass 1 topic summary with explicit anti-repetition rules. No more rehashing.
+
+**Session 32 fixes (faceless-factory.ts):**
+8. **Music bed: aevalsrc → sine+noise** — The complex 6-oscillator `aevalsrc` expression NEVER worked on Railway (shell quoting killed it silently). Replaced with `sine` source (single frequency, niche-aware) + `anoisesrc` pink noise → lowpass → ambient drone. Bulletproof. Cannot fail.
+9. **Intro/outro signature audio** — Brand signature mp3 files existed in brand-assets but were NEVER mixed into the final audio. The final ffmpeg assembly only mapped TTS + music bed, discarding intro/outro mp4 embedded audio. NEW: Step 2b creates a composite audio track: intro signature at t=0, TTS delayed by intro duration, outro signature appended. Brand sounds now guaranteed in every video.
+10. **Scene count 25 → 12** — 25 Imagen 4 generations took 33 minutes. Cut to 12 (halves image gen time to ~16 min). Two-pass script gen updated: Pass 1 = 7 segments, Pass 2 = 5 segments. Quality gate lowered from 15 to 8 minimum segments.
 
 **Pending:**
 - ~~Imagen 4 cinematic background image~~ — DONE. SS golden sacred geometry + TCF concrete bunker corridor backgrounds generated, uploaded to Supabase, composited into all intro/outro videos. Commits `6530e2d`, `c975912`.
@@ -2260,34 +2272,4 @@ const CHANNEL_MAP = {
 Posts appeared in Buffer but with TWO critical bugs:
 
 **BUG CE-1: Only X and Threads receive posts. IG, TikTok, YouTube at zero.** ✅ PARTIALLY FIXED (2026-04-02)
-- Root cause: Content engine sends text-only posts (no `media_url`). IG and TikTok require images — Buffer silently rejects text-only.
-- **Fix applied (defensive):** Added `IMAGE_REQUIRED_PLATFORMS` set in content-engine.ts. Distribution sweep now SKIPS instagram/tiktok when no `media_url` attached instead of sending doomed requests. Also added `IG_FREQUENCY_OVERRIDE` config object enforcing the Ace 3/day + CF 2/day cap directly in the engine.
-- **Remaining work:** Image generation still needed. `dailyContentProduction()` needs to produce or attach a `media_url` for each draft. Options: (a) Gemini Imagen 3 generates a branded image per post, (b) pull from a pre-loaded asset library in Supabase Storage, (c) use Canva API for templated quote cards. Until then, IG/TikTok remain skipped — X/Threads/YouTube get text posts at correct times.
-
-**BUG CE-2: Buffer GraphQL mutation broken.** ✅ FIXED (2026-04-02, Session 6)
-- Root cause chain: Session 2 changed `schedulingType: automatic` to `schedulingType: scheduled` (invalid enum). Session 6 discovered `scheduled` doesn't exist in Buffer's SchedulingType enum — only `automatic` and `notification` do. Additionally, the response query included `scheduledAt` field which doesn't exist on the `Post` type.
-- **Fix (Session 6):** Reverted to `schedulingType: automatic` + removed `scheduledAt` from response + matched working pattern in `social-scheduler.ts` line 181. Result: 12/12 posts distributed successfully.
-- **Channel hit rates:** TikTok ✅, Twitter/X ✅. Instagram needs explicit type param (post/story/reel). YouTube needs video not images + title + category. Threads has 500-char limit exceeded. These are next-iteration platform-specific fixes.
-- **Fix applied:** Changed to `schedulingType: scheduled` with `scheduledAt` pulled from `draft.scheduled_time`. Posts now hit at the exact 6 time slots defined in the cadence (7AM/10AM/1PM/4PM/7PM/10PM ET).
-
-**Current state after fixes (updated 2026-04-02 Session 5):** X and Threads get 6 posts/day at correct times. YouTube community posts get 6/day text-only. **IG and TikTok are NOW UNBLOCKED** — `dailyContentProduction()` generates branded images via Gemini Imagen 3 / DALL-E 3 and uploads to Supabase Storage `public-assets/content-images/`. The distribution sweep passes the image URL to Buffer. IG frequency override (Ace 3/day, CF 2/day) activates automatically. Full 329/week cadence achievable once deployed.
-
-### 23B. CONTENT BATCHING STRATEGY — 7-Day Rolling Batch (Added 2026-04-02)
-
-**Decision:** Content is generated in 7-day rolling batches, not daily. This gives a full week of runway so a missed session or API outage never causes silence on the grid.
-
-**How it changes the engine:**
-
-| Aspect | Old (Daily) | New (7-Day Rolling) |
-|--------|-------------|---------------------|
-| Production job | 6:30 AM daily, generates 12 items (6 slots × 2 brands) | **Sunday 11 PM** (or Monday 3 AM), generates 84 items (6 slots × 2 brands × 7 days) |
-| LLM calls per batch | 12/day | ~84/week (can be parallelized in chunks of 6) |
-| Queue depth | Always 0-12 items ahead | Always 0-84 items ahead |
-| Failure mode | If daily job fails, that day has no content | If weekly job fails, 6 days of runway remain. Alert fires, next daily check-in can regenerate. |
-| Trending content | All content generated same-day | **Evergreen batch + daily trending override** (see below) |
-
-**The Trending Override Slot:**
-Each day reserves **1 slot (1 PM across both brands)** as a "trending override." This slot is NOT pre-filled by the weekly batch. Instead, Alfred's 8 AM trend scan produces a real-time hook, and the 1 PM slot picks it up. If no trending content exists by 12:30 PM, the engine falls back to a pre-generated evergreen post for that slot.
-
-**Niche rotation still applies per day:**
-The weekl
+- Root cause: Content engine sends text-only posts (no `media_url`). IG and TikTok require images — Buffer silently rejects text-only

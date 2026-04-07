@@ -226,6 +226,7 @@ export interface GravityClawConfig {
     sqlitePath: string;
     supabaseUrl?: string;
     supabaseKey?: string;
+    supabaseServiceKey?: string;
     pineconeApiKey?: string;
     pineconeIndex?: string;
   };
@@ -278,5 +279,3 @@ export interface MCPServerConfig {
   args: string[];
   env?: Record<string, string>;
   transport: "stdio" | "sse";
-  url?: string;
-}

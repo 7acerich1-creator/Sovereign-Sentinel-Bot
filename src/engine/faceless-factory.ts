@@ -1560,6 +1560,73 @@ async function assembleVideo(
     try { unlinkSync(musicLoopPath); } catch {}
   }
 
+  // ── TRANSITION STINGS — Session 33 ──
+  // Short brand-derived audio hit at each segment boundary.
+  // Creates a single "sting track" with silence + stings at the right offsets.
+  // Source: 1.5s slice of brand signature, pitched down with reverb tail.
+  const stingPath = `${FACELESS_DIR}/${jobId}_sting_track.mp3`;
+  let hasStingTrack = false;
+
+  try {
+    const brandAssetsDir = `${__dirname}/../../brand-assets`;
+    const brandSuffix = script.brand === "containment_field" ? "_tcf" : "";
+    const stingSource = `${brandAssetsDir}/signature_short${brandSuffix}.mp3`;
+
+    if (existsSync(stingSource) && segmentDurations && segmentDurations.length > 2) {
+      // Generate a 1.5s processed sting from the brand signature
+      const rawStingPath = `${FACELESS_DIR}/${jobId}_sting_raw.mp3`;
+      execSync(
+        `ffmpeg -i "${stingSource}" -af "` +
+          `atrim=start=0:end=1.5,` +
+          `asetrate=44100*0.85,aresample=44100,` +  // pitch down ~15%
+          `lowpass=f=2000,` +
+          `afade=t=in:st=0:d=0.1,afade=t=out:st=0.8:d=0.7,` +
+          `aecho=0.8:0.7:40|80:0.3|0.2,` +  // reverb tail
+          `volume=0.7" ` +
+        `-t 1.5 -c:a libmp3lame -b:a 128k -y "${rawStingPath}"`,
+        { timeout: 15_000, maxBuffer: 5 * 1024 * 1024 }
+      );
+
+      // Calculate segment boundary timestamps (cumulative durations)
+      // Skip first boundary (that's the intro) and last (outro handles it)
+      const boundaries: number[] = [];
+      let cumulative = 0;
+      for (let i = 0; i < segmentDurations.length; i++) {
+        cumulative += segmentDurations[i] || 0;
+        // Place sting at boundaries between content segments (not after intro, not at very end)
+        if (i > 0 && i < segmentDurations.length - 1) {
+          boundaries.push(cumulative);
+        }
+      }
+
+      if (boundaries.length > 0 && existsSync(rawStingPath)) {
+        // Build adelay filter: duplicate sting for each boundary, delay each to its offset
+        const stingInputs = boundaries.map(() => `-i "${rawStingPath}"`).join(" ");
+        const delayFilters = boundaries.map((t, idx) => {
+          const ms = Math.round(t * 1000);
+          return `[${idx}:a]adelay=${ms}|${ms},volume=0.6[s${idx}]`;
+        }).join(";");
+        const mixLabels = boundaries.map((_, idx) => `[s${idx}]`).join("");
+        const mixFilter = `${delayFilters};${mixLabels}amix=inputs=${boundaries.length}:duration=longest:normalize=0[stings]`;
+
+        execSync(
+          `ffmpeg ${stingInputs} -filter_complex "${mixFilter}" ` +
+            `-map "[stings]" -t ${Math.ceil(audioDuration) + 4} -c:a libmp3lame -b:a 128k -y "${stingPath}"`,
+          { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 }
+        );
+
+        hasStingTrack = existsSync(stingPath);
+        if (hasStingTrack) {
+          console.log(`🔔 [FacelessFactory] Transition stings: ${boundaries.length} hits at [${boundaries.map(t => t.toFixed(0) + "s").join(", ")}]`);
+        }
+      }
+      try { unlinkSync(rawStingPath); } catch {}
+    }
+  } catch (err: any) {
+    console.warn(`⚠️ [FacelessFactory] Transition sting generation failed (non-fatal): ${err.message?.slice(0, 300)}`);
+    hasStingTrack = false;
+  }
+
   // Build the final assembly command:
   // If xfade succeeded, use the pre-crossfaded video file.
   // If concat fallback, use the concat list.
@@ -1570,18 +1637,35 @@ async function assembleVideo(
     ? `-i "${xfadedPath}"`
     : `-f concat -safe 0 -i "${concatListPath}"`;
 
-  // Audio filter: if music bed exists, mix voice (loud) + music (quiet) via amix.
-  // Session 33: Raised music bed from 0.15 (inaudible) to 0.35 so it's actually perceptible
-  const audioFilter = hasMusicBed
-    ? `[1:a]volume=1.0[voice];[2:a]volume=0.35,lowpass=f=800[bg];[voice][bg]amix=inputs=2:duration=first:normalize=0[aout]`
-    : "";
-  const musicInput = hasMusicBed ? `-i "${musicPath}" ` : "";
-  const audioMap = hasMusicBed ? `-map "[aout]"` : `-map 1:a`;
+  // Audio mixing: voice + music bed + transition stings (3-layer audio)
+  // Session 33: Raised music bed from 0.15 (inaudible) to 0.35
+  // Session 33: Added transition sting track as third audio layer
+  const inputCount = 1 + (hasMusicBed ? 1 : 0) + (hasStingTrack ? 1 : 0); // after video(0) + voice(1)
+  let audioFilter = "";
+  let musicInput = "";
+  let audioMap = `-map 1:a`; // default: just voice
+
+  if (hasMusicBed && hasStingTrack) {
+    // 3-layer: voice(1) + music(2) + stings(3)
+    musicInput = `-i "${musicPath}" -i "${stingPath}" `;
+    audioFilter = `[1:a]volume=1.0[voice];[2:a]volume=0.35,lowpass=f=800[bg];[3:a]volume=0.5[stings];[voice][bg][stings]amix=inputs=3:duration=first:normalize=0[aout]`;
+    audioMap = `-map "[aout]"`;
+  } else if (hasMusicBed) {
+    // 2-layer: voice + music
+    musicInput = `-i "${musicPath}" `;
+    audioFilter = `[1:a]volume=1.0[voice];[2:a]volume=0.35,lowpass=f=800[bg];[voice][bg]amix=inputs=2:duration=first:normalize=0[aout]`;
+    audioMap = `-map "[aout]"`;
+  } else if (hasStingTrack) {
+    // 2-layer: voice + stings
+    musicInput = `-i "${stingPath}" `;
+    audioFilter = `[1:a]volume=1.0[voice];[2:a]volume=0.5[stings];[voice][stings]amix=inputs=2:duration=first:normalize=0[aout]`;
+    audioMap = `-map "[aout]"`;
+  }
 
   try {
     execSync(
       `ffmpeg ${videoInput} -i "${audioPath}" ${musicInput}` +
-        `-filter_complex "[0:v]${nicheFilter}${hookOverlay}[v]${hasMusicBed ? ";" + audioFilter : ""}" ` +
+        `-filter_complex "[0:v]${nicheFilter}${hookOverlay}[v]${audioFilter ? ";" + audioFilter : ""}" ` +
         `-map "[v]" ${audioMap} ` +
         `-c:v libx264 -preset fast -crf 23 ` +
         `-c:a aac -b:a 192k ` +
@@ -1591,7 +1675,7 @@ async function assembleVideo(
   } catch (err: any) {
     // Fallback: no filter_complex for video — just pass through + audio mix
     console.warn(`[FacelessFactory] Color grade/hook failed, trying plain assembly: ${err.message?.slice(0, 200)}`);
-    if (hasMusicBed) {
+    if (audioFilter) {
       execSync(
         `ffmpeg ${videoInput} -i "${audioPath}" ${musicInput}` +
           `-filter_complex "${audioFilter}" ` +

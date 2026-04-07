@@ -411,6 +411,12 @@ VISUAL DIRECTION RULES:
 - Include: camera angle (low angle, overhead, close-up), lighting (amber single-source, cold fluorescent, backlit), physical elements (cracked concrete, rain on glass, smoke through light), mood (grain, haze, shallow DOF)
 - Each segment's visual should MATCH the emotional beat of the voiceover
 - FORMAT: ${orientation === "horizontal" ? "LANDSCAPE 16:9 — wide establishing shots, negative space, cinematic framing" : "VERTICAL 9:16 — center subject, close crops, portrait framing"}
+- BRAND VISUAL DNA (CRITICAL — every image must carry these signature elements):
+  * NEVER write generic stock-photo descriptions (no "woman in blazer", "hands holding puzzle piece", "person at desk")
+  * ALWAYS include at least ONE of these recurring motifs: lone silhouette figure against vast space, concentric rings/circles of light, golden amber particles/fragments dissolving or coalescing, chains/barriers shattering into light, sacred geometry patterns, architectural grandeur with dramatic converging perspective lines, cosmic void with single warm light source
+  * COLOR MANDATE: dominant deep blacks (#0a0a0f), amber/gold (#d4a843) as primary accent, teal (#00e5c7) as secondary accent. NO bright daylight, NO office settings, NO casual modern environments
+  * ATMOSPHERE: volumetric haze, dust particles catching light beams, shallow DOF with bokeh, film grain. Every scene should feel like a frame from a Villeneuve or Fincher film, NOT a LinkedIn banner
+  * PEOPLE: If human figures appear, they must be SYMBOLIC (silhouetted, partially obscured, seen from behind, dwarfed by environment) — NEVER stock-photo-style portraits or corporate poses
 
 duration_hint MUST be 30-45 seconds per segment. Total for these 7 segments: 210-315 seconds.
 Return ONLY valid JSON, no code fences, no explanation.`;
@@ -482,6 +488,13 @@ Generate as JSON:
     }
   ]
 }
+
+VISUAL DIRECTION RULES (same as Part 1 — maintain visual continuity):
+- Cinematographer shot list, NOT vague concepts
+- BRAND VISUAL DNA: lone silhouettes against vast space, concentric light rings, golden particles dissolving/coalescing, chains shattering into light, sacred geometry, converging architectural lines, cosmic void with warm light
+- COLOR: deep blacks (#0a0a0f), amber/gold (#d4a843), teal (#00e5c7). NO daylight, NO offices, NO stock-photo settings
+- PEOPLE: symbolic only (silhouetted, from behind, dwarfed by environment) — NEVER stock portraits
+- ATMOSPHERE: volumetric haze, particle-laden light beams, film grain, shallow DOF
 
 duration_hint: 30-45 seconds each. Total for these ${pass2SegCount} segments: ${pass2SegCount * 30}-${pass2SegCount * 45} seconds.
 Return ONLY valid JSON, no code fences.`;
@@ -598,6 +611,7 @@ RULES:
 - Hook must stop mid-scroll in 3 seconds
 - FORMAT: ${orientation === "horizontal" ? "LANDSCAPE 16:9" : "VERTICAL 9:16"}
 - duration_hint per segment ~8-12s, total ~45s
+- VISUAL DNA: every visual_direction MUST include brand motifs (lone silhouette against vast space, concentric light rings, golden particles, chains shattering into light, sacred geometry, cosmic void). Colors: deep black + amber/gold + teal. NO stock photos, NO offices, NO generic people. Humans are SYMBOLIC (silhouetted, from behind, dwarfed).
 - Return ONLY valid JSON`;
 
     const response = await llm.generate(

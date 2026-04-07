@@ -1445,19 +1445,39 @@ async function assembleVideo(
 
   // Ken Burns is now applied per-scene above. Video assembly just concats + applies color grade + hook.
 
-  // QUALITY GATE (Session 23): Text hook overlay
+  // QUALITY GATE (Session 23 + Session 33 wrap fix): Text hook overlay
   // Burns the hook text into the first 3 seconds of the video as a scroll-stopping overlay.
-  // White text with dark shadow, centered, large font. Fades out from 2s-3s.
-  const hookText = (script.hook || script.segments[0]?.voiceover || "")
+  // Session 33: Split long text into 2 lines to prevent cutoff at frame edges.
+  const rawHook = (script.hook || script.segments[0]?.voiceover || "")
     .split(/[.!?]/)[0]  // First sentence only
-    .replace(/'/g, "'\\''")  // Escape single quotes for ffmpeg
-    .replace(/:/g, "\\:")     // Escape colons for ffmpeg drawtext
-    .slice(0, 80);            // Max 80 chars for readability
+    .slice(0, 80)        // Max 80 chars for readability
+    .trim();
 
-  // drawtext filter: show for first 3s, fade out during second 2-3
-  const hookOverlay = hookText
-    ? `,drawtext=text='${hookText}':fontsize=42:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h*0.4):enable='between(t,0,3)':alpha='if(lt(t,2),1,(3-t))'`
-    : "";
+  // Split into two lines at the nearest word boundary to midpoint
+  function wrapHookText(text: string, maxLineChars: number = 40): string[] {
+    if (text.length <= maxLineChars) return [text];
+    const mid = Math.floor(text.length / 2);
+    // Find nearest space to midpoint
+    let splitAt = text.lastIndexOf(" ", mid);
+    if (splitAt < 10) splitAt = text.indexOf(" ", mid); // fallback: split after midpoint
+    if (splitAt < 0) return [text]; // no space found, render as-is
+    return [text.slice(0, splitAt).trim(), text.slice(splitAt + 1).trim()];
+  }
+
+  const hookLines = wrapHookText(rawHook);
+  const escLine = (s: string) => s.replace(/'/g, "'\\''").replace(/:/g, "\\:");
+
+  // drawtext filter: show for first 3s, fade out from 2s-3s
+  // If 2 lines: line1 at y=37%, line2 at y=43% (stacked centered)
+  let hookOverlay = "";
+  if (hookLines.length === 2) {
+    hookOverlay =
+      `,drawtext=text='${escLine(hookLines[0])}':fontsize=40:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h*0.37):enable='between(t,0,3)':alpha='if(lt(t,2),1,(3-t))'` +
+      `,drawtext=text='${escLine(hookLines[1])}':fontsize=40:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h*0.44):enable='between(t,0,3)':alpha='if(lt(t,2),1,(3-t))'`;
+  } else if (hookLines.length === 1 && hookLines[0]) {
+    hookOverlay =
+      `,drawtext=text='${escLine(hookLines[0])}':fontsize=42:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h*0.4):enable='between(t,0,3)':alpha='if(lt(t,2),1,(3-t))'`;
+  }
 
   // ── BACKGROUND MUSIC BED ──
   // Session 32 REWRITE: Previous aevalsrc approach with 6 detuned oscillators NEVER worked.
@@ -1537,8 +1557,9 @@ async function assembleVideo(
     : `-f concat -safe 0 -i "${concatListPath}"`;
 
   // Audio filter: if music bed exists, mix voice (loud) + music (quiet) via amix.
+  // Session 33: Raised music bed from 0.15 (inaudible) to 0.35 so it's actually perceptible
   const audioFilter = hasMusicBed
-    ? `[1:a]volume=1.0[voice];[2:a]volume=0.15[bg];[voice][bg]amix=inputs=2:duration=first:normalize=0[aout]`
+    ? `[1:a]volume=1.0[voice];[2:a]volume=0.35,lowpass=f=800[bg];[voice][bg]amix=inputs=2:duration=first:normalize=0[aout]`
     : "";
   const musicInput = hasMusicBed ? `-i "${musicPath}" ` : "";
   const audioMap = hasMusicBed ? `-map "[aout]"` : `-map 1:a`;

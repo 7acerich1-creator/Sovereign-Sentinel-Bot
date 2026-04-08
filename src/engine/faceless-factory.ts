@@ -917,9 +917,14 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<Audio
     segmentPaths.push(segMp3);
     rawSegDurations.push(segAudioDur);
 
-    // Small delay between TTS calls to avoid rate limits
+    // Session 40b: Edge TTS cooldown — Microsoft's free endpoint throttles after ~4 rapid calls.
+    // 2s base cooldown between every segment. Every 5th segment gets a 5s breather.
+    // Total overhead for 17 segments: ~40s (vs 8s at 500ms). Worth it to avoid retry cascades.
     if (i < allSegmentTexts.length - 1) {
-      await new Promise(r => setTimeout(r, 500));
+      const isCooldownBreak = (i + 1) % 5 === 0;
+      const cooldownMs = isCooldownBreak ? 5000 : 2000;
+      if (isCooldownBreak) console.log(`  ⏸️ TTS cooldown break after segment ${i + 1} (5s)...`);
+      await new Promise(r => setTimeout(r, cooldownMs));
     }
   }
 

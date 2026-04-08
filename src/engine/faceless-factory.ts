@@ -832,10 +832,23 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<Audio
 
     writeFileSync(segRaw, segBuffer!);
 
-    // Convert to mp3
+    // Convert to mp3 with afade in/out to eliminate harsh room-tone clips.
+    // Session 37: 150ms fade-in, 200ms fade-out — just enough to kill the click
+    // without softening the delivery. The TTS starts/stops abruptly otherwise
+    // and the background room-tone delta creates an audible pop.
     try {
+      // First get duration so we can place the fade-out correctly
+      let rawDur = 3;
+      try {
+        const rd = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${segRaw}"`, { timeout: 10_000, stdio: "pipe" }).toString().trim();
+        rawDur = parseFloat(rd) || 3;
+      } catch { /* use default */ }
+
+      const fadeOutStart = Math.max(0, rawDur - 0.2);
       execSync(
-        `ffmpeg -i "${segRaw}" -ar 44100 -ac 1 -c:a libmp3lame -b:a 128k -y "${segMp3}"`,
+        `ffmpeg -i "${segRaw}" -ar 44100 -ac 1 ` +
+          `-af "afade=t=in:st=0:d=0.15,afade=t=out:st=${fadeOutStart}:d=0.2" ` +
+          `-c:a libmp3lame -b:a 128k -y "${segMp3}"`,
         { timeout: 30_000, stdio: "pipe" }
       );
     } catch {
@@ -863,18 +876,23 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<Audio
     throw new Error("All TTS segments failed — cannot produce audio");
   }
 
-  // QUALITY GATE (Session 24): 1.5s silence between segments, 2.5s chapter breaks every 4.
-  // Session 23 test showed 0.6s was too tight — felt like a run-on. 1.5s lets ideas breathe.
+  // QUALITY GATE (Session 37 REWRITE): Natural breathing room between segments.
+  // Session 24 had 1.5s/2.5s which was too aggressive — chopped the TTS delivery.
+  // Session 37: 0.8s standard pause (enough to breathe, not enough to bore),
+  // 2.0s chapter break where narrative shifts (every 4 segments).
+  // Combined with the per-segment afade (Fix 3), this creates cinematic pacing.
+  const SILENCE_PAD_SEC = 0.8;
+  const CHAPTER_PAD_SEC = 2.0;
   const silencePad = `${FACELESS_DIR}/${jobId}_silence.mp3`;
   const chapterPad = `${FACELESS_DIR}/${jobId}_chapter.mp3`;
   try {
     execSync(
-      `ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 1.5 -c:a libmp3lame -b:a 128k -y "${silencePad}"`,
+      `ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t ${SILENCE_PAD_SEC} -c:a libmp3lame -b:a 128k -y "${silencePad}"`,
       { timeout: 10_000, stdio: "pipe" }
     );
     // Chapter break: longer pause every 4 segments for documentary feel
     execSync(
-      `ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 2.5 -c:a libmp3lame -b:a 128k -y "${chapterPad}"`,
+      `ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t ${CHAPTER_PAD_SEC} -c:a libmp3lame -b:a 128k -y "${chapterPad}"`,
       { timeout: 10_000, stdio: "pipe" }
     );
   } catch {
@@ -950,8 +968,7 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<Audio
   // ── Calculate per-segment durations (voiceover + trailing silence pad) for scene sync ──
   // This tells assembleVideo exactly how long each scene should display,
   // so visual transitions align with the natural speech pauses.
-  const SILENCE_PAD_SEC = 1.5;
-  const CHAPTER_PAD_SEC = 2.5;
+  // SILENCE_PAD_SEC and CHAPTER_PAD_SEC are defined above (0.8s / 2.0s as of Session 37).
   const segmentDurations: number[] = [];
   for (let i = 0; i < rawSegDurations.length; i++) {
     let dur = rawSegDurations[i];
@@ -1621,105 +1638,86 @@ async function assembleVideo(
 
   // Ken Burns is now applied per-scene above. Video assembly just concats + applies color grade + hook.
 
-  // QUALITY GATE (Session 23 + Session 33 wrap fix): Text hook overlay
+  // QUALITY GATE (Session 37 REWRITE): Text hook overlay
   // Burns the hook text into the first 3 seconds of the video as a scroll-stopping overlay.
-  // Session 33: Split long text into 2 lines to prevent cutoff at frame edges.
+  // Session 37: Pre-wrap text in TypeScript — NEVER rely on ffmpeg to wrap.
+  // wrapText() inserts \n every ~25 chars at word boundaries, then we pass
+  // the pre-wrapped string to a SINGLE drawtext filter so it renders perfectly centered.
   const rawHook = (script.hook || script.segments[0]?.voiceover || "")
     .split(/[.!?]/)[0]  // First sentence only
-    .slice(0, 80)        // Max 80 chars for readability
+    .slice(0, 100)       // Max 100 chars (wrapping handles readability now)
     .trim();
 
-  // Split into two lines at the nearest word boundary to midpoint
-  function wrapHookText(text: string, maxLineChars: number = 40): string[] {
-    if (text.length <= maxLineChars) return [text];
-    const mid = Math.floor(text.length / 2);
-    // Find nearest space to midpoint
-    let splitAt = text.lastIndexOf(" ", mid);
-    if (splitAt < 10) splitAt = text.indexOf(" ", mid); // fallback: split after midpoint
-    if (splitAt < 0) return [text]; // no space found, render as-is
-    return [text.slice(0, splitAt).trim(), text.slice(splitAt + 1).trim()];
+  /** Pre-wrap text at word boundaries. Returns string with \n inserted. */
+  function wrapText(text: string, maxCharsPerLine: number = 25): string {
+    const words = text.split(/\s+/);
+    const lines: string[] = [];
+    let currentLine = "";
+    for (const word of words) {
+      const candidate = currentLine ? `${currentLine} ${word}` : word;
+      if (candidate.length > maxCharsPerLine && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = candidate;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines.join("\n");
   }
 
-  const hookLines = wrapHookText(rawHook);
-  const escLine = (s: string) => s.replace(/'/g, "'\\''").replace(/:/g, "\\:");
+  const wrappedHook = wrapText(rawHook, 25);
+  const escLine = (s: string) => s
+    .replace(/'/g, "'\\''")
+    .replace(/:/g, "\\:")
+    .replace(/\n/g, "\\n");  // ffmpeg drawtext interprets \n as newline
 
-  // drawtext filter: show for first 3s, fade out from 2s-3s
-  // If 2 lines: line1 at y=37%, line2 at y=43% (stacked centered)
+  // Single drawtext filter with pre-wrapped text — centered both horizontally and vertically.
+  // The \n characters in the escaped string make ffmpeg render multiple lines natively.
+  // y=(h*0.35) places the block in the upper-center sweet spot for readability.
   let hookOverlay = "";
-  if (hookLines.length === 2) {
+  if (wrappedHook) {
     hookOverlay =
-      `,drawtext=text='${escLine(hookLines[0])}':fontsize=40:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h*0.37):enable='between(t,0,3)':alpha='if(lt(t,2),1,(3-t))'` +
-      `,drawtext=text='${escLine(hookLines[1])}':fontsize=40:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h*0.44):enable='between(t,0,3)':alpha='if(lt(t,2),1,(3-t))'`;
-  } else if (hookLines.length === 1 && hookLines[0]) {
-    hookOverlay =
-      `,drawtext=text='${escLine(hookLines[0])}':fontsize=42:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h*0.4):enable='between(t,0,3)':alpha='if(lt(t,2),1,(3-t))'`;
+      `,drawtext=text='${escLine(wrappedHook)}':fontsize=42:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h*0.35):line_spacing=12:enable='between(t,0,3)':alpha='if(lt(t,2),1,(3-t))'`;
   }
 
   // ── BACKGROUND MUSIC BED ──
-  // Session 32 REWRITE: Previous aevalsrc approach with 6 detuned oscillators NEVER worked.
-  // Root cause: complex aevalsrc expressions with shell quoting fail silently on Railway.
-  // Fix: Use ffmpeg's `sine` source (single frequency, bulletproof) + `anoisesrc` (pink noise).
-  // Two simple sources mixed and filtered = ambient drone. Cannot fail.
-  const musicLoopPath = `${FACELESS_DIR}/${jobId}_music_loop.mp3`;
+  // Session 37 REWRITE: ALL synthetic audio generation (sine, aevalsrc, anoisesrc) is DEAD.
+  // Root cause: lavfi-based music silently fails on Railway, leaving videos with zero music.
+  // Fix: Loop a REAL static MP3 file (brand-assets/ambient_drone.mp3) using stream_loop.
+  // The Architect uploads the actual audio file. This code just loops and fades it.
   const musicPath = `${FACELESS_DIR}/${jobId}_music_bed.mp3`;
   let hasMusicBed = false;
 
-  // Niche-aware frequencies: root tone sets the mood
-  const MUSIC_FREQ: Record<string, { hz: number; mood: string }> = {
-    dark_psychology: { hz: 110, mood: "dark" },      // A2 — dark, ominous
-    self_improvement: { hz: 131, mood: "warm" },      // C3 — warm, grounded
-    burnout: { hz: 98, mood: "heavy" },               // G2 — heavy, low
-    quantum: { hz: 123, mood: "ethereal" },            // B2 — ethereal
-    brand: { hz: 110, mood: "dark" },                  // default
-  };
-
   try {
-    const freq = MUSIC_FREQ[script.niche] || MUSIC_FREQ.brand;
-    const musicDuration = Math.ceil(audioDuration) + 4;
-    const LOOP_DURATION = 30;
+    const brandAssetsDir = `${__dirname}/../../brand-assets`;
+    const ambientSource = `${brandAssetsDir}/ambient_drone.mp3`;
 
-    // STEP 1: Generate 30s ambient loop using SIMPLE sources (no aevalsrc)
-    // sine = single clean tone, anoisesrc = pink noise texture
-    // Heavy lowpass + compression makes it a smooth ambient drone
-    execSync(
-      `ffmpeg -f lavfi -i sine=frequency=${freq.hz}:duration=${LOOP_DURATION + 2}:sample_rate=44100 ` +
-        `-f lavfi -i anoisesrc=d=${LOOP_DURATION + 2}:c=pink:r=44100:a=0.01 ` +
-        `-filter_complex ` +
-          `"[0:a]volume=0.08,lowpass=f=400[tone];` +
-          `[1:a]lowpass=f=600,volume=0.3[noise];` +
-          `[tone][noise]amix=inputs=2:duration=first:normalize=0,` +
-          `lowpass=f=1200,highpass=f=40,` +
-          `acompressor=threshold=-25dB:ratio=4:attack=50:release=200,` +
-          `afade=t=in:st=0:d=2,afade=t=out:st=${LOOP_DURATION}:d=2[loop]" ` +
-        `-map "[loop]" -t ${LOOP_DURATION} -c:a libmp3lame -b:a 128k -y "${musicLoopPath}"`,
-      { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 }
-    );
-
-    if (!existsSync(musicLoopPath)) throw new Error("Loop file not created");
-    const loopSize = readFileSync(musicLoopPath).length;
-    console.log(`🎵 [FacelessFactory] 30s music loop generated: ${freq.hz}Hz/${freq.mood} (${(loopSize / 1024).toFixed(0)}KB)`);
-
-    // STEP 2: Loop it to full video duration with fade in/out
-    const loopCount = Math.ceil(musicDuration / LOOP_DURATION);
-    execSync(
-      `ffmpeg -stream_loop ${loopCount} -i "${musicLoopPath}" ` +
-        `-af "afade=t=in:st=0:d=3,afade=t=out:st=${Math.max(0, musicDuration - 4)}:d=4" ` +
-        `-t ${musicDuration} -c:a libmp3lame -b:a 128k -y "${musicPath}"`,
-      { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 }
-    );
-
-    hasMusicBed = existsSync(musicPath);
-    if (hasMusicBed) {
-      console.log(`🎵 [FacelessFactory] Music bed: ${musicDuration}s (${loopCount}x${LOOP_DURATION}s loops) — ${freq.hz}Hz/${freq.mood}`);
+    if (!existsSync(ambientSource)) {
+      console.warn(`⚠️ [FacelessFactory] No ambient_drone.mp3 found at ${ambientSource} — video will have NO music bed. Upload a real MP3 to brand-assets/ambient_drone.mp3`);
     } else {
-      console.error(`❌ [FacelessFactory] Music bed file not created despite no error`);
+      const musicDuration = Math.ceil(audioDuration) + 4;
+
+      // stream_loop -1 = infinite loop. -t caps to exact duration needed.
+      // afade in 3s at start, fade out 4s at end — smooth cinematic envelope.
+      execSync(
+        `ffmpeg -stream_loop -1 -i "${ambientSource}" ` +
+          `-af "afade=t=in:st=0:d=3,afade=t=out:st=${Math.max(0, musicDuration - 4)}:d=4" ` +
+          `-t ${musicDuration} -c:a libmp3lame -b:a 128k -y "${musicPath}"`,
+        { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 }
+      );
+
+      hasMusicBed = existsSync(musicPath);
+      if (hasMusicBed) {
+        console.log(`🎵 [FacelessFactory] Music bed: ${musicDuration}s looped from ambient_drone.mp3`);
+      } else {
+        console.error(`❌ [FacelessFactory] Music bed file not created despite no error`);
+      }
     }
-    try { unlinkSync(musicLoopPath); } catch {}
   } catch (err: any) {
     console.error(`❌ [FacelessFactory] Music bed generation FAILED: ${err.message?.slice(0, 400)}`);
     const stderr = err.stderr ? err.stderr.toString().slice(0, 500) : "(no stderr)";
     console.error(`  STDERR: ${stderr}`);
-    try { unlinkSync(musicLoopPath); } catch {}
   }
 
   // ── TRANSITION STINGS — Session 33 ──

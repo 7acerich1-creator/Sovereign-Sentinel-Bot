@@ -9,18 +9,40 @@ import { writeFileSync } from "fs";
 import { config } from "../config";
 import type { Tool, ToolDefinition } from "../types";
 
-// ── Niche prompt prefixes ──
+// ── Niche × Brand prompt prefixes ──
+// SESSION 35: Upgraded from generic one-liners to cinematic brand-aligned prompts.
+// Matches the visual DNA in design-tokens.json:
+// Ace Richie = gold (#d4a843) + teal (#00e5c7) on void (#0a0a0f), warm sovereign energy
+// Containment Field = cold blue (#5A9CF5) + teal (#00e5c7) on void (#0a0a0f), clinical surveillance energy
+// NO blood red for TCF. NO warm tones for TCF.
 const NICHE_PREFIXES: Record<string, string> = {
   dark_psychology:
-    "High contrast monochromatic, brutalist aesthetic, heavy shadows, single geometric element, cinematic, ",
+    "Cinematic noir photograph, deep shadows with single amber light source cutting through darkness, " +
+    "silhouette against brutalist geometric structure, gold (#d4a843) and midnight blue palette, " +
+    "volumetric haze, tension and revelation, photorealistic cinematic quality, dark void (#0a0a0f) background, " +
+    "NO text NO words NO letters NO watermarks, ",
   self_improvement:
-    "Clean minimal, bright warm tones, forward momentum, architectural, ",
+    "Golden hour cinematic photograph, figure ascending toward bright horizon, " +
+    "warm amber (#d4a843) and teal (#00e5c7) sky, architectural grandeur, columns and open space, " +
+    "elevation and breakthrough energy, sovereign and majestic, photorealistic, " +
+    "NO text NO words NO letters NO watermarks, ",
   burnout:
-    "Muted desaturated palette, warm undertones, soft industrial, release energy, ",
+    "Cinematic photograph of chains dissolving into golden particles, " +
+    "figure walking from industrial space into open landscape at dawn, " +
+    "muted grays transitioning to warm amber (#d4a843), liberation energy, " +
+    "dark void (#0a0a0f) background, photorealistic cinematic quality, " +
+    "NO text NO words NO letters NO watermarks, ",
   quantum:
-    "Abstract geometric, deep blue shifted, high saturation, conceptual visualization, ",
+    "Abstract cosmic photograph, human figure in field of geometric light patterns, " +
+    "deep space indigo and electric gold (#d4a843), sacred geometry, observer effect, " +
+    "reality bending at edges, teal (#00e5c7) accent refractions, cinematic, " +
+    "NO text NO words NO letters NO watermarks, ",
   brand:
-    "Sovereign Synthesis brand aesthetic, amber and teal accents, dark background, authoritative minimal, ",
+    "Sovereign Synthesis brand photograph, midnight void (#0a0a0f) background, " +
+    "amber (#d4a843) and teal (#00e5c7) accent lighting, architectural sovereignty, " +
+    "throne-like composition, gold geometric accents, sacred geometry elements, " +
+    "master architect energy, photorealistic cinematic quality, " +
+    "NO text NO words NO letters NO watermarks, ",
 };
 
 // ── Aspect ratio → DALL-E 3 size mapping ──
@@ -88,7 +110,9 @@ export class ImageGeneratorTool implements Tool {
 
     // ── STEP 1: Gemini Imagen 4 (PRIMARY — highest quality) ──
     // Session 27: Restored as primary. Billing crisis was Anita text-gen, not image gen.
-    const geminiKey = config.llm.providers.gemini?.apiKey;
+    // SESSION 35: Use ONLY imagenKey — apiKey is for embeddings, not image gen.
+    // Old code used apiKey here = same "zero logs" ghost (wrong billing project).
+    const geminiKey = config.llm.providers.gemini?.imagenKey;
     if (geminiKey) {
       try {
         imageBuffer = await this.tryGeminiImagen(geminiKey, enhancedPrompt, aspectRatio);

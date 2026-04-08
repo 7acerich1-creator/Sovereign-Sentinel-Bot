@@ -258,7 +258,7 @@ const SCENE_VISUAL_STYLE: Record<string, Record<Brand, string>> = {
   },
   brand: {
     ace_richie: "Photorealistic cinematic still, midnight blue atmospheric haze with amber accent lighting, sovereign throne-like composition, architectural mastery with dramatic perspective lines converging on subject, rich fabric and stone textures, single warm practial light source creating Rembrandt lighting pattern, film grain and subtle lens vignette, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
-    containment_field: "Photorealistic noir photograph, single focused red light illuminating classified documents on dark desk, smoke or atmospheric haze catching the light beam, extreme chiaroscuro, intelligence briefing room aesthetic, cold steel and leather textures, Dutch angle creating unease, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
+    containment_field: "Photorealistic noir photograph, single focused cold blue (#5A9CF5) light illuminating classified documents on dark desk, smoke or atmospheric haze catching the light beam, teal (#00e5c7) accent glow on steel surfaces, extreme chiaroscuro, intelligence briefing room aesthetic, cold steel and leather textures, Dutch angle creating unease, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
   },
 };
 
@@ -1101,7 +1101,8 @@ async function generateThumbnail(
   const thumbVisual = script.thumbnail_visual || "lone figure silhouetted against a vast cosmic light source, concentric rings of golden energy";
   const thumbPrompt = `${thumbStyle}. Scene: ${thumbVisual}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks. The image must have a large dark area (left or right third) where text will be overlaid.`;
 
-  const geminiKey = config.llm.providers.gemini?.imagenKey || config.llm.providers.gemini?.apiKey;
+  // SESSION 35: Use ONLY imagenKey — no fallback to apiKey (embedding key ≠ image gen key).
+  const geminiKey = config.llm.providers.gemini?.imagenKey;
   let hasBase = false;
 
   if (geminiKey) {

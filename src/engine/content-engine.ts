@@ -111,9 +111,9 @@ const IMAGE_NICHE_PREFIXES: Record<string, Record<Brand, string>> = {
       "gold and midnight blue color palette, brutalist architecture, fog, tension and revelation, " +
       "movie-poster composition, 1:1 square format, photorealistic cinematic quality, ",
     containment_field:
-      "Surveillance-aesthetic photograph, clinical cold blue lighting on concrete and steel, " +
+      "Surveillance-aesthetic photograph, clinical cold blue (#5A9CF5) lighting on concrete and steel, " +
       "security camera angle, rain-slicked urban environment at night, " +
-      "blood red accent light bleeding through shadows, noir detective film still, " +
+      "teal (#00e5c7) accent light bleeding through shadows, noir detective film still, " +
       "oppressive atmosphere, institutional architecture, 1:1 square format, photorealistic, ",
   },
   self_improvement: {
@@ -154,9 +154,9 @@ const IMAGE_NICHE_PREFIXES: Record<string, Record<Brand, string>> = {
       "architectural sovereignty, throne-like composition, gold geometric accents, " +
       "power and intention, master architect energy, 1:1 square format, cinematic, ",
     containment_field:
-      "Anonymous intelligence aesthetic, dark room with single red light on a classified document, " +
-      "noir atmosphere, information broker setting, shadows and revelation, " +
-      "the truth behind the curtain, 1:1 square format, photorealistic noir, ",
+      "Anonymous intelligence aesthetic, dark room with single cold blue (#5A9CF5) light on a classified document, " +
+      "noir atmosphere, information broker setting, teal (#00e5c7) accent glow, shadows and revelation, " +
+      "the truth behind the curtain, void (#0a0a0f) background, 1:1 square format, photorealistic noir, ",
   },
 };
 
@@ -166,8 +166,8 @@ const IMAGE_NICHE_FALLBACK: Record<Brand, string> = {
     "Cinematic dark photograph with amber and gold accent lighting, sovereign aesthetic, architectural, " +
     "powerful composition, 1:1 square format, photorealistic, ",
   containment_field:
-    "Dark noir photograph, cold blue and red accent lighting, clinical atmosphere, " +
-    "surveillance aesthetic, 1:1 square format, photorealistic, ",
+    "Dark noir photograph, cold blue (#5A9CF5) and teal (#00e5c7) accent lighting, clinical atmosphere, " +
+    "surveillance aesthetic, void (#0a0a0f) background, 1:1 square format, photorealistic, ",
 };
 
 /** Brand-specific SUFFIX — applied AFTER niche prefix */

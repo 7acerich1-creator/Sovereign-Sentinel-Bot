@@ -1284,7 +1284,13 @@ async function main() {
   });
 
   webhookServer.register("/api/notify", async (payload: any) => {
-    const text = payload?.text || JSON.stringify(payload).slice(0, 1000);
+    const text = payload?.text || "";
+    // SESSION 35: Guard against empty notifications — something was hitting this endpoint
+    // with no payload at 00:30 UTC, producing "🔔 NOTIFICATION" with no content.
+    if (!text || text === "{}" || text.trim().length === 0) {
+      console.warn(`⚠️ [Notify] Empty notification payload received — suppressed. Raw: ${JSON.stringify(payload).slice(0, 200)}`);
+      return "suppressed:empty";
+    }
     await telegram.sendMessage(defaultChatId, `🔔 *NOTIFICATION*\n${text}`, { parseMode: "Markdown" });
     return "delivered";
   });

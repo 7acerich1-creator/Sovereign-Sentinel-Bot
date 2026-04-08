@@ -241,7 +241,7 @@ The voiceover should sound measured and low-cadence — like a whistleblower rea
 
 const SCENE_VISUAL_STYLE: Record<string, Record<Brand, string>> = {
   dark_psychology: {
-    ace_richie: "Photorealistic cinematic still, shot on ARRI Alexa 65, 2.39:1 anamorphic lens with amber flares, Deakins-style single-source lighting cutting through volumetric haze, deep blacks with crushed shadows, brutalist concrete and steel textures, grain structure matching Kodak Vision3 500T, shallow depth of field f/1.4, color grade: teal shadows with warm amber highlights, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
+    ace_richie: "Photorealistic cinematic still, shot on ARRI Alexa 65, 2.39:1 anamorphic lens with GOLDEN AMBER flares, Deakins-style single-source warm amber lighting cutting through volumetric haze, deep blacks with crushed shadows, brutalist concrete and steel textures, grain structure matching Kodak Vision3 500T, shallow depth of field f/1.4, DOMINANT COLOR PALETTE: warm amber/gold (#d4a843) is the PRIMARY accent light — every image MUST have visible gold/amber tones as the dominant warm element. Teal (#00e5c7) appears ONLY in deep shadows or background edges, NEVER as the primary color. {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
     containment_field: "Photorealistic surveillance photograph, CCTV camera angle, rain-slicked urban alley at 2AM, sodium vapor streetlights creating harsh orange pools against cold blue ambient, wet concrete reflecting neon, lens distortion and chromatic aberration, high ISO grain, shallow focus with background bokeh, oppressive claustrophobic composition, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
   },
   self_improvement: {
@@ -257,7 +257,7 @@ const SCENE_VISUAL_STYLE: Record<string, Record<Brand, string>> = {
     containment_field: "Photorealistic photograph overlaid with subtle wireframe holographic elements, reality glitching at the edges, code-green scan lines barely visible on physical surfaces, dark teal and phosphor green palette, CRT monitor glow illuminating a dark space, data streams visualized as fiber optic light trails, analog noise artifacts, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
   },
   brand: {
-    ace_richie: "Photorealistic cinematic still, midnight blue atmospheric haze with amber accent lighting, sovereign throne-like composition, architectural mastery with dramatic perspective lines converging on subject, rich fabric and stone textures, single warm practial light source creating Rembrandt lighting pattern, film grain and subtle lens vignette, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
+    ace_richie: "Photorealistic cinematic still, midnight blue atmospheric haze with DOMINANT warm amber/gold (#d4a843) accent lighting, sovereign throne-like composition, architectural mastery with dramatic perspective lines converging on subject, rich fabric and stone textures, single warm GOLDEN practical light source creating Rembrandt lighting pattern, amber/gold is the PRIMARY color accent in every frame — teal only in deep shadow edges. Film grain and subtle lens vignette, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
     containment_field: "Photorealistic noir photograph, single focused cold blue (#5A9CF5) light illuminating classified documents on dark desk, smoke or atmospheric haze catching the light beam, teal (#00e5c7) accent glow on steel surfaces, extreme chiaroscuro, intelligence briefing room aesthetic, cold steel and leather textures, Dutch angle creating unease, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
   },
 };
@@ -403,12 +403,23 @@ Write 7 segments that tell a CONTINUOUS STORY. Each segment FLOWS into the next 
 CRITICAL WRITING RULES:
 1. NEVER copy or closely paraphrase the source material. You are writing ORIGINAL content inspired by the thesis.
 2. Each segment must END with a sentence that creates FORWARD MOMENTUM — making the listener need to hear the next segment.
-3. Use specific examples, vivid metaphors, and "imagine this..." moments. Abstract lecturing is death.
+3. Use specific examples, vivid metaphors, and concrete scenarios. Abstract lecturing is death.
 4. Write like you're TELLING someone a story over a drink — not reading a textbook.
 5. Vary sentence length dramatically. Short punch. Then a longer, flowing thought that lets the idea breathe and settle into the listener's mind. Then another short hit.
-6. Every 3-4 segments, include a TRANSITION BEAT: "But here's what nobody talks about..." or "Now... pay attention to this part..." or "And this is where it gets dark..."
+6. Create organic transitions that flow from the previous thought — NOT formulaic bridges. Each transition should feel like a natural escalation, not a cue card.
 7. Each segment MUST be 100-150 words MINIMUM (6-10 sentences). Under 80 words = FAILURE.
 8. The video should feel like a REVELATION unfolding — not a list of tips.
+
+BANNED PHRASES (Session 38 — these are lexically stagnant and kill authenticity):
+- "Imagine..." or "Imagine this..." (overused opener — find a more vivid entry point)
+- "But here's the thing..." (crutch transition — be more specific about WHAT the thing is)
+- "Now pay attention..." or "Now pay attention to this part..." (condescending — let the content command attention)
+- "But here's what nobody talks about..." (clickbait filler — just SAY the thing nobody talks about)
+- "Let that sink in" (lazy emphasis — if the point is powerful enough, it sinks in on its own)
+- "Think about it" or "Think about that" (passive — instead SHOW them the implication)
+- "Here's the truth" or "The truth is..." (throat-clearing — just deliver the truth)
+- "Are you ready?" or "Ready for this?" (cheap tension — build real tension through content)
+If you catch yourself reaching for any of these, REWRITE the sentence with a concrete image, a specific example, or a direct statement that carries its own weight.
 
 Generate as JSON:
 {
@@ -434,7 +445,7 @@ VISUAL DIRECTION RULES:
 - BRAND VISUAL DNA (CRITICAL — every image must carry these signature elements):
   * NEVER write generic stock-photo descriptions (no "woman in blazer", "hands holding puzzle piece", "person at desk")
   * ALWAYS include at least ONE of these recurring motifs: lone silhouette figure against vast space, concentric rings/circles of light, golden amber particles/fragments dissolving or coalescing, chains/barriers shattering into light, sacred geometry patterns, architectural grandeur with dramatic converging perspective lines, cosmic void with single warm light source
-  * COLOR MANDATE: dominant deep blacks (#0a0a0f), amber/gold (#d4a843) as primary accent, teal (#00e5c7) as secondary accent. NO bright daylight, NO office settings, NO casual modern environments
+  * COLOR MANDATE (CRITICAL — Session 38 enforcement): dominant deep blacks (#0a0a0f). For Ace Richie/Sovereign Synthesis: amber/gold (#d4a843) MUST be the PRIMARY visible accent in EVERY scene — warm golden light, amber particles, gold flares. Teal (#00e5c7) is SECONDARY ONLY — used sparingly in deep shadows or background edges, NEVER as the dominant color. For The Containment Field: cold blue (#5A9CF5) is primary, teal is secondary. NO bright daylight, NO office settings, NO casual modern environments. If a scene description doesn't explicitly mention gold/amber lighting, ADD IT.
   * ATMOSPHERE: volumetric haze, dust particles catching light beams, shallow DOF with bokeh, film grain. Every scene should feel like a frame from a Villeneuve or Fincher film, NOT a LinkedIn banner
   * PEOPLE: If human figures appear, they must be SYMBOLIC (silhouetted, partially obscured, seen from behind, dwarfed by environment) — NEVER stock-photo-style portraits or corporate poses
 
@@ -494,9 +505,13 @@ CRITICAL ANTI-REPETITION RULES:
 - Reference Part 1 ideas as callbacks ("This is exactly why..." / "Remember when we said...") but DO NOT re-explain them
 - Each segment must introduce NEW territory — new angles, new evidence, new frameworks
 
+BANNED PHRASES (lexically stagnant — rewrite with concrete images or direct statements):
+- "Imagine..." / "But here's the thing..." / "Now pay attention..." / "But here's what nobody talks about..."
+- "Let that sink in" / "Think about it" / "Here's the truth" / "The truth is..." / "Are you ready?"
+
 Each segment: 100-150 words MINIMUM (6-10 sentences). Under 80 words = FAILURE.
 Vary sentence length. Short punches mixed with flowing thoughts.
-Include 2-3 transition beats across these segments.
+Create organic transitions that flow from the previous thought — NOT formulaic bridges.
 
 Generate as JSON:
 {
@@ -512,7 +527,7 @@ Generate as JSON:
 VISUAL DIRECTION RULES (same as Part 1 — maintain visual continuity):
 - Cinematographer shot list, NOT vague concepts
 - BRAND VISUAL DNA: lone silhouettes against vast space, concentric light rings, golden particles dissolving/coalescing, chains shattering into light, sacred geometry, converging architectural lines, cosmic void with warm light
-- COLOR: deep blacks (#0a0a0f), amber/gold (#d4a843), teal (#00e5c7). NO daylight, NO offices, NO stock-photo settings
+- COLOR (CRITICAL): deep blacks (#0a0a0f). Ace Richie: amber/gold (#d4a843) is DOMINANT accent in EVERY scene. Teal (#00e5c7) SECONDARY only (deep shadows/edges). TCF: cold blue primary, teal secondary. NO daylight, NO offices, NO stock-photo settings
 - PEOPLE: symbolic only (silhouetted, from behind, dwarfed by environment) — NEVER stock portraits
 - ATMOSPHERE: volumetric haze, particle-laden light beams, film grain, shallow DOF
 
@@ -633,7 +648,8 @@ RULES:
 - Hook must stop mid-scroll in 3 seconds
 - FORMAT: ${orientation === "horizontal" ? "LANDSCAPE 16:9" : "VERTICAL 9:16"}
 - duration_hint per segment ~8-12s, total ~45s
-- VISUAL DNA: every visual_direction MUST include brand motifs (lone silhouette against vast space, concentric light rings, golden particles, chains shattering into light, sacred geometry, cosmic void). Colors: deep black + amber/gold + teal. NO stock photos, NO offices, NO generic people. Humans are SYMBOLIC (silhouetted, from behind, dwarfed).
+- VISUAL DNA: every visual_direction MUST include brand motifs (lone silhouette against vast space, concentric light rings, golden particles, chains shattering into light, sacred geometry, cosmic void). Colors: deep black + amber/gold (#d4a843) as DOMINANT accent + teal as secondary edge-only. NO stock photos, NO offices, NO generic people. Humans are SYMBOLIC (silhouetted, from behind, dwarfed).
+- BANNED: "Imagine...", "But here's the thing...", "Let that sink in", "Think about it", "Here's the truth"
 - Return ONLY valid JSON`;
 
     const response = await llm.generate(
@@ -766,11 +782,13 @@ async function renderAudio(script: FacelessScript, jobId: string): Promise<Audio
   ];
   const totalChars = allSegmentTexts.reduce((sum, t) => sum + t.length, 0);
   const isLongForm = allSegmentTexts.length > 8;
-  // QUALITY GATE (Session 24): Documentary cadence — slow and deliberate.
-  // 0.85x was still too rushed per Session 23 test. 0.80x with 1.5s silence pads
-  // + 2.5s chapter breaks every 4 segments creates measured pacing.
-  const ttsSpeed = isLongForm ? 0.80 : undefined;
-  console.log(`🗣️ [FacelessFactory] Rendering TTS — ${allSegmentTexts.length} segments, ${totalChars} chars total${isLongForm ? " (long-form, 0.80x speed)" : ""}`);
+  // QUALITY GATE (Session 24→38): Documentary cadence — deliberate but not sluggish.
+  // Session 24: 0.85x too rushed. Session 27: 0.80x chosen. Session 37 audit: 0.80x + 0.8s pads + afade
+  // made the output SLUGGISH — Gemini flagged "the resonance is fundamentally flat."
+  // Session 38 FIX: 0.90x balances gravitas with momentum. Combined with afade per-segment,
+  // this gives a measured cadence without dragging. If still slow, try removing override entirely.
+  const ttsSpeed = isLongForm ? 0.90 : undefined;
+  console.log(`🗣️ [FacelessFactory] Rendering TTS — ${allSegmentTexts.length} segments, ${totalChars} chars total${isLongForm ? " (long-form, 0.90x speed)" : ""}`);
 
   // If total text fits in one call (short-form), do it in one shot
   if (totalChars <= 3800) {
@@ -1498,9 +1516,10 @@ async function assembleVideo(
   }
 
   // ── FREQUENCY ACTIVATION CTAs (long-form only, 2 per video) ──
-  // Inserted at ~1/3 and ~2/3 of the scene clips. Each is a 4-second card:
+  // Inserted at ~1/3 and ~2/3 of the scene clips. Each is an 8-second card (Session 38: raised from 5s):
   // Dark background → narrator context line (TTS) → declaration text overlay (gold, Bebas Neue)
   // These are consciousness activation moments, NOT traditional CTAs.
+  // Session 38 FIX: 5s was too fast — viewers couldn't read + process + type. 8s gives breathing room.
   if (orientation === "horizontal" && script.frequency_activations?.length) {
     const fontPath = `${brandAssetsDir}/BebasNeue-Regular.ttf`;
     const hasFont = existsSync(fontPath);
@@ -1514,7 +1533,7 @@ async function assembleVideo(
     for (let ai = 0; ai < Math.min(2, script.frequency_activations.length); ai++) {
       const activation = script.frequency_activations[ai];
       const actPath = `${sceneClipDir}/freq_activation_${ai}.mp4`;
-      const actDuration = 5.0;
+      const actDuration = 8.0; // Session 38: raised from 5.0 — viewers need time to read + process + type
 
       // Escape text for ffmpeg drawtext
       const declaration = (activation.declaration || "I AM AWAKENING")
@@ -1638,6 +1657,61 @@ async function assembleVideo(
 
   // Ken Burns is now applied per-scene above. Video assembly just concats + applies color grade + hook.
 
+  // ── SESSION 38 FIX: Audio/Visual Sync Safety Clamp ──
+  // Problem: xfade transitions eat xfadeDuration per transition from the total video length.
+  // With N clips and N-1 transitions at 0.6s each, total visual is ~(N-1)*0.6s shorter than sum(clipDurations).
+  // If segmentDurations undercount (missing intro/outro/CTA padding), video goes black while audio continues.
+  // Fix: probe the assembled video duration, compare to audio duration. If video < audio, extend the
+  // LAST scene clip to cover the gap, then re-assemble.
+  if (usedXfade) {
+    try {
+      const videoDurStr = execSync(
+        `ffprobe -v error -show_entries format=duration -of csv=p=0 "${xfadedPath}"`,
+        { timeout: 10_000, stdio: "pipe" }
+      ).toString().trim();
+      const videoDur = parseFloat(videoDurStr) || 0;
+      const gap = audioDuration - videoDur;
+      if (gap > 2.0) {
+        // Video is significantly shorter than audio — extend last scene
+        console.warn(`⚠️ [FacelessFactory] Video/audio desync detected: video=${videoDur.toFixed(1)}s, audio=${audioDuration.toFixed(1)}s, gap=${gap.toFixed(1)}s. Extending last scene.`);
+        const lastIdx = sceneClipPaths.length - 1;
+        const lastClip = sceneClipPaths[lastIdx];
+        const extendedPath = `${sceneClipDir}/scene_extended_last.mp4`;
+        const newDuration = (clipDurations[lastIdx] || 10) + gap + 1.0; // +1s safety margin
+        // Re-render last scene clip with extended duration (loop the last frame)
+        execSync(
+          `ffmpeg -stream_loop -1 -i "${lastClip}" -t ${newDuration.toFixed(2)} ` +
+            `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p -y "${extendedPath}"`,
+          { timeout: 120_000, stdio: "pipe" }
+        );
+        sceneClipPaths[lastIdx] = extendedPath;
+        clipDurations[lastIdx] = newDuration;
+
+        // Re-do xfade assembly with the extended last clip
+        const inputs2 = sceneClipPaths.map((p, i) => `-i "${p}"`).join(" ");
+        let filterChain2 = "";
+        let prevLabel2 = "[0]";
+        let cumDur2 = clipDurations[0] || 0;
+        for (let i = 1; i < sceneClipPaths.length; i++) {
+          const offset = cumDur2 - (i * xfadeDuration);
+          const outLabel = i === sceneClipPaths.length - 1 ? "[vout]" : `[v${i}]`;
+          filterChain2 += `${prevLabel2}[${i}]xfade=transition=fade:duration=${xfadeDuration}:offset=${Math.max(0, offset).toFixed(2)}${outLabel}; `;
+          prevLabel2 = outLabel;
+          cumDur2 += clipDurations[i] || 0;
+        }
+        filterChain2 = filterChain2.replace(/;\s*$/, "");
+        execSync(
+          `ffmpeg ${inputs2} -filter_complex "${filterChain2}" -map "[vout]" ` +
+            `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p -y "${xfadedPath}"`,
+          { timeout: 300_000, stdio: "pipe" }
+        );
+        console.log(`✅ [FacelessFactory] Desync fix applied: last scene extended by ${(gap + 1.0).toFixed(1)}s`);
+      }
+    } catch (err: any) {
+      console.warn(`[FacelessFactory] Desync safety check failed (non-fatal): ${err.message?.slice(0, 200)}`);
+    }
+  }
+
   // QUALITY GATE (Session 37 REWRITE): Text hook overlay
   // Burns the hook text into the first 3 seconds of the video as a scroll-stopping overlay.
   // Session 37: Pre-wrap text in TypeScript — NEVER rely on ffmpeg to wrap.
@@ -1667,18 +1741,17 @@ async function assembleVideo(
   }
 
   const wrappedHook = wrapText(rawHook, 25);
-  const escLine = (s: string) => s
-    .replace(/'/g, "'\\''")
-    .replace(/:/g, "\\:")
-    .replace(/\n/g, "\\n");  // ffmpeg drawtext interprets \n as newline
 
-  // Single drawtext filter with pre-wrapped text — centered both horizontally and vertically.
-  // The \n characters in the escaped string make ffmpeg render multiple lines natively.
-  // y=(h*0.35) places the block in the upper-center sweet spot for readability.
+  // Session 38 FIX: Write hook text to a TEMP FILE and use textfile= instead of text=.
+  // Inline text= with \n gets eaten by shell quoting on Railway (shows "ofnbeing" instead of line breaks).
+  // textfile= reads from disk — ffmpeg parses \n natively from the file content, no shell involved.
+  const hookTextFilePath = `${FACELESS_DIR}/${jobId}_hook_text.txt`;
   let hookOverlay = "";
   if (wrappedHook) {
+    writeFileSync(hookTextFilePath, wrappedHook); // raw newlines in file — ffmpeg reads them correctly
+    const escPath = hookTextFilePath.replace(/'/g, "'\\''").replace(/:/g, "\\:");
     hookOverlay =
-      `,drawtext=text='${escLine(wrappedHook)}':fontsize=42:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h*0.35):line_spacing=12:enable='between(t,0,3)':alpha='if(lt(t,2),1,(3-t))'`;
+      `,drawtext=textfile='${escPath}':fontsize=42:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h*0.35):line_spacing=12:enable='between(t,0,3)':alpha='if(lt(t,2),1,(3-t))'`;
   }
 
   // ── BACKGROUND MUSIC BED ──

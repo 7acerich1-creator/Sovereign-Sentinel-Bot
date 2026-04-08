@@ -60,6 +60,7 @@ import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { ProposeTaskTool, SaveContentDraftTool, FileBriefingTool, CheckApprovedTasksTool } from "./tools/action-surface";
 import { StripeMetricsTool } from "./tools/stripe-metrics";
+import { BufferAnalyticsTool } from "./tools/buffer-analytics";
 import { VideoPublisherTool, TikTokPublishTool, InstagramReelsPublishTool, YouTubeShortsPublishTool, YouTubeLongFormPublishTool } from "./tools/video-publisher";
 
 // ── Voice ──
@@ -1029,10 +1030,12 @@ async function main() {
             chat_id: defaultChatId,
             payload: {
               directive: "DAILY CRO METRICS SWEEP — Execute your Chief Revenue Officer protocol. " +
-                "Pull current revenue metrics from Stripe (MRR, churn rate, new subscriptions, failed payments). " +
-                "Calculate velocity toward $100K/month target. " +
-                "Identify the top conversion bottleneck and recommend one specific optimization. " +
-                "Check all active funnels for statistical significance on any running A/B tests (min 100 visitors, 50 opens, 20 checkouts). " +
+                "1) Use stripe_metrics (dashboard) to pull MRR, active subs, failed payments, new customers, and velocity toward $100K/month. " +
+                "2) Use buffer_analytics (overview) to pull content reach, impressions, clicks, engagement rate across all channels. " +
+                "3) Use buffer_analytics (top_posts) to identify top 5 performing posts and what made them work. " +
+                "4) Use buffer_analytics (channel_breakdown) to compare channel performance — which platforms drive reach vs clicks. " +
+                "5) Cross-reference: revenue signals (Stripe) vs content signals (Buffer) — is content driving conversions? " +
+                "6) Identify the #1 bottleneck and recommend one specific optimization. " +
                 "Report findings to the Architect. Keep it actionable — numbers, not narratives.",
               triggered_at: new Date().toISOString(),
               sweep_type: "daily",
@@ -1068,15 +1071,20 @@ async function main() {
             chat_id: defaultChatId,
             payload: {
               directive: "DAILY TREND SCAN & CONTENT BRIEF — Execute your Content Director protocol. " +
-                "Scan trending topics across your 5 niches (dark psychology, self-improvement, burnout recovery, quantum consciousness, sovereign systems). " +
-                "Score each opportunity by relevance to Sovereign Synthesis brand (1-10) and viral potential (1-10). " +
-                "Generate today's content brief: top 3 content opportunities with suggested hooks, formats (short-form, long-form, carousel), and target platforms. " +
-                "CRITICAL — PIPELINE FUEL: For your #1 ranked opportunity, use your browser tool to search YouTube for a high-performing video " +
-                "(50k+ views, relevant to the topic, posted in last 30 days). Include the FULL YouTube URL in your response " +
-                "in this exact format: PIPELINE_URL: https://www.youtube.com/watch?v=XXXXX — This URL will auto-trigger the VidRush pipeline. " +
-                "If you cannot find a suitable video, write PIPELINE_URL: NONE. " +
-                "Dispatch the top hook to Yuki for distribution optimization. " +
-                "Report the full brief to the Architect.",
+                "TARGETED SCAN — Do NOT search generic niche labels. Use these SPECIFIC search queries:\n" +
+                "• dark_psychology: search 'covert narcissist tactics 2026' OR 'manipulation red flags dating' OR 'dark triad workplace' OR 'psychological warfare relationships'\n" +
+                "• self_improvement: search 'masculine frame control' OR 'dopamine detox protocol' OR 'cold approach confidence' OR 'monk mode transformation'\n" +
+                "• burnout: search 'corporate burnout escape plan' OR 'quiet quitting to entrepreneurship' OR 'leaving 9-5 strategy' OR 'high performer burnout recovery'\n" +
+                "• quantum: search 'reality shifting techniques' OR 'quantum manifestation proof' OR 'consciousness frequency science' OR 'simulation theory evidence 2026'\n" +
+                "• brand: search 'sovereign individual movement' OR 'digital nomad empire building' OR 'one-person business $1M' OR 'escape matrix lifestyle'\n" +
+                "Score each finding: Brand Alignment (1-10, how closely it maps to Sovereign Synthesis messaging) × Viral Potential (1-10, engagement signals, controversy, emotional trigger). " +
+                "Minimum score 50/100 to make the brief. " +
+                "Generate today's content brief: top 3 opportunities with specific hooks using 4-Part Copy Architecture (GLITCH → PIVOT → BRIDGE → ANCHOR). " +
+                "CRITICAL — PIPELINE FUEL: For your #1 pick, search YouTube for a video with 50k+ views, posted in last 30 days, " +
+                "that a Sovereign Synthesis viewer would watch. Priority channels: dark psychology creators, self-improvement alphas, consciousness/manifestation educators. " +
+                "Include the FULL URL: PIPELINE_URL: https://www.youtube.com/watch?v=XXXXX — This auto-triggers VidRush. " +
+                "If nothing meets the 50/100 threshold, write PIPELINE_URL: NONE. " +
+                "Dispatch the top hook to Yuki for distribution. Report the full brief to the Architect.",
               triggered_at: new Date().toISOString(),
               scan_type: "daily",
             },
@@ -2399,9 +2407,10 @@ async function main() {
           agentTools.push(new FileBriefingTool(agentCfg.name));
         }
 
-        // Vector gets Stripe metrics for CRO sweeps
+        // Vector gets Stripe metrics + Buffer analytics for full CRO visibility
         if (agentCfg.name === "vector") {
           agentTools.push(new StripeMetricsTool());
+          agentTools.push(new BufferAnalyticsTool());
         }
 
         // Pinecone KnowledgeWriter — agent-specific namespaces

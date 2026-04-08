@@ -141,8 +141,8 @@ export class AgentLoop {
         "web_search", "web_browse",
         // Knowledge persistence
         "write_knowledge", "read_protocols",
-        // Stripe for Vector's metrics sweeps
-        "stripe_metrics",
+        // Stripe + Buffer analytics for Vector's metrics sweeps
+        "stripe_metrics", "buffer_analytics",
         // Briefing tool for summary agents
         "file_briefing",
       ]);

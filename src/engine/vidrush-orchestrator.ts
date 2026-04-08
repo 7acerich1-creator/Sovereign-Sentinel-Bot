@@ -152,6 +152,8 @@ interface ClipMeta {
   startSec: number;
   endSec: number;
   captionText: string;
+  thumbnailPath?: string | null;  // Session 39: per-clip thumbnail with bold text overlay
+  thumbnailUrl?: string | null;   // Session 39: public URL after Supabase upload
 }
 
 interface PlatformCopy {
@@ -200,6 +202,7 @@ const NICHE_FILTERS: Record<string, string> = {
 interface StoryMoment {
   title: string;
   hook: string;
+  thumbnail_text?: string; // Session 39: 2-4 word hook for clip thumbnail overlay
   startSec: number;
   endSec: number;
 }
@@ -257,9 +260,16 @@ Rules:
 
 Respond with ONLY a JSON array, no markdown, no explanation:
 [
-  { "title": "short punchy title", "hook": "opening line that stops the scroll", "startSec": 12.5, "endSec": 38.2 },
+  { "title": "short punchy title", "hook": "opening line that stops the scroll", "thumbnail_text": "2-4 WORDS", "startSec": 12.5, "endSec": 38.2 },
   ...
 ]
+
+THUMBNAIL_TEXT RULES:
+- 2-4 words MAXIMUM, ALL CAPS. This is overlaid on a still frame at massive font size.
+- Must create instant curiosity or emotional hit readable at tiny thumbnail size (120x68px).
+- Style reference: "THEY KNEW", "SYSTEM OVERRIDE", "WAKE UP", "YOU WERE CHOSEN", "BREAK FREE", "THE REAL TRAP".
+- NEVER repeat the title — thumbnail_text is a DIFFERENT angle on the same moment.
+- Think: what single phrase would make someone STOP scrolling and tap?
 
 TRANSCRIPT:
 ${transcriptBlock}`;
@@ -394,6 +404,43 @@ async function chopLongFormIntoClips(
           { timeout: FFMPEG_CLIP_TIMEOUT_MS, stdio: "ignore" }
         );
 
+        // ── Session 39: Per-clip thumbnail (zero API cost, pure ffmpeg) ──
+        // Extract frame at 30% into the clip (past the hook, into the visual meat),
+        // apply dark vignette + brand color grade, overlay bold text.
+        // Style: "Brave New Slop" — massive lowercase text on a dark still frame.
+        let clipThumbPath: string | null = null;
+        const thumbText = (moment.thumbnail_text || moment.title || "").toUpperCase().replace(/[^\w\s!?]/g, "").slice(0, 25);
+        if (thumbText) {
+          const thumbPath = `${clipDir}/thumb_${i.toString().padStart(2, "0")}.jpg`;
+          const brandAssetsDir = `${__dirname}/../../brand-assets`;
+          const fontPath = `${brandAssetsDir}/BebasNeue-Regular.ttf`;
+          const hasFont = existsSync(fontPath);
+          const fontFilter = hasFont ? `fontfile='${fontPath}':` : "";
+          const thumbTextFile = `${clipDir}/thumb_text_${i}.txt`;
+          // Write text to file to avoid shell quoting issues (Session 38 lesson)
+          writeFileSync(thumbTextFile, thumbText);
+          try {
+            // Extract key frame at 30% mark, apply vignette + text overlay
+            const seekSec = (duration * 0.3).toFixed(2);
+            execSync(
+              `ffmpeg -ss ${seekSec} -i "${clipPath}" -frames:v 1 ` +
+                `-vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,` +
+                `${nicheFilter},` +
+                `vignette=PI/3,` +
+                `drawbox=x=0:y=ih*0.35:w=iw:h=ih*0.3:c=black@0.6:t=fill,` +
+                `drawtext=${fontFilter}textfile='${thumbTextFile.replace(/'/g, "'\\''")}':fontsize=96:fontcolor=white:borderw=4:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2:line_spacing=8" ` +
+                `-q:v 2 -y "${thumbPath}"`,
+              { timeout: 15_000, stdio: "pipe" }
+            );
+            if (existsSync(thumbPath) && readFileSync(thumbPath).length > 1000) {
+              clipThumbPath = thumbPath;
+              console.log(`  🖼️ Thumb ${i}: "${thumbText}" (${(readFileSync(thumbPath).length / 1024).toFixed(0)}KB)`);
+            }
+          } catch (err: any) {
+            console.warn(`  ⚠️ Thumb ${i} failed (non-fatal): ${err.message?.slice(0, 150)}`);
+          }
+        }
+
         clips.push({
           index: i,
           localPath: clipPath,
@@ -401,6 +448,7 @@ async function chopLongFormIntoClips(
           startSec: paddedStart,
           endSec: paddedEnd,
           captionText: `${moment.title} | ${moment.hook}`,
+          thumbnailPath: clipThumbPath,
         });
         console.log(`  ✂️ Clip ${i}: "${moment.title}" ${paddedStart.toFixed(1)}s → ${paddedEnd.toFixed(1)}s (${duration.toFixed(1)}s, padded ±0.3s)`);
       } catch (err: any) {
@@ -591,6 +639,33 @@ async function uploadClipsToStorage(clips: ClipMeta[], jobId: string, meta?: { b
         if (attempt < MAX_RETRIES) {
           await new Promise(r => setTimeout(r, 3000 * attempt));
         }
+      }
+    }
+
+    // ── Session 39: Upload clip thumbnail alongside video ──
+    if (uploaded && clip.thumbnailPath && existsSync(clip.thumbnailPath)) {
+      try {
+        const thumbBuf = readFileSync(clip.thumbnailPath);
+        const thumbStoragePath = `vidrush/${folderName}/thumb_${clip.index.toString().padStart(2, "0")}.jpg`;
+        const thumbResp = await fetch(
+          `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${thumbStoragePath}`,
+          {
+            method: "POST",
+            headers: {
+              apikey: SUPABASE_KEY,
+              Authorization: `Bearer ${SUPABASE_KEY}`,
+              "Content-Type": "image/jpeg",
+              "x-upsert": "true",
+            },
+            body: thumbBuf,
+          }
+        );
+        if (thumbResp.ok) {
+          clip.thumbnailUrl = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${thumbStoragePath}`;
+          console.log(`🖼️ [Orchestrator] Thumb ${clip.index} uploaded → ${clip.thumbnailUrl}`);
+        }
+      } catch (err: any) {
+        console.warn(`⚠️ [Orchestrator] Thumb ${clip.index} upload failed (non-fatal): ${err.message?.slice(0, 150)}`);
       }
     }
 
@@ -894,12 +969,17 @@ async function scheduleBufferWeek(
         // Without prefix = regular strings (rendered quoted)
         // This convention survives JSON.stringify/parse round-trip.
         if (channel.service === "youtube") {
-          metadata.youtube = {
+          const ytMeta: Record<string, unknown> = {
             title: clipTitle,
             categoryId: "22",               // String! per Buffer schema
             privacy: "ENUM:public",          // YoutubePrivacy enum — NOT a quoted string
             madeForKids: false,
           };
+          // Session 39: Attach per-clip thumbnail if available
+          if (clip.thumbnailUrl) {
+            ytMeta.thumbnail = clip.thumbnailUrl;
+          }
+          metadata.youtube = ytMeta;
         } else if (channel.service === "instagram") {
           metadata.instagram = {
             type: "ENUM:reel",               // PostType enum — NOT a quoted string

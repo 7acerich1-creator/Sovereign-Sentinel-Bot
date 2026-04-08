@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-08 (Session 39 — Per-clip thumbnail system for shorts. Commit `0fa4bc5`.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-08 (Session 40 — Title uniqueness, visual pacing, pipeline concurrency queue. Commit `53e61f3`.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -2406,11 +2406,16 @@ The gap between "personalized LLMs" and "personalized agents" is this: they need
 - ✅ Phase 2: Per-clip thumbnail generation — key frame extraction + vignette + Bebas Neue bold text overlay. Zero API cost.
 - ✅ Phase 3: Thumbnail upload to Supabase + YouTube Shorts metadata attachment via Buffer API.
 
-**SESSION 40 — PIPELINE INFRASTRUCTURE + REMAINING BUGS:**
-- Pipeline concurrency queue (Option A — in-memory queue, same container)
-- Title uniqueness enforcement (BUG 9 from Session 37)
-- Visual pacing — segment count increase or dual-image per segment (BUG 6 from Session 37)
-- Verify Session 38+39 fixes on live pipeline output
+**SESSION 40 — COMPLETED (commit `53e61f3`):**
+- ✅ Title uniqueness: getRecentTitles() queries Supabase vid_rush_queue, ban list injected into blueprint + Pass 1 + short-form prompts
+- ✅ Visual pacing: segmentCount 12→16, Pass 1 segments 7→9, quality gate 8→10, duration hint 35→30s
+- ✅ Pipeline concurrency queue: In-memory FIFO queue serializes /pipeline, /dryrun, and auto-pipeline. Queue position feedback via Telegram.
+
+**BEYOND SESSION 40 — REVENUE ARCHITECTURE (Thursday):**
+- Revenue funnel activation (T0-T7 product tiers live)
+- Stripe integration verification
+- Verify Sessions 38-40 fixes on live pipeline output
+- Logo placement audit (deferred)
 
 **DEFERRED — Logo Placement Audit:**
 - Ace Richie: Has logo. Needs placement on channel art, intros/outros, email headers, funnel pages.
@@ -2478,3 +2483,25 @@ Built full per-clip thumbnail pipeline in `vidrush-orchestrator.ts` (82 insertio
 - `[DVP: ADDRESSED]` Per-clip thumbnail generation — needs production test
 - `[DVP: ADDRESSED]` Thumbnail Supabase upload — needs production test
 - `[DVP: ADDRESSED]` YouTube Shorts thumbnail metadata — needs production test (verify Buffer actually attaches it)
+
+---
+
+### Session 40 Summary (2026-04-08)
+**Commit:** `53e61f3` — Session 40: Title uniqueness, visual pacing 12>16, pipeline concurrency queue
+
+Final infrastructure hardening session before Thursday's revenue architecture pivot. Three fixes across `faceless-factory.ts` and `index.ts`.
+
+**Changes deployed:**
+1. **Title uniqueness enforcement (BUG 9)** — New `getRecentTitles()` function queries Supabase `vid_rush_queue` for the last 20 titles. Constructs a `titleBanList` string injected into three prompts: blueprint extraction (`extractNarrativeBlueprint`, new 5th parameter), Pass 1 title field, and short-form title field. LLM is instructed titles must be "completely different" from all listed.
+2. **Visual pacing (BUG 6)** — `segmentCount` raised from 12→16 for long-form. Pass 1 segment count raised 7→9. Quality gate minimum raised 8→10. Duration hint example lowered 35→30s. Duration range set to "8-12 minutes". Net effect: static image hold reduced from 30-50s to 22-37s. Cost delta: ~$0.16/video ($0.64 vs $0.48 at $0.04/img), ~5min more render time.
+3. **Pipeline concurrency queue** — In-memory FIFO queue (`PipelineJob[]`) added to `index.ts` near existing `pipelineRunning` flag. `processPipelineQueue()` drains sequentially, managing `setPipelineRunning(true/false)` centrally. New `enqueuePipeline(label, runFn)` function exposed globally. All three callsites updated: `/dryrun` command, `/pipeline` command, and auto-pipeline dispatch (Alfred daily scan). Users receive queue position feedback via Telegram when a second pipeline arrives while one is running.
+
+**DVP Status:**
+- `[DVP: ADDRESSED]` Title uniqueness — needs production test (verify no repeated titles across runs)
+- `[DVP: ADDRESSED]` Visual pacing 16 segments — needs production test (verify shorter image holds)
+- `[DVP: ADDRESSED]` Pipeline concurrency queue — needs production test (send two /pipeline commands)
+
+**Next session priorities (Revenue Architecture — Thursday):**
+1. Revenue funnel activation — T0-T7 product tiers, Stripe integration
+2. Verify Sessions 38-40 fixes on live pipeline output
+3. Logo placement audit (deferred from Session 39)

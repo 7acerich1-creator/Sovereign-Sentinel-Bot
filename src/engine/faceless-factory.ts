@@ -1683,25 +1683,50 @@ async function assembleVideo(
 
   // ── BACKGROUND MUSIC BED ──
   // Session 37 REWRITE: ALL synthetic audio generation (sine, aevalsrc, anoisesrc) is DEAD.
-  // Root cause: lavfi-based music silently fails on Railway, leaving videos with zero music.
-  // Fix: Loop a REAL static MP3 file (brand-assets/ambient_drone.mp3) using stream_loop.
-  // The Architect uploads the actual audio file. This code just loops and fades it.
+  // Loop REAL static MP3 files from brand-assets/ using stream_loop.
+  // NICHE-AWARE music selection: picks the right emotional bed for the content.
+  //   music_urgent.mp3     → dark_psychology, burnout (ticking cadence, forward momentum)
+  //   music_sovereign.mp3  → ace_richie self_improvement, quantum (melodic, uplifting)
+  //   ambient_drone.mp3    → default fallback (containment_field, general)
   const musicPath = `${FACELESS_DIR}/${jobId}_music_bed.mp3`;
   let hasMusicBed = false;
 
+  // Music selection map: brand + niche → file. Most specific match wins.
+  const MUSIC_MAP: Record<string, string> = {
+    // Niche overrides (strongest signal)
+    "dark_psychology":  "music_urgent.mp3",
+    "burnout":          "music_urgent.mp3",
+    // Brand + niche combos
+    "ace_richie:self_improvement": "music_sovereign.mp3",
+    "ace_richie:quantum":         "music_sovereign.mp3",
+    "ace_richie:brand":           "music_sovereign.mp3",
+    // Brand-level defaults
+    "ace_richie":           "music_sovereign.mp3",
+    "containment_field":    "ambient_drone.mp3",
+  };
+
+  function selectMusicFile(brand: Brand, niche: string): string {
+    // Try most-specific first: brand:niche → niche → brand → fallback
+    return MUSIC_MAP[`${brand}:${niche}`]
+      || MUSIC_MAP[niche]
+      || MUSIC_MAP[brand]
+      || "ambient_drone.mp3";
+  }
+
   try {
     const brandAssetsDir = `${__dirname}/../../brand-assets`;
-    const ambientSource = `${brandAssetsDir}/ambient_drone.mp3`;
+    const selectedFile = selectMusicFile(script.brand, script.niche);
+    const musicSource = `${brandAssetsDir}/${selectedFile}`;
 
-    if (!existsSync(ambientSource)) {
-      console.warn(`⚠️ [FacelessFactory] No ambient_drone.mp3 found at ${ambientSource} — video will have NO music bed. Upload a real MP3 to brand-assets/ambient_drone.mp3`);
+    if (!existsSync(musicSource)) {
+      console.warn(`⚠️ [FacelessFactory] Music file not found: ${selectedFile} — video will have NO music bed.`);
     } else {
       const musicDuration = Math.ceil(audioDuration) + 4;
 
       // stream_loop -1 = infinite loop. -t caps to exact duration needed.
       // afade in 3s at start, fade out 4s at end — smooth cinematic envelope.
       execSync(
-        `ffmpeg -stream_loop -1 -i "${ambientSource}" ` +
+        `ffmpeg -stream_loop -1 -i "${musicSource}" ` +
           `-af "afade=t=in:st=0:d=3,afade=t=out:st=${Math.max(0, musicDuration - 4)}:d=4" ` +
           `-t ${musicDuration} -c:a libmp3lame -b:a 128k -y "${musicPath}"`,
         { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 }
@@ -1709,7 +1734,7 @@ async function assembleVideo(
 
       hasMusicBed = existsSync(musicPath);
       if (hasMusicBed) {
-        console.log(`🎵 [FacelessFactory] Music bed: ${musicDuration}s looped from ambient_drone.mp3`);
+        console.log(`🎵 [FacelessFactory] Music bed: ${musicDuration}s looped from ${selectedFile} (${script.brand}/${script.niche})`);
       } else {
         console.error(`❌ [FacelessFactory] Music bed file not created despite no error`);
       }

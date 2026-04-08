@@ -1091,7 +1091,7 @@ async function main() {
                 "These are our reference-class creators — study what's working for them THIS WEEK. " +
                 "Include the FULL URL: PIPELINE_URL: https://www.youtube.com/watch?v=XXXXX — This auto-triggers VidRush. " +
                 "If nothing meets the 50/100 threshold, write PIPELINE_URL: NONE. " +
-                "Dispatch the top hook to Yuki for distribution. Report the full brief to the Architect.",
+                "Report the full brief to the Architect. Your PIPELINE_URL is your primary deliverable — VidRush handles distribution automatically.",
               triggered_at: new Date().toISOString(),
               scan_type: "daily",
             },

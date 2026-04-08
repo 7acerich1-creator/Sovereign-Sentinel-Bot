@@ -41,18 +41,24 @@ export interface DispatchRecord extends DispatchTask {
 // Yuki is the SOLE distribution endpoint — she posts to Buffer and publishes video.
 // Vector NEVER posts. He analyzes performance and recommends strategy changes.
 
+// SESSION 36: Pipeline routes DISABLED. These auto-handoffs never fire because
+// agents produce freeform briefs, not structured payloads with the required keys.
+// ContentEngine + VidRush handle all production deterministically.
+// Alfred's value is PIPELINE_URL → VidRush trigger (handled in index.ts auto-pipeline block).
+// Vector's value is analytics → crew_dispatch optimization tasks (handled in his directive).
+// Keeping the structure for Option C (future: structured agent-to-agent handoffs).
 export const PIPELINE_ROUTES: Record<string, Array<{ to: string; task_type: string; payloadKey: string }>> = {
-  alfred: [
-    { to: "yuki", task_type: "viral_clip_extraction", payloadKey: "timestamped_hooks" },
-    { to: "anita", task_type: "narrative_weaponization", payloadKey: "cleaned_transcript" },
-    { to: "sapphire", task_type: "architectural_sync", payloadKey: "core_summary" },
-  ],
-  yuki: [
-    { to: "anita", task_type: "caption_weaponization", payloadKey: "viral_package" },
-  ],
-  anita: [
-    { to: "yuki", task_type: "content_for_distribution", payloadKey: "platform_posts" },
-  ],
+  // alfred: [
+  //   { to: "yuki", task_type: "viral_clip_extraction", payloadKey: "timestamped_hooks" },
+  //   { to: "anita", task_type: "narrative_weaponization", payloadKey: "cleaned_transcript" },
+  //   { to: "sapphire", task_type: "architectural_sync", payloadKey: "core_summary" },
+  // ],
+  // yuki: [
+  //   { to: "anita", task_type: "caption_weaponization", payloadKey: "viral_package" },
+  // ],
+  // anita: [
+  //   { to: "yuki", task_type: "content_for_distribution", payloadKey: "platform_posts" },
+  // ],
 };
 
 // ── Core Dispatch Functions ──

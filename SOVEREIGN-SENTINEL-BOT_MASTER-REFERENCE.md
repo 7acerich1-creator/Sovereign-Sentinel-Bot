@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-08 (Session 38 — 6 critical video quality fixes: textfile wrapping, desync clamp, voice 0.90x, banned phrases, gold color enforcement, CTA 8s. Commit `aed0e2b`.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-08 (Session 39 — Per-clip thumbnail system for shorts. Commit `0fa4bc5`.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -156,12 +156,11 @@ Any new operational knowledge goes into Layer 3 (protocols table). NEVER into La
 - [DVP: ADDRESSED] Outro CTA card — 5s card with tagline + sovereign-synthesis.com. Commit `f949bc2`.
 - [DVP: ADDRESSED] Script generation prompt upgraded — visual_direction field treated as cinematographer's shot list (camera angle, lighting, physical elements, mood texture). Commit `f949bc2`.
 - [DVP: ADDRESSED] Legacy debris purge — 35 dead files deleted, .gitignore hardened with `_legacy/`, `*.patch`, `commitmsg.txt`. Commit `e3597c0`.
+- [DVP: ADDRESSED] Per-clip thumbnails — Session 39: extractStoryMoments outputs `thumbnail_text`. Clips get ffmpeg-rendered thumbnails (key frame + vignette + bold text). Uploaded to Supabase, attached to YouTube Shorts metadata via Buffer. Commit `0fa4bc5`.
 - REMAINING:
   - Platform Adaptation Engine: per-platform clip variants (TikTok faster cadence, IG cover frame optimization)
   - Distribution Router consolidation: single entry point instead of split Buffer/direct-API paths
   - Midjourney: NO official API exists. Flux by Black Forest Labs ($0.04/img) is best legitimate alternative if Imagen 4 quality insufficient.
-- Platform Adaptation Engine needed: Each platform needs slightly different clip versions (TikTok = faster cadence, IG = cover frame optimization, etc.)
-- Distribution Router consolidation: Single entry point instead of split Buffer/direct-API paths
 - **Funnel Audit skill deployed** — `skills/funnel-audit.md` gives Veritas deep audit methodology for the entire T0→T6 conversion path. Covers distribution, links, Stripe, email, pipeline health, and TCF→Ace handoff.
 
 ---
@@ -2402,18 +2401,16 @@ The gap between "personalized LLMs" and "personalized agents" is this: they need
 5. ✅ Brand color — gold/amber enforced as DOMINANT for Ace Richie in style map + visual direction rules
 6. ✅ CTA duration — Frequency Activation 5s → 8s
 
-**SESSION 39 — SHORTS OVERHAUL:**
-- Per-clip thumbnail with unique bold text overlay (9:16, per-clip hook)
-- Phase 1: Extract key frame from clip + dark vignette + Bebas Neue hook text. One ffmpeg command per clip, zero API cost.
-- Phase 2: Upgrade `extractStoryMoments()` prompt to output `thumbnail_text` (2-4 word hook), CTR title, short description + CTA.
-- Phase 3: Buffer integration — attach custom thumbnail to YouTube Shorts metadata.
-- Reference style: "Brave New Slop" format — one word/phrase in massive lowercase on a still frame. Simple, bold, instant read.
+**SESSION 39 — COMPLETED (commit `0fa4bc5`):**
+- ✅ Phase 1: `extractStoryMoments()` upgraded with `thumbnail_text` field (2-4 word hook per clip)
+- ✅ Phase 2: Per-clip thumbnail generation — key frame extraction + vignette + Bebas Neue bold text overlay. Zero API cost.
+- ✅ Phase 3: Thumbnail upload to Supabase + YouTube Shorts metadata attachment via Buffer API.
 
-**SESSION 40 — PIPELINE INFRASTRUCTURE:**
+**SESSION 40 — PIPELINE INFRASTRUCTURE + REMAINING BUGS:**
 - Pipeline concurrency queue (Option A — in-memory queue, same container)
-- Thumbnail generation debugging (BUG 8) — verify Imagen 4 + upload + Buffer attachment
-- Title uniqueness enforcement (BUG 9)
-- Visual pacing — segment count increase or dual-image per segment (BUG 6)
+- Title uniqueness enforcement (BUG 9 from Session 37)
+- Visual pacing — segment count increase or dual-image per segment (BUG 6 from Session 37)
+- Verify Session 38+39 fixes on live pipeline output
 
 **DEFERRED — Logo Placement Audit:**
 - Ace Richie: Has logo. Needs placement on channel art, intros/outros, email headers, funnel pages.
@@ -2448,7 +2445,36 @@ All 6 bugs flagged by Session 37 Gemini audit shipped in one commit to `faceless
 - `[DVP: ADDRESSED]` Brand color enforcement — needs production test (next Imagen 4 gen)
 - `[DVP: ADDRESSED]` CTA 8s duration — needs production test
 
-**Next session priorities (Session 39):**
-1. **VERIFY Session 38 fixes** — Run pipeline, audit output video for: text wrapping, no black screen, pacing, fresh vocabulary, gold-dominant visuals, readable CTAs
-2. **Shorts overhaul** — Per-clip thumbnails, `thumbnail_text` in extractStoryMoments, Buffer thumbnail attachment
-3. **Remaining Session 37 bugs not addressed:** BUG 6 (visual pacing / static holds), BUG 8 (thumbnail generation), BUG 9 (title uniqueness)
+**Next session priorities (Session 40):**
+1. **VERIFY Session 38+39 fixes** — Run pipeline, audit output: text wrapping, no black screen, pacing, vocabulary, gold visuals, CTAs, clip thumbnails
+2. **Title uniqueness enforcement** (BUG 9) — prevent "System Failure by Design" repeating across videos
+3. **Visual pacing** (BUG 6) — increase segment count or dual-image per segment for long static holds
+4. **Pipeline concurrency queue** — in-memory queue to prevent overlapping runs
+
+---
+
+### Session 39 Summary (2026-04-08)
+**Commit:** `0fa4bc5` — feat: Session 39 — per-clip thumbnail system for shorts
+
+Built full per-clip thumbnail pipeline in `vidrush-orchestrator.ts` (82 insertions, 2 deletions). Zero API cost — pure ffmpeg.
+
+**Changes deployed:**
+1. **`StoryMoment` interface** — added `thumbnail_text?: string` field (2-4 word hook per clip).
+2. **`extractStoryMoments()` prompt** — LLM now outputs `thumbnail_text` alongside title/hook/timestamps. Includes style guidance ("THEY KNEW", "SYSTEM OVERRIDE", etc.) and rules (ALL CAPS, 2-4 words, different angle from title).
+3. **Per-clip thumbnail generation** — After each clip is cut in semantic chop mode, extracts a key frame at 30% into the clip (past the hook, into the visual meat). Applies: niche color grade → dark vignette (PI/3) → semi-transparent black bar (60% opacity) → bold white text overlay (Bebas Neue, fontsize 96, centered). Uses `textfile=` approach (Session 38 lesson) to avoid shell quoting issues.
+4. **`ClipMeta` interface** — added `thumbnailPath` and `thumbnailUrl` fields.
+5. **Thumbnail upload** — `uploadClipsToStorage()` now uploads clip thumbnails to Supabase alongside clip videos (`thumb_00.jpg`, `thumb_01.jpg`, etc.).
+6. **Buffer YouTube metadata** — `scheduleBufferWeek()` attaches `thumbnail` URL to YouTube Shorts metadata when available.
+
+**Design decisions:**
+- Thumbnails are 1080x1920 (9:16 vertical) matching the clip orientation.
+- Text rendered at fontsize 96 with 4px black border — readable at thumbnail size.
+- Vignette + dark bar ensure text readability regardless of frame content.
+- Style reference: "Brave New Slop" format — massive bold text on a dark still frame.
+- Fallback-safe: if thumbnail generation fails, clip still posts normally (non-fatal).
+
+**DVP Status:**
+- `[DVP: ADDRESSED]` thumbnail_text in extractStoryMoments — needs production test
+- `[DVP: ADDRESSED]` Per-clip thumbnail generation — needs production test
+- `[DVP: ADDRESSED]` Thumbnail Supabase upload — needs production test
+- `[DVP: ADDRESSED]` YouTube Shorts thumbnail metadata — needs production test (verify Buffer actually attaches it)

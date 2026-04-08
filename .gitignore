@@ -16,7 +16,13 @@ __pycache__/
 
 # Temp files
 commitmsg.txt
+commit_msg.txt
+restore_crlf.bat
 *.patch
+
+# Development artifacts
+voice-samples/
+.claude/worktrees/
 
 # Legacy — fully migrated to TypeScript
 _legacy/

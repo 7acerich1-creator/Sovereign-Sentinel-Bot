@@ -624,21 +624,29 @@ async function generatePlatformCopy(
       `Clip ${c.index + 1} (${c.startSec.toFixed(0)}s-${c.endSec.toFixed(0)}s): Segment from "${sourceTitle}"`
     ).join("\n");
 
-    const prompt = `You are the social media distribution engine for ${brand === "ace_richie" ? "Sovereign Synthesis (Ace Richie)" : "The Containment Field"}.
+    // Session 36: Enhanced with social-optimization-prompt intelligence.
+    // Platform-specific algorithm awareness + audience psychology + copy architecture.
+    const brandContext = brand === "ace_richie"
+      ? "Sovereign Synthesis (Ace Richie) — personal brand, liberation framework, dark psychology transmuted into sovereignty. Voice: authoritative, warm, destiny-coded. CTA: Frequency Activation style."
+      : "The Containment Field — anonymous dark psychology feeder brand. Voice: clinical, cold, pattern-interrupt. Never reference Ace Richie.";
+
+    const prompt = `You are an elite social media marketing expert AND the distribution engine for ${brandContext}
 
 SOURCE VIDEO TITLE: "${sourceTitle}"
 NICHE: ${niche.replace(/_/g, " ")}
 TRANSCRIPT EXCERPT: ${transcript.slice(0, 1500)}
 
-Generate platform-specific captions for ${batch.length} clips. Each platform has different requirements:
+PLATFORM-SPECIFIC OPTIMIZATION RULES (obey these exactly):
 
-- YOUTUBE_SHORT: Title + description for YouTube Shorts. Include #Shorts in title. Hook-first, max 100 chars title.
-- TIKTOK: Casual, hook-driven. 2-3 lines + 5 hashtags. Pattern-interrupt energy.
-- INSTAGRAM: Caption for Reels. Hook + value + CTA. 3-5 lines + 10 relevant hashtags.
-- X_TWITTER: Punchy 1-2 lines. Provocative. Max 280 chars including hashtags.
-- THREADS: Conversational, slightly longer. 2-3 lines. Thought-provoking angle.
-- LINKEDIN: Professional tone. 2-3 sentences. Frame as insight/expertise. 3-5 hashtags.
-- FACEBOOK: Engaging, shareable. 2-3 lines + CTA.
+- YOUTUBE_SHORT: Hook in first 3 words of title. Max 100 chars. Include #Shorts. YouTube pushes Shorts that get >40% watch-through — your title MUST create curiosity gap. Category: 22 (People & Blogs). Use "You" or identity-level hooks ("The chosen ones already know...").
+- TIKTOK: Hook within 1.5 seconds of reading. 2-3 lines + exactly 5 hashtags. TikTok rewards saves and shares over likes — write something people SCREENSHOT or send to a friend. Pattern-interrupt opening. No corporate voice.
+- INSTAGRAM: Reels caption: Hook line + value line + CTA. 3-5 lines + 8-12 hashtags (sweet spot). Instagram deprioritizes hashtag-only captions. First line IS the hook (it's what shows in feed). Suggest sharing to Feed.
+- X_TWITTER: Max 280 chars. Provocative. X penalizes hashtag-heavy posts — use 0-2 max. The algorithm favors replies and quotes, so write something DEBATABLE. Short declarative sentences.
+- THREADS: 2-3 lines, conversational. Threads deprioritizes hashtag-loaded posts — use 0 hashtags. Write like you're texting a smart friend. Thought-provoking.
+- LINKEDIN: Professional authority tone. 2-3 sentences. Frame as contrarian expertise, not promotion. 3-5 hashtags. LinkedIn rewards dwell time — longer reads beat snappy one-liners.
+- FACEBOOK: Shareable insight format. 2-3 lines + CTA. Facebook prioritizes posts that generate comments — ask a question or make a claim people want to respond to.
+
+COPY ARCHITECTURE: Use GLITCH (pattern interrupt) → PIVOT (reframe) → BRIDGE (to their world) → ANCHOR (to Protocol 77 / Sovereign Synthesis).
 
 CLIPS:
 ${clipDescriptions}

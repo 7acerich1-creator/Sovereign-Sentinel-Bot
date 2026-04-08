@@ -255,32 +255,11 @@ async function generateContentImage(
   let imageBuffer: Buffer | null = null;
   let source = "none";
 
-  // ── STEP 1: Pollinations.ai (FREE, no auth, unlimited) ──
+  // ── STEP 1: Gemini Imagen 4 (PRIMARY — cinematic quality, brand-aligned prompts) ──
+  // Session 36: Flipped order. Imagen 4 is PRIMARY because our prompts are crafted
+  // for cinematic brand-aligned imagery. Pollinations is free but generic quality.
+  // GEMINI_IMAGEN_KEY only — no fallback to GEMINI_API_KEY (Session 35 ghost fix).
   if (!imageBuffer) {
-    try {
-      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePrompt.slice(0, 2000))}?width=1024&height=1024&nologo=true&seed=${Date.now()}`;
-      const res = await fetch(pollinationsUrl, { redirect: "follow" });
-      if (res.ok) {
-        const buf = Buffer.from(await res.arrayBuffer());
-        if (buf.length > 5000) {
-          imageBuffer = buf;
-          source = "pollinations";
-          console.log(`🎨 [ContentEngine] Image generated via Pollinations (${(buf.length / 1024).toFixed(0)}KB)`);
-        } else {
-          console.warn(`[ContentEngine] Pollinations returned tiny response: ${buf.length}B`);
-        }
-      } else {
-        console.warn(`[ContentEngine] Pollinations ${res.status}`);
-      }
-    } catch (err: any) {
-      console.warn(`[ContentEngine] Pollinations error: ${err.message}`);
-    }
-  }
-
-  // ── STEP 2: Fallback to Gemini Imagen 4 ──
-  if (!imageBuffer) {
-    // SESSION 35: Use ONLY GEMINI_IMAGEN_KEY. No fallback to GEMINI_API_KEY.
-    // Old fallback was the "zero logs" ghost — all calls hit the old API project.
     const geminiKey = process.env.GEMINI_IMAGEN_KEY;
     if (geminiKey) {
       try {
@@ -317,7 +296,29 @@ async function generateContentImage(
     }
   }
 
-  // ── STEP 3: Fallback to DALL-E 3 ──
+  // ── STEP 2: Pollinations.ai (FREE fallback — no auth, unlimited) ──
+  if (!imageBuffer) {
+    try {
+      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePrompt.slice(0, 2000))}?width=1024&height=1024&nologo=true&seed=${Date.now()}`;
+      const res = await fetch(pollinationsUrl, { redirect: "follow" });
+      if (res.ok) {
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length > 5000) {
+          imageBuffer = buf;
+          source = "pollinations";
+          console.log(`🎨 [ContentEngine] Image generated via Pollinations fallback (${(buf.length / 1024).toFixed(0)}KB)`);
+        } else {
+          console.warn(`[ContentEngine] Pollinations returned tiny response: ${buf.length}B`);
+        }
+      } else {
+        console.warn(`[ContentEngine] Pollinations ${res.status}`);
+      }
+    } catch (err: any) {
+      console.warn(`[ContentEngine] Pollinations error: ${err.message}`);
+    }
+  }
+
+  // ── STEP 3: DALL-E 3 (last resort) ──
   if (!imageBuffer) {
     const openaiKey = process.env.OPENAI_API_KEY;
     if (openaiKey) {

@@ -28,12 +28,13 @@ export interface PineconeMatch {
 // so we don't pull in extra SDK dependencies for a single call.
 // NOTE: text-embedding-004 was deprecated Jan 14 2026, replaced by gemini-embedding-001
 async function embedText(text: string): Promise<number[]> {
-  // SESSION 35: GEMINI_API_KEY was nuked from Railway (billing crisis).
-  // GEMINI_IMAGEN_KEY gets 403 on embeddings (wrong API scope).
-  // OPENAI_API_KEY is not set.
-  // So: embeddings are DISABLED until an embedding-capable key is added.
-  // Pinecone read (queryRelevant) still works — vectors already exist.
-  // Only writes (new embeddings) are blocked.
+  // SESSION 36: GEMINI_API_KEY is set in Railway but getting 403 on embeddings.
+  // Likely cause: API key has API restrictions (check Google Cloud Console →
+  // Credentials → click the key → "API restrictions" tab. Must include
+  // "Generative Language API" or be set to "Don't restrict key").
+  // Also check: "Application restrictions" — if restricted to specific IPs,
+  // Railway's dynamic IPs will be blocked.
+  // Fallback: OPENAI_API_KEY for text-embedding-3-small (768d).
   const geminiKey = config.llm.providers.gemini?.apiKey;
   const openaiKey = config.llm.providers.openai?.apiKey;
 
@@ -58,7 +59,8 @@ async function embedText(text: string): Promise<number[]> {
       const data = (await res.json()) as any;
       return data.embedding?.values || [];
     }
-    console.warn(`[Pinecone] Gemini embed failed (${res.status}), trying OpenAI fallback...`);
+    const errBody = await res.text().catch(() => "");
+    console.warn(`[Pinecone] Gemini embed failed (${res.status}): ${errBody.slice(0, 300)}. Trying OpenAI fallback...`);
   }
 
   // Fallback: OpenAI text-embedding-3-small

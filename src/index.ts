@@ -1036,6 +1036,10 @@ async function main() {
                 "4) Use buffer_analytics (channel_breakdown) to compare channel performance — which platforms drive reach vs clicks. " +
                 "5) Cross-reference: revenue signals (Stripe) vs content signals (Buffer) — is content driving conversions? " +
                 "6) Identify the #1 bottleneck and recommend one specific optimization. " +
+                "CRITICAL — FEEDBACK LOOP: After analysis, use crew_dispatch to send optimization tasks:\n" +
+                "• Dispatch to 'anita' (task_type: 'copy_optimization') with your top 3 copy findings — what hooks worked, what flopped, and ONE specific rewrite recommendation for the weakest-performing copy pattern.\n" +
+                "• Dispatch to 'yuki' (task_type: 'distribution_optimization') with channel performance data — which platforms are underperforming, optimal posting times from the data, and ONE specific creative/scheduling change to test.\n" +
+                "This closes the loop: you analyze → they optimize → next sweep measures the impact. " +
                 "Report findings to the Architect. Keep it actionable — numbers, not narratives.",
               triggered_at: new Date().toISOString(),
               sweep_type: "daily",
@@ -1081,7 +1085,10 @@ async function main() {
                 "Minimum score 50/100 to make the brief. " +
                 "Generate today's content brief: top 3 opportunities with specific hooks using 4-Part Copy Architecture (GLITCH → PIVOT → BRIDGE → ANCHOR). " +
                 "CRITICAL — PIPELINE FUEL: For your #1 pick, search YouTube for a video with 50k+ views, posted in last 30 days, " +
-                "that a Sovereign Synthesis viewer would watch. Priority channels: dark psychology creators, self-improvement alphas, consciousness/manifestation educators. " +
+                "that a Sovereign Synthesis viewer would watch. " +
+                "COMPETITOR CHANNELS TO MONITOR: Hamza Ahmed, Dan Koe, Iman Gadzhi, Alex Hormozi, Improvement Pill, Charisma on Command, " +
+                "Psych2Go, Practical Psychology, DoctorRamani (narcissism), The Art of Manliness, Kevin David (Unemployed CEO), Noah Kagan. " +
+                "These are our reference-class creators — study what's working for them THIS WEEK. " +
                 "Include the FULL URL: PIPELINE_URL: https://www.youtube.com/watch?v=XXXXX — This auto-triggers VidRush. " +
                 "If nothing meets the 50/100 threshold, write PIPELINE_URL: NONE. " +
                 "Dispatch the top hook to Yuki for distribution. Report the full brief to the Architect.",

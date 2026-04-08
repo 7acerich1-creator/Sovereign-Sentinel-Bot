@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-07 (Session 35 — Token bloat exorcism: dispatch 25K→3K tokens, Gemini key isolation, embedding disable, boot storm cap, briefing timezone fix) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-08 (Session 38 — 6 critical video quality fixes: textfile wrapping, desync clamp, voice 0.90x, banned phrases, gold color enforcement, CTA 8s. Commit `aed0e2b`.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -139,9 +139,10 @@ Any new operational knowledge goes into Layer 3 (protocols table). NEVER into La
 - [DVP: VERIFIED] Hook text overlay — first sentence burned into opening 3s *(verified: Session 23 Test 3)*
 - [DVP: VERIFIED] Smart clip boundaries — silencedetect natural pause points *(verified: Session 23 Test 3)*
 - [DVP: VERIFIED] Segment expansion — LLM expands short scripts to 15+ segments *(verified: Session 23 Test 3, 15 scenes)*
-- [DVP: ADDRESSED] Background ambient music — UPGRADED Session 27: multi-voice detuned pad chords with per-voice LFO breathing envelopes. Per-niche chord voicings (Am(add9) detuned for dark_psychology, C6/9 for self_improvement, etc.). Replaces sine waves. Commit `f949bc2`.
-- [DVP: ADDRESSED] Silence pads — 1.5s between segments. Commit `0706f68`.
-- [DVP: ADDRESSED] Chapter breaks — 2.5s pause every 4 segments for long-form. Commit `0706f68`.
+- [DVP: ADDRESSED] Background ambient music — Session 37 REWRITE: synthetic lavfi KILLED (silently failed on Railway). Now loops REAL MP3 files via `stream_loop -1`. Niche-aware: `music_urgent.mp3` (dark_psych/burnout), `music_sovereign.mp3` (ace_richie), `ambient_drone.mp3` (fallback). Commit `257c406`.
+- [DVP: ADDRESSED] Hook text wrapping — Session 38 FIX: switched from inline `text=` to `textfile=` approach. Wrapped text written to temp file, ffmpeg reads newlines directly. Bypasses all shell quoting. Commit `aed0e2b`.
+- [DVP: ADDRESSED] TTS pacing — Session 38 FIX: 0.80x → 0.90x speed. Balances documentary gravitas with momentum. Combined with afade per-segment. Commit `aed0e2b`.
+- [DVP: ADDRESSED] Audio/visual sync — Session 38 FIX: safety clamp in assembleVideo(). After xfade assembly, probes video duration vs audio duration. If gap > 2s, extends last scene clip and re-assembles. Commit `aed0e2b`.
 - [DVP: ADDRESSED] TTS speed — 0.80x for long-form documentary cadence. Commit `0706f68`.
 - [DVP: ADDRESSED] Orientation-aware dimensions — 16:9/9:16. Commit `0706f68`.
 - [DVP: ADDRESSED] Scheduler timezone fix — all getUTCHours. Commit `d2847f7`.
@@ -2316,3 +2317,138 @@ The gap between "personalized LLMs" and "personalized agents" is this: they need
 - `ANTHROPIC_API_KEY`: SET — all agent dispatches + user chat
 - `OPENAI_API_KEY`: NOT SET
 - Pinecone embeddings: **DISABLED** (no embedding-capable key)
+
+---
+
+### Session 37 Changes (2026-04-08)
+**Commits:** `dfc7b78` (faceless overhaul) → `953f98b` (ambient_drone.mp3) → `257c406` (niche-aware music selection)
+
+1. **Hook text wrapping REWRITE** — `wrapText(text, 25)` pre-wraps at word boundaries with `\n`. Single drawtext filter with `line_spacing=12`. Old midpoint-split code deleted.
+2. **Music bed: synthetic lavfi KILLED** — sine+anoisesrc silently failed on Railway. Replaced with `stream_loop -1` on real MP3 files from `brand-assets/`.
+3. **Niche-aware music selection** — `MUSIC_MAP` in faceless-factory.ts routes brand+niche to the right music file:
+   - `music_urgent.mp3` → dark_psychology, burnout (ticking cadence)
+   - `music_sovereign.mp3` → ace_richie (melodic, uplifting)
+   - `ambient_drone.mp3` → containment_field, fallback
+4. **TTS pacing fix** — 150ms fade-in / 200ms fade-out per segment (kills room-tone pop). Silence pads: 1.5s→0.8s, chapter breaks: 2.5s→2.0s.
+5. **Windows repo path confirmed:** `C:\Users\richi\Sovereign-Sentinel-Bot` (not `richie`).
+
+### SESSION 37 — LIVE VIDEO AUDIT (ZUjZAUV6NHA, post-redeploy)
+**Video:** "System Failure by Design" — https://www.youtube.com/watch?v=ZUjZAUV6NHA
+**Status:** Rendered AFTER Session 37 Railway redeploy. Our fixes PARTIALLY landed but several are broken.
+
+**BUG 1: Text Wrapping STILL BROKEN (CRITICAL)**
+- Output shows: `"now that feeling ofnbeing stuck"` — the `\n` is being consumed by shell quoting, only `n` survives.
+- Root cause: `escLine()` does `.replace(/\n/g, "\\n")` but inside single-quoted ffmpeg text, the backslash is stripped by the shell. The `n` bleeds into the text as a literal character.
+- **FIX:** Use ffmpeg's `textfile` option instead of inline `text=`. Write the pre-wrapped text to a temp file, reference it with `textfile='path'`. This bypasses ALL shell escaping. Alternatively, double-escape: `\\\\n` so shell reduces to `\\n` and ffmpeg reads `\n` as newline. Test both.
+- **[DVP: REGRESSED]** — Session 37 fix deployed but produces worse output than Session 33.
+
+**BUG 2: Frequency Activation CTAs — Visual Flash, Not in Audio**
+- The "I AM BREAKING FREE (TYPE THIS IN THE COMMENTS)" cards at 1/3 and 2/3 marks ARE appearing — concept is working.
+- BUT: they flash on screen too fast to read. Duration needs to increase from 5.0s to at least 7-8s.
+- The CTA text is NOT being spoken in the TTS audio — it's visual-only. Need to either: (a) extend the TTS render to include the context_line audio before the card, or (b) slow the card fade-in so viewers can absorb it.
+- **The concept is validated. The execution needs tuning.**
+
+**BUG 3: Voice Speed Too Slow**
+- TTS `0.80x` speed was set in Session 23 to combat rushed delivery.
+- Combined with Session 37's 0.8s silence pads + 150ms/200ms afade, the overall pacing is now TOO slow.
+- **FIX:** Test `0.90x` speed OR remove the speed override entirely (Edge TTS AndrewMultilingualNeural has natural documentary pacing without forced slowdown). Silence pads (0.8s) are fine — the speed multiplier is the problem.
+
+**BUG 4: Video Goes Black at ~9 Minutes (Audio/Visual Desync)**
+- Screen goes black while voice continues. Video track ran out before audio track.
+- Root cause: `segmentDurations` array (which tells `assembleVideo` how long each scene lasts) is probably miscalculated after Session 37 pad changes. The total visual duration sums to less than the audio duration.
+- **FIX:** Add a safety check in `assembleVideo()`: if total scene duration < audio duration, extend the last scene to cover the gap. Also verify that the `segmentDurations` calculation matches the actual concat output duration.
+
+**BUG 5: Lexical Stagnation — Banned Transition Phrases**
+- Pipeline script gen is still using exhausted AI essay transitions:
+  - "Imagine being on a train watching the world..."
+  - "But here's the thing..."
+  - "Now pay attention to this part because it's where things get interesting..."
+  - "But here's what nobody talks about..."
+- These are in the Pass 1 / Pass 2 prompts in `faceless-factory.ts` (the `STRUCTURE` voice blocks).
+- **FIX:** Add explicit ban list to BOTH Pass 1 and Pass 2 prompts. Force declarative, urgent, surgical syntax. Ban "Imagine", "But here's the thing", "Now pay attention", "Let's talk about". Replace with: direct statements, rhetorical interrogation, pattern interrupts.
+
+**BUG 6: Visual Pacing — 15-20s Static Image Holds**
+- Single Imagen 4 images holding for 15-20 seconds kills momentum.
+- Ken Burns (zoom/pan) exists but it's not enough to sustain a single image that long.
+- **FIX OPTIONS:** (a) Increase segment count target from 12 to 16-18 for long-form so each image displays ~8-10s max. (b) Add subtle transition overlays (light leak, film grain pulse) between Ken Burns phases. (c) Generate 2 images per segment for longer segments and crossfade between them.
+
+**BUG 7: Brand Color Bleed — Teal/Green Instead of Gold**
+- Ace Richie videos showing deep teal/green mid-sections instead of gold/amber brand tokens.
+- The visual direction prompts in Pass 1/2 include brand palette but Imagen 4 is ignoring the color mandate.
+- **CRITICAL:** Imagen 4 does NOT support `negativePrompt` (legacy feature, dropped after Imagen 3.0-generate-001). We CANNOT use negative prompt to ban colors. The only lever is the positive prompt.
+- **CRITICAL:** NEVER use negative phrasing ("NO blue", "NO green") in the positive prompt. Diffusion models tokenize the noun and ignore the negation — this literally causes the banned color to appear MORE.
+- **FIX (two-part, Gemini-approved):**
+  1. **Imagen 4 scene prompt suffix (POSITIVE ONLY):** Replace any "NO blue/green" phrasing with absolute positive constraints: `"EXCLUSIVELY bathed in warm amber and gold light. Monochromatic gold aesthetic. All light sources are warm amber (#d4a843). Deep void black (#0a0a0f) shadows."` Teal accent gets its own positive: `"Single subtle teal (#00e5c7) rim light as minor accent only."`
+  2. **Pass 1/2 visual_direction prompt:** Add to the LLM instructions: `"All visual directions for Ace Richie MUST specify warm gold/amber as the dominant light source. Describe scenes with golden light, amber haze, warm tones. Teal only as a subtle accent rim light."` This ensures the LLM-generated scene direction is ALREADY brand-encoded before it hits Imagen 4.
+
+**BUG 8: Thumbnails Not Generating for New Videos**
+- `generateThumbnail()` exists but may be failing silently (Imagen 4 quota, prompt issues, or upload failure).
+- The YouTube channel shows generic auto-picked frames, not the designed thumbnails.
+- **FIX:** Add explicit error logging + fallback path. Verify Imagen 4 is actually firing for thumbnails. Check if Buffer is attaching the thumbnail when posting to YouTube.
+
+**BUG 9: Titles Still Generic**
+- "System Failure by Design" appearing on 5+ different videos. The Pass 1 title gen is not differentiating.
+- **FIX:** The title prompt needs stronger uniqueness enforcement. Add "NEVER reuse a title from a previous video. Each title must be a unique curiosity gap or bold claim." Also, the clip titles from `extractStoryMoments()` need the same treatment.
+
+---
+
+### FUTURE SESSION QUEUE (Priority Order)
+
+**SESSION 38 — COMPLETED (commit `aed0e2b`):**
+1. ✅ Text wrapping — `textfile=` approach (bypasses shell quoting)
+2. ✅ Audio/visual sync — safety clamp extends last scene if video < audio
+3. ✅ Voice speed — 0.80x → 0.90x (measured cadence, not sluggish)
+4. ✅ Banned phrases — 8 crutch phrases banned in Pass 1/2/short prompts
+5. ✅ Brand color — gold/amber enforced as DOMINANT for Ace Richie in style map + visual direction rules
+6. ✅ CTA duration — Frequency Activation 5s → 8s
+
+**SESSION 39 — SHORTS OVERHAUL:**
+- Per-clip thumbnail with unique bold text overlay (9:16, per-clip hook)
+- Phase 1: Extract key frame from clip + dark vignette + Bebas Neue hook text. One ffmpeg command per clip, zero API cost.
+- Phase 2: Upgrade `extractStoryMoments()` prompt to output `thumbnail_text` (2-4 word hook), CTR title, short description + CTA.
+- Phase 3: Buffer integration — attach custom thumbnail to YouTube Shorts metadata.
+- Reference style: "Brave New Slop" format — one word/phrase in massive lowercase on a still frame. Simple, bold, instant read.
+
+**SESSION 40 — PIPELINE INFRASTRUCTURE:**
+- Pipeline concurrency queue (Option A — in-memory queue, same container)
+- Thumbnail generation debugging (BUG 8) — verify Imagen 4 + upload + Buffer attachment
+- Title uniqueness enforcement (BUG 9)
+- Visual pacing — segment count increase or dual-image per segment (BUG 6)
+
+**DEFERRED — Logo Placement Audit:**
+- Ace Richie: Has logo. Needs placement on channel art, intros/outros, email headers, funnel pages.
+- The Containment Field: Currently spade/clover icon. Needs proper dark brand mark.
+- Gravity Claw: Has icon (claw + sacred geometry + "77"). Infrastructure only, never consumer-facing.
+- Multi-phase rollout — document in brand-identity skill when ready.
+
+---
+
+### Session 38 Summary (2026-04-08)
+**Commit:** `aed0e2b` — fix: Session 38 — 6 critical video quality fixes from live audit
+
+All 6 bugs flagged by Session 37 Gemini audit shipped in one commit to `faceless-factory.ts` (97 insertions, 24 deletions). No other files changed.
+
+**Changes deployed:**
+1. **Text wrap: inline → textfile** — Hook overlay `drawtext` switched from `text='...'` to `textfile='...'`. Wrapped text written to `{jobId}_hook_text.txt`, ffmpeg reads newlines directly from disk. Shell quoting can no longer eat `\n`.
+2. **Audio/visual desync clamp** — After xfade assembly, `assembleVideo()` now probes video vs audio duration. If video is >2s shorter, the last scene clip is extended via `stream_loop` and xfade is re-assembled. Prevents black screen at end of long-form.
+3. **Voice speed 0.80x → 0.90x** — Session 37 audit flagged 0.80x + 0.8s pads + afade as sluggish. 0.90x balances documentary gravitas with forward momentum.
+4. **Banned phrases** — 8 overused crutch phrases explicitly banned in Pass 1, Pass 2, AND short-form prompts: "Imagine...", "But here's the thing...", "Now pay attention...", "But here's what nobody talks about...", "Let that sink in", "Think about it", "Here's the truth", "Are you ready?". Each ban includes rewrite guidance.
+5. **Brand color enforcement** — Gold/amber (#d4a843) made DOMINANT accent for Ace Richie in: `SCENE_VISUAL_STYLE` (dark_psychology + brand entries), Pass 1 COLOR MANDATE, Pass 2 COLOR rule, short-form VISUAL DNA. Teal demoted to "secondary, shadow/edge only."
+6. **CTA duration 5s → 8s** — Frequency Activation card `actDuration` raised. Viewers need time to read, process, and type.
+
+**Also cleaned up:**
+- Restored 4 files with CRLF-only noise (vidrush-orchestrator.ts, sapphire-sentinel.ts, SOVEREIGN_SYNTHESIS_MASTER Parts 1+2)
+- Committed Session 37 master reference updates (previously written but never pushed)
+
+**DVP Status — all Session 38 fixes:**
+- `[DVP: ADDRESSED]` Text wrapping textfile approach — needs production test
+- `[DVP: ADDRESSED]` Audio/visual desync clamp — needs production test
+- `[DVP: ADDRESSED]` Voice speed 0.90x — needs production test
+- `[DVP: ADDRESSED]` Banned phrases — needs production test (next pipeline run)
+- `[DVP: ADDRESSED]` Brand color enforcement — needs production test (next Imagen 4 gen)
+- `[DVP: ADDRESSED]` CTA 8s duration — needs production test
+
+**Next session priorities (Session 39):**
+1. **VERIFY Session 38 fixes** — Run pipeline, audit output video for: text wrapping, no black screen, pacing, fresh vocabulary, gold-dominant visuals, readable CTAs
+2. **Shorts overhaul** — Per-clip thumbnails, `thumbnail_text` in extractStoryMoments, Buffer thumbnail attachment
+3. **Remaining Session 37 bugs not addressed:** BUG 6 (visual pacing / static holds), BUG 8 (thumbnail generation), BUG 9 (title uniqueness)

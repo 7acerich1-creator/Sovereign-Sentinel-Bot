@@ -724,8 +724,9 @@ async function main() {
           const dryBrandMatch = message.content.match(/\b(containment[_ ]?field|tcf)\b/i);
           const dryBrand = dryBrandMatch ? "containment_field" as const : "ace_richie" as const;
 
-          // Fire pipeline in background — errors caught inside
-          (async () => {
+          // Session 40: Enqueue via pipeline queue — serializes with live runs
+          const enqueue = (globalThis as any).__enqueuePipeline;
+          const dryPosition = enqueue ? enqueue(`dryrun-${dryVideoId}`, async () => {
             try {
               console.log(`🧪 [/dryrun] Starting executeFullPipeline...`);
               const result = await executeFullPipeline(
@@ -760,7 +761,11 @@ async function main() {
                 console.error(`❌ [/dryrun] Could not send failure msg: ${sendErr.message}`);
               }
             }
-          })();
+          }) : 0;
+
+          if (dryPosition > 1) {
+            try { await telegram.sendMessage(message.chatId, `⏳ Pipeline queue position: ${dryPosition}. Will start when current run finishes.`); } catch { /* non-critical */ }
+          }
 
           return true;
         } catch (err: any) {
@@ -802,75 +807,72 @@ async function main() {
             ? ["ace_richie"]
             : ["ace_richie", "containment_field"];
 
-          (async () => {
-            // Pause all pollers during pipeline execution to preserve Supabase bandwidth
-            const setPipelineRunning = (globalThis as any).__setPipelineRunning;
-            if (setPipelineRunning) setPipelineRunning(true);
+          // Session 40: Enqueue via pipeline queue — serializes concurrent requests
+          const pipelineEnqueue = (globalThis as any).__enqueuePipeline;
+          const pipelinePos = pipelineEnqueue ? pipelineEnqueue(`pipeline-${liveVideoId}-${brands.join("+")}`, async () => {
+            for (let bIdx = 0; bIdx < brands.length; bIdx++) {
+              const brand = brands[bIdx];
+              const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
 
-            try {
-              for (let bIdx = 0; bIdx < brands.length; bIdx++) {
-                const brand = brands[bIdx];
-                const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
-
-                // Inter-brand cooldown: even with a dedicated TCF Groq key, other shared resources
-                // (TTS, image gen, Supabase) need breathing room between 50-min pipeline runs.
-                // PIPELINE_COOLDOWN_MS env var overrides. Default raised to 180s (was 90s —
-                // 90s was insufficient even before the dual-key fix).
-                if (bIdx > 0) {
-                  const cooldownMs = parseInt(process.env.PIPELINE_COOLDOWN_MS || "180000", 10);
-                  const cooldownSec = Math.round(cooldownMs / 1000);
-                  console.log(`⏳ [Pipeline] Inter-brand cooldown: ${cooldownSec}s...`);
-                  try {
-                    await telegram.sendMessage(message.chatId,
-                      `⏳ Cooling down ${cooldownSec}s before ${brandLabel} pipeline...`
-                    );
-                  } catch { /* non-critical */ }
-                  await new Promise(r => setTimeout(r, cooldownMs));
-                }
-
+              // Inter-brand cooldown: even with a dedicated TCF Groq key, other shared resources
+              // (TTS, image gen, Supabase) need breathing room between 50-min pipeline runs.
+              // PIPELINE_COOLDOWN_MS env var overrides. Default raised to 180s (was 90s —
+              // 90s was insufficient even before the dual-key fix).
+              if (bIdx > 0) {
+                const cooldownMs = parseInt(process.env.PIPELINE_COOLDOWN_MS || "180000", 10);
+                const cooldownSec = Math.round(cooldownMs / 1000);
+                console.log(`⏳ [Pipeline] Inter-brand cooldown: ${cooldownSec}s...`);
                 try {
                   await telegram.sendMessage(message.chatId,
-                    `--- ${brandLabel} PIPELINE ---`
+                    `⏳ Cooling down ${cooldownSec}s before ${brandLabel} pipeline...`
                   );
                 } catch { /* non-critical */ }
-
-                // Use brand-dedicated LLM: TCF gets its own Groq key (GROQ_API_KEY_TCF) to avoid
-                // rate limit contention after Ace Richie burns through the primary Groq quota.
-                const activePipelineLLM = brand === "containment_field" ? tcfPipelineLLM : pipelineLLM;
-
-                try {
-                  const result = await executeFullPipeline(
-                    liveYoutubeUrl,
-                    activePipelineLLM,
-                    brand,
-                    async (step: string, detail: string) => {
-                      try {
-                        await telegram.sendMessage(message.chatId, `[${brandLabel}] ${step}: ${detail}`);
-                      } catch { /* non-critical */ }
-                    }
-                  );
-
-                  const report = formatPipelineReport(result);
-                  try {
-                    await telegram.sendMessage(message.chatId, `${brandLabel} COMPLETE:\n${report}`, { parseMode: "Markdown" });
-                  } catch {
-                    await telegram.sendMessage(message.chatId, `${brandLabel} COMPLETE:\n${report.replace(/[*_`]/g, "")}`);
-                  }
-                } catch (err: any) {
-                  console.error(`❌ [/pipeline] ${brandLabel} Pipeline CRASHED: ${err.message}\n${err.stack}`);
-                  try {
-                    await telegram.sendMessage(message.chatId,
-                      `${brandLabel} Pipeline FAILED: ${err.message?.slice(0, 500)}`
-                    );
-                  } catch { /* nothing */ }
-                  // Continue to next brand even if one fails
-                }
+                await new Promise(r => setTimeout(r, cooldownMs));
               }
-            } finally {
-              // Always resume pollers, even on failure
-              if (setPipelineRunning) setPipelineRunning(false);
+
+              try {
+                await telegram.sendMessage(message.chatId,
+                  `--- ${brandLabel} PIPELINE ---`
+                );
+              } catch { /* non-critical */ }
+
+              // Use brand-dedicated LLM: TCF gets its own Groq key (GROQ_API_KEY_TCF) to avoid
+              // rate limit contention after Ace Richie burns through the primary Groq quota.
+              const activePipelineLLM = brand === "containment_field" ? tcfPipelineLLM : pipelineLLM;
+
+              try {
+                const result = await executeFullPipeline(
+                  liveYoutubeUrl,
+                  activePipelineLLM,
+                  brand,
+                  async (step: string, detail: string) => {
+                    try {
+                      await telegram.sendMessage(message.chatId, `[${brandLabel}] ${step}: ${detail}`);
+                    } catch { /* non-critical */ }
+                  }
+                );
+
+                const report = formatPipelineReport(result);
+                try {
+                  await telegram.sendMessage(message.chatId, `${brandLabel} COMPLETE:\n${report}`, { parseMode: "Markdown" });
+                } catch {
+                  await telegram.sendMessage(message.chatId, `${brandLabel} COMPLETE:\n${report.replace(/[*_`]/g, "")}`);
+                }
+              } catch (err: any) {
+                console.error(`❌ [/pipeline] ${brandLabel} Pipeline CRASHED: ${err.message}\n${err.stack}`);
+                try {
+                  await telegram.sendMessage(message.chatId,
+                    `${brandLabel} Pipeline FAILED: ${err.message?.slice(0, 500)}`
+                  );
+                } catch { /* nothing */ }
+                // Continue to next brand even if one fails
+              }
             }
-          })();
+          }) : 0;
+
+          if (pipelinePos > 1) {
+            try { await telegram.sendMessage(message.chatId, `⏳ Pipeline queued (position ${pipelinePos}). A pipeline is already running — yours will start automatically when it finishes.`); } catch { /* non-critical */ }
+          }
 
           return true;
         } catch (err: any) {
@@ -2645,17 +2647,58 @@ async function main() {
       }
     };
 
-    // ── Pipeline Lock — pause all pollers during VidRush pipeline execution ──
+    // ── Pipeline Lock + Concurrency Queue (Session 40) ──
     // Supabase free tier can't handle poller traffic + pipeline traffic simultaneously.
     // When pipeline is running, pollers skip their cycle entirely.
+    // The queue serializes overlapping pipeline requests — only one runs at a time,
+    // subsequent requests wait in FIFO order instead of being silently dropped.
     let pipelineRunning = false;
     const setPipelineRunning = (val: boolean) => {
       pipelineRunning = val;
       console.log(`🔒 [PipelineLock] Pipeline ${val ? "STARTED — pollers paused" : "ENDED — pollers resumed"}`);
     };
-    // Expose globally so /pipeline command can access it
+
+    // In-memory FIFO pipeline queue
+    type PipelineJob = {
+      label: string;
+      run: () => Promise<void>;
+    };
+    const pipelineQueue: PipelineJob[] = [];
+    let pipelineQueueProcessing = false;
+
+    const processPipelineQueue = async () => {
+      if (pipelineQueueProcessing) return; // already draining
+      pipelineQueueProcessing = true;
+      while (pipelineQueue.length > 0) {
+        const job = pipelineQueue.shift()!;
+        console.log(`🚀 [PipelineQueue] Starting: ${job.label} (${pipelineQueue.length} queued behind)`);
+        setPipelineRunning(true);
+        try {
+          await job.run();
+        } catch (err: any) {
+          console.error(`❌ [PipelineQueue] ${job.label} CRASHED: ${err.message}`);
+        } finally {
+          setPipelineRunning(false);
+        }
+      }
+      pipelineQueueProcessing = false;
+      console.log(`✅ [PipelineQueue] Queue drained — all pipelines complete`);
+    };
+
+    /** Enqueue a pipeline job. Runs immediately if idle, queues if busy. */
+    const enqueuePipeline = (label: string, run: () => Promise<void>): number => {
+      pipelineQueue.push({ label, run });
+      const position = pipelineQueue.length;
+      console.log(`📥 [PipelineQueue] Enqueued: ${label} (position ${position})`);
+      // Kick off processing (no-op if already running)
+      processPipelineQueue();
+      return position;
+    };
+
+    // Expose globally so /pipeline command and dispatch poller can access it
     (globalThis as any).__setPipelineRunning = setPipelineRunning;
     (globalThis as any).__isPipelineRunning = () => pipelineRunning;
+    (globalThis as any).__enqueuePipeline = enqueuePipeline;
 
     // ── Dispatch Poller — BATCHED: one query for all agents, with 503 backoff ──
     const DISPATCH_POLL_BASE_MS = 60_000; // 60s base (was 15s — killed Supabase free tier)
@@ -2829,66 +2872,65 @@ async function main() {
                         );
                       } catch { /* non-critical */ }
 
+                      // Session 40: Enqueue via pipeline queue — serializes with manual /pipeline runs.
                       // Session 26: Dual-brand auto-pipeline — fires BOTH brands sequentially.
-                      // Ace Richie (niche rotation) → The Containment Field (dark psych perspective).
-                      (async () => {
-                        const setPipelineRunning = (globalThis as any).__setPipelineRunning;
-                        if (setPipelineRunning) setPipelineRunning(true);
-                        const autoBrands: Array<"ace_richie" | "containment_field"> = ["ace_richie", "containment_field"];
-                        try {
-                          for (let bIdx = 0; bIdx < autoBrands.length; bIdx++) {
-                            const brand = autoBrands[bIdx];
-                            const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
+                      const autoEnqueue = (globalThis as any).__enqueuePipeline;
+                      const autoChatId = task.chat_id || defaultChatId;
+                      const autoBrands: Array<"ace_richie" | "containment_field"> = ["ace_richie", "containment_field"];
+                      const autoPos = autoEnqueue ? autoEnqueue(`auto-${autoVideoId}-dual`, async () => {
+                        for (let bIdx = 0; bIdx < autoBrands.length; bIdx++) {
+                          const brand = autoBrands[bIdx];
+                          const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
 
-                            // Inter-brand cooldown (same env var as manual pipeline: PIPELINE_COOLDOWN_MS)
-                            if (bIdx > 0) {
-                              const cooldownMs = parseInt(process.env.PIPELINE_COOLDOWN_MS || "180000", 10);
-                              const cooldownSec = Math.round(cooldownMs / 1000);
-                              console.log(`⏳ [AutoPipeline] Inter-brand cooldown: ${cooldownSec}s...`);
-                              try {
-                                await channel.sendMessage(task.chat_id || defaultChatId,
-                                  `⏳ Cooling down ${cooldownSec}s before ${brandLabel} pipeline...`
-                                );
-                              } catch { /* non-critical */ }
-                              await new Promise(r => setTimeout(r, cooldownMs));
-                            }
-
+                          // Inter-brand cooldown (same env var as manual pipeline: PIPELINE_COOLDOWN_MS)
+                          if (bIdx > 0) {
+                            const cooldownMs = parseInt(process.env.PIPELINE_COOLDOWN_MS || "180000", 10);
+                            const cooldownSec = Math.round(cooldownMs / 1000);
+                            console.log(`⏳ [AutoPipeline] Inter-brand cooldown: ${cooldownSec}s...`);
                             try {
-                              await channel.sendMessage(task.chat_id || defaultChatId, `--- ${brandLabel} AUTO-PIPELINE ---`);
-                            } catch { /* non-critical */ }
-
-                            try {
-                              const result = await executeFullPipeline(
-                                autoUrl,
-                                brand === "containment_field" ? tcfPipelineLLM : pipelineLLM,
-                                brand,
-                                async (step: string, detail: string) => {
-                                  try {
-                                    await channel.sendMessage(task.chat_id || defaultChatId, `[${brandLabel}] ${step}: ${detail}`);
-                                  } catch { /* non-critical */ }
-                                }
+                              await channel.sendMessage(autoChatId,
+                                `⏳ Cooling down ${cooldownSec}s before ${brandLabel} pipeline...`
                               );
-                              const report = formatPipelineReport(result);
-                              try {
-                                await channel.sendMessage(task.chat_id || defaultChatId, `${brandLabel} COMPLETE:\n${report}`, { parseMode: "Markdown" });
-                              } catch {
-                                await channel.sendMessage(task.chat_id || defaultChatId, `${brandLabel} COMPLETE:\n${report.replace(/[*_`]/g, "")}`);
-                              }
-                            } catch (pipeErr: any) {
-                              console.error(`❌ [AutoPipeline] ${brandLabel} Pipeline CRASHED: ${pipeErr.message}`);
-                              try {
-                                await channel.sendMessage(
-                                  task.chat_id || defaultChatId,
-                                  `${brandLabel} Pipeline FAILED: ${pipeErr.message?.slice(0, 500)}`
-                                );
-                              } catch { /* silent */ }
-                              // Continue to next brand even if one fails
-                            }
+                            } catch { /* non-critical */ }
+                            await new Promise(r => setTimeout(r, cooldownMs));
                           }
-                        } finally {
-                          if (setPipelineRunning) setPipelineRunning(false);
+
+                          try {
+                            await channel.sendMessage(autoChatId, `--- ${brandLabel} AUTO-PIPELINE ---`);
+                          } catch { /* non-critical */ }
+
+                          try {
+                            const result = await executeFullPipeline(
+                              autoUrl,
+                              brand === "containment_field" ? tcfPipelineLLM : pipelineLLM,
+                              brand,
+                              async (step: string, detail: string) => {
+                                try {
+                                  await channel.sendMessage(autoChatId, `[${brandLabel}] ${step}: ${detail}`);
+                                } catch { /* non-critical */ }
+                              }
+                            );
+                            const report = formatPipelineReport(result);
+                            try {
+                              await channel.sendMessage(autoChatId, `${brandLabel} COMPLETE:\n${report}`, { parseMode: "Markdown" });
+                            } catch {
+                              await channel.sendMessage(autoChatId, `${brandLabel} COMPLETE:\n${report.replace(/[*_`]/g, "")}`);
+                            }
+                          } catch (pipeErr: any) {
+                            console.error(`❌ [AutoPipeline] ${brandLabel} Pipeline CRASHED: ${pipeErr.message}`);
+                            try {
+                              await channel.sendMessage(
+                                autoChatId,
+                                `${brandLabel} Pipeline FAILED: ${pipeErr.message?.slice(0, 500)}`
+                              );
+                            } catch { /* silent */ }
+                            // Continue to next brand even if one fails
+                          }
                         }
-                      })();
+                      }) : 0;
+                      if (autoPos > 1) {
+                        try { await channel.sendMessage(autoChatId, `⏳ Auto-pipeline queued (position ${autoPos}). Will start after current run.`); } catch { /* non-critical */ }
+                      }
                     } else {
                       console.log(`🔍 [AutoPipeline] Alfred scan complete — no PIPELINE_URL found in response`);
                     }

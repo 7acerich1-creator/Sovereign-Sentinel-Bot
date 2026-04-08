@@ -22,6 +22,27 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
 const STORAGE_BUCKET = "public-assets";
 
+// ── Session 40: Title uniqueness — fetch recent titles to prevent repetition ──
+async function getRecentTitles(limit: number = 20): Promise<string[]> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return [];
+  try {
+    const resp = await fetch(
+      `${SUPABASE_URL}/rest/v1/vid_rush_queue?select=title&order=created_at.desc&limit=${limit}`,
+      {
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+        },
+      }
+    );
+    if (!resp.ok) return [];
+    const rows = (await resp.json()) as { title: string }[];
+    return rows.map(r => r.title).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 // ── Types ──
 
 type Brand = "ace_richie" | "containment_field";
@@ -292,7 +313,8 @@ async function extractNarrativeBlueprint(
   llm: LLMProvider,
   sourceIntelligence: string,
   niche: string,
-  brand: Brand
+  brand: Brand,
+  titleBanList: string = ""
 ): Promise<NarrativeBlueprint> {
   const brandContext = brand === "ace_richie"
     ? "Sovereign Synthesis (Ace Richie) — sovereign, zero-fear, cracked-the-code energy"
@@ -311,11 +333,12 @@ RAW SOURCE MATERIAL (use as INSPIRATION only — do NOT copy phrases or structur
 ${sourceIntelligence.slice(0, 2500)}
 
 NICHE: ${niche.replace(/_/g, " ")}
+${titleBanList}
 
 Extract a narrative blueprint as JSON:
 {
   "thesis": "The ONE bold claim the entire video argues (1 sentence, provocative, specific — NOT generic like 'mindset matters'). Must connect to the urgency of NOW — why this matters TODAY, not someday.",
-  "title": "Punchy video title derived from the thesis (max 60 chars, pattern-interrupt energy). Must create curiosity gap or make a bold claim.",
+  "title": "A UNIQUE punchy video title (max 60 chars, pattern-interrupt energy). Must create curiosity gap or bold claim. MUST be completely different from any previously used titles listed above.",
   "hook": "The first 2 sentences spoken — must NAME A FEELING the viewer already has but can't articulate. Plain English, no jargon. A STATEMENT that makes them think 'how does this person know exactly what I'm experiencing?' Open loop energy.",
   "narrative_arc": "3-act summary: ACT 1 (name the feeling — plain English, what they already sense is wrong) → ACT 2 (reveal the mechanism — the hidden architecture behind the feeling, why the old rules no longer work) → ACT 3 (deliver the exchange — give them one piece of sovereign architecture that replaces the old programming, tie to the urgency of acting NOW)",
   "key_arguments": ["argument 1 that supports thesis", "argument 2...", "...up to 7 total, in narrative ORDER — each builds on the previous"],
@@ -367,9 +390,19 @@ export async function generateScript(
   orientation: Orientation = "vertical"
 ): Promise<FacelessScript> {
   const voice = SCRIPT_VOICE[brand];
-  const segmentCount = targetDuration === "short" ? 5 : 12;
-  const durationRange = targetDuration === "short" ? "30-60 seconds" : "6-10 minutes";
-  const durationHintExample = targetDuration === "short" ? 8 : 35;
+  // Session 40: Raised long-form from 12→16 segments to reduce static image hold time.
+  // At 12 segments over 6-10min, each image held 30-50s (kills momentum).
+  // At 16 segments, each image holds ~22-37s — still cinematic but no dead air.
+  // Cost delta: $0.16 more per video ($0.64 vs $0.48 at $0.04/img). Time: ~5min more.
+  const segmentCount = targetDuration === "short" ? 5 : 16;
+  const durationRange = targetDuration === "short" ? "30-60 seconds" : "8-12 minutes";
+  const durationHintExample = targetDuration === "short" ? 8 : 30;
+
+  // Session 40: Fetch recent titles to enforce uniqueness
+  const recentTitles = await getRecentTitles(20);
+  const titleBanList = recentTitles.length > 0
+    ? `\nTITLE UNIQUENESS (CRITICAL): These titles have ALREADY been used. Do NOT reuse or closely paraphrase any of them:\n${recentTitles.map(t => `- "${t}"`).join("\n")}\nYour title MUST be completely different from all of the above.`
+    : "";
 
   // ── LONG-FORM: Blueprint-driven narrative architecture ──
   // Short-form: single-pass, no blueprint needed (it's one idea, 30-60s)
@@ -380,11 +413,11 @@ export async function generateScript(
 
   if (targetDuration === "long") {
     // ── STEP 0: Extract narrative blueprint from raw source ──
-    const blueprint = await extractNarrativeBlueprint(llm, sourceIntelligence, niche, brand);
+    const blueprint = await extractNarrativeBlueprint(llm, sourceIntelligence, niche, brand, titleBanList);
 
     await new Promise(r => setTimeout(r, 5000)); // Groq TPM cooldown
 
-    // ── PASS 1: ACT 1 + ACT 2 (segments 1-13) ──
+    // ── PASS 1: ACT 1 + ACT 2 (9 segments) ── Session 40: raised from 7→9 for 16-segment target
     const pass1Prompt = `${voice}
 
 You are writing a 10-15 minute documentary-style voiceover script. This is NOT a compilation of short clips. This is ONE COHESIVE STORY with a beginning, middle, and end — like a Netflix documentary scene.
@@ -397,8 +430,8 @@ NARRATIVE BLUEPRINT:
 - KEY ARGUMENTS (in order): ${blueprint.key_arguments.map((a, i) => `${i + 1}. ${a}`).join(" | ")}
 - EMOTIONAL JOURNEY: ${blueprint.emotional_journey}
 
-You are writing PART 1: The HOOK + ACT 1 (setup) + ACT 2 (escalation). This covers the first 3-5 minutes.
-Write 7 segments that tell a CONTINUOUS STORY. Each segment FLOWS into the next — not standalone paragraphs.
+You are writing PART 1: The HOOK + ACT 1 (setup) + ACT 2 (escalation). This covers the first 4-6 minutes.
+Write 9 segments that tell a CONTINUOUS STORY. Each segment FLOWS into the next — not standalone paragraphs.
 
 CRITICAL WRITING RULES:
 1. NEVER copy or closely paraphrase the source material. You are writing ORIGINAL content inspired by the thesis.
@@ -423,7 +456,7 @@ If you catch yourself reaching for any of these, REWRITE the sentence with a con
 
 Generate as JSON:
 {
-  "title": "CTR-optimized title (max 60 chars) — curiosity gap, emotional trigger, or bold claim. NOT generic. Study: 'System Failure by Design', 'The Trap Nobody Warns You About', 'Why Your Reality Is Running on Outdated Code'",
+  "title": "UNIQUE CTR-optimized title (max 60 chars) — curiosity gap, emotional trigger, or bold claim. MUST be different from ALL previously used titles.${recentTitles.length > 0 ? " BANNED (already used): " + recentTitles.slice(0, 5).map(t => `'${t}'`).join(", ") : ""}",
   "hook": "${blueprint.hook}",
   "thumbnail_text": "2-5 words ALL CAPS that STOP the scroll. This is the TEXT that goes ON the thumbnail image. Think: 'BREAK THE BLOCK', 'YOU WERE CHOSEN', 'SYSTEM FAILURE', 'THEY LIED TO YOU'. Must create instant curiosity or emotional reaction in under 1 second.",
   "thumbnail_visual": "Thumbnail-specific visual: MUST be a single dramatic focal point image — lone silhouette against cosmic light, figure at the edge of a void, sacred geometry portal, shattered chains with golden fragments. HIGH CONTRAST required (bright focal element against deep dark background). This is a STILL IMAGE, not a video frame — it needs to read at 120x68px thumbnail size.",
@@ -449,10 +482,10 @@ VISUAL DIRECTION RULES:
   * ATMOSPHERE: volumetric haze, dust particles catching light beams, shallow DOF with bokeh, film grain. Every scene should feel like a frame from a Villeneuve or Fincher film, NOT a LinkedIn banner
   * PEOPLE: If human figures appear, they must be SYMBOLIC (silhouetted, partially obscured, seen from behind, dwarfed by environment) — NEVER stock-photo-style portraits or corporate poses
 
-duration_hint MUST be 30-45 seconds per segment. Total for these 7 segments: 210-315 seconds.
+duration_hint MUST be 25-40 seconds per segment. Total for these 9 segments: 225-360 seconds.
 Return ONLY valid JSON, no code fences, no explanation.`;
 
-    console.log(`📝 [FacelessFactory] Pass 1: ACT 1 + ACT 2 (7 segments)...`);
+    console.log(`📝 [FacelessFactory] Pass 1: ACT 1 + ACT 2 (9 segments)...`);
     const res1 = await llm.generate(
       [{ role: "user", content: pass1Prompt }],
       { maxTokens, temperature: 0.8 }
@@ -632,7 +665,7 @@ Write a ${durationRange} voiceover script for a ${niche.replace(/_/g, " ")} face
 
 Generate as JSON:
 {
-  "title": "CTR-optimized title (max 60 chars) — curiosity gap or bold claim, NOT generic",
+  "title": "UNIQUE CTR-optimized title (max 60 chars) — curiosity gap or bold claim. MUST be different from all previously used titles.${recentTitles.length > 0 ? " BANNED: " + recentTitles.slice(0, 5).map(t => `'${t}'`).join(", ") : ""}",
   "hook": "Opening line that stops the scroll — a STATEMENT, not a question",
   "thumbnail_text": "2-5 words ALL CAPS for thumbnail overlay — instant emotional hit at 120x68px",
   "thumbnail_visual": "Single dramatic focal point: silhouette, portal, shattered chains, cosmic void. HIGH CONTRAST. Must read at tiny thumbnail size.",
@@ -682,13 +715,13 @@ RULES:
   const estimatedMinutes = (totalWords / 140).toFixed(1); // ~140 WPM for measured narration
   console.log(`📊 [FacelessFactory] Script word counts: [${wordCounts.join(", ")}] | Total: ${totalWords} words | Estimated: ~${estimatedMinutes} min at 140 WPM`);
 
-  // QUALITY GATE (Session 23/32): Enforce minimum segment count for long-form.
-  // Session 32: Reduced from 25→12 scenes (Imagen 4 at 25 = 33 min). Quality gate lowered accordingly.
-  if (targetDuration === "long" && segments.length < 8) {
-    console.warn(`⚠️ [FacelessFactory] Only ${segments.length} segments (need 8+). Attempting segment expansion...`);
+  // QUALITY GATE (Session 23/32/40): Enforce minimum segment count for long-form.
+  // Session 40: Target raised to 16 segments. Quality gate at 10 (was 8).
+  if (targetDuration === "long" && segments.length < 10) {
+    console.warn(`⚠️ [FacelessFactory] Only ${segments.length} segments (need 10+). Attempting segment expansion...`);
     // Don't retry the whole LLM call (costs time + tokens) — instead, expand what we have.
     // Take each short segment and ask the LLM to elaborate it into 2 segments.
-    const expansionNeeded = Math.max(8 - segments.length, 3);
+    const expansionNeeded = Math.max(10 - segments.length, 3);
     const segmentsToExpand = segments
       .map((s: any, i: number) => ({ ...s, _idx: i, _words: s.voiceover.split(/\s+/).filter(Boolean).length }))
       .sort((a: any, b: any) => a._words - b._words) // Expand shortest segments first

@@ -6,7 +6,7 @@
 
 export const SHARED_AGENT_CONTEXT = `
 ## Operational Context
-Product ladder: The Map ($27) → Foundation Protocol ($197) → Adversarial Systems ($497) → Sovereign Integration ($997) → Inner Circle ($5,000).
+Product ladder: Protocol 77 ($77) → Navigation Override ($177) → Foundation Protocol ($477) → Adversarial Systems ($1,497) → Sovereign Integration ($3,777) → Inner Circle ($12,000). Free tiers: Landing (email capture) + Diagnostic (self-assessment).
 Two brands: Ace Richie (personal) + The Containment Field (anonymous dark psych — NEVER cross-reference).
 Architecture: Bot runs on Railway. Dashboard on Vercel. Supabase is the ONLY bridge.
 Tables you write to: crew_dispatch, tasks, activity_log, content_drafts, content_transmissions.

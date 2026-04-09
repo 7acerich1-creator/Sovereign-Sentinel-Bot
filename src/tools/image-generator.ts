@@ -292,10 +292,9 @@ export class ImageGeneratorTool implements Tool {
           type: "image",
           niche,
           style,
-          file_path: filePath,
           prompt: prompt.slice(0, 2000),
           status: "ready",
-          metadata: { source, generated_at: new Date().toISOString() },
+          metadata: { source, local_path: filePath, generated_at: new Date().toISOString() },
         }),
       });
 

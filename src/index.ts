@@ -2744,8 +2744,10 @@ async function main() {
             if (tasks.length === 0) continue;
 
             // Stagger agent processing with generous gaps to conserve LLM quota.
+            // Session 41: Raised 10s→20s — Anthropic rate-limit window needs room
+            // when 5 agents fire stasis_self_check in sequence. $0.003/call, stagger is free insurance.
             if (agentIndex > 0) {
-              await new Promise((resolve) => setTimeout(resolve, 10_000));
+              await new Promise((resolve) => setTimeout(resolve, 20_000));
             }
             agentIndex++;
 

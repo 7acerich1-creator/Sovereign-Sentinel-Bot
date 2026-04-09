@@ -11,11 +11,14 @@ const COOKIES_PATH = "/tmp/yt-cookies.txt";
 
 /** Strategies to try, in order. Each rotates the YouTube player client. */
 const STRATEGIES = [
-  { name: "with-cookies",     args: "" },  // cookies alone should be enough
-  { name: "cookies+android",  args: '--extractor-args "youtube:player_client=android_vr"' },
-  { name: "cookies+web_creator", args: '--extractor-args "youtube:player_client=web_creator"' },
-  { name: "cookies+mweb",    args: '--extractor-args "youtube:player_client=mweb"' },
-  { name: "no-cookies",      args: "" },   // last resort: try without cookies
+  { name: "with-cookies",        args: "", proxy: false },
+  { name: "cookies+android",     args: '--extractor-args "youtube:player_client=android_vr"', proxy: false },
+  { name: "cookies+web_creator", args: '--extractor-args "youtube:player_client=web_creator"', proxy: false },
+  { name: "cookies+mweb",        args: '--extractor-args "youtube:player_client=mweb"', proxy: false },
+  // ── PROXY TIER: same strategies routed through residential proxy to dodge datacenter IP bans ──
+  { name: "proxy+cookies",       args: "", proxy: true },
+  { name: "proxy+android",       args: '--extractor-args "youtube:player_client=android_vr"', proxy: true },
+  { name: "no-cookies",          args: "", proxy: false },
 ];
 
 const USER_AGENT =
@@ -72,6 +75,15 @@ export function ytdlpDownload(opts: YtdlpDownloadOpts): void {
   const hasCookies = ensureCookiesFile();
   const cookieFlag = hasCookies ? `--cookies "${COOKIES_PATH}"` : "";
 
+  // YTDLP_PROXY — residential proxy URL to bypass YouTube datacenter IP bans.
+  // Format: socks5://user:pass@host:port  OR  http://user:pass@host:port
+  // Set in Railway env. Without this, proxy strategies are skipped.
+  const proxyUrl = process.env.YTDLP_PROXY || "";
+  const hasProxy = proxyUrl.length > 0;
+  if (hasProxy) {
+    console.log(`🌐 [${label}] Residential proxy configured — will try proxy strategies if direct fails.`);
+  }
+
   const baseCmd =
     `yt-dlp --js-runtimes node ` +
     `--remote-components ejs:github ` +
@@ -88,11 +100,15 @@ export function ytdlpDownload(opts: YtdlpDownloadOpts): void {
     const useCookies = strategy.name !== "no-cookies";
     if (useCookies && !hasCookies) continue;
 
+    // Skip proxy strategies if no proxy configured
+    if (strategy.proxy && !hasProxy) continue;
+
     const thisCookieFlag = useCookies ? cookieFlag : "";
+    const thisProxyFlag = strategy.proxy ? `--proxy "${proxyUrl}"` : "";
 
     try {
-      const cmd = `${baseCmd} ${thisCookieFlag} ${strategy.args} -o "${outputPath}" "${youtubeUrl}"`.replace(/\s+/g, " ").trim();
-      console.log(`📥 [${label}] Strategy: ${strategy.name}...`);
+      const cmd = `${baseCmd} ${thisCookieFlag} ${thisProxyFlag} ${strategy.args} -o "${outputPath}" "${youtubeUrl}"`.replace(/\s+/g, " ").trim();
+      console.log(`📥 [${label}] Strategy: ${strategy.name}${strategy.proxy ? " (via proxy)" : ""}...`);
       execSync(cmd, { timeout, stdio: "pipe" });
 
       // Verify file actually landed
@@ -110,6 +126,7 @@ export function ytdlpDownload(opts: YtdlpDownloadOpts): void {
 
   throw new Error(
     `All yt-dlp strategies failed for ${youtubeUrl}:\n${errors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}` +
-    (!hasCookies ? "\n\n💡 FIX: Set YOUTUBE_COOKIES_BASE64 env var in Railway. Export cookies from Chrome with a browser extension, base64-encode the file, and paste it as the env var value." : "")
+    (!hasCookies ? "\n\n💡 FIX: Set YOUTUBE_COOKIES_BASE64 env var in Railway." : "") +
+    (!hasProxy ? "\n💡 FIX: Set YTDLP_PROXY env var in Railway (e.g. socks5://user:pass@host:port) for residential proxy bypass." : "")
   );
 }

@@ -100,14 +100,20 @@ function buildSlidingWindows(segments: WhisperSegment[], windowSec = 45): Scored
   const totalDuration = segments[segments.length - 1].end;
 
   for (let start = 0; start < totalDuration - 15; start += 10) {
-    const end = Math.min(start + windowSec, totalDuration);
-    if (end - start < 15) continue;
+    const rawEnd = Math.min(start + windowSec, totalDuration);
+    if (rawEnd - start < 15) continue;
 
     const windowSegments = segments.filter(
-      (s) => s.start >= start && s.end <= end
+      (s) => s.start >= start && s.end <= rawEnd
     );
 
     if (windowSegments.length === 0) continue;
+
+    // Snap the window end to the last segment's actual end timestamp.
+    // This ensures we cut at a Whisper-detected sentence boundary
+    // instead of mid-word at an arbitrary second mark.
+    const lastSeg = windowSegments[windowSegments.length - 1];
+    const end = lastSeg.end;
 
     const text = windowSegments.map((s) => s.text).join(" ");
     const score = scoreSegment(text);

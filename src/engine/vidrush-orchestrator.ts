@@ -249,13 +249,21 @@ A great story moment:
 - Opens with a hook that stops the scroll
 - Contains a single powerful idea (not 3 ideas crammed together)
 - Ends with impact — a punchline, revelation, or call to action
-- Does NOT start or end mid-sentence
+- Does NOT start or end mid-sentence or mid-phrase
+
+CRITICAL — CLIP ENDING RULE:
+The endSec timestamp MUST land AFTER the speaker has finished a complete, resolved thought.
+NEVER cut in the middle of a prepositional phrase, subordinate clause, or dangling connector.
+BAD endings: "with a map that's...", "because they don't...", "so you can actually..."
+GOOD endings: "...and that changes everything.", "...that's the real secret.", "...wake up."
+If a great moment trails off into filler, set endSec at the last impactful sentence — not the start of the next weak one.
+When in doubt, extend the clip 2-3 seconds longer to capture the full final statement.
 
 Rules:
 - Moments must not overlap
 - Cover the best material across the full video (don't cluster at the start)
 - startSec and endSec must match the timestamps in the transcript
-- Prefer slightly longer clips (25-40s) over rushed short ones
+- Prefer slightly longer clips (25-40s) over rushed short ones — a 38s clip that ends clean beats a 28s clip that cuts mid-thought
 - Skip any weak filler sections — quality over quantity
 
 Respond with ONLY a JSON array, no markdown, no explanation:
@@ -371,7 +379,7 @@ async function chopLongFormIntoClips(
     // 0.3s before the LLM's start (catches the beginning of the first word)
     // 0.2s after the LLM's end (lets the last word finish naturally)
     const PAD_BEFORE = 0.3;
-    const PAD_AFTER = 0.2;
+    const PAD_AFTER = 1.5;
 
     // Cap to MAX_CLIPS_PER_RUN — even in semantic mode, 10 moments is enough
     const momentsToCut = storyMoments.slice(0, MAX_CLIPS_PER_RUN);
@@ -399,7 +407,7 @@ async function chopLongFormIntoClips(
             `-vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${nicheFilter}" ` +
             `-c:v libx264 -preset fast -crf 23 ` +
             `-c:a aac -b:a 128k ` +
-            `-af "afade=t=in:st=0:d=0.15,afade=t=out:st=${Math.max(0, duration - 0.3).toFixed(2)}:d=0.3" ` +
+            `-af "afade=t=in:st=0:d=0.15,afade=t=out:st=${Math.max(0, duration - 0.5).toFixed(2)}:d=0.5" ` +
             `-y "${clipPath}"`,
           { timeout: FFMPEG_CLIP_TIMEOUT_MS, stdio: "ignore" }
         );
@@ -480,7 +488,7 @@ async function chopLongFormIntoClips(
 
   // ── BUILD CLIP BOUNDARIES ──
   const MIN_CLIP_DURATION = 15;
-  const MAX_CLIP_DURATION = 40;
+  const MAX_CLIP_DURATION = 59; // Raised from 40 — old cap was truncating clips mid-sentence. Silence boundaries are semantic; trust them.
   const SNAP_TOLERANCE = 8;
 
   const maxClips = Math.floor(totalDuration / MIN_CLIP_DURATION);
@@ -552,14 +560,20 @@ async function chopLongFormIntoClips(
     const clipPath = `${clipDir}/clip_${i.toString().padStart(2, "0")}.mp4`;
 
     try {
+      // Add 1.5s end-padding so the final spoken word lands fully. Clamp to totalDuration.
+      const paddedEndSec = Math.min(endSec + 1.5, totalDuration);
+      const clipLen = paddedEndSec - startSec;
+      const fadeStart = Math.max(0, clipLen - 0.5).toFixed(2);
+
       // stdio:"ignore" — drops ffmpeg encode progress from Node.js heap.
       // Previously "pipe" was buffering megabytes per clip, bloating memory across 10+ clips.
       execSync(
         `ffmpeg -i "${videoPath}" ` +
-          `-ss ${startSec.toFixed(2)} -to ${endSec.toFixed(2)} ` +
+          `-ss ${startSec.toFixed(2)} -to ${paddedEndSec.toFixed(2)} ` +
           `-vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${nicheFilter}" ` +
           `-c:v libx264 -preset fast -crf 23 ` +
           `-c:a aac -b:a 128k ` +
+          `-af "afade=t=in:st=0:d=0.15,afade=t=out:st=${fadeStart}:d=0.5" ` +
           `-y "${clipPath}"`,
         { timeout: FFMPEG_CLIP_TIMEOUT_MS, stdio: "ignore" }
       );

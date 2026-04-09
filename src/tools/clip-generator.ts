@@ -149,13 +149,19 @@ export class ClipGeneratorTool implements Tool {
 
       try {
         // Cut + scale to 9:16 + apply niche color grade
+        // Add 1.5s audio buffer past the semantic end-point so the last word lands fully,
+        // then apply a 0.5s fade-out for a clean exit.
+        const paddedEnd = ts.end_seconds + 1.5;
+        const clipDuration = paddedEnd - ts.start_seconds;
+        const fadeOutStart = Math.max(0, clipDuration - 0.5).toFixed(2);
         const scaleFilter = `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${nicheFilter}`;
         execSync(
           `ffmpeg -i "${sourcePath}" ` +
-            `-ss ${ts.start_seconds} -to ${ts.end_seconds} ` +
+            `-ss ${ts.start_seconds} -to ${paddedEnd} ` +
             `-vf "${scaleFilter}" ` +
             `-c:v libx264 -preset fast -crf 23 ` +
             `-c:a aac -b:a 128k ` +
+            `-af "afade=t=out:st=${fadeOutStart}:d=0.5" ` +
             `-y "${clipRaw}"`,
           { timeout: 120_000, stdio: "pipe" }
         );

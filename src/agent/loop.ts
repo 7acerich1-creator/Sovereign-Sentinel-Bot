@@ -63,11 +63,19 @@ export class AgentLoop {
   async processMessage(
     message: Message,
     sendTyping?: () => Promise<void>,
-    iterationCap?: number
+    iterationCap?: number,
+    textOnly?: boolean
   ): Promise<string> {
     // Dispatch tasks use a lower cap (3) to conserve LLM quota.
     // Direct user messages use the full config limit (default 10).
     const maxIterations = iterationCap ?? config.security.maxAgentIterations;
+
+    // SESSION 44: LIGHT MODE — tools disabled, single-pass text response.
+    // Used by introspection tasks (stasis_self_check) where tool calls
+    // burn iteration budget without contributing to the final answer.
+    // Drops ~2,900 tokens of tool schemas per request AND prevents the
+    // iter-cap max-iterations "⚠️" fallback that was marking stasis failed.
+    const isTextOnly = textOnly === true;
 
     // 0. Determine Persona
     const persona = this.determinePersona(message.content);
@@ -126,7 +134,12 @@ export class AgentLoop {
     const allTools = Array.from(this.tools.values());
 
     let toolDefs: ToolDefinition[];
-    if (isDispatch) {
+    if (isTextOnly) {
+      // SESSION 44: LIGHT MODE — ship zero tools. LLM must return text.
+      // This is the cheapest, most reliable path for introspection tasks.
+      toolDefs = [];
+      console.log(`⚡ [AgentLoop] LIGHT MODE — 0 tools (text-only response)`);
+    } else if (isDispatch) {
       // SESSION 35: DISPATCH MODE — only include tools the agent actually needs.
       // Sending 33+ tool schemas (each 200-500 tokens) to every dispatch call
       // was adding ~5-8K tokens of dead weight. Dispatch tasks have explicit
@@ -433,6 +446,26 @@ export class AgentLoop {
     // Use the agent's own persona based on identity (set during bot init).
     // Previous implementation routed by message keywords to personas (bob, angela,
     // josh, milo) that no longer exist in PERSONA_REGISTRY, causing crashes when
+    // dispatch payloads contained trigger words like "viral", "code", "metrics", etc.
+    // Each Maven Crew agent should always use its own persona — not a content-based switch.
+    const agentPersona = PERSONA_REGISTRY[this.identity.agentName];
+    if (agentPersona) return agentPersona;
+    return DEFAULT_PERSONA;
+  }
+
+  private getPersonaLLM(persona: Persona): LLMProvider {
+    if (persona.modelOverride) {
+      // Look for the specific model in the registry
+      for (const provider of this.llmProviders.values()) {
+        if (provider.model.includes(persona.modelOverride)) {
+          return provider;
+        }
+      }
+    }
+    return this.llm; // Fallback to default
+  }
+}
+REGISTRY, causing crashes when
     // dispatch payloads contained trigger words like "viral", "code", "metrics", etc.
     // Each Maven Crew agent should always use its own persona — not a content-based switch.
     const agentPersona = PERSONA_REGISTRY[this.identity.agentName];

@@ -2762,10 +2762,24 @@ async function main() {
               // Build a synthetic message from the dispatch payload
               const payloadStr = JSON.stringify(task.payload, null, 2);
 
+              // ── Session 44: LIGHT TASKS — introspection-only, zero tools, single pass ──
+              // These tasks burn iter cap without producing useful tool calls. Stasis
+              // self-check was max-iter-failing because the agent would call tools for
+              // introspection data it couldn't actually retrieve, then hit iter 4 on
+              // the completion crew_dispatch call without a final text response.
+              // Light mode: tools=undefined, iterCap=1, strip "use crew_dispatch" tail.
+              const LIGHT_TASKS = new Set(["stasis_self_check"]);
+              const isLightTask = LIGHT_TASKS.has(task.task_type);
+
               // ── Task-type-specific execution directives ──
               // Without these, agents default to analysis/reporting instead of executing tools.
               // These ensure the pipeline's final stages actually POST content to platforms.
               const EXECUTION_DIRECTIVES: Record<string, string> = {
+                stasis_self_check: `STASIS SELF-CHECK — Respond with a SINGLE plain-text message. No tool calls. ` +
+                  `Speak in your character voice. Review your role in the Sovereign Synthesis mission and ` +
+                  `report ONE of: (a) "NOMINAL" + a one-line observation about the current phase, OR ` +
+                  `(b) A single concrete concern, opportunity, or pivot recommendation Ace should see. ` +
+                  `Keep it under 300 words. The system will auto-log your response — do NOT attempt to mark the task complete.`,
                 content_for_distribution: `EXECUTION ORDER: You (Yuki) are the SOLE distribution authority. You MUST use the social_scheduler_create_post tool to post this content to Buffer channels. ` +
                   `Step 1: Call social_scheduler_list_profiles to get channel IDs. ` +
                   `Step 2: Take the content from the payload and call social_scheduler_create_post with appropriate channel_ids and the text. ` +
@@ -2814,13 +2828,17 @@ async function main() {
                 console.warn(`[ProtocolInjection] Non-fatal error for ${agentName}/${task.task_type}: ${injErr.message?.slice(0, 200)}`);
               }
 
+              const completionTail = isLightTask
+                ? "" // Light tasks auto-complete from the text response; no crew_dispatch tail.
+                : `\n\nWhen done, use crew_dispatch tool with action "complete" and task_id "${task.id}" to mark it done.`;
+
               const dispatchMessage: Message = {
                 id: `dispatch-${task.id}`,
                 role: "user",
                 content: `[DISPATCHED TASK from ${task.from_agent}]\nType: ${task.task_type}\nDispatch ID: ${task.id}\n\n` +
                   (architectDirectives ? `${architectDirectives}\n\n` : "") +
                   `Payload:\n${payloadStr}\n\n` +
-                  `${executionDirective}\n\nWhen done, use crew_dispatch tool with action "complete" and task_id "${task.id}" to mark it done.`,
+                  `${executionDirective}${completionTail}`,
                 timestamp: new Date(),
                 channel: "telegram",
                 chatId: task.chat_id || defaultChatId,
@@ -2842,10 +2860,11 @@ async function main() {
                 // Iteration caps per task type — balances LLM quota vs task completion
                 // Heavy tasks (distribution, scheduling) need more tool call rounds
                 // Light tasks (analysis, captions) can finish in fewer
+                // LIGHT tasks (Session 44): introspection — 1 pass, zero tools
                 const HEAVY_TASKS = new Set(["content_for_distribution", "content_scheduling", "daily_metrics_sweep", "daily_trend_scan"]);
                 const isHeavyTask = HEAVY_TASKS.has(task.task_type);
-                const iterCap = isHeavyTask ? 6 : 4;
-                const response = await agentLoop.processMessage(dispatchMessage, undefined, iterCap);
+                const iterCap = isLightTask ? 1 : (isHeavyTask ? 6 : 4);
+                const response = await agentLoop.processMessage(dispatchMessage, undefined, iterCap, isLightTask);
 
                 // SESSION 33: Detect if the response is actually a failure — mark appropriately.
                 // Prevents "completed" status on tasks where all LLM providers failed,

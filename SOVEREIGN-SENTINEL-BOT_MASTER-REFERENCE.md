@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-10 (Session 43 — YouTube Growth Protocol v2.0 integration: hard-inject architect directives into agent dispatch + Anti-Ghost ±14min jitter in Buffer scheduling. Tasks 1+2+4 of the protocol directive shipped; Task 3 (Kinetic Baseline) deferred to next session via intra-segment ffmpeg interrupts. Uncommitted until typecheck + pipeline-idle push window.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-10 (Session 44 — Stasis regression triage: LIGHT MODE dispatch shipped. Root cause of stasis_self_check repeated max-iterations failures was the iter-cap + tool-loop trap (not prompt bloat). `processMessage` gains optional `textOnly` 4th arg; `stasis_self_check` routes text-only with `toolDefs=[]` and `iterCap=1`. Verified in production via synthetic probes (Anita 17s, Vector 59s — both returned clean character-voice text). Session 43 commit `8339dbc` pushed + deployed pre-session; Session 44 commit `1a766d2` pushed + deployed. Kinetic Baseline (Task 3) deferred to Session 45.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -2541,10 +2541,10 @@ Final infrastructure hardening session before Thursday's revenue architecture pi
 - **MODIFIED:** `src/engine/vidrush-orchestrator.ts` (13-line jitter helper + 2× two-line wraps at scheduledAt construction sites)
 - **MODIFIED:** `SOVEREIGN-SENTINEL-BOT_MASTER-REFERENCE.md` (this entry)
 
-**DVP Status:**
-- `[DVP: ADDRESSED]` Task 2 hard-inject — typecheck deferred to architect's local shell (sandbox mount had vidrush-orchestrator.ts as a 0-byte stub, blocking in-session `tsc --noEmit`). Needs production test: dispatch a `narrative_weaponization` task and grep `[ProtocolInjection]` in Railway logs for the char-count line.
-- `[DVP: ADDRESSED]` Task 4 Anti-Ghost jitter — same typecheck deferral. Needs production test: run a full VidRush pipeline and verify Buffer `scheduled_at` timestamps land on non-zero minute values in a ±14min envelope around the base slot.
-- `[DVP: NOT YET VERIFIED]` Both tasks are ADDRESSED, not VERIFIED, until architect runs `npx tsc --noEmit` locally on Windows and the pipeline runs clean once after push.
+**DVP Status (updated Session 44):**
+- `[DVP: VERIFIED]` Task 2 hard-inject — verified Session 44 via synthetic YT-related dispatch probes. Commit `8339dbc` deployed cleanly. Protocol injection fires for YouTube task types; non-YT tasks short-circuit with zero added latency.
+- `[DVP: ADDRESSED — BLOCKED-ON-CYCLE]` Task 4 Anti-Ghost jitter — code committed in `8339dbc` and deployed. Cannot verify until next full VidRush pipeline run produces Buffer `scheduled_at` timestamps; will flip to VERIFIED in Session 45 after inspecting first post-deploy Buffer schedule for minute values in the `-14..+14` envelope around the 8 base slots.
+- `[DVP: DEFERRED]` Task 3 Kinetic Baseline — not started. Full design (intra-segment ffmpeg scale punch-ins + chromatic aberration + Ken Burns reversal) is queued as the Session 45 primary target.
 
 **Architect action items to ship this session's work:**
 1. Run `cd C:\Users\richi\Sovereign-Sentinel-Bot && npx tsc --noEmit` in a Windows terminal. Fix any surfaced type errors (none expected — all edits are self-consistent and use standard APIs).
@@ -2553,7 +2553,70 @@ Final infrastructure hardening session before Thursday's revenue architecture pi
 4. Push to main — Railway auto-deploys.
 5. First post-deploy Buffer schedule should show minute values in `-14..+14` envelope around the 8 base slots; first YT-related crew_dispatch claim should log `[ProtocolInjection]` in Railway with a non-zero char count.
 
-**Next session priorities:**
+**Next session priorities (as of Session 43 — superseded by Session 44 entry below):**
 1. Build Kinetic Baseline intra-segment ffmpeg filter chain (scale punch-ins, chromatic aberration, Ken Burns reversal) — target 3–4s / 5–7s visual interrupt frequency without breaking 22–37s audio segments.
 2. Production verification of Session 43 tasks (flip DVP from ADDRESSED to VERIFIED).
 3. Revenue architecture — still the top-line objective.
+
+---
+
+### Session 44 Summary (2026-04-10)
+**Status:** SHIPPED — commit `1a766d2` on 2026-04-10, "Session 44: LIGHT MODE dispatch - stasis_self_check text-only". 2 files changed, 58 insertions, 6 deletions. Pushed to origin/main, Railway auto-deployed. Verified in production at 06:10–06:11 UTC via synthetic probes.
+
+**Planned target:** Kinetic Baseline (Task 3). **Actual target:** Stasis regression triage (architect pivot mid-session: "Triage the Anita stasis regression first"). Kinetic Baseline slides to Session 45.
+
+**Session 43 Task 2 verification (first act of the session):**
+- Dispatched synthetic S44-PROBE rows via Supabase into crew_dispatch targeting YouTube task types. Confirmed `[ProtocolInjection]` log line fires on dispatch with non-zero char count. Session 43 Task 2 hard-inject flipped ADDRESSED → **VERIFIED**.
+- Session 43 Task 4 (Anti-Ghost ±14min jitter) cannot be verified until the next VidRush pipeline cycle produces Buffer `scheduled_at` timestamps. Parked as **BLOCKED-ON-CYCLE** — verification rolls to Session 45.
+
+**Stasis regression triage — the main event:**
+
+*Symptom:* `stasis_self_check` tasks dispatched to the 6 agents by the daily 20:28–20:32 UTC watchdog were failing with repeated `max-iterations` errors spanning multiple agents (not just Anita). Two failure modes observed in the crew_dispatch table: Groq 413 on 2026-04-07 and "max-iterations" on 2026-04-08/09.
+
+*Investigation:*
+1. Suspected prompt bloat first. Measured the full Layer 1 + Layer 2 prompt stack per agent — all ≤ ~3000 chars. Not the culprit.
+2. Measured Session 35 dispatch-mode tool schemas (the 14-tool allowlist shipped to dispatch agents). Total: **11,544 chars / ~2,886 tokens** in JSON-serialized tool defs.
+3. Per-iteration request size: ~3000 (system prompt) + 11,544 (tool schemas) + 1,100 (dispatch message) = ~15,650 chars / ~3,900 tokens. Well within all provider budgets.
+4. Bloat ruled out. Root cause hypothesis: **iter-cap + tool-loop trap.** The stasis_self_check dispatch asked agents to introspect and return a status observation, but dispatch mode shipped them 14 tools. Agents burned iterations 1–3 issuing tool calls (`read_memory`, `read_protocols`, `get_stripe_metrics`, etc.) looking for data dispatch mode had explicitly stripped (Session 35 skips memory loading on dispatch). Iteration 4 returned `tool_use` content again, the loop hit `maxIterations` and exited. `lastAssistant.content` was `""` because the final assistant turn was tool calls with no text. The fallback `"⚠️ Agent loop reached maximum iterations..."` was returned, matched the isErrorResponse regex, and the task was marked failed.
+5. 2026-04-07 413s explained: Anthropic had a degraded window that day, all agents failed over to Groq, and the accumulated tool-result context across iterations exceeded the Groq per-request TPM budget. Both failure modes share the same root cause — a feedback loop between tool-seeking behavior and a context that cannot provide data.
+
+*Fix — LIGHT MODE dispatch:*
+- **EDIT:** `src/agent/loop.ts` — `processMessage()` gains optional 4th arg `textOnly?: boolean`. When `true`, `toolDefs = []` (zero tools shipped), the agent cannot call tools, and the loop runs single-pass. Logs `⚡ [AgentLoop] LIGHT MODE — 0 tools (text-only response)` on entry.
+- **EDIT:** `src/index.ts` — new `LIGHT_TASKS = new Set(["stasis_self_check"])` set in the DispatchPoller. When a claimed task's type is in LIGHT_TASKS, the poller:
+  1. Adds a `stasis_self_check` entry to `EXECUTION_DIRECTIVES` telling the agent to return a single plain-text message (NOMINAL + one-line observation, or a single concrete concern/opportunity/pivot recommendation) in their character voice, under 300 words, with NO tool calls.
+  2. Omits the `completionTail` string ("When done, use crew_dispatch tool with action 'complete'...") that normally gets appended, because the agent has no tools.
+  3. Sets `iterCap = 1` instead of 4/6.
+  4. Passes `isLightTask` as the new 4th arg to `processMessage`.
+- The existing `isStasisNominal` auto-completion logic (~index.ts line 2993) already catches stasis_self_check responses and writes them back to crew_dispatch as `status=completed`, so the task completes even without a tool call.
+- Zero impact on heavy dispatch paths (`viral_clip_extraction`, `narrative_weaponization`, `content_scheduling`, etc.) — they go through the normal tool-enabled path unchanged.
+
+*Sandbox file-truncation damage (secondary incident):*
+- While editing `src/agent/loop.ts` and `src/index.ts`, the sandbox-side copies of both files silently truncated (a known risk — see `feedback_file_truncation_risk.md`). `tsc --noEmit` surfaced `loop.ts(448,52): error TS1005` and `index.ts(3268,147): error TS1003`. Investigation: loop.ts ended mid-comment at `PERSONA_` and index.ts ended mid-template-literal at `${Math.round(mem.` — classic sandbox truncation.
+- **Recovery:** appended the missing tails directly via bash heredoc (loop.ts tail = `REGISTRY, causing crashes when ...` + 19 lines through class close; index.ts tail = 49 lines through `process.exit(1); });`). CRLF preserved via `sed -i 's/$/\r/'`. Post-repair `tsc --noEmit` returned clean.
+- **Lesson reinforced:** after any file-tool Write on files > 300 lines, verify both Windows-side and sandbox-side line counts agree before running tsc. The Windows Write tool writes successfully while the sandbox mount can lag or silently truncate.
+
+**Verification in production (2026-04-10 06:09–06:11 UTC):**
+- Dispatched 2 synthetic `stasis_self_check` probes (anita, vector) via Supabase SQL insert into crew_dispatch with `payload.note='S44-LIGHTMODE-PROBE'` at 06:09:26 UTC.
+- Both probes were claimed at 06:10:12 UTC (46s after insert — within expected poller interval post-deploy).
+- **Anita:** completed at 06:10:30 UTC (17.4s elapsed). Result: `*[inner state: probe processed, machine running clean, one approved task screaming for execution, ready to weaponize whatever Alfred drops next]*` — clean character-voice text response.
+- **Vector:** completed at 06:11:12 UTC (59.3s elapsed). Result: `Current status: - Revenue: Zero baseline. No subscription revenue flowing. - Distribution: Buffer analytics query failing on schema mismatch. Content pipeline visibility compromised. - Task queue: Empty. ... This isn't growth stagnation — this is pre-launch state. Distribution infrastructure shows GraphQL schema drift in Buffer inte...` (truncated). Clean text response AND a useful side observation about Buffer analytics schema drift.
+- Both status rows: `status=completed`, `result` populated, no max-iterations error. LIGHT MODE VERIFIED.
+- Probe rows cleaned from crew_dispatch after verification.
+
+**Side finding flagged for Session 45:** Vector's stasis response surfaced "Buffer analytics query failing on schema mismatch / GraphQL schema drift in Buffer inte...". Buffer analytics tool (added Session 36) may have regressed against a Buffer API schema change. Needs investigation in Session 45 — could be masking other distribution visibility issues. Not currently blocking pipeline runs (Buffer post creation still works), but the Vector weekly analytics sweep may be returning garbage.
+
+**Files touched:**
+- **MODIFIED:** `src/agent/loop.ts` (+textOnly arg, +LIGHT MODE branch, +log line; ~37 lines inserted/modified)
+- **MODIFIED:** `src/index.ts` (+LIGHT_TASKS set, +stasis_self_check EXECUTION_DIRECTIVES entry, +completionTail conditional, +iterCap light branch, +4th arg passed to processMessage; ~27 lines inserted/modified)
+- **MODIFIED:** `SOVEREIGN-SENTINEL-BOT_MASTER-REFERENCE.md` (header + Session 43 DVP flip + this entry)
+
+**DVP Status:**
+- `[DVP: VERIFIED]` Session 44 LIGHT MODE dispatch — verified in production 2026-04-10 06:10–06:11 UTC via anita + vector synthetic probes. Both completed with clean text, no max-iterations error.
+- `[DVP: VERIFIED]` Session 43 Task 2 hard-inject — flipped from ADDRESSED to VERIFIED this session.
+- `[DVP: ADDRESSED — BLOCKED-ON-CYCLE]` Session 43 Task 4 Anti-Ghost jitter — deployed, waiting on first VidRush pipeline cycle for Buffer timestamp verification.
+
+**Next session priorities (Session 45):**
+1. **Kinetic Baseline (Task 3 of YouTube Growth Protocol v2.0).** Build ffmpeg filter chain for intra-segment visual interrupts on existing Ken Burns clips: 1.2× scale punch-ins, 0.2s chromatic aberration / RGB-split glitch overlays, Ken Burns direction reversal. Target frequency: 3–4s for The Containment Field, 5–7s for Ace Richie. Constraint: do NOT break the Session 40 16-segment / 22–37s audio-sync contract. This is a perceptual overlay, not a new image asset.
+2. **Verify Session 43 Task 4 Anti-Ghost jitter.** Inspect Buffer `scheduled_at` timestamps from the first post-Session-43 pipeline cycle; confirm minute values land in a `-14..+14` envelope around the 8 base slots. Flip DVP ADDRESSED → VERIFIED.
+3. **Investigate Buffer analytics schema drift** (flagged by Vector in Session 44 probe). GraphQL schema in the buffer_analytics tool may be stale.
+4. **Revenue architecture** — still the top-line objective. Zero MRR against $1.2M target = 0.0000% velocity. T0/T1 free tiers and T2-T7 paid tiers are mapped in design-tokens.json; what's missing is distribution that actually drives signups.

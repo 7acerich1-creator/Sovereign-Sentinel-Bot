@@ -89,15 +89,15 @@ async function callProvider(provider: TTSProvider, text: string, speed?: number)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async function elevenLabsTTS(text: string, speed?: number): Promise<Buffer> {
-  // Session 42: Dual-key support. Primary key → Alt key failover.
-  // Add ELEVENLABS_API_KEY_ALT to Railway for fresh credits.
-  const primaryKey = config.voice.elevenLabsApiKey;
-  const altKey = config.voice.elevenLabsApiKeyAlt;
+  // Session 42: Dual-key support. ALT (fresh) → Primary (old) failover.
+  // Chain: ELEVENLABS_API_KEY_ALT → ELEVENLABS_API_KEY → fall through to Edge TTS
+  const altKey = config.voice.elevenLabsApiKeyAlt;   // Fresh credits — tried FIRST
+  const primaryKey = config.voice.elevenLabsApiKey;   // Original key — fallback
 
   if (!primaryKey && !altKey) throw new Error("ElevenLabs API key not configured");
 
-  // Try primary first, then alt if primary is exhausted (402/quota errors)
-  const keysToTry = [primaryKey, altKey].filter(Boolean) as string[];
+  // ALT first (live/fresh), then primary (old/may be exhausted)
+  const keysToTry = [altKey, primaryKey].filter(Boolean) as string[];
   let lastError: Error | null = null;
 
   for (const apiKey of keysToTry) {

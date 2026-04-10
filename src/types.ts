@@ -233,6 +233,7 @@ export interface GravityClawConfig {
   voice: {
     whisperApiKey?: string;
     elevenLabsApiKey?: string;
+    elevenLabsApiKeyAlt?: string;
     elevenLabsVoiceId?: string;
     openaiTtsModel?: string;
   };

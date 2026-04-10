@@ -88,8 +88,8 @@ export const config: GravityClawConfig = {
 
   voice: {
     whisperApiKey: process.env.OPENAI_API_KEY || process.env.WHISPER_API_KEY,
-    elevenLabsApiKey: process.env.ELEVENLABS_API_KEY || process.env.ELEVENLABS_API_KEY_ALT, // Primary → Alternate fallback
-    elevenLabsApiKeyAlt: process.env.ELEVENLABS_API_KEY_ALT, // Standalone alternate key for manual rotation
+    elevenLabsApiKey: process.env.ELEVENLABS_API_KEY, // Original key (may be exhausted)
+    elevenLabsApiKeyAlt: process.env.ELEVENLABS_API_KEY_ALT, // Fresh alternate key — tried FIRST when FORCE_ELEVENLABS=true
     elevenLabsVoiceId: process.env.ELEVENLABS_VOICE_ID || "IRHApOXLvnW57QJPQH2P", // Adam Brooding, Dark & Tough
     openaiTtsModel: process.env.OPENAI_TTS_MODEL || "tts-1",
   },

@@ -154,6 +154,10 @@ interface ClipMeta {
   captionText: string;
   thumbnailPath?: string | null;  // Session 39: per-clip thumbnail with bold text overlay
   thumbnailUrl?: string | null;   // Session 39: public URL after Supabase upload
+  // Session 42: Semantic metadata from StoryMoment extraction — enables diverse copy/titles per clip
+  storyTitle?: string;            // Unique title from LLM story moment identification
+  storyHook?: string;             // Scroll-stopping hook line per clip
+  thumbnailText?: string;         // 2-4 word overlay text
 }
 
 interface PlatformCopy {
@@ -457,6 +461,10 @@ async function chopLongFormIntoClips(
           endSec: paddedEnd,
           captionText: `${moment.title} | ${moment.hook}`,
           thumbnailPath: clipThumbPath,
+          // Session 42: Preserve semantic metadata for diverse copy generation
+          storyTitle: moment.title,
+          storyHook: moment.hook,
+          thumbnailText: moment.thumbnail_text,
         });
         console.log(`  ✂️ Clip ${i}: "${moment.title}" ${paddedStart.toFixed(1)}s → ${paddedEnd.toFixed(1)}s (${duration.toFixed(1)}s, padded ±0.3s)`);
       } catch (err: any) {
@@ -709,9 +717,23 @@ async function generatePlatformCopy(
   const batchSize = 5;
   for (let batchStart = 0; batchStart < clips.length; batchStart += batchSize) {
     const batch = clips.slice(batchStart, batchStart + batchSize);
-    const clipDescriptions = batch.map(c =>
-      `Clip ${c.index + 1} (${c.startSec.toFixed(0)}s-${c.endSec.toFixed(0)}s): Segment from "${sourceTitle}"`
-    ).join("\n");
+    // Session 42: Pass clip-specific semantic data (title, hook, thumbnail_text) to the LLM.
+    // Previously only sent generic "Segment from {sourceTitle}" — every clip got near-identical copy
+    // targeting the same audience with the same keywords. Now each clip gets unique context
+    // so the LLM produces diverse titles/keywords for wide YouTube distribution.
+    const clipDescriptions = batch.map(c => {
+      const parts = [`Clip ${c.index + 1} (${c.startSec.toFixed(0)}s-${c.endSec.toFixed(0)}s)`];
+      if (c.captionText && c.captionText !== sourceTitle) {
+        parts.push(`TOPIC: "${c.captionText}"`);
+      }
+      // StoryMoment title/hook stored on clip during extraction (Step 4)
+      if ((c as any).storyTitle) parts.push(`TITLE: "${(c as any).storyTitle}"`);
+      if ((c as any).storyHook) parts.push(`HOOK: "${(c as any).storyHook}"`);
+      if ((c as any).thumbnailText) parts.push(`THUMBNAIL: "${(c as any).thumbnailText}"`);
+      // Fallback if no semantic data
+      if (parts.length === 1) parts.push(`Segment from "${sourceTitle}"`);
+      return parts.join(" | ");
+    }).join("\n");
 
     // Session 36: Enhanced with social-optimization-prompt intelligence.
     // Platform-specific algorithm awareness + audience psychology + copy architecture.
@@ -737,11 +759,14 @@ PLATFORM-SPECIFIC OPTIMIZATION RULES (obey these exactly):
 
 COPY ARCHITECTURE: Use GLITCH (pattern interrupt) → PIVOT (reframe) → BRIDGE (to their world) → ANCHOR (to Protocol 77 / Sovereign Synthesis).
 
+KEYWORD DIVERSITY RULE (CRITICAL):
+Each clip MUST target a DIFFERENT keyword cluster and audience segment. The content is universal — what changes is WHO discovers it. If Clip 1 targets "dark psychology manipulation", Clip 2 must target something completely different like "corporate escape plan" or "subconscious reprogramming". YouTube distributes each clip independently. Same keywords = same audience = wasted reach. NEVER repeat the same core keyword across clips. Think: what DIFFERENT person would search for this specific insight?
+
 CLIPS:
 ${clipDescriptions}
 
 Return ONLY valid JSON — an array of objects, one per clip, each with keys: youtube_short, tiktok, instagram, x_twitter, threads, linkedin, facebook.
-All values are strings (the caption text for that platform).`;
+All values are strings (the caption text for that platform). Each clip's youtube_short title MUST start with a UNIQUE keyword/topic angle.`;
 
     try {
       const response = await llm.generate(
@@ -946,9 +971,11 @@ async function scheduleBufferWeek(
         if (result.includes("✅")) {
           scheduledCount++;
           console.log(`  📌 Clip ${clipIdx} → ${channel.service}/${channel.name} @ ${scheduledAt} [text]`);
+        } else {
+          console.error(`  ❌ Clip ${clipIdx} → ${channel.service}/${channel.name}: REJECTED — ${result.slice(0, 300)}`);
         }
       } catch (err: any) {
-        console.error(`[Orchestrator] Buffer failed clip ${clipIdx} → ${channel.service}: ${err.message?.slice(0, 200)}`);
+        console.error(`[Orchestrator] Buffer EXCEPTION clip ${clipIdx} → ${channel.service}: ${err.message?.slice(0, 300)}`);
       }
 
       globalSlotIndex++;
@@ -977,14 +1004,23 @@ async function scheduleBufferWeek(
 
         // Build platform-specific metadata based on channel service
         const metadata: Record<string, unknown> = {};
-        const clipTitle = postText.split("\n")[0].slice(0, 100) || "Sovereign Synthesis";
+
+        // Session 42: Use clip's semantic storyTitle for YouTube/TikTok titles (unique per clip).
+        // Fallback: extract from post text first line. Last resort: source title.
+        const clipTitle = (
+          clip.storyTitle ||
+          postText.split("\n")[0].slice(0, 100) ||
+          "Sovereign Synthesis"
+        ).slice(0, 95); // Leave room for #Shorts suffix
 
         // ENUM: prefix = GraphQL enum values (rendered unquoted by buildGqlObj in social-scheduler.ts)
         // Without prefix = regular strings (rendered quoted)
         // This convention survives JSON.stringify/parse round-trip.
         if (channel.service === "youtube") {
+          // Session 42: Enforce #Shorts in title (PLATFORM_DEFAULTS.youtube_shorts.requiredInTitle)
+          const ytTitle = clipTitle.includes("#Shorts") ? clipTitle : `${clipTitle} #Shorts`;
           const ytMeta: Record<string, unknown> = {
-            title: clipTitle,
+            title: ytTitle.slice(0, 100),
             categoryId: "22",               // String! per Buffer schema
             privacy: "ENUM:public",          // YoutubePrivacy enum — NOT a quoted string
             madeForKids: false,
@@ -1016,10 +1052,16 @@ async function scheduleBufferWeek(
           });
           if (result.includes("✅")) {
             scheduledCount++;
-            console.log(`  📌 Clip ${clipIdx} → ${channel.service}/${channel.name} @ ${scheduledAt} [video+metadata]`);
+            console.log(`  📌 Clip ${clipIdx} → ${channel.service}/${channel.name} @ ${scheduledAt} [video+metadata] title="${clipTitle}"`);
+          } else {
+            // Session 42: Log full result for failed posts to diagnose platform-specific issues
+            console.error(`  ❌ Clip ${clipIdx} → ${channel.service}/${channel.name}: REJECTED — ${result.slice(0, 300)}`);
+            console.error(`     Media URL: ${clip.publicUrl?.slice(0, 100)}`);
+            console.error(`     Metadata: ${JSON.stringify(metadata).slice(0, 200)}`);
           }
         } catch (err: any) {
-          console.error(`[Orchestrator] Buffer failed clip ${clipIdx} → ${channel.service}: ${err.message?.slice(0, 200)}`);
+          console.error(`[Orchestrator] Buffer EXCEPTION clip ${clipIdx} → ${channel.service}: ${err.message?.slice(0, 300)}`);
+          console.error(`  Media URL: ${clip.publicUrl?.slice(0, 100)}`);
         }
 
         globalSlotIndex++;

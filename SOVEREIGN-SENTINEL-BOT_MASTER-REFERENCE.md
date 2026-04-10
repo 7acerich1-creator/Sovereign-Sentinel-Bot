@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-08 (Session 40 — Title uniqueness, visual pacing, pipeline concurrency queue. Commit `53e61f3`.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-09 (Session 41 — Shorts mid-sentence fix `3545815` + Railway error sweep: RLS bypass, schema fix, dispatch stagger 20s, yt-dlp proxy support. Commit `9c0e7f9`.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 

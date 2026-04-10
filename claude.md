@@ -1,7 +1,8 @@
 # Project Constitution: claude.md
 
 ## ⚡ Session Start Protocol (READ FIRST — NON-NEGOTIABLE)
-1. **Read `LIVE_STATE.md` at repo root FIRST.** It is auto-generated from `src/voice/tts.ts` + `src/index.ts` and is the terminal authority on TTS routing, LLM teams, env vars, git SHA.
+0. **Read `NORTH_STAR.md` at repo root FIRST — before anything.** It holds the $1.2M target, the 5 input metrics that actually lead to revenue, and the current highest-leverage action. If the "Current Highest-Leverage Action" field has not been updated recently, surface that immediately. No build task starts without answering: "does this move one of the 5 metrics in <7 days?" See `feedback_revenue_first_pushback.md` in memory for the pushback protocol.
+1. **Read `LIVE_STATE.md` at repo root SECOND.** It is auto-generated from `src/voice/tts.ts` + `src/index.ts` and is the terminal authority on TTS routing, LLM teams, env vars, git SHA.
 2. **If `LIVE_STATE.md` is missing or older than 24h**, run `npm run verify-state` to regenerate it before touching anything.
 3. **Read `SOVEREIGN-SENTINEL-BOT_MASTER-REFERENCE.md` for invariants + history.** If its runtime claims contradict `LIVE_STATE.md`, **`LIVE_STATE.md` wins** — flag the contradiction and patch the master ref before proceeding.
 4. **When the Architect shares a URL, FETCH IT.** `yt-dlp` + `ffmpeg` in the bash sandbox for videos, `WebFetch` for pages, Chrome tools for social. Never cite capability limits without trying every tool first.

@@ -25,9 +25,12 @@ RUN ./node_modules/.bin/tsc && cp src/data/*.json dist/data/
 # (exit 137). Only chromium remains as an apt install.
 FROM nikolaik/python-nodejs:python3.11-nodejs20-slim
 
-# Chromium for browser automation (own layer to release memory before/after unpack)
-RUN apt-get update && apt-get install -y --no-install-recommends chromium \
-    && rm -rf /var/lib/apt/lists/*
+# NOTE: Chromium apt-install was removed — Railway's Singapore builder cannot
+# unpack the 150+ transitive debs without exit 137 OOM. puppeteer-core is loaded
+# lazily in src/tools/browser.ts via `await import()` so the bot starts fine
+# without chromium; only TikTok/Instagram direct browser uploads will fail at
+# runtime (not on the critical dispatch / LIGHT MODE path). Revisit in Session 45
+# by either using a puppeteer base image or downloading chromium via @puppeteer/browsers.
 
 # Static ffmpeg + ffprobe binaries from the mwader stage (avoids apt OOM)
 COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg

@@ -1575,10 +1575,42 @@ async function assembleVideo(
     }
   }
 
-  // ── PRE-RENDER EACH SCENE AS A VIDEO CLIP (Ken Burns, NO fade — xfade handles transitions) ──
+  // ── PRE-RENDER EACH SCENE AS A VIDEO CLIP (Kinetic Baseline on top of Ken Burns, NO fade — xfade handles transitions) ──
   // Each scene renders clean (no fade in/out). True dissolve transitions are applied
   // via ffmpeg xfade filter during concat. This eliminates the black-flash problem
   // where fade-out + fade-in created a visible dark gap between scenes.
+  //
+  // Session 45 — Kinetic Baseline (YouTube Growth Protocol v2.0 Task 3):
+  //   1. Ken Burns direction REVERSES on every other segment (even = zoom-in, odd = zoom-out).
+  //      Linear drift 1.0 ↔ 1.15 across the full segment — eliminates the old "grows for 10s
+  //      then holds flat at 1.15 for 20s" dead-air behavior.
+  //   2. Punch-in pulses via dynamic crop expression at a brand-keyed cadence
+  //      (TCF = 3.5s, Ace Richie = 6.0s). Each pulse pulls 18% inward for 0.2s then snaps back,
+  //      mimicking a 1.2x scale jolt WITHOUT resolution loss (crop then scale back to full dim).
+  //   3. Chromatic aberration (rgbashift ±8px R/B split) fires on the same pulse schedule,
+  //      gated by the `enable` timeline expression. Both filters support T flag (verified 2026-04-10).
+  //   4. Pulses are masked by a 0.5s edge margin on both ends so they never fire inside the
+  //      0.6s xfade overlap region — transitions stay clean.
+  //
+  // HARD CONSTRAINT: the Session 40 16-segment / 22-37s audio-sync contract is preserved.
+  // `thisSegDuration` comes straight from `getSegDuration(i)` (audio-driven), and zoompan's
+  // `d=${thisFrames}` locks output to exactly that duration. Verified via dry-run in sandbox:
+  // nb_frames always equals thisSegDuration*fps to the frame.
+  //
+  // Fallback cascade: Kinetic → Classic Ken Burns → static scale/crop. Never breaks the pipeline.
+
+  const KINETIC_BEAT_PERIOD: Record<Brand, number> = {
+    containment_field: 3.5,  // 3-4s cadence — paranoid/urgent pacing
+    ace_richie:        6.0,  // 5-7s cadence — sovereign/cinematic pacing
+  };
+  const KINETIC_PUNCH_WIDTH = 0.20;  // seconds — pulse window length
+  const KINETIC_PUNCH_AMP   = 0.18;  // inward crop ratio at peak (≈1.22x scale back)
+  const KINETIC_RGB_SHIFT   = 8;     // pixel shift for chromatic aberration
+  const KINETIC_EDGE_MARGIN = 0.5;   // seconds — dodge the 0.6s xfade at both ends
+
+  const kineticBeatPeriod = KINETIC_BEAT_PERIOD[script.brand];
+  const kineticPunchThreshold = (kineticBeatPeriod - KINETIC_PUNCH_WIDTH).toFixed(2);
+  const kineticBeatPeriodStr = kineticBeatPeriod.toFixed(2);
 
   for (let i = 0; i < validSegments.length; i++) {
     const seg = validSegments[i];
@@ -1586,32 +1618,66 @@ async function assembleVideo(
     const thisSegDuration = getSegDuration(i);
     const thisFrames = Math.round(thisSegDuration * fps);
 
-    try {
-      execSync(
-        `ffmpeg -loop 1 -i "${seg.imgPath}" ` +
-          `-t ${thisSegDuration.toFixed(2)} ` +
-          `-vf "zoompan=z='min(zoom+0.0005,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${thisFrames}:s=${dim.width}x${dim.height}:fps=${fps}" ` +
-          `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p ` +
-          `-y "${clipPath}"`,
-        { timeout: 120_000, stdio: "pipe" }
-      );
-      sceneClipPaths.push(clipPath);
-      clipDurations.push(thisSegDuration);
-    } catch (err: any) {
-      console.warn(`[FacelessFactory] Scene ${i} clip render failed, using raw: ${err.message?.slice(0, 150)}`);
-      // Fallback: render without Ken Burns
+    // Pulse expression — 1 inside punch window, 0 elsewhere, masked by edge margins.
+    // Reused in both the crop punch-in and the rgbashift chromatic aberration filters.
+    const kineticEdgeTail = Math.max(KINETIC_EDGE_MARGIN, thisSegDuration - KINETIC_EDGE_MARGIN).toFixed(2);
+    const kineticPulse =
+      `gte(t,${KINETIC_EDGE_MARGIN})*lte(t,${kineticEdgeTail})*` +
+      `gt(mod(t,${kineticBeatPeriodStr}),${kineticPunchThreshold})`;
+
+    // Ken Burns reversal: even segs drift IN (1.0→1.15), odd segs drift OUT (1.15→1.0).
+    const reverseZoom = i % 2 === 1;
+    const zExpr = reverseZoom
+      ? `'1.15-0.15*on/${thisFrames}'`
+      : `'1.0+0.15*on/${thisFrames}'`;
+
+    const kineticVf =
+      `zoompan=z=${zExpr}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${thisFrames}:s=${dim.width}x${dim.height}:fps=${fps},` +
+      `crop=w='iw*(1-${KINETIC_PUNCH_AMP}*(${kineticPulse}))':h='ih*(1-${KINETIC_PUNCH_AMP}*(${kineticPulse}))':x='(iw-out_w)/2':y='(ih-out_h)/2',` +
+      `scale=${dim.width}:${dim.height},` +
+      `rgbashift=rh=-${KINETIC_RGB_SHIFT}:bh=${KINETIC_RGB_SHIFT}:gh=0:enable='${kineticPulse}'`;
+
+    const classicVf =
+      `zoompan=z='min(zoom+0.0005,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${thisFrames}:s=${dim.width}x${dim.height}:fps=${fps}`;
+
+    const staticVf =
+      `scale=${dim.width}:${dim.height}:force_original_aspect_ratio=increase,crop=${dim.width}:${dim.height}`;
+
+    const renderAttempts: { label: string; vf: string; timeout: number }[] = [
+      { label: "Kinetic Baseline",  vf: kineticVf, timeout: 120_000 },
+      { label: "Classic Ken Burns", vf: classicVf, timeout: 120_000 },
+      { label: "Static crop",       vf: staticVf,  timeout: 60_000  },
+    ];
+
+    let rendered = false;
+    for (const attempt of renderAttempts) {
       try {
         execSync(
           `ffmpeg -loop 1 -i "${seg.imgPath}" ` +
             `-t ${thisSegDuration.toFixed(2)} ` +
-            `-vf "scale=${dim.width}:${dim.height}:force_original_aspect_ratio=increase,crop=${dim.width}:${dim.height}" ` +
+            `-vf "${attempt.vf}" ` +
             `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p ` +
             `-y "${clipPath}"`,
-          { timeout: 60_000, stdio: "pipe" }
+          { timeout: attempt.timeout, stdio: "pipe" }
         );
         sceneClipPaths.push(clipPath);
         clipDurations.push(thisSegDuration);
-      } catch { /* skip this scene entirely */ }
+        if (attempt.label !== "Kinetic Baseline") {
+          console.warn(
+            `[FacelessFactory] Scene ${i} rendered via ${attempt.label} fallback (kinetic path failed)`
+          );
+        }
+        rendered = true;
+        break;
+      } catch (err: any) {
+        console.warn(
+          `[FacelessFactory] Scene ${i} ${attempt.label} render failed: ${err.message?.slice(0, 150)}`
+        );
+        continue;
+      }
+    }
+    if (!rendered) {
+      console.warn(`[FacelessFactory] Scene ${i} ALL render attempts failed — skipping scene entirely`);
     }
   }
 

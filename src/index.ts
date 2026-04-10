@@ -47,6 +47,7 @@ import { TikTokBrowserUploadTool, tiktokLoginFlow } from "./tools/tiktok-browser
 import { InstagramBrowserUploadTool, instagramLoginFlow } from "./tools/instagram-browser-upload";
 import { logTask, updateTask, logAgentActivity } from "./tools/task-logger";
 import { CrewDispatchTool, claimTasks, claimAllPending, completeDispatch, dispatchTask, triggerPipelineHandoffs, checkPipelineComplete } from "./agent/crew-dispatch";
+import { injectYoutubeProtocolsIfNeeded } from "./agent/protocol-injection";
 import { ProtocolReaderTool, ProtocolWriterTool } from "./tools/protocol-reader";
 import { RelationshipContextTool } from "./tools/relationship-context";
 import { SapphireSentinel } from "./proactive/sapphire-sentinel";
@@ -2794,10 +2795,31 @@ async function main() {
               const executionDirective = EXECUTION_DIRECTIVES[task.task_type] ||
                 `Process this task according to your role.`;
 
+              // ── Session 43: Hard-inject Architect YouTube Growth Protocol directives ──
+              // If this task is YouTube-related, prepend the relevant youtube_*_protocol
+              // bytes directly into the task context. Strips the agent of the "choice"
+              // to skip the protocol — it becomes part of the task payload itself.
+              // No latency on non-YT tasks (injector short-circuits on isYoutubeTask check).
+              let architectDirectives = "";
+              try {
+                architectDirectives = await injectYoutubeProtocolsIfNeeded(
+                  agentName,
+                  task.task_type,
+                  task.payload
+                );
+                if (architectDirectives) {
+                  console.log(`📡 [ProtocolInjection] ${agentName}/${task.task_type} — ${architectDirectives.length} chars injected`);
+                }
+              } catch (injErr: any) {
+                console.warn(`[ProtocolInjection] Non-fatal error for ${agentName}/${task.task_type}: ${injErr.message?.slice(0, 200)}`);
+              }
+
               const dispatchMessage: Message = {
                 id: `dispatch-${task.id}`,
                 role: "user",
-                content: `[DISPATCHED TASK from ${task.from_agent}]\nType: ${task.task_type}\nDispatch ID: ${task.id}\n\nPayload:\n${payloadStr}\n\n` +
+                content: `[DISPATCHED TASK from ${task.from_agent}]\nType: ${task.task_type}\nDispatch ID: ${task.id}\n\n` +
+                  (architectDirectives ? `${architectDirectives}\n\n` : "") +
+                  `Payload:\n${payloadStr}\n\n` +
                   `${executionDirective}\n\nWhen done, use crew_dispatch tool with action "complete" and task_id "${task.id}" to mark it done.`,
                 timestamp: new Date(),
                 channel: "telegram",

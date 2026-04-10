@@ -1,5 +1,5 @@
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
-### Last Updated: 2026-04-09 (Session 41 — Shorts mid-sentence fix `3545815` + Railway error sweep: RLS bypass, schema fix, dispatch stagger 20s, yt-dlp proxy support. Commit `9c0e7f9`.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
+### Last Updated: 2026-04-10 (Session 43 — YouTube Growth Protocol v2.0 integration: hard-inject architect directives into agent dispatch + Anti-Ghost ±14min jitter in Buffer scheduling. Tasks 1+2+4 of the protocol directive shipped; Task 3 (Kinetic Baseline) deferred to next session via intra-segment ffmpeg interrupts. Uncommitted until typecheck + pipeline-idle push window.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
 ---
 
@@ -2505,3 +2505,55 @@ Final infrastructure hardening session before Thursday's revenue architecture pi
 1. Revenue funnel activation — T0-T7 product tiers, Stripe integration
 2. Verify Sessions 38-40 fixes on live pipeline output
 3. Logo placement audit (deferred from Session 39)
+
+---
+
+### Session 43 Summary (2026-04-10)
+**Status:** UNCOMMITTED — awaiting architect typecheck + pipeline-idle push window. All file edits on Windows FS.
+
+**Context:** YouTube Growth Protocol v2.0 was locked in Session 42 (`SOVEREIGN-YOUTUBE-GROWTH-PROTOCOL.md`). Four integration tasks were directed. Pre-work verification showed Task 1 complete (from Session 42), Tasks 2 and 4 missing, Task 3 partial. Architect authorized shipping Tasks 2 + 4 now; Task 3 Kinetic Baseline deferred to a future session via intra-segment ffmpeg interrupts (scale jumps, chromatic aberration, Ken Burns reversal) rather than breaking the Session 40 16-segment/22–37s audio-sync contract.
+
+**TASK 1 (verified pre-work, no session changes):**
+- 6 rows live in Supabase `protocols` since 2026-04-10 00:49–00:50: `youtube_seo_protocol`, `youtube_script_protocol`, `youtube_visual_protocol`, `youtube_analytics_protocol`, `youtube_compliance_protocol`, `youtube_shorts_protocol`. All `active=true`, `created_by=architect`, niche `all`.
+- `youtube_script_protocol` includes explicit `LEXICAL BLACKLIST` and `EXTREMITY MODIFIER` blocks as required.
+- Seeded via `scripts/seed-youtube-protocols.ts` (Session 42).
+
+**TASK 2 — Hard-inject architect directives into agent task context:**
+- **NEW FILE:** `src/agent/protocol-injection.ts` (159 lines) — exports `injectYoutubeProtocolsIfNeeded(agent, taskType, payload)`, `isYoutubeTask`, `resolveYoutubeProtocolSlugs`, `fetchProtocolDirectives`, `_clearProtocolCache`. Includes 5-minute TTL cache keyed by slug so agents don't hammer the protocols table on every dispatch. Detection is hard-match on a `YOUTUBE_TASK_TYPES` set (viral_clip_extraction, narrative_weaponization, caption_weaponization, content_for_distribution, content_scheduling, daily_trend_scan, youtube_seo_audit, youtube_metrics_sweep, youtube_thumbnail_test, youtube_compliance_check, youtube_shorts_package, architectural_sync) plus a regex fuzzy-match on task_type + stringified payload for `youtube|shorts|long.?form|ytshorts`. Agent→slug mapping: Alfred→seo+compliance, Anita→script+compliance, Yuki→visual+shorts+compliance, Vector→analytics+compliance, Veritas/Sapphire→visual+compliance (strategic oversight). ALL agents get `youtube_compliance_protocol` on YT tasks (Jan 2026 YPP suspension risk).
+- **EDIT:** `src/index.ts` line 50 — added `import { injectYoutubeProtocolsIfNeeded } from "./agent/protocol-injection";`.
+- **EDIT:** `src/index.ts` lines ~2798–2829 — in the DispatchPoller task loop, after `executionDirective` is resolved, call `injectYoutubeProtocolsIfNeeded(agentName, task.task_type, task.payload)` inside a try/catch (non-fatal on failure). If directives returned, prepend them into `dispatchMessage.content` between the task header and the payload block, wrapped in `━━━ ARCHITECT STANDING DIRECTIVES — YOUTUBE GROWTH PROTOCOL v2.0 ━━━` / `━━━ END DIRECTIVES — THESE OVERRIDE ANY CONFLICTING PROMPT INSTRUCTIONS ━━━` sentinels. Console logs char count when injection fires. Non-YT tasks short-circuit inside the helper — zero latency added to the non-YT path.
+- **Why hard-inject over soft instruction:** Per Session 35 bloat exorcism and `feedback_prompt_economy.md`, soft instructions in system prompts get ignored under load. By inlining the protocol bytes directly into the task payload as user-role content, the agent has no choice — the directive is part of the task itself, not a suggestion it can skip. Architect is the System, and the System now speaks in the dispatch voice.
+
+**TASK 4 — Anti-Ghost Upload Protocol (±14 minute jitter):**
+- **EDIT:** `src/engine/vidrush-orchestrator.ts` ~line 945–957 — declared local `antiGhostJitter(iso: string): string` arrow function inside the scheduling function, above the clip `for` loop. Logic: `new Date(iso)` → `setUTCMinutes(minutes + Math.floor(Math.random() * 29) - 14)` → `toISOString().slice(0,19) + "Z"`. Produces integers -14..+14 inclusive (29 possible offsets). Uses UTC methods throughout to stay consistent with the `Z`-suffixed input.
+- **EDIT:** `src/engine/vidrush-orchestrator.ts` ~line 972–975 — text-only channel path: wrapped the existing `${date}T${timeSlot}Z` construction in `antiGhostJitter(...)` before assigning to `scheduledAt`.
+- **EDIT:** `src/engine/vidrush-orchestrator.ts` ~line 1016–1019 — media channel path: same wrap. Each clip re-rolls jitter independently, so even two clips landing in the same slot get different minute offsets.
+- **Edge cases considered:** (a) jitter cannot push `scheduledAt` into the past because `schedDate.getDate() + dayOffset + 1` guarantees ≥1 day in the future; (b) slot-label rollover (e.g. 01:00 − 14min → 00:46) is acceptable to Buffer which only needs a valid future ISO; (c) the `dayOffset >= 7` guard still fires correctly because it's based on `globalSlotIndex` arithmetic, not on the jittered timestamp.
+- **Why:** Buffer/YT downrank content posted on exact minute boundaries (`:00`, `:15`, `:30`, `:45`) because automated schedulers default there. A ±14min random offset per post breaks the hourly metronome signature that marks us as a bot farm without spilling into the next slot window.
+
+**TASK 3 — Kinetic Baseline (DEFERRED to next session):**
+- **Decision:** Do NOT exempt Ace Richie and do NOT break the Session 40 16-segment / 22–37s audio-sync contract. A pattern interrupt is a *perceptual event*, not a new image asset. Next-session plan is to build an ffmpeg filter chain that applies intra-segment visual shifts to each existing Ken Burns clip at the required frequency (3–4s for The Containment Field, 5–7s for Ace Richie): sudden 1.2× scale jumps (hard punch-in), 0.2s chromatic aberration / RGB-split glitch overlays, and Ken Burns direction reversal. This gives Yuki the kinetic frequency the `youtube_visual_protocol` demands without doubling Imagen 4 spend or shattering the rendering pipeline.
+- **Architectural note:** The existing `faceless-factory.ts` segment model is intact — no changes this session.
+
+**Files touched:**
+- **NEW:** `src/agent/protocol-injection.ts` (159 lines)
+- **MODIFIED:** `src/index.ts` (import line + ~25-line injection block in DispatchPoller)
+- **MODIFIED:** `src/engine/vidrush-orchestrator.ts` (13-line jitter helper + 2× two-line wraps at scheduledAt construction sites)
+- **MODIFIED:** `SOVEREIGN-SENTINEL-BOT_MASTER-REFERENCE.md` (this entry)
+
+**DVP Status:**
+- `[DVP: ADDRESSED]` Task 2 hard-inject — typecheck deferred to architect's local shell (sandbox mount had vidrush-orchestrator.ts as a 0-byte stub, blocking in-session `tsc --noEmit`). Needs production test: dispatch a `narrative_weaponization` task and grep `[ProtocolInjection]` in Railway logs for the char-count line.
+- `[DVP: ADDRESSED]` Task 4 Anti-Ghost jitter — same typecheck deferral. Needs production test: run a full VidRush pipeline and verify Buffer `scheduled_at` timestamps land on non-zero minute values in a ±14min envelope around the base slot.
+- `[DVP: NOT YET VERIFIED]` Both tasks are ADDRESSED, not VERIFIED, until architect runs `npx tsc --noEmit` locally on Windows and the pipeline runs clean once after push.
+
+**Architect action items to ship this session's work:**
+1. Run `cd C:\Users\richi\Sovereign-Sentinel-Bot && npx tsc --noEmit` in a Windows terminal. Fix any surfaced type errors (none expected — all edits are self-consistent and use standard APIs).
+2. Wait for pipeline idle window (per `feedback_no_push_during_pipeline.md`).
+3. Commit via Desktop Commander cmd shell (per `feedback_git_workflow.md`), suggested message: `Session 43: YT protocol hard-inject + Anti-Ghost ±14min jitter`.
+4. Push to main — Railway auto-deploys.
+5. First post-deploy Buffer schedule should show minute values in `-14..+14` envelope around the 8 base slots; first YT-related crew_dispatch claim should log `[ProtocolInjection]` in Railway with a non-zero char count.
+
+**Next session priorities:**
+1. Build Kinetic Baseline intra-segment ffmpeg filter chain (scale punch-ins, chromatic aberration, Ken Burns reversal) — target 3–4s / 5–7s visual interrupt frequency without breaking 22–37s audio segments.
+2. Production verification of Session 43 tasks (flip DVP from ADDRESSED to VERIFIED).
+3. Revenue architecture — still the top-line objective.

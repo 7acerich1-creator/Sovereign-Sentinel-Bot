@@ -942,6 +942,20 @@ async function scheduleBufferWeek(
   const now = new Date();
   let globalSlotIndex = 0;
 
+  // ── Session 43: Anti-Ghost Upload Protocol ──
+  // YouTube/Buffer de-prioritizes content posting on exact minute boundaries
+  // (:00, :15, :30, :45) because automated posters all default to them.
+  // We inject a random ±14 minute offset per post so timestamps look human.
+  // 29 possible offsets (-14..+14 inclusive) — small enough to stay in slot
+  // neighborhood, large enough to break the hourly metronome signature.
+  const antiGhostJitter = (iso: string): string => {
+    const d = new Date(iso);
+    const jitterMin = Math.floor(Math.random() * 29) - 14; // -14..+14
+    d.setUTCMinutes(d.getUTCMinutes() + jitterMin);
+    // Buffer expects ISO8601 with Z suffix, seconds precision is fine
+    return d.toISOString().slice(0, 19) + "Z";
+  };
+
   for (let clipIdx = 0; clipIdx < clips.length; clipIdx++) {
     const clip = clips[clipIdx];
     const copy = copyMap.get(clip.index);
@@ -955,7 +969,10 @@ async function scheduleBufferWeek(
 
       const schedDate = new Date(now);
       schedDate.setDate(schedDate.getDate() + dayOffset + 1);
-      const scheduledAt = `${schedDate.toISOString().split("T")[0]}T${timeSlots[slotIdx]}Z`;
+      // Session 43: Apply Anti-Ghost ±14min jitter to defeat metronome detection
+      const scheduledAt = antiGhostJitter(
+        `${schedDate.toISOString().split("T")[0]}T${timeSlots[slotIdx]}Z`
+      );
 
       const copyKey = SERVICE_TO_COPY_KEY[channel.service] || "x_twitter";
       const postText = (copy as any)[copyKey] || copy.x_twitter || copy.threads ||
@@ -996,7 +1013,11 @@ async function scheduleBufferWeek(
 
         const schedDate = new Date(now);
         schedDate.setDate(schedDate.getDate() + dayOffset + 1);
-        const scheduledAt = `${schedDate.toISOString().split("T")[0]}T${timeSlots[slotIdx]}Z`;
+        // Session 43: Apply Anti-Ghost ±14min jitter — each clip re-rolls jitter,
+        // so even clips scheduled into the same slot land at different minutes.
+        const scheduledAt = antiGhostJitter(
+          `${schedDate.toISOString().split("T")[0]}T${timeSlots[slotIdx]}Z`
+        );
 
         const copyKey = SERVICE_TO_COPY_KEY[channel.service] || "tiktok";
         const postText = (copy as any)[copyKey] || copy.tiktok || copy.instagram ||

@@ -2561,7 +2561,7 @@ Final infrastructure hardening session before Thursday's revenue architecture pi
 ---
 
 ### Session 44 Summary (2026-04-10)
-**Status:** SHIPPED — commit `1a766d2` on 2026-04-10, "Session 44: LIGHT MODE dispatch - stasis_self_check text-only". 2 files changed, 58 insertions, 6 deletions. Pushed to origin/main, Railway auto-deployed. Verified in production at 06:10–06:11 UTC via synthetic probes.
+**Status:** COMMITTED BUT NOT DEPLOYED — commit `1a766d2` on 2026-04-10, "Session 44: LIGHT MODE dispatch - stasis_self_check text-only". 2 files changed, 58 insertions, 6 deletions. Pushed to origin/main. **Railway auto-deploy FAILED twice** (see "Build failure + DVP correction" block below). A fresh empty commit `b8a5cc3` was pushed at 06:39 UTC to retrigger the build; verification pending.
 
 **Planned target:** Kinetic Baseline (Task 3). **Actual target:** Stasis regression triage (architect pivot mid-session: "Triage the Anita stasis regression first"). Kinetic Baseline slides to Session 45.
 
@@ -2595,13 +2595,19 @@ Final infrastructure hardening session before Thursday's revenue architecture pi
 - **Recovery:** appended the missing tails directly via bash heredoc (loop.ts tail = `REGISTRY, causing crashes when ...` + 19 lines through class close; index.ts tail = 49 lines through `process.exit(1); });`). CRLF preserved via `sed -i 's/$/\r/'`. Post-repair `tsc --noEmit` returned clean.
 - **Lesson reinforced:** after any file-tool Write on files > 300 lines, verify both Windows-side and sandbox-side line counts agree before running tsc. The Windows Write tool writes successfully while the sandbox mount can lag or silently truncate.
 
-**Verification in production (2026-04-10 06:09–06:11 UTC):**
-- Dispatched 2 synthetic `stasis_self_check` probes (anita, vector) via Supabase SQL insert into crew_dispatch with `payload.note='S44-LIGHTMODE-PROBE'` at 06:09:26 UTC.
-- Both probes were claimed at 06:10:12 UTC (46s after insert — within expected poller interval post-deploy).
-- **Anita:** completed at 06:10:30 UTC (17.4s elapsed). Result: `*[inner state: probe processed, machine running clean, one approved task screaming for execution, ready to weaponize whatever Alfred drops next]*` — clean character-voice text response.
-- **Vector:** completed at 06:11:12 UTC (59.3s elapsed). Result: `Current status: - Revenue: Zero baseline. No subscription revenue flowing. - Distribution: Buffer analytics query failing on schema mismatch. Content pipeline visibility compromised. - Task queue: Empty. ... This isn't growth stagnation — this is pre-launch state. Distribution infrastructure shows GraphQL schema drift in Buffer inte...` (truncated). Clean text response AND a useful side observation about Buffer analytics schema drift.
-- Both status rows: `status=completed`, `result` populated, no max-iterations error. LIGHT MODE VERIFIED.
-- Probe rows cleaned from crew_dispatch after verification.
+**Verification attempt 1 (2026-04-10 06:09–06:11 UTC) — FALSE POSITIVE:**
+- Dispatched 2 synthetic `stasis_self_check` probes (anita, vector) at 06:09:26 UTC. Both returned clean text responses — Anita 17.4s, Vector 59.3s with a side observation about Buffer analytics schema drift.
+- I initially interpreted this as LIGHT MODE verified and flipped the DVP to VERIFIED. **This was wrong.** Railway was still running Session 43 code at that moment (see build failure block below). Old code (14-tool allowlist, iterCap=4) can coincidentally return a text-only response if the LLM happens to emit prose instead of a tool call on early iterations. Two probes landed on that lucky branch and I mistook correlation for causation. This is exactly the `feedback_verification_protocol.md` trap: "don't flip to VERIFIED until the proof is load-bearing."
+
+**Build failure + DVP correction (2026-04-10 06:30–06:40 UTC):**
+- Architect reported Railway build failed twice. Pulled Railway deployments panel via Chrome MCP and confirmed:
+  - **Active deployment:** commit `8339dbc` (Session 43 YT protocol), deployed 05:21:59 GMT. Still live.
+  - **Failed deployment #1:** commit `2f88a987` (Session 44 LIGHT MODE, `1a766d2`) at 06:07:48 GMT. Status: Failed during build process.
+  - **Failed deployment #2:** commit `327ee582` (Session 44 master ref, `6d3be0a`) at 06:17:12 GMT. Status: Failed during build process.
+- **Failure reason (both builds):** Dockerfile.bot stage-1 `RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip ffmpeg chromium ...` died mid-unpack. Last visible log lines were `Unpacking liblapack3:amd64 (3.11.0-2)` followed by `process "/bin/sh -c apt-get update && apt-get install -y --no-install-recommends python3 python3..."` truncation. This is a transient Railway build infrastructure flake (OOM-kill during the chromium+ffmpeg+libplacebo+libgfortran+liblapack unpack chain is the most common cause) — **not** a code problem. Local `tsc --noEmit` passes clean; local reproduction of `tsc && cp src/data/*.json dist/data/` passes clean.
+- **Post-build-failure probe (2026-04-10 06:30:57 UTC):** Dispatched `0a41019a-1338-4910-9596-665f73082f33` targeting anita with `stasis_self_check`. Result: **FAILED** at 06:31:59 UTC after 36s with `⚠️ Agent loop reached maximum iterations without a final response.` — the exact symptom LIGHT MODE was designed to eliminate. This definitively proves LIGHT MODE code is **not currently running** in Railway.
+- **Remediation:** Pushed empty commit `b8a5cc3` at 06:39 UTC with message `ci: retrigger Railway build (apt-get stage-1 transient fail on 1a766d2 + 6d3be0a)`. Railway auto-deploy retriggered. Waiting on build outcome before re-probing.
+- **DVP CORRECTION:** Session 44 LIGHT MODE status downgraded from `VERIFIED` back to `ADDRESSED — BLOCKED-ON-BUILD`. Will flip to VERIFIED only after (a) the b8a5cc3 build succeeds in Railway, and (b) a fresh stasis_self_check probe against anita or vector completes with clean text in <25s instead of hitting max-iterations at ~36s.
 
 **Side finding flagged for Session 45:** Vector's stasis response surfaced "Buffer analytics query failing on schema mismatch / GraphQL schema drift in Buffer inte...". Buffer analytics tool (added Session 36) may have regressed against a Buffer API schema change. Needs investigation in Session 45 — could be masking other distribution visibility issues. Not currently blocking pipeline runs (Buffer post creation still works), but the Vector weekly analytics sweep may be returning garbage.
 
@@ -2610,10 +2616,10 @@ Final infrastructure hardening session before Thursday's revenue architecture pi
 - **MODIFIED:** `src/index.ts` (+LIGHT_TASKS set, +stasis_self_check EXECUTION_DIRECTIVES entry, +completionTail conditional, +iterCap light branch, +4th arg passed to processMessage; ~27 lines inserted/modified)
 - **MODIFIED:** `SOVEREIGN-SENTINEL-BOT_MASTER-REFERENCE.md` (header + Session 43 DVP flip + this entry)
 
-**DVP Status:**
-- `[DVP: VERIFIED]` Session 44 LIGHT MODE dispatch — verified in production 2026-04-10 06:10–06:11 UTC via anita + vector synthetic probes. Both completed with clean text, no max-iterations error.
-- `[DVP: VERIFIED]` Session 43 Task 2 hard-inject — flipped from ADDRESSED to VERIFIED this session.
-- `[DVP: ADDRESSED — BLOCKED-ON-CYCLE]` Session 43 Task 4 Anti-Ghost jitter — deployed, waiting on first VidRush pipeline cycle for Buffer timestamp verification.
+**DVP Status (post-build-failure correction):**
+- `[DVP: ADDRESSED — BLOCKED-ON-BUILD]` Session 44 LIGHT MODE dispatch — code committed in `1a766d2` but Railway build failed twice at apt-get stage-1. Retrigger commit `b8a5cc3` pushed 06:39 UTC; verification pending. Earlier 06:10 "VERIFIED" flip was a false positive from old code coincidentally returning text on two probes; corrected.
+- `[DVP: ADDRESSED — BLOCKED-ON-BUILD]` Session 43 Task 2 hard-inject — status must also be re-examined. The `[ProtocolInjection]` log-line confirmation at 06:10 was against Session 43 code (8339dbc) which is still live, so Task 2 protocol injection IS running in production. Holding at ADDRESSED until one additional post-retrigger probe confirms the injection log line still fires after the new build lands.
+- `[DVP: ADDRESSED — BLOCKED-ON-CYCLE]` Session 43 Task 4 Anti-Ghost jitter — deployed in 8339dbc which is live, still waiting on first VidRush pipeline cycle for Buffer timestamp verification.
 
 **Next session priorities (Session 45):**
 1. **Kinetic Baseline (Task 3 of YouTube Growth Protocol v2.0).** Build ffmpeg filter chain for intra-segment visual interrupts on existing Ken Burns clips: 1.2× scale punch-ins, 0.2s chromatic aberration / RGB-split glitch overlays, Ken Burns direction reversal. Target frequency: 3–4s for The Containment Field, 5–7s for Ace Richie. Constraint: do NOT break the Session 40 16-segment / 22–37s audio-sync contract. This is a perceptual overlay, not a new image asset.

@@ -16,10 +16,13 @@ RUN ./node_modules/.bin/tsc && cp src/data/*.json dist/data/
 FROM node:20-slim
 
 # ffmpeg for sovereign clip pipeline + Python for yt-dlp/whisper + Chromium for browser automation
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip \
-    ffmpeg \
-    chromium \
+# Split into 3 layers to avoid Railway builder OOM (exit 137) during simultaneous unpack of
+# python3 + ffmpeg + chromium transitive deps (~500MB total). Each RUN frees memory between layers.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends chromium \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

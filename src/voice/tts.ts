@@ -144,7 +144,7 @@ async function elevenLabsCallWithKey(apiKey: string, text: string, speed?: numbe
       },
       body: JSON.stringify({
         text: text.slice(0, 5000),
-        model_id: "eleven_multilingual_v2",
+        model_id: "eleven_v3",
         voice_settings: {
           stability,
           similarity_boost: 0.75,
@@ -269,7 +269,7 @@ export async function elevenLabsStreamTTS(
       },
       body: JSON.stringify({
         text: text.slice(0, 5000),
-        model_id: "eleven_multilingual_v2",
+        model_id: "eleven_v3",
         voice_settings: { stability: 0.45, similarity_boost: 0.75, style: 0.60, use_speaker_boost: true },
       }),
     }

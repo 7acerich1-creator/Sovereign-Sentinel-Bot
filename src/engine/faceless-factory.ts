@@ -1435,9 +1435,11 @@ async function assembleVideo(
     audioDuration = script.segments.reduce((sum, s) => sum + s.duration_hint, 0);
   }
 
-  // Filter to only segments that have images
+  // Filter to only segments that have images.
+  // Segment 0 = The Hook — visualized by the Terminal Override clip below (NOT a Ken Burns scene).
+  // Skipping it here prevents double-consumption of the hook duration.
   const validSegments: { imgPath: string; index: number }[] = [];
-  for (let i = 0; i < imagePaths.length; i++) {
+  for (let i = 1; i < imagePaths.length; i++) {
     if (imagePaths[i] && existsSync(imagePaths[i]!)) {
       validSegments.push({ imgPath: imagePaths[i]!, index: i });
     }
@@ -1462,50 +1464,114 @@ async function assembleVideo(
   const fps = 30;
   const xfadeDuration = 0.6; // 0.6s true dissolve between scenes (not fade-to-black)
 
-  // ── PRE-RENDERED BRAND INTRO (from brand-assets/) ──
-  // Uses permanent intro videos rendered with Bebas Neue + audio signature.
-  // Long-form = intro_long.mp4 (6s, 1920x1080), Shorts = intro_short.mp4 (2s, 1080x1920)
+  // ── TERMINAL OVERRIDE HOOK SEQUENCE (0 → ~hookDur seconds) ──
+  // Replaces the legacy 5-6s static logo intro that was killing retention.
+  // Black screen + char-by-char typewriter reveal of the hook + typing.mp3 sound bed.
+  // The brand logo intro asset (intro_long.mp4 / intro_short.mp4) is now DEAD —
+  // not prepended, not appended. The CTA card (outro_long.mp4) remains the sole tail.
   const sceneClipDir = `${FACELESS_DIR}/${jobId}_scenes`;
   if (!existsSync(sceneClipDir)) mkdirSync(sceneClipDir, { recursive: true });
   const dim = DIMS[orientation];
   const sceneClipPaths: string[] = [];
   const clipDurations: number[] = [];
 
-  const BRAND_NAMES: Record<Brand, string> = {
-    ace_richie: "SOVEREIGN SYNTHESIS",
-    containment_field: "THE CONTAINMENT FIELD",
-  };
-
   // Brand asset paths — baked into Docker image via brand-assets/
-  // SS = warm gold aesthetic, TCF = cold clinical blue aesthetic
   const brandAssetsDir = `${__dirname}/../../brand-assets`;
   const brandSuffix = script.brand === "containment_field" ? "_tcf" : "";
-  const introAsset = orientation === "horizontal"
-    ? `${brandAssetsDir}/intro_long${brandSuffix}.mp4`
-    : `${brandAssetsDir}/intro_short${brandSuffix}.mp4`;
-  const introDuration = orientation === "horizontal" ? 6.0 : 2.0;
+  const fontPath = `${brandAssetsDir}/BebasNeue-Regular.ttf`;
+  const hasFont = existsSync(fontPath);
+  let terminalOverrideRendered = false;
+  let terminalOverrideDuration = 0;
 
-  if (existsSync(introAsset)) {
-    sceneClipPaths.push(introAsset);
-    clipDurations.push(introDuration);
-    console.log(`🎬 [FacelessFactory] Brand intro loaded: ${introAsset} (${introDuration}s)`);
-  } else {
-    // Fallback: generate basic intro if brand assets not found (dev/local)
-    const introPath = `${sceneClipDir}/intro_bumper.mp4`;
-    const brandName = BRAND_NAMES[script.brand] || "SOVEREIGN SYNTHESIS";
-    const introBrand = brandName.replace(/'/g, "'\\''").replace(/:/g, "\\:");
-    try {
-      execSync(
-        `ffmpeg -f lavfi -i "color=c=0x0a0a0f:s=${dim.width}x${dim.height}:d=3:r=30" ` +
-          `-vf "drawtext=text='${introBrand}':fontsize=48:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2:alpha='min(t/1.5,1)'" ` +
-          `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p -y "${introPath}"`,
-        { timeout: 30_000, stdio: "pipe" }
+  {
+    // Extract first sentence of the hook, sanitize to ASCII-safe terminal charset.
+    // [A-Z0-9 .,!?-] only — strips emojis, smart quotes, colons, etc. that would
+    // crash drawtext / render fontboxes on Railway.
+    const rawFirstSentence = (script.hook || script.segments[0]?.voiceover || "")
+      .split(/[.!?]/)[0]
+      .trim()
+      .toUpperCase();
+    const sanitizedHook = rawFirstSentence
+      .replace(/[^A-Z0-9 .,!?\-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 60); // Cap at 60 chars to keep the drawtext chain manageable.
+
+    if (sanitizedHook.length > 0) {
+      // Hook duration: prefer actual first-segment TTS duration when available, clamped 3-5s.
+      // Falls back to 4.0s for shorts (no per-segment timing).
+      const firstSegDur = segmentDurations?.[0];
+      terminalOverrideDuration = Math.min(
+        5.0,
+        Math.max(3.0, firstSegDur && firstSegDur > 0 ? firstSegDur : 4.0)
       );
-      sceneClipPaths.push(introPath);
-      clipDurations.push(3.0);
-      console.log(`🎬 [FacelessFactory] Fallback intro generated (brand assets not found)`);
-    } catch (err: any) {
-      console.warn(`[FacelessFactory] Intro generation failed (non-fatal): ${err.message?.slice(0, 150)}`);
+
+      const terminalClipPath = `${sceneClipDir}/_terminal_override.mp4`;
+      const typingAudioPath = `${brandAssetsDir}/typing.mp3`;
+      const hasTyping = existsSync(typingAudioPath);
+
+      // Build char-reveal drawtext chain — one filter per revealed substring.
+      // Each filter writes its substring to a temp file (Session 38 lesson:
+      // textfile= bypasses shell quoting hell). Each filter is enabled
+      // between its reveal time and the next char's reveal time.
+      const chars = sanitizedHook.split("");
+      const charCount = chars.length;
+      const charInterval = terminalOverrideDuration / charCount;
+      const drawFilters: string[] = [];
+
+      for (let i = 1; i <= charCount; i++) {
+        const substr = chars.slice(0, i).join("");
+        const revealFile = `${sceneClipDir}/_term_${i.toString().padStart(3, "0")}.txt`;
+        writeFileSync(revealFile, substr);
+        const escRevealPath = revealFile.replace(/'/g, "'\\''").replace(/:/g, "\\:");
+        const startTime = ((i - 1) * charInterval).toFixed(3);
+        const endTime =
+          i === charCount
+            ? terminalOverrideDuration.toFixed(3)
+            : (i * charInterval).toFixed(3);
+        const fontfileFilter = hasFont ? `fontfile='${fontPath}':` : "";
+        // Bright terminal green (#00FF88) on pure black, sharp black border for crispness.
+        // Font size scales to orientation: larger on horizontal (1920w), smaller on vertical (1080w).
+        const fsize = orientation === "horizontal" ? 64 : 56;
+        drawFilters.push(
+          `drawtext=${fontfileFilter}textfile='${escRevealPath}':fontsize=${fsize}:fontcolor=0x00FF88:borderw=2:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${startTime},${endTime})'`
+        );
+      }
+
+      const drawtextChain = drawFilters.join(",");
+
+      // Audio: typing.mp3 looped to hookDuration with subtle fades. Falls back to silence.
+      const audioInputFlags = hasTyping
+        ? `-stream_loop -1 -t ${terminalOverrideDuration.toFixed(2)} -i "${typingAudioPath}"`
+        : `-f lavfi -t ${terminalOverrideDuration.toFixed(2)} -i "anullsrc=channel_layout=stereo:sample_rate=44100"`;
+
+      try {
+        execSync(
+          `ffmpeg -f lavfi -t ${terminalOverrideDuration.toFixed(2)} -i "color=c=black:s=${dim.width}x${dim.height}:r=${fps}" ` +
+            `${audioInputFlags} ` +
+            `-filter_complex "[0:v]${drawtextChain}[v];[1:a]volume=0.55,afade=t=in:st=0:d=0.2,afade=t=out:st=${Math.max(0, terminalOverrideDuration - 0.4).toFixed(2)}:d=0.4[a]" ` +
+            `-map "[v]" -map "[a]" ` +
+            `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p ` +
+            `-c:a aac -b:a 128k ` +
+            `-y "${terminalClipPath}"`,
+          { timeout: 90_000, stdio: "pipe" }
+        );
+
+        if (existsSync(terminalClipPath)) {
+          sceneClipPaths.push(terminalClipPath);
+          clipDurations.push(terminalOverrideDuration);
+          terminalOverrideRendered = true;
+          console.log(
+            `⌨️  [FacelessFactory] Terminal Override hook rendered: "${sanitizedHook.slice(0, 60)}" (${terminalOverrideDuration.toFixed(1)}s, ${charCount} chars, typing=${hasTyping})`
+          );
+        }
+      } catch (err: any) {
+        console.warn(
+          `[FacelessFactory] Terminal Override hook render failed (non-fatal): ${err.message?.slice(0, 200)}`
+        );
+        const stderr = err.stderr ? err.stderr.toString().slice(0, 400) : "";
+        if (stderr) console.warn(`  STDERR: ${stderr}`);
+      }
     }
   }
 
@@ -1559,9 +1625,8 @@ async function assembleVideo(
   // These are consciousness activation moments, NOT traditional CTAs.
   // Session 38 FIX: 5s was too fast — viewers couldn't read + process + type. 8s gives breathing room.
   if (orientation === "horizontal" && script.frequency_activations?.length) {
-    const fontPath = `${brandAssetsDir}/BebasNeue-Regular.ttf`;
-    const hasFont = existsSync(fontPath);
-    const totalScenes = sceneClipPaths.length; // includes intro
+    // fontPath / hasFont declared above in the Terminal Override block
+    const totalScenes = sceneClipPaths.length; // includes Terminal Override at index 0
     const insertPoints = [
       Math.floor(totalScenes * 0.33),  // ~1/3 mark
       Math.floor(totalScenes * 0.66),  // ~2/3 mark
@@ -1750,47 +1815,15 @@ async function assembleVideo(
     }
   }
 
-  // QUALITY GATE (Session 37 REWRITE): Text hook overlay
-  // Burns the hook text into the first 3 seconds of the video as a scroll-stopping overlay.
-  // Session 37: Pre-wrap text in TypeScript — NEVER rely on ffmpeg to wrap.
-  // wrapText() inserts \n every ~25 chars at word boundaries, then we pass
-  // the pre-wrapped string to a SINGLE drawtext filter so it renders perfectly centered.
-  const rawHook = (script.hook || script.segments[0]?.voiceover || "")
-    .split(/[.!?]/)[0]  // First sentence only
-    .slice(0, 100)       // Max 100 chars (wrapping handles readability now)
-    .trim();
-
-  /** Pre-wrap text at word boundaries. Returns string with \n inserted. */
-  function wrapText(text: string, maxCharsPerLine: number = 25): string {
-    const words = text.split(/\s+/);
-    const lines: string[] = [];
-    let currentLine = "";
-    for (const word of words) {
-      const candidate = currentLine ? `${currentLine} ${word}` : word;
-      if (candidate.length > maxCharsPerLine && currentLine) {
-        lines.push(currentLine);
-        currentLine = word;
-      } else {
-        currentLine = candidate;
-      }
-    }
-    if (currentLine) lines.push(currentLine);
-    return lines.join("\n");
-  }
-
-  const wrappedHook = wrapText(rawHook, 25);
-
-  // Session 38 FIX: Write hook text to a TEMP FILE and use textfile= instead of text=.
-  // Inline text= with \n gets eaten by shell quoting on Railway (shows "ofnbeing" instead of line breaks).
-  // textfile= reads from disk — ffmpeg parses \n natively from the file content, no shell involved.
-  const hookTextFilePath = `${FACELESS_DIR}/${jobId}_hook_text.txt`;
-  let hookOverlay = "";
-  if (wrappedHook) {
-    writeFileSync(hookTextFilePath, wrappedHook); // raw newlines in file — ffmpeg reads them correctly
-    const escPath = hookTextFilePath.replace(/'/g, "'\\''").replace(/:/g, "\\:");
-    hookOverlay =
-      `,drawtext=textfile='${escPath}':fontsize=42:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=(h*0.35):line_spacing=12:enable='between(t,0,3)':alpha='if(lt(t,2),1,(3-t))'`;
-  }
+  // ── LEGACY HOOK OVERLAY: DISABLED ──
+  // Previously: burned a wrapped white drawtext over the first 3s of the final composition.
+  // That overlay was designed to ride on top of the static brand logo intro.
+  // The Terminal Override clip (built above) IS the new opening visual — green typewriter
+  // reveal on black. Stacking the legacy white overlay on top would create two competing
+  // text layers fighting for the same eye-line. Killed entirely.
+  // hookOverlay stays as an empty string so the existing filter_complex string concat below
+  // keeps working without further surgery.
+  const hookOverlay = "";
 
   // ── BACKGROUND MUSIC BED ──
   // Session 37 REWRITE: ALL synthetic audio generation (sine, aevalsrc, anoisesrc) is DEAD.
@@ -1936,6 +1969,10 @@ async function assembleVideo(
   // Audio mixing: voice + music bed + transition stings (3-layer audio)
   // Session 33: Raised music bed from 0.15 (inaudible) to 0.35
   // Session 33: Added transition sting track as third audio layer
+  // Session 42: Architect-locked EQ — drone must feel HEAVY and present.
+  //   - volume 0.35 → 0.85 (~+8dB perceptual)
+  //   - removed lowpass=f=800 (was muffling the drone, killing presence)
+  //   - added bass=g=3 (low-end body without clipping the voice channel)
   const inputCount = 1 + (hasMusicBed ? 1 : 0) + (hasStingTrack ? 1 : 0); // after video(0) + voice(1)
   let audioFilter = "";
   let musicInput = "";
@@ -1944,12 +1981,12 @@ async function assembleVideo(
   if (hasMusicBed && hasStingTrack) {
     // 3-layer: voice(1) + music(2) + stings(3)
     musicInput = `-i "${musicPath}" -i "${stingPath}" `;
-    audioFilter = `[1:a]volume=1.0[voice];[2:a]volume=0.35,lowpass=f=800[bg];[3:a]volume=0.5[stings];[voice][bg][stings]amix=inputs=3:duration=first:normalize=0[aout]`;
+    audioFilter = `[1:a]volume=1.0[voice];[2:a]volume=0.85,bass=g=3[bg];[3:a]volume=0.5[stings];[voice][bg][stings]amix=inputs=3:duration=first:normalize=0[aout]`;
     audioMap = `-map "[aout]"`;
   } else if (hasMusicBed) {
     // 2-layer: voice + music
     musicInput = `-i "${musicPath}" `;
-    audioFilter = `[1:a]volume=1.0[voice];[2:a]volume=0.35,lowpass=f=800[bg];[voice][bg]amix=inputs=2:duration=first:normalize=0[aout]`;
+    audioFilter = `[1:a]volume=1.0[voice];[2:a]volume=0.85,bass=g=3[bg];[voice][bg]amix=inputs=2:duration=first:normalize=0[aout]`;
     audioMap = `-map "[aout]"`;
   } else if (hasStingTrack) {
     // 2-layer: voice + stings
@@ -2138,66 +2175,95 @@ export async function produceFacelessVideo(
   const audioResult = await renderAudio(script, jobId);
   let audioPath = audioResult.audioPath;
 
-  // STEP 2b: Mix in brand signature audio (intro + outro sounds)
-  // The intro/outro mp4 videos contain audio, but the final assembly strips it (only maps TTS + music).
-  // Instead, we mix the standalone signature mp3 files directly into the TTS audio track.
-  // This ensures the brand sounds ALWAYS play regardless of the video assembly path.
+  // STEP 2b: Mix Terminal Override typewriter bed + outro signature into the TTS track.
+  //
+  // SESSION 42 ARCHITECTURAL REWRITE:
+  //   Old behavior: prepended a 2-6s static brand-logo intro video AND delayed the TTS by
+  //   introPad seconds, then mixed signature_long.mp3 over that pad. This was destroying
+  //   retention — viewers saw a static logo for 5 seconds before any payload arrived.
+  //
+  //   New behavior:
+  //     • TTS plays at t=0 (NO adelay, NO introPad).
+  //     • typing.mp3 is mixed UNDER the first hookDuration seconds at low volume — this is
+  //       the audio bed for the Terminal Override clip rendered in assembleVideo() (the
+  //       green typewriter on black). The visual hook IS the video's first segment.
+  //     • signature_outro.mp3 is mixed in at t=ttsDur (after the voiceover finishes).
+  //     • signature_long / signature_short are NO LONGER prepended — the static-logo intro
+  //       is dead.
+  //     • segmentDurations is NOT modified; segment 0 IS the hook.
   const brandAssetsRoot = `${__dirname}/../../brand-assets`;
   const brandSfx = brand === "containment_field" ? "_tcf" : "";
-  const introSig = orientation === "horizontal"
-    ? `${brandAssetsRoot}/signature_long${brandSfx}.mp3`
-    : `${brandAssetsRoot}/signature_short${brandSfx}.mp3`;
   const outroSig = `${brandAssetsRoot}/signature_outro${brandSfx}.mp3`;
-  const introPad = orientation === "horizontal" ? 6.0 : 2.0; // must match intro video duration
+  const typingBed = `${brandAssetsRoot}/typing.mp3`;
+
+  // Hook duration mirrors the assembleVideo Terminal Override calculation:
+  // clamp segmentDurations[0] to [3.0, 5.0]; default 4.0 if missing.
+  const firstSegDurForHook = audioResult.segmentDurations?.[0] || 0;
+  const hookDuration = Math.min(5.0, Math.max(3.0, firstSegDurForHook > 0 ? firstSegDurForHook : 4.0));
 
   const compositeAudioPath = `${FACELESS_DIR}/${jobId}_composite_audio.mp3`;
   try {
-    const hasIntro = existsSync(introSig);
     const hasOutro = existsSync(outroSig);
+    const hasTyping = existsSync(typingBed);
 
-    if (hasIntro || hasOutro) {
+    if (hasOutro || hasTyping) {
       // Get TTS duration
       const ttsDur = parseFloat(
         execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${audioPath}"`,
           { timeout: 10_000, maxBuffer: 1024 * 1024 }).toString().trim()
       ) || 0;
 
-      if (hasIntro && hasOutro && ttsDur > 0) {
-        // Full composite: intro signature at t=0, TTS delayed by introPad, outro signature at end
-        // adelay is in milliseconds
-        const ttsDelayMs = Math.round(introPad * 1000);
-        const outroOffsetMs = Math.round((introPad + ttsDur) * 1000);
+      if (ttsDur > 0) {
+        // Build inputs and filter graph dynamically based on what assets we have.
+        // Index 0 is always the TTS voice. Typing and outro are appended as available.
+        const inputs: string[] = [`-i "${audioPath}"`];
+        const filterParts: string[] = [`[0:a]volume=1.0[voice]`];
+        const mixLabels: string[] = [`[voice]`];
+        let inputIdx = 1;
+
+        if (hasTyping) {
+          // Loop the typing bed so it always covers the hook window even if it's short.
+          inputs.push(`-stream_loop -1 -t ${hookDuration.toFixed(2)} -i "${typingBed}"`);
+          // Bed it under the hook: low volume, fade in fast, fade out before hook ends.
+          const fadeOutStart = Math.max(0, hookDuration - 0.4);
+          filterParts.push(
+            `[${inputIdx}:a]volume=0.35,afade=t=in:st=0:d=0.15,afade=t=out:st=${fadeOutStart.toFixed(2)}:d=0.4[typing]`
+          );
+          mixLabels.push(`[typing]`);
+          inputIdx++;
+        }
+
+        if (hasOutro) {
+          inputs.push(`-i "${outroSig}"`);
+          const outroOffsetMs = Math.round(ttsDur * 1000);
+          filterParts.push(`[${inputIdx}:a]adelay=${outroOffsetMs}|${outroOffsetMs},volume=0.85[outro]`);
+          mixLabels.push(`[outro]`);
+          inputIdx++;
+        }
+
+        const totalMixInputs = mixLabels.length;
+        const mixFilter = `${mixLabels.join("")}amix=inputs=${totalMixInputs}:duration=longest:normalize=0[out]`;
+        const filterComplex = `${filterParts.join(";")};${mixFilter}`;
+
         execSync(
-          `ffmpeg -i "${introSig}" -i "${audioPath}" -i "${outroSig}" ` +
-            `-filter_complex "` +
-              `[0:a]volume=0.9[intro];` +
-              `[1:a]adelay=${ttsDelayMs}|${ttsDelayMs},volume=1.0[voice];` +
-              `[2:a]adelay=${outroOffsetMs}|${outroOffsetMs},volume=0.8[outro];` +
-              `[intro][voice][outro]amix=inputs=3:duration=longest:normalize=0[out]" ` +
+          `ffmpeg ${inputs.join(" ")} ` +
+            `-filter_complex "${filterComplex}" ` +
             `-map "[out]" -c:a libmp3lame -b:a 192k -y "${compositeAudioPath}"`,
           { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 }
         );
-        console.log(`🔊 [FacelessFactory] Composite audio: intro(${introPad}s) + TTS(${ttsDur.toFixed(1)}s) + outro`);
-      } else if (hasIntro && ttsDur > 0) {
-        // Intro only
-        const ttsDelayMs = Math.round(introPad * 1000);
-        execSync(
-          `ffmpeg -i "${introSig}" -i "${audioPath}" ` +
-            `-filter_complex "` +
-              `[0:a]volume=0.9[intro];` +
-              `[1:a]adelay=${ttsDelayMs}|${ttsDelayMs},volume=1.0[voice];` +
-              `[intro][voice]amix=inputs=2:duration=longest:normalize=0[out]" ` +
-            `-map "[out]" -c:a libmp3lame -b:a 192k -y "${compositeAudioPath}"`,
-          { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 }
+        console.log(
+          `🔊 [FacelessFactory] Composite audio: TTS(${ttsDur.toFixed(1)}s)` +
+            (hasTyping ? ` + typing-bed(${hookDuration.toFixed(1)}s)` : "") +
+            (hasOutro ? ` + outro@${ttsDur.toFixed(1)}s` : "")
         );
-        console.log(`🔊 [FacelessFactory] Composite audio: intro(${introPad}s) + TTS(${ttsDur.toFixed(1)}s)`);
       }
 
       if (existsSync(compositeAudioPath)) {
         audioPath = compositeAudioPath;
-        // Update segment durations to account for intro padding
-        audioResult.segmentDurations = [introPad, ...audioResult.segmentDurations];
-        console.log(`🔊 [FacelessFactory] Audio track now includes brand signatures`);
+        // NOTE: segmentDurations is INTENTIONALLY NOT modified.
+        // The Terminal Override is segment 0 — the visual is generated FROM segmentDurations[0],
+        // not in addition to it. Prepending introPad here would double-count the hook.
+        console.log(`🔊 [FacelessFactory] Audio track now includes typing bed + outro signature`);
       }
     }
   } catch (err: any) {

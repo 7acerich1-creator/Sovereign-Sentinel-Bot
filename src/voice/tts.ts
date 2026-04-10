@@ -89,9 +89,37 @@ async function callProvider(provider: TTSProvider, text: string, speed?: number)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async function elevenLabsTTS(text: string, speed?: number): Promise<Buffer> {
-  const apiKey = config.voice.elevenLabsApiKey;
-  if (!apiKey) throw new Error("ElevenLabs API key not configured");
+  // Session 42: Dual-key support. Primary key → Alt key failover.
+  // Add ELEVENLABS_API_KEY_ALT to Railway for fresh credits.
+  const primaryKey = config.voice.elevenLabsApiKey;
+  const altKey = config.voice.elevenLabsApiKeyAlt;
 
+  if (!primaryKey && !altKey) throw new Error("ElevenLabs API key not configured");
+
+  // Try primary first, then alt if primary is exhausted (402/quota errors)
+  const keysToTry = [primaryKey, altKey].filter(Boolean) as string[];
+  let lastError: Error | null = null;
+
+  for (const apiKey of keysToTry) {
+    try {
+      const result = await elevenLabsCallWithKey(apiKey, text, speed);
+      return result;
+    } catch (err: any) {
+      const msg = err.message || "";
+      // Only failover on quota/auth errors, not on content or server errors
+      if (msg.includes("401") || msg.includes("402") || msg.includes("quota") || msg.includes("insufficient")) {
+        console.warn(`[ElevenLabs] Key exhausted/invalid, trying next key...`);
+        lastError = err;
+        continue;
+      }
+      throw err; // Non-quota error — don't swallow it
+    }
+  }
+
+  throw lastError || new Error("All ElevenLabs keys exhausted");
+}
+
+async function elevenLabsCallWithKey(apiKey: string, text: string, speed?: number): Promise<Buffer> {
   // Voice: Adam Brooding — dark, tough, weathered American male.
   // THE Sovereign Synthesis voice. Locked Session 28.
   // Old defaults: Rachel (female, wrong brand), stock Adam (too warm/PBS).

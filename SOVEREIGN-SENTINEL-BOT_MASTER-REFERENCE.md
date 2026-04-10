@@ -1,3 +1,20 @@
+> # ⚡ SESSION START PROTOCOL — READ FIRST ⚡
+>
+> **This file rots.** It is human-authored and captures *invariants* + *history*. For live runtime state — TTS routing, LLM teams, env vars, git SHA — trust `LIVE_STATE.md` instead. `LIVE_STATE.md` is auto-generated from the actual source code by `scripts/verify-state.ts` and cannot lie.
+>
+> **Every session must:**
+>
+> 1. Read `LIVE_STATE.md` at repo root BEFORE trusting any runtime claim in this file.
+> 2. If `LIVE_STATE.md` is older than 24h → run `npm run verify-state` to regenerate it.
+> 3. If this file's routing / credit / env claims contradict `LIVE_STATE.md` → **`LIVE_STATE.md` wins**. Flag the contradiction and patch this file before continuing work.
+> 4. Never tell the Architect "X is live" based on a memory or a section below — verify against `LIVE_STATE.md` first.
+>
+> **Why this exists:** Session 45. Claude told Ace he was hearing Edge TTS Andrew. He was hearing ElevenLabs Adam. Claude trusted a stale master-reference section instead of the code. The fix is to stop trusting prose and start trusting the source files. `LIVE_STATE.md` is the terminal authority on runtime state — everything in this file is context, not truth.
+>
+> **Link-fetching rule (same session):** When the Architect shares a URL, open it. Use `yt-dlp` + `ffmpeg` for videos, `WebFetch` for pages, Chrome tools for social. Never cite a capability limit without trying every tool first.
+
+---
+
 # SOVEREIGN SENTINEL BOT — MASTER REFERENCE
 ### Last Updated: 2026-04-10 (Session 45 — Kinetic Baseline SHIPPED. YouTube Growth Protocol v2.0 Task 3 now live in `src/engine/faceless-factory.ts`: per-scene ffmpeg filter chain replaces the old flat-cap zoompan with (a) Ken Burns direction reversal alternating per segment index (even=in 1.0→1.15, odd=out 1.15→1.0, linear across full duration), (b) dynamic crop pulse punch-ins at brand-keyed cadence (TCF=3.5s, Ace Richie=6.0s) for 0.20s at 18% inward crop, and (c) rgbashift chromatic aberration (±8px R/B split) gated on the same pulse expression — both filters' T-flag timeline editing support was verified against ffmpeg 7.0 before edit. Pulse expression is edge-masked (0.5s both ends) so pulses never fire inside the 0.6s xfade overlap. Session 40 16-segment / 22–37s audio-sync contract preserved to the frame — `thisSegDuration` and `thisFrames=Math.round(thisSegDuration*fps)` feed straight into `d=` on zoompan. Fallback cascade hardened from 2 levels to 3: Kinetic → Classic Ken Burns → static crop. Filter chain dry-run in sandbox against synthetic gradients input: both forward and reverse zoom branches rendered clean with exact frame counts. `tsc --noEmit` proven-clean via Desktop Commander canary test (canary caught → real file clean). Kinetic Baseline (Task 3) deferred from Session 44 is now SHIPPED.) | Session Handoff Protocol: UPDATE THIS AFTER EVERY SESSION
 
@@ -28,8 +45,9 @@
 - **OpenAI:** -$0.06 credits. DEAD. DALL-E 3 and OpenAI TTS will not fire.
 - **Gemini:** $62.30 OWED but NOT BLOCKED. **REMOVED from ALL text-gen failover chains (Session 28c, commit 624fc28).** Gemini API key stays active ONLY for Imagen 4 image generation and gemini-embedding-001 (Pinecone vectors). Railway env var `LLM_FAILOVER_ORDER` updated to `groq,anthropic,openai`. Zero Gemini text-gen burns going forward.
 - **Groq:** FREE tier. 30 RPM, 6000 TPM, 14,400 req/day PER KEY. Primary for pipeline + content agents. Session 31: Dual key distribution — Key A (GROQ_API_KEY) serves alfred, vector, yuki + Ace pipeline. Key B (GROQ_API_KEY_TCF) serves anita, yuki + TCF pipeline. Doubles effective rate limit. fetchWithRetry capped at 5s retry-after (was 30s, causing 60s timeout race that made Groq structurally impossible to succeed).
-- **ElevenLabs:** Creator plan, credits EXHAUSTED (Session 29b, April 2026). DEMOTED to fallback. Edge TTS (FREE, Microsoft neural voices) is now primary. Set `FORCE_ELEVENLABS=true` env var to restore ElevenLabs when credits renew. Voice: Adam Brooding, Dark & Tough (`IRHApOXLvnW57QJPQH2P`) — locked as permanent Sovereign Synthesis voice (Session 28c).
-- **Edge TTS:** FREE, unlimited, no API key. Python `edge-tts` CLI (pip install). Voice: `en-US-AndrewMultilingualNeural` (deep, cinematic, intonation-rich — Sovereign Synthesis signature voice). Swapped from GuyNeural (too flat/newscastery) in Session 29b2. Installed in Docker production stage. Primary TTS provider as of Session 29.
+- **ElevenLabs:** RELOADED 2026-04-10 by Ace with a fresh API key (`ELEVENLABS_API_KEY_ALT`). Adam Brooding voice (`IRHApOXLvnW57QJPQH2P`) is the locked Sovereign Synthesis voice and IS AVAILABLE. **IMPORTANT — code routing truth (src/voice/tts.ts, verified Session 45):** the default fallback chain is `edge → elevenlabs → openai`. ElevenLabs is ONLY called first when Railway env var `FORCE_ELEVENLABS=true` is set. If `FORCE_ELEVENLABS` is not `true`, Edge TTS Andrew fires first and Adam only plays when Edge TTS fails. **To guarantee Adam on every render: set `FORCE_ELEVENLABS=true` in Railway.** Dual-key failover is live: `ELEVENLABS_API_KEY_ALT` (fresh) is tried first, then `ELEVENLABS_API_KEY` (old).
+- **Edge TTS:** FREE, unlimited, no API key. Python `edge-tts` CLI (pip install). Voice: `en-US-AndrewMultilingualNeural`. Currently still the FIRST provider in the default chain (tts.ts line 47: `chain.push("edge")` is unconditional before the `!forceElevenLabs` branch). To verify which provider actually rendered a given video, grep Railway logs for `[TTS] elevenlabs failed` / `[TTS] edge failed` / `[ElevenLabs] Key exhausted` — the last successful `callProvider` wins.
+- **VOICE VERIFICATION PROTOCOL:** Do NOT assert which voice is playing from memory. (1) Check `FORCE_ELEVENLABS` env var in Railway. (2) Grep recent Railway logs for `[TTS]` lines. (3) Believe the user when they say what they're hearing. Do not contradict them from stale docs.
 - **Imagen 4:** RESTORED as primary image gen (Session 27). Cost $0.02-0.06/image. Expected $7-12/month. Gemini API is active, so Imagen 4 is functional.
 
 **LLM ROUTING (Session 31 — dual key distribution + timeout race fix):**

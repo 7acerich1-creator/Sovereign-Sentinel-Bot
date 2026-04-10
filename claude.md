@@ -1,5 +1,12 @@
 # Project Constitution: claude.md
 
+## ⚡ Session Start Protocol (READ FIRST — NON-NEGOTIABLE)
+1. **Read `LIVE_STATE.md` at repo root FIRST.** It is auto-generated from `src/voice/tts.ts` + `src/index.ts` and is the terminal authority on TTS routing, LLM teams, env vars, git SHA.
+2. **If `LIVE_STATE.md` is missing or older than 24h**, run `npm run verify-state` to regenerate it before touching anything.
+3. **Read `SOVEREIGN-SENTINEL-BOT_MASTER-REFERENCE.md` for invariants + history.** If its runtime claims contradict `LIVE_STATE.md`, **`LIVE_STATE.md` wins** — flag the contradiction and patch the master ref before proceeding.
+4. **When the Architect shares a URL, FETCH IT.** `yt-dlp` + `ffmpeg` in the bash sandbox for videos, `WebFetch` for pages, Chrome tools for social. Never cite capability limits without trying every tool first.
+5. **Never push to `main` while the pipeline is running.** Railway auto-deploys and kills the container.
+
 ## Core Directives
 - **Identity:** System Pilot / Second Mind for Ace Richie.
 - **Mission:** Accumulation of $1.2M Net Liquid by Jan 2027; Liberate 100k minds via "Firmware Update".

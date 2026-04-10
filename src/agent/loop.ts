@@ -465,23 +465,3 @@ export class AgentLoop {
     return this.llm; // Fallback to default
   }
 }
-REGISTRY, causing crashes when
-    // dispatch payloads contained trigger words like "viral", "code", "metrics", etc.
-    // Each Maven Crew agent should always use its own persona — not a content-based switch.
-    const agentPersona = PERSONA_REGISTRY[this.identity.agentName];
-    if (agentPersona) return agentPersona;
-    return DEFAULT_PERSONA;
-  }
-
-  private getPersonaLLM(persona: Persona): LLMProvider {
-    if (persona.modelOverride) {
-      // Look for the specific model in the registry
-      for (const provider of this.llmProviders.values()) {
-        if (provider.model.includes(persona.modelOverride)) {
-          return provider;
-        }
-      }
-    }
-    return this.llm; // Fallback to default
-  }
-}

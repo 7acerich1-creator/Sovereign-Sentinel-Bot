@@ -1,4 +1,11 @@
 # Gravity Claw v3.0 — Multi-stage build
+
+# ── Static ffmpeg stage ──
+# COPY-from approach avoids the 200+ transitive .deb unpack that blows Railway
+# builder memory (exit 137 OOM) when apt-installing ffmpeg on node:20-slim.
+FROM mwader/static-ffmpeg:7.0 AS ffmpeg
+
+# ── Builder stage ──
 FROM node:20-slim AS builder
 
 WORKDIR /app
@@ -15,15 +22,17 @@ RUN ./node_modules/.bin/tsc && cp src/data/*.json dist/data/
 # ── Production Stage ──
 FROM node:20-slim
 
-# ffmpeg for sovereign clip pipeline + Python for yt-dlp/whisper + Chromium for browser automation
-# Split into 3 layers to avoid Railway builder OOM (exit 137) during simultaneous unpack of
-# python3 + ffmpeg + chromium transitive deps (~500MB total). Each RUN frees memory between layers.
+# Python for yt-dlp/whisper + Chromium for browser automation
+# Split into 2 layers to avoid Railway builder OOM (exit 137) during simultaneous unpack of
+# transitive deps. ffmpeg comes from the mwader/static-ffmpeg COPY stage below (no apt).
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip \
-    && rm -rf /var/lib/apt/lists/*
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 RUN apt-get update && apt-get install -y --no-install-recommends chromium \
     && rm -rf /var/lib/apt/lists/*
+
+# Static ffmpeg + ffprobe binaries from the mwader stage (avoids apt OOM)
+COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
+COPY --from=ffmpeg /ffprobe /usr/local/bin/ffprobe
 
 WORKDIR /app
 

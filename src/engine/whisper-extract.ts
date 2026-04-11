@@ -170,7 +170,9 @@ export async function extractWhisperIntel(youtubeUrl: string): Promise<WhisperRe
 }
 
 // ── Niche detection (shared logic) ──
-function detectNiche(text: string): string {
+// Exported (Session 47b — Native Seed Generator pivot) so the VidRush orchestrator
+// can classify raw_idea inputs without rerunning Whisper. Same logic, no changes.
+export function detectNiche(text: string): string {
   const lower = text.toLowerCase();
   const scores: Record<string, number> = {
     dark_psychology: 0,

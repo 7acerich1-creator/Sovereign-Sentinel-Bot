@@ -1077,24 +1077,32 @@ async function main() {
             priority: 1,
             chat_id: defaultChatId,
             payload: {
-              directive: "DAILY TREND SCAN & CONTENT BRIEF — Execute your Content Director protocol. " +
-                "TARGETED SCAN — Do NOT search generic niche labels. Use these SPECIFIC search queries:\n" +
-                "• dark_psychology: search 'covert narcissist tactics 2026' OR 'manipulation red flags dating' OR 'dark triad workplace' OR 'psychological warfare relationships'\n" +
-                "• self_improvement: search 'masculine frame control' OR 'dopamine detox protocol' OR 'cold approach confidence' OR 'monk mode transformation'\n" +
-                "• burnout: search 'corporate burnout escape plan' OR 'quiet quitting to entrepreneurship' OR 'leaving 9-5 strategy' OR 'high performer burnout recovery'\n" +
-                "• quantum: search 'reality shifting techniques' OR 'quantum manifestation proof' OR 'consciousness frequency science' OR 'simulation theory evidence 2026'\n" +
-                "• brand: search 'sovereign individual movement' OR 'digital nomad empire building' OR 'one-person business $1M' OR 'escape matrix lifestyle'\n" +
-                "Score each finding: Brand Alignment (1-10, how closely it maps to Sovereign Synthesis messaging) × Viral Potential (1-10, engagement signals, controversy, emotional trigger). " +
-                "Minimum score 50/100 to make the brief. " +
-                "Generate today's content brief: top 3 opportunities with specific hooks using 4-Part Copy Architecture (GLITCH → PIVOT → BRIDGE → ANCHOR). " +
-                "CRITICAL — PIPELINE FUEL: For your #1 pick, search YouTube for a video with 50k+ views, posted in last 30 days, " +
-                "that a Sovereign Synthesis viewer would watch. " +
-                "COMPETITOR CHANNELS TO MONITOR: Hamza Ahmed, Dan Koe, Iman Gadzhi, Alex Hormozi, Improvement Pill, Charisma on Command, " +
-                "Psych2Go, Practical Psychology, DoctorRamani (narcissism), The Art of Manliness, Kevin David (Unemployed CEO), Noah Kagan. " +
-                "These are our reference-class creators — study what's working for them THIS WEEK. " +
-                "Include the FULL URL: PIPELINE_URL: https://www.youtube.com/watch?v=XXXXX — This auto-triggers VidRush. " +
-                "If nothing meets the 50/100 threshold, write PIPELINE_URL: NONE. " +
-                "Report the full brief to the Architect. Your PIPELINE_URL is your primary deliverable — VidRush handles distribution automatically.",
+              // SESSION 47b — NATIVE SEED GENERATOR PIVOT.
+              // Alfred no longer scrapes YouTube. The machine projects the Sovereign frequency
+              // outward from its own core. Alfred generates ONE original thesis per day from
+              // the Sovereign Synthesis framework and hands it to VidRush as a raw_idea. This
+              // severs the pipeline's dependency on external URL availability and removes the
+              // yt-dlp / Whisper failure surface entirely.
+              directive: "DAILY NATIVE SEED GENERATION — You are the autonomous Native Seed Generator for the Sovereign Synthesis machine. " +
+                "DO NOT search the web. DO NOT look for YouTube URLs. DO NOT cite competitors. " +
+                "Your job is to PROJECT the Sovereign frequency outward, not to react to the simulation's noise.\n\n" +
+                "Generate ONE single, high-impact, highly specific original thesis for today's faceless video. " +
+                "It must be a complete, standalone concept — not a niche label, not a topic, not a list. A thesis statement plus a 1-2 sentence framing.\n\n" +
+                "TARGET DOMAINS (rotate across days; pick the one with the strongest psychic charge today):\n" +
+                "• Corporate burnout & the high-performer trapdoor — quiet quitting, escape velocity from W-2 servitude, the burnout-to-sovereignty pivot.\n" +
+                "• Covert psychological manipulation — dark triad tactics in dating/workplace/family, narcissist defense architecture, gray rock as a frequency shield.\n" +
+                "• Dopamine, frame control, and masculine recalibration — monk mode, cold exposure, the self-discipline operating system.\n" +
+                "• Spiritual awakening / simulation theory / reality shifting — the Firmware Update, escape velocity, biological drag, the painting dad metaphor.\n" +
+                "• Sovereign individual / one-person empire — the architecture of the $1M solo business, digital nomad without the cope.\n\n" +
+                "FOR THE THESIS YOU PICK, USE NICHE-CHARGED LANGUAGE so downstream classification routes the right color grade and brand voice. " +
+                "Embed at least 3 keywords from the chosen domain (e.g., 'narcissist', 'manipulation', 'dark psychology' for the dark_psychology lane; 'burnout', 'corporate', 'recovery' for the burnout lane).\n\n" +
+                "OUTPUT CONTRACT (mandatory — your response is parsed by regex):\n" +
+                "1. A short brief to the Architect (1-3 sentences explaining why this thesis hits today).\n" +
+                "2. The hook line in 4-Part Copy Architecture (GLITCH → PIVOT → BRIDGE → ANCHOR).\n" +
+                "3. The final line MUST be exactly: PIPELINE_IDEA: <your one-sentence thesis here>\n" +
+                "Example: PIPELINE_IDEA: The corporate ladder is a Faraday cage — every promotion thickens the walls. The high-performer's burnout is not failure, it's the system finally hitting resonance frequency and breaking its own shielding.\n\n" +
+                "If for any reason you cannot generate a thesis today, write: PIPELINE_IDEA: NONE\n" +
+                "Your PIPELINE_IDEA line is the primary deliverable — VidRush ingests it as a raw_idea and bypasses Whisper entirely.",
               triggered_at: new Date().toISOString(),
               scan_type: "daily",
             },
@@ -2896,31 +2904,45 @@ async function main() {
                   console.error(`[Pipeline] Handoff error for ${agentName}: ${handoffErr.message}`);
                 }
 
-                // ── AUTO-PIPELINE TRIGGER: Alfred's daily scan → VidRush ──
-                // When Alfred completes a daily_trend_scan and his response contains PIPELINE_URL: <youtube_url>,
-                // automatically fire the 8-step VidRush pipeline. This is the compounding engine:
-                // 1 auto-pipeline/day + manual URLs = 250+ posts/week at steady state.
+                // ── AUTO-PIPELINE TRIGGER: Alfred's daily NATIVE SEED → VidRush ──
+                // SESSION 47b — NATIVE SEED GENERATOR PIVOT.
+                // Alfred no longer scrapes URLs. He generates an original thesis as a raw_idea.
+                // The bridge parses `PIPELINE_IDEA: <thesis>` from his response and feeds it
+                // directly into VidRush via the rawIdea option, which bypasses Step 1 (yt-dlp)
+                // and Step 2 (Whisper) entirely. The Faceless Factory builds the narrative
+                // blueprint from the raw thesis.
                 if (agentName === "alfred" && task.task_type === "daily_trend_scan") {
                   try {
-                    const pipelineUrlMatch = response.match(/PIPELINE_URL:\s*(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11}))/);
-                    if (pipelineUrlMatch) {
-                      const autoUrl = pipelineUrlMatch[1];
-                      const autoVideoId = pipelineUrlMatch[2];
-                      console.log(`🚀 [AutoPipeline] Alfred found pipeline fuel: ${autoVideoId} — launching VidRush`);
+                    // Greedy match to end of line — captures the full thesis sentence Alfred emits.
+                    const pipelineIdeaMatch = response.match(/PIPELINE_IDEA:\s*([^\r\n]+?)\s*$/m);
+                    const rawIdeaText = pipelineIdeaMatch ? pipelineIdeaMatch[1].trim() : "";
+                    const ideaIsValid = rawIdeaText.length > 0 && rawIdeaText.toUpperCase() !== "NONE";
+
+                    if (ideaIsValid) {
+                      // Synthetic identifier for jobId / queue dedupe — derived from idea text hash.
+                      const ideaHash = require("crypto")
+                        .createHash("sha1")
+                        .update(rawIdeaText)
+                        .digest("hex")
+                        .slice(0, 10);
+                      const syntheticId = `raw_${ideaHash}`;
+                      const ideaPreview = rawIdeaText.length > 120 ? rawIdeaText.slice(0, 120) + "…" : rawIdeaText;
+                      console.log(`🌱 [AutoPipeline] Alfred generated native seed [${syntheticId}]: "${ideaPreview}"`);
                       try {
                         await channel.sendMessage(
                           task.chat_id || defaultChatId,
-                          `🚀 *AUTO-PIPELINE ACTIVATED*\nAlfred's daily scan found: \`${autoVideoId}\`\n8-step pipeline launching autonomously...`,
+                          `🌱 *NATIVE SEED INGESTED*\nAlfred generated:\n_"${ideaPreview}"_\n\nVidRush bypassing Whisper — feeding directly into Faceless Factory...`,
                           { parseMode: "Markdown" }
                         );
                       } catch { /* non-critical */ }
 
                       // Session 40: Enqueue via pipeline queue — serializes with manual /pipeline runs.
                       // Session 26: Dual-brand auto-pipeline — fires BOTH brands sequentially.
+                      // Session 47b: payload type is now `raw_idea` (vs `youtube_url`).
                       const autoEnqueue = (globalThis as any).__enqueuePipeline;
                       const autoChatId = task.chat_id || defaultChatId;
                       const autoBrands: Array<"ace_richie" | "containment_field"> = ["ace_richie", "containment_field"];
-                      const autoPos = autoEnqueue ? autoEnqueue(`auto-${autoVideoId}-dual`, async () => {
+                      const autoPos = autoEnqueue ? autoEnqueue(`auto-${syntheticId}-dual`, async () => {
                         for (let bIdx = 0; bIdx < autoBrands.length; bIdx++) {
                           const brand = autoBrands[bIdx];
                           const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
@@ -2939,19 +2961,20 @@ async function main() {
                           }
 
                           try {
-                            await channel.sendMessage(autoChatId, `--- ${brandLabel} AUTO-PIPELINE ---`);
+                            await channel.sendMessage(autoChatId, `--- ${brandLabel} AUTO-PIPELINE (raw_idea) ---`);
                           } catch { /* non-critical */ }
 
                           try {
                             const result = await executeFullPipeline(
-                              autoUrl,
+                              syntheticId, // First param is now a synthetic identifier; orchestrator ignores it when rawIdea is set.
                               brand === "containment_field" ? tcfPipelineLLM : pipelineLLM,
                               brand,
                               async (step: string, detail: string) => {
                                 try {
                                   await channel.sendMessage(autoChatId, `[${brandLabel}] ${step}: ${detail}`);
                                 } catch { /* non-critical */ }
-                              }
+                              },
+                              { rawIdea: rawIdeaText }
                             );
                             const report = formatPipelineReport(result);
                             try {
@@ -2975,7 +2998,7 @@ async function main() {
                         try { await channel.sendMessage(autoChatId, `⏳ Auto-pipeline queued (position ${autoPos}). Will start after current run.`); } catch { /* non-critical */ }
                       }
                     } else {
-                      console.log(`🔍 [AutoPipeline] Alfred scan complete — no PIPELINE_URL found in response`);
+                      console.log(`🔍 [AutoPipeline] Alfred scan complete — no valid PIPELINE_IDEA found in response`);
                     }
                   } catch (autoErr: any) {
                     console.error(`[AutoPipeline] Error checking Alfred response: ${autoErr.message}`);

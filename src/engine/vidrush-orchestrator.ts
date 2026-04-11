@@ -26,7 +26,7 @@ const FFMPEG_CLIP_TIMEOUT_MS = parseInt(process.env.FFMPEG_CLIP_TIMEOUT_MS || "1
 // the container. 10 clips is enough for a week of Buffer posts across all channels.
 const MAX_CLIPS_PER_RUN = parseInt(process.env.MAX_CLIPS_PER_RUN || "10", 10);
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync, rmSync } from "fs";
-import { extractWhisperIntel, type WhisperResult } from "./whisper-extract";
+import { extractWhisperIntel, detectNiche, type WhisperResult } from "./whisper-extract";
 import { produceFacelessVideo } from "./faceless-factory";
 import { YouTubeLongFormPublishTool } from "../tools/video-publisher";
 import {
@@ -1345,6 +1345,14 @@ async function scheduleBufferWeek(
 
 export interface PipelineOptions {
   dryRun?: boolean; // Stub all expensive API calls — validates logic without burning credits
+  // SESSION 47b — NATIVE SEED GENERATOR PIVOT.
+  // When set, the orchestrator skips Step 1 (yt-dlp download) and Step 2 (Whisper transcription)
+  // entirely. The rawIdea text is fed directly into the Faceless Factory as the
+  // sourceIntelligence for Anita's script generator. The first arg (youtubeUrl) is treated
+  // as a synthetic identifier and is NOT downloaded or transcribed. Niche is auto-detected
+  // from the rawIdea text via detectNiche(); pass `niche` to override.
+  rawIdea?: string;
+  niche?: string; // Optional override; otherwise inferred from rawIdea via detectNiche()
 }
 
 export async function executeFullPipeline(
@@ -1355,6 +1363,8 @@ export async function executeFullPipeline(
   options?: PipelineOptions
 ): Promise<OrchestratorResult> {
   const dryRun = options?.dryRun ?? false;
+  const rawIdea = options?.rawIdea?.trim() || null;
+  const isRawIdeaMode = rawIdea !== null && rawIdea.length > 0;
   const startTime = Date.now();
   const jobId = `vr_${brand}_${Date.now()}`;
   const errors: string[] = [];
@@ -1369,9 +1379,26 @@ export async function executeFullPipeline(
     }
   };
 
-  // ── STEP 1: WHISPER EXTRACTION ──
-  await progress("STEP 1/8", dryRun ? "[DRY RUN] Simulating Whisper extraction..." : "Downloading video and running Whisper transcription...");
+  // ── STEP 1: WHISPER EXTRACTION (or RAW IDEA BYPASS) ──
+  // SESSION 47b — when rawIdea is set, we skip yt-dlp + Whisper entirely and synthesize
+  // a WhisperResult shell where transcript = the raw thesis text. The Faceless Factory
+  // already takes its sourceIntelligence as a free-form string, so this drops in cleanly.
   let whisperResult: WhisperResult;
+  if (isRawIdeaMode) {
+    await progress("STEP 1/8", `🌱 RAW IDEA mode — bypassing yt-dlp + Whisper. Seed: "${rawIdea!.slice(0, 100)}${rawIdea!.length > 100 ? "…" : ""}"`);
+    const inferredNiche = options?.niche || detectNiche(rawIdea!);
+    whisperResult = {
+      videoId: youtubeUrl, // Synthetic identifier from caller (e.g., raw_<sha1>)
+      transcript: rawIdea!, // The thesis IS the source intelligence
+      segments: [], // Empty — chopLongFormIntoClips falls back to silence-boundary detection
+      sourcePath: "",
+      audioPath: "",
+      whisperPath: "",
+      niche: inferredNiche,
+    };
+    await progress("STEP 1/8", `✅ Native seed accepted — niche: ${inferredNiche} (no transcription required)`);
+  } else {
+    await progress("STEP 1/8", dryRun ? "[DRY RUN] Simulating Whisper extraction..." : "Downloading video and running Whisper transcription...");
   if (dryRun) {
     whisperResult = {
       videoId: youtubeUrl.match(/(?:v=|youtu\.be\/)([\w-]{11})/)?.[1] || "dryrun_vid",
@@ -1395,6 +1422,7 @@ export async function executeFullPipeline(
       throw new Error(`Whisper extraction failed: ${err.message}`);
     }
   }
+  } // ← end of isRawIdeaMode else (Session 47b — Native Seed Generator)
 
   // ── STEP 2: FACELESS FACTORY — LONG MODE (ANITA'S VOICE) ──
   await progress("STEP 2/8", dryRun ? "[DRY RUN] Simulating Faceless Factory..." : "Generating 10-15 minute faceless video in Anita's Protocol 77 voice...");

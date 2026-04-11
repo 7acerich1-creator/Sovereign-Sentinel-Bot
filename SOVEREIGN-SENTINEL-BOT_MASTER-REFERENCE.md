@@ -362,7 +362,9 @@ When Anita creates ANY email, she MUST conform to the standard documented in Mis
 
 ---
 
-## 12. WEBHOOK BRIDGE (`/api/chat-bridge`)
+## 12. WEBHOOKS
+
+### 12.1 Chat Bridge (`/api/chat-bridge`) — Railway bot
 
 Mission Control chat uses the real agent loop via a webhook on the Railway bot.
 
@@ -373,6 +375,41 @@ Mission Control chat uses the real agent loop via a webhook on the Railway bot.
 - **Gated by:** `WEBHOOKS_ENABLED=true` env var
 
 The standalone Sapphire API service is DEPRECATED — the webhook bridge replaced it.
+
+### 12.2 Supabase Edge Functions (separate plane from Railway)
+
+Supabase hosts a second set of webhook handlers at `https://wzthxohtgojenukmdubz.supabase.co/functions/v1/<slug>`. Their env vars live in **Supabase Dashboard → Project Settings → Edge Functions → Secrets**, NOT in Railway. `execute_sql` cannot read them.
+
+| Slug | Version | Role |
+|---|---|---|
+| `stripe-webhook` | v8 | Primary Stripe receiver. Handles `checkout.session.completed` only. Provisions in 6 steps (see below). |
+| `send-purchase-email` | v1 | Resend-backed receipt email + `initiates` table patch. Accepts raw Stripe payload OR flat `{customer_email, amount_total}` from Make.com relay. |
+| `send-nurture-email` | v3 | Anita's nurture template delivery. |
+| `fireflies-webhook` | v4 | Meeting transcript ingestion. |
+
+**`stripe-webhook` step order (critical for failure mode reasoning):**
+
+1. Log to `revenue_log` (product_id=tier, metadata includes stripe ids)
+2. Find-or-create user via `supabase.auth.admin`
+3. Grant `member_access` row with `tier_slug`, `granted_by='stripe-webhook'`
+4. Insert `audit_trail` row with `action='stripe_purchase'`
+5. Fire-and-forget fetch → `MAKE_STRIPE_ROUTER_URL` (Make.com fan-out)
+6. Fire-and-forget fetch → `BOT_WEBHOOK_URL` (Telegram bot fan-out)
+
+**Fan-out is `.catch((e) => console.warn(...))`.** If steps 5 or 6 hit a dead URL, the buyer is still provisioned (steps 1–4) and the webhook returns 200. But the Make.com scenario at `MAKE_STRIPE_ROUTER_URL` is the relay that normally invokes `send-purchase-email` with a flat payload — so a dead Make.com URL means **no receipt email** even though tier access is granted. The two env vars are SEPARATE: `MAKE_STRIPE_ROUTER_URL` is NOT `BOT_WEBHOOK_URL`. Any doc that says "forwards to Make.com + Telegram via BOT_WEBHOOK_URL" is wrong — that was an earlier conflation bug.
+
+**Relevant Edge Function env vars (live in Supabase, not Railway):**
+
+| Var | Powers |
+|---|---|
+| `MAKE_STRIPE_ROUTER_URL` | Make.com fan-out from `stripe-webhook` step 5. Likely target: receipt email relay to `send-purchase-email`, HubSpot/Notion syncs, Slack ping. If this is one of the four dead hooks deleted during funnel cleanup, receipt email is silently broken. |
+| `BOT_WEBHOOK_URL` | Telegram bot fan-out from `stripe-webhook` step 6. Should point to the Railway bot's `/api/stripe-webhook` or equivalent `revenue_signal` receiver. |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Used by stripe-webhook for revenue_log + member_access writes. |
+| `RESEND_API_KEY` | **Currently hardcoded in `send-purchase-email` source** — should be moved to env var. Security issue tracked in `SECURITY-ISSUES.md`. |
+
+**Duplicate webhook handler — be aware:**
+
+There is ALSO a bot-side webhook handler at `src/index.ts:2014` (`webhookServer.register("/api/stripe-webhook", ...)`) that signature-verifies via `STRIPE_WEBHOOK_SECRET` and writes to `revenue_log + mission_metrics + activity_log`. Stripe can only send each event to one URL per endpoint config — exactly one of these two handlers is the registered receiver in Stripe dashboard. **Which one determines which tables light up on the first paid test.** Verify in Stripe dashboard → Developers → Webhooks before running a test transaction.
 
 ---
 

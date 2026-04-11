@@ -51,6 +51,22 @@ export function computeTerminalOverrideDuration(firstSegDur: number | undefined)
   return Math.max(TERMINAL_OVERRIDE_DUR_MIN, seg0);
 }
 
+/**
+ * Sanitize a filesystem path for inlining into an ffmpeg drawtext `fontfile=`
+ * filter argument. Needed on Windows where __dirname resolves to paths like
+ * `C:\Users\...\brand-assets\BebasNeue-Regular.ttf` — the backslashes break
+ * the filter parse and the drive-letter colon collides with the filter arg
+ * separator. Canonical fix:
+ *   1. `\` → `/`  (ffmpeg accepts forward slashes on Windows)
+ *   2. `:` → `\:` (escape the drive-letter colon so it's not treated as an
+ *                  argument separator inside the filter chain)
+ * Result for `C:\Users\richi\...\BebasNeue-Regular.ttf`:
+ *   `C\:/Users/richi/.../BebasNeue-Regular.ttf`
+ */
+function sanitizeFontPathForDrawtext(p: string): string {
+  return p.replace(/\\/g, "/").replace(/:/g, "\\:");
+}
+
 // ── Session 40: Title uniqueness — fetch recent titles to prevent repetition ──
 async function getRecentTitles(limit: number = 20): Promise<string[]> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return [];
@@ -1391,7 +1407,11 @@ export async function generateLongFormThumbnail(
   const brandAssetsDir = `${__dirname}/../../brand-assets`;
   const fontPath = `${brandAssetsDir}/BebasNeue-Regular.ttf`;
   const hasFont = existsSync(fontPath);
-  const fontFilter = hasFont ? `fontfile='${fontPath}':` : "";
+  // Sanitize Windows-native path — drawtext chokes on backslashes and drive-letter
+  // colons. Forward slashes + escaped colon is the canonical ffmpeg fix.
+  const safeFontPath = sanitizeFontPathForDrawtext(fontPath);
+  const safeThumbTextFile = sanitizeFontPathForDrawtext(thumbTextFile);
+  const fontFilter = hasFont ? `fontfile='${safeFontPath}':` : "";
 
   // Visual grammar:
   //   - Bar occupies ih*0.62 → ih*0.84 (lower-middle third), keeps keyframe subject's head-room
@@ -1405,12 +1425,18 @@ export async function generateLongFormThumbnail(
   const textY = line2 ? `ih*0.645` : `(h-text_h)/2+ih*0.23`;
 
   const textOverlay = titleText
-    ? `,drawtext=${fontFilter}textfile='${thumbTextFile.replace(/'/g, "'\\''")}':fontsize=${fontSize}:fontcolor=white:borderw=4:bordercolor=black@0.85:x=(w-text_w)/2:y=${textY}:line_spacing=10`
+    ? `,drawtext=${fontFilter}textfile='${safeThumbTextFile}':fontsize=${fontSize}:fontcolor=white:borderw=4:bordercolor=black@0.85:x=(w-text_w)/2:y=${textY}:line_spacing=10`
     : "";
 
   // Single-filter-chain (not filter_complex) because we have one video stream and output one frame.
+  //
+  // Session 47 fix: the old `scale=1920:1080:force_original_aspect_ratio=increase`
+  // syntax was throwing `Invalid argument` on some ffmpeg builds (older libavfilter
+  // that parses the `:force_...=` suffix as a bad option set). Replaced with the
+  // portable `scale=-1:1080,crop=1920:1080` idiom — resize to height 1080 preserving
+  // aspect, then crop to exact 1920×1080. Works on every libavfilter we've seen.
   const vf =
-    `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,` +
+    `scale=-1:1080,crop=1920:1080,` +
     `eq=contrast=1.1:brightness=-0.02:saturation=1.05,` + // subtle pop for 120x68 render
     `vignette=PI/4,` +
     `drawbox=x=0:y=${barY}:w=iw:h=${barH}:c=black@0.6:t=fill` +
@@ -1705,7 +1731,10 @@ export async function assembleVideo(
           i === stepCount
             ? terminalOverrideDuration.toFixed(3)
             : (i * stepInterval).toFixed(3);
-        const fontfileFilter = hasFont ? `fontfile='${fontPath}':` : "";
+        // Sanitize Windows-native fontPath before inlining — drawtext chokes on
+        // `C:\Users\...` because of the backslashes and drive-letter colon.
+        const safeFontPath = sanitizeFontPathForDrawtext(fontPath);
+        const fontfileFilter = hasFont ? `fontfile='${safeFontPath}':` : "";
         // Bright terminal green (#00FF88) on pure black, sharp black border for crispness.
         // Session 47: fontsize raised to 120 (horizontal) / 110 (vertical) — the old 64/56
         // scale was producing tiny centered text that got lost in the Terminal Override.

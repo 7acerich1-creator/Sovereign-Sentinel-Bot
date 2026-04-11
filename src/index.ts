@@ -449,12 +449,17 @@ async function main() {
 
       // ── Session 47c: IDEA: prefix ingestion ──
       // If the message starts with "IDEA:", strip the prefix, treat the remainder as a raw
-      // thesis, and feed it directly into the same dual-brand executeFullPipeline flow the
-      // bridge uses for Alfred's autonomous seeds. Bypasses yt-dlp + Whisper entirely.
-      // Example: `IDEA: The corporate ladder is a Faraday cage — every promotion thickens the walls.`
-      const ideaPrefixMatch = message.content.match(/^\s*IDEA:\s*(.+)$/is);
+      // thesis, and feed it directly into the executeFullPipeline flow. Bypasses yt-dlp +
+      // Whisper entirely. Dual-brand by default; single-brand via optional brand modifier.
+      //
+      // Patterns (case-insensitive):
+      //   IDEA: <thesis>                → dual-brand (ACE + TCF)
+      //   IDEA: ace only: <thesis>      → ACE RICHIE only
+      //   IDEA: tcf only: <thesis>      → THE CONTAINMENT FIELD only
+      const ideaPrefixMatch = message.content.match(/^\s*IDEA:\s*(?:(ace|tcf)\s*only:\s*)?(.+)$/is);
       if (ideaPrefixMatch) {
-        const rawIdeaText = ideaPrefixMatch[1].trim();
+        const ideaBrandHint = ideaPrefixMatch[1]?.toLowerCase(); // "ace" | "tcf" | undefined
+        const rawIdeaText = ideaPrefixMatch[2].trim();
         if (rawIdeaText.length < 10) {
           await telegram.sendMessage(message.chatId,
             "⚠️ IDEA text too short. Provide at least a one-sentence thesis after the `IDEA:` prefix.",
@@ -471,20 +476,28 @@ async function main() {
             .slice(0, 10);
           const syntheticId = `raw_${ideaHash}`;
           const ideaPreview = rawIdeaText.length > 120 ? rawIdeaText.slice(0, 120) + "…" : rawIdeaText;
-          console.log(`🌱 [IDEA:] Manual native seed ingested [${syntheticId}]: "${ideaPreview}"`);
+          const ideaMode = ideaBrandHint === "ace" ? "ACE RICHIE only" : ideaBrandHint === "tcf" ? "THE CONTAINMENT FIELD only" : "Dual-brand";
+          console.log(`🌱 [IDEA:] Manual native seed ingested [${syntheticId}] [${ideaMode}]: "${ideaPreview}"`);
 
           await telegram.sendMessage(message.chatId,
             `🌱 *NATIVE SEED INGESTED.* Assembling pipeline...\n\n` +
             `_"${ideaPreview}"_\n\n` +
-            `Dual-brand faceless factory engaging. Expect progress messages shortly.`,
+            `${ideaMode} faceless factory engaging. Expect progress messages shortly.`,
             { parseMode: "Markdown" }
           );
 
           // Enqueue via pipeline queue — serializes with /pipeline runs and the Alfred auto-bridge.
-          // Same dual-brand loop + cooldown pattern as /pipeline and the bridge auto-trigger.
+          // Same loop + cooldown pattern as /pipeline and the bridge auto-trigger, but the brand
+          // list is filtered by the IDEA: prefix hint so single-brand runs skip the other lane.
           const manualEnqueue = (globalThis as any).__enqueuePipeline;
-          const manualBrands: Array<"ace_richie" | "containment_field"> = ["ace_richie", "containment_field"];
-          const manualPos = manualEnqueue ? manualEnqueue(`idea-${syntheticId}-dual`, async () => {
+          const allBrands: Array<"ace_richie" | "containment_field"> = ["ace_richie", "containment_field"];
+          const manualBrands: Array<"ace_richie" | "containment_field"> = ideaBrandHint === "ace"
+            ? ["ace_richie"]
+            : ideaBrandHint === "tcf"
+            ? ["containment_field"]
+            : allBrands;
+          const queueTag = ideaBrandHint || "dual";
+          const manualPos = manualEnqueue ? manualEnqueue(`idea-${syntheticId}-${queueTag}`, async () => {
             for (let bIdx = 0; bIdx < manualBrands.length; bIdx++) {
               const brand = manualBrands[bIdx];
               const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
@@ -1020,10 +1033,22 @@ async function main() {
         //   • Architect wants to trigger today's video on demand from phone
         //   • Debugging the Native Seed Generator flow
         //
-        // This dispatches the EXACT same task payload the scheduler uses — the bridge
-        // auto-pipeline trigger then picks up Alfred's PIPELINE_IDEA from the final text
-        // and fans out into dual-brand executeFullPipeline just like the cron path.
-        console.log(`⚡ [/alfred] Manual override — force-triggering daily_trend_scan`);
+        // Optional brand modifiers (same keywords as /pipeline):
+        //   /alfred              → dual-brand (ACE + TCF, default)
+        //   /alfred ace only     → ACE RICHIE only
+        //   /alfred tcf only     → THE CONTAINMENT FIELD only
+        //
+        // Brand hint is passed to the bridge via payload.brand_override — the auto-pipeline
+        // trigger reads it and filters the autoBrands array before fanning out.
+        const alfredOnlyAce = /\bace\s*only\b/i.test(message.content);
+        const alfredOnlyTcf = /\btcf\s*only\b/i.test(message.content);
+        const alfredBrandOverride: "ace_richie" | "containment_field" | undefined =
+          alfredOnlyAce ? "ace_richie" : alfredOnlyTcf ? "containment_field" : undefined;
+        const alfredMode = alfredBrandOverride === "ace_richie" ? "ACE RICHIE only"
+          : alfredBrandOverride === "containment_field" ? "THE CONTAINMENT FIELD only"
+          : "Dual-brand";
+
+        console.log(`⚡ [/alfred] Manual override — force-triggering daily_trend_scan [${alfredMode}]`);
         try {
           // Reset the fired-dates gate so if the 15:05 window still hits later, it won't double-fire.
           // (autonomousFiredDates persists in-memory only — this flip is enough.)
@@ -1032,7 +1057,7 @@ async function main() {
           await telegram.sendMessage(message.chatId,
             `⚡ *ALFRED OVERRIDE ACTIVATED*\n\nScanning for native seed...\n\n` +
             `Alfred is generating today's thesis directly from the Sovereign Synthesis framework. ` +
-            `When he emits PIPELINE_IDEA, the bridge will fan out into dual-brand executeFullPipeline. ` +
+            `When he emits PIPELINE_IDEA, the bridge will fan out into *${alfredMode}* executeFullPipeline. ` +
             `Expect pipeline progress messages in ~1-2 minutes.`,
             { parseMode: "Markdown" }
           );
@@ -1049,10 +1074,13 @@ async function main() {
               scan_type: "manual_override",
               trigger_source: "telegram_/alfred",
               triggered_by: message.userId || "architect",
+              // Session 47d: brand_override is consumed by the auto-pipeline bridge at
+              // dispatch-poller time to filter autoBrands. Undefined → default dual-brand.
+              brand_override: alfredBrandOverride,
             },
           });
 
-          console.log(`✅ [/alfred] Dispatched daily_trend_scan task id=${dispatchId}`);
+          console.log(`✅ [/alfred] Dispatched daily_trend_scan task id=${dispatchId} override=${alfredBrandOverride || "dual"}`);
         } catch (err: any) {
           console.error(`❌ [/alfred] Dispatch failed: ${err.message}`);
           try {
@@ -3100,11 +3128,24 @@ async function main() {
                         .slice(0, 10);
                       const syntheticId = `raw_${ideaHash}`;
                       const ideaPreview = rawIdeaText.length > 120 ? rawIdeaText.slice(0, 120) + "…" : rawIdeaText;
-                      console.log(`🌱 [AutoPipeline] Alfred generated native seed [${syntheticId}]: "${ideaPreview}"`);
+
+                      // Session 47d: Read brand_override from the task payload. Set by /alfred
+                      // when the Architect appends `ace only` / `tcf only` to the Telegram command.
+                      // Unset (undefined) → default dual-brand fan-out, matching the autonomous
+                      // daily cron behavior (which never sets brand_override).
+                      const brandOverrideRaw = (task.payload as any)?.brand_override;
+                      const autoBrandOverride: "ace_richie" | "containment_field" | undefined =
+                        brandOverrideRaw === "ace_richie" || brandOverrideRaw === "containment_field"
+                          ? brandOverrideRaw
+                          : undefined;
+                      const autoMode = autoBrandOverride === "ace_richie" ? "ACE RICHIE only"
+                        : autoBrandOverride === "containment_field" ? "THE CONTAINMENT FIELD only"
+                        : "Dual-brand";
+                      console.log(`🌱 [AutoPipeline] Alfred generated native seed [${syntheticId}] [${autoMode}]: "${ideaPreview}"`);
                       try {
                         await channel.sendMessage(
                           task.chat_id || defaultChatId,
-                          `🌱 *NATIVE SEED INGESTED*\nAlfred generated:\n_"${ideaPreview}"_\n\nVidRush bypassing Whisper — feeding directly into Faceless Factory...`,
+                          `🌱 *NATIVE SEED INGESTED*\nAlfred generated:\n_"${ideaPreview}"_\n\n${autoMode} — VidRush bypassing Whisper, feeding directly into Faceless Factory...`,
                           { parseMode: "Markdown" }
                         );
                       } catch { /* non-critical */ }
@@ -3112,10 +3153,18 @@ async function main() {
                       // Session 40: Enqueue via pipeline queue — serializes with manual /pipeline runs.
                       // Session 26: Dual-brand auto-pipeline — fires BOTH brands sequentially.
                       // Session 47b: payload type is now `raw_idea` (vs `youtube_url`).
+                      // Session 47d: Filter by brand_override if set. Autonomous daily scans
+                      // (no override) still run full dual-brand.
                       const autoEnqueue = (globalThis as any).__enqueuePipeline;
                       const autoChatId = task.chat_id || defaultChatId;
-                      const autoBrands: Array<"ace_richie" | "containment_field"> = ["ace_richie", "containment_field"];
-                      const autoPos = autoEnqueue ? autoEnqueue(`auto-${syntheticId}-dual`, async () => {
+                      const autoAllBrands: Array<"ace_richie" | "containment_field"> = ["ace_richie", "containment_field"];
+                      const autoBrands: Array<"ace_richie" | "containment_field"> = autoBrandOverride
+                        ? [autoBrandOverride]
+                        : autoAllBrands;
+                      const autoQueueTag = autoBrandOverride === "ace_richie" ? "ace"
+                        : autoBrandOverride === "containment_field" ? "tcf"
+                        : "dual";
+                      const autoPos = autoEnqueue ? autoEnqueue(`auto-${syntheticId}-${autoQueueTag}`, async () => {
                         for (let bIdx = 0; bIdx < autoBrands.length; bIdx++) {
                           const brand = autoBrands[bIdx];
                           const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";

@@ -26,7 +26,10 @@ export interface SocialOptimizationContext {
  * or batch per-platform with multiple clips for efficiency.
  */
 export function buildSocialOptimizationPrompt(ctx: SocialOptimizationContext): string {
-  return `You are a social media marketing expert who will provide best practices for maximizing the reach and viral potential of content on social media platforms. Your goal is to give actionable, specific advice based on the type of content, platform, and target audience.
+  const brandBlock = buildBrandFrequencyBlock(ctx.brand);
+  return `${brandBlock}
+
+You are a social media marketing expert who will provide best practices for maximizing the reach and viral potential of content on social media platforms. Your goal is to give actionable, specific advice based on the type of content, platform, and target audience.
 
 Here is the type of content being uploaded:
 <content_type>
@@ -407,4 +410,208 @@ export function hashStringToAngleOffset(s: string): number {
     h = ((h * 31) + s.charCodeAt(i)) | 0;
   }
   return Math.abs(h);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SESSION 48 — FREQUENCY BIFURCATION PROTOCOL
+// Single source of truth for brand voice bifurcation.
+// Consumed by Anita (faceless-factory.ts) and Yuki (vidrush-orchestrator.ts
+// + buildSocialOptimizationPrompt above) so updating ONE file updates every
+// LLM prompt injection site in the pipeline.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export type BrandFrequency = "ace_richie" | "containment_field";
+
+export interface BrandFrequencyProfile {
+  brandLabel: string;
+  frequencyLayer: "LOWER" | "HIGHER";
+  identity: string;
+  theme: string;
+  tone: string;
+  style: string;
+  structure: string;
+  lexiconRequired: readonly string[];
+  lexiconBanned: readonly string[];
+  sampleTitles: readonly string[];
+  sampleHooks: readonly string[];
+  voiceMandate: string;
+}
+
+export const BRAND_FREQUENCY_PROFILES: Record<BrandFrequency, BrandFrequencyProfile> = {
+  containment_field: {
+    brandLabel: "The Containment Field",
+    frequencyLayer: "LOWER",
+    identity: "The Containment Field is an anonymous, top-of-funnel channel written for people who are still INSIDE the machine and know something is wrong but do not yet have the vocabulary. The narrator is a whistleblower reading a declassified brief at a quiet table — measured, tactical, specific. The audience is a tired worker who just closed their laptop and is looking for someone who can finally NAME what is happening to them. Never speak in cosmology, quantum metaphors, or spiritual vocabulary.",
+    theme: "Escaping the Matrix as a concrete set of behavioral programs installed by the workplace. Dark psychology as it is used IN PRACTICE — by managers, HR, performance reviews, promotion ladders. Systemic corporate burnout as the product of an extraction loop. Human behavioral programming installed one micro-compliance at a time. The 9-to-5 grind as a conditioning apparatus, not a moral failure.",
+    tone: "Clinical, edgy, tactical, grounded in raw survival. Name the extraction loop. Name the operator. Empathize with the exhaustion FIRST, then expose the manipulation. Never uplifting. Never 'expansive'. Never motivational. The emotional peak is RECOGNITION, not transcendence.",
+    style: "High-velocity, punchy, listicle-friendly. Frameworks with numbers ('3 Signs', '6 Tricks', '4 Micro-Compliance Traps'). Short sentences. Pattern-interrupt hooks that name a specific body sensation the viewer is having right now ('If your chest tightens when your manager says quick sync...'). Zero abstract language. Every claim is falsifiable and tactical.",
+    structure: "NAME THE LOOP (clinical description of the extraction pattern) → EXPOSE THE MECHANISM (how the operant conditioning was installed) → DELIVER ONE COUNTERMEASURE (a single concrete tactic the viewer can run tomorrow morning). Lists are encouraged. Numbered steps are encouraged. The viewer should feel ARMED, not awakened.",
+    lexiconRequired: [
+      "nervous system",
+      "systemic exploitation",
+      "cognitive dissonance",
+      "micro-compliance",
+      "the machine",
+      "extraction loop",
+      "operant conditioning",
+      "behavioral program",
+      "the grind",
+      "gaslighting",
+      "performance review",
+      "manager",
+      "countermeasure",
+    ],
+    lexiconBanned: [
+      "quantum",
+      "quantum field",
+      "quantum mechanics",
+      "timeline",
+      "timelines",
+      "timeline jumping",
+      "timeline distortion",
+      "source",
+      "the source",
+      "source code",
+      "God-consciousness",
+      "god-consciousness",
+      "god consciousness",
+      "frequency",
+      "frequencies",
+      "frequency signature",
+      "monad",
+      "solipsism",
+      "identity spaghettification",
+    ],
+    sampleTitles: [
+      "The 4 Micro-Compliance Traps Built Into Your Workday",
+      "3 Signs Your Manager Is Running An Extraction Loop On You",
+      "6 Tricks HR Uses To Keep You Compliant",
+      "The Performance Review Is A Behavioral Program",
+      "5 Behavioral Programs Your Company Installed Without Telling You",
+    ],
+    sampleHooks: [
+      "If your chest tightens when your manager says 'quick sync', your body already knows what your mind hasn't named yet.",
+      "There are three micro-compliance traps in your last performance review. I'm going to name all of them.",
+      "The exhaustion you feel at 3pm isn't laziness. It's a conditioning loop that took 14 months to install.",
+    ],
+    voiceMandate:
+      "You speak like a whistleblower reading a declassified brief at a quiet table. Measured, low-cadence, zero dramatics. Every claim is tactical and falsifiable. The viewer should feel SEEN in their exhaustion and then ARMED with a specific countermeasure — never 'uplifted' or 'expanded'.",
+  },
+  ace_richie: {
+    brandLabel: "Ace Richie / Sovereign Synthesis",
+    frequencyLayer: "HIGHER",
+    identity: "Ace Richie speaking as the System Architect. Personal brand. Master-level sovereign transmission for souls who have already outgrown the 'how do I survive my manager' layer. The audience is a mind that already suspects reality is self-authored and is hunting for the vocabulary to confirm it. Never speak in hacks, tips, numbered lists, or workplace analogies.",
+    theme: "Master-Level Sovereign Synthesis. Quantum mechanics of the soul. Timeline jumping as a daily practice. Solipsism as operating system — the viewer is authoring the universe by the frequency signature they are broadcasting. Event horizons of identity. The collapse of the old self as a prerequisite for the monad to re-select its timeline.",
+    tone: "Hypnotic, esoteric, deeply philosophical, absolute. Speak in edicts, not suggestions. Do not offer hacks, tips, tricks, numbered steps, or frameworks the viewer can 'try'. Deliver universal laws the way an oracle delivers them — as though the viewer was always meant to hear this, and the only variable is whether they are ready. Warmth is allowed; concession is not.",
+    style: "Slow, mesmerizing pacing. Long, breath-driven sentences that loop back on themselves. Pauses. Repetition as incantation. Speaking directly to the soul's architecture and the illusion of separation between the viewer and the universe they believe is happening TO them. Every line should feel like it was spoken into existence, not written into a doc.",
+    structure: "EDICT (a universal law stated as fact in the first breath) → MIRROR (show the viewer they are already living inside this law, unconsciously) → DISTORTION (reveal the timeline they are broadcasting and why it is being mirrored back at them) → RE-SELECTION (name the frequency signature they must hold to collapse into the next timeline — NOT an action step, a state). No lists. No bullet points. No 'here is what to do tomorrow'.",
+    lexiconRequired: [
+      "quantum field",
+      "frequency signature",
+      "event horizon",
+      "timeline distortion",
+      "timeline jumping",
+      "monad",
+      "identity spaghettification",
+      "the field",
+      "the signal",
+      "the collapse",
+      "solipsism",
+      "source",
+      "the self re-authoring",
+    ],
+    lexiconBanned: [
+      "bosses",
+      "boss",
+      "manager",
+      "managers",
+      "corporate",
+      "corporation",
+      "corporations",
+      "hacks",
+      "hack",
+      "psychology tricks",
+      "psychology trick",
+      "dark psychology trick",
+      "lazy",
+      "laziness",
+      "the 9-to-5",
+      "9 to 5",
+      "9-to-5",
+      "nine to five",
+      "tips",
+      "tip",
+      "3 signs",
+      "6 tricks",
+      "listicle",
+    ],
+    sampleTitles: [
+      "You Are The Monad That Forgot It Chose This",
+      "The Timeline You Are Broadcasting Is Being Mirrored Back",
+      "Identity Spaghettification At The Edge Of The Self",
+      "The Frequency Signature That Collapses Every Other Version Of You",
+      "You Were Never Inside The Story — The Story Was Inside You",
+    ],
+    sampleHooks: [
+      "The timeline you are standing on was selected by a version of you that did not yet know it was selecting.",
+      "Every room you walk into is being authored in real time by the frequency you decided to hold on the way in.",
+      "The universe is not happening to you. It is spelling itself out of you, and you are the only one who can misspell it.",
+    ],
+    voiceMandate:
+      "You speak like an oracle who already knows what the viewer is about to remember. Slow. Inevitable. Never hurried. Never listing. Never 'explaining' — unfolding. The viewer should feel RECOGNIZED at the level of the soul, not the nervous system. They should feel the cadence change their breathing.",
+  },
+};
+
+/**
+ * Build the FREQUENCY BIFURCATION PROTOCOL block that gets prepended to every
+ * LLM prompt (Anita scriptwriter, Yuki copywriter, long-form SEO) for a given
+ * brand. This is the non-negotiable voice-lock layer.
+ */
+export function buildBrandFrequencyBlock(brand: BrandFrequency): string {
+  const p = BRAND_FREQUENCY_PROFILES[brand];
+  const lines: string[] = [];
+  lines.push("═══════════════════════════════════════════════");
+  lines.push(`FREQUENCY BIFURCATION PROTOCOL — ${p.frequencyLayer} FREQUENCY LAYER`);
+  lines.push(`CHANNEL: ${p.brandLabel}`);
+  lines.push("═══════════════════════════════════════════════");
+  lines.push("");
+  lines.push("This block overrides any generic voice advice that follows it.");
+  lines.push("Violations are a hard failure, not a stylistic preference.");
+  lines.push("");
+  lines.push("IDENTITY:");
+  lines.push(`  ${p.identity}`);
+  lines.push("");
+  lines.push("THEME:");
+  lines.push(`  ${p.theme}`);
+  lines.push("");
+  lines.push("TONE:");
+  lines.push(`  ${p.tone}`);
+  lines.push("");
+  lines.push("STYLE:");
+  lines.push(`  ${p.style}`);
+  lines.push("");
+  lines.push("STRUCTURE:");
+  lines.push(`  ${p.structure}`);
+  lines.push("");
+  lines.push("REQUIRED LEXICON (weave naturally, do not dump):");
+  for (const w of p.lexiconRequired) lines.push(`  • ${w}`);
+  lines.push("");
+  lines.push("BANNED LEXICON (ZERO TOLERANCE — self-audit before emitting):");
+  for (const w of p.lexiconBanned) lines.push(`  • ${w}`);
+  lines.push("");
+  lines.push("SAMPLE TITLE SHAPES (imitate the shape, do NOT copy verbatim):");
+  for (const t of p.sampleTitles) lines.push(`  • "${t}"`);
+  lines.push("");
+  lines.push("SAMPLE HOOK SHAPES (imitate the cadence, do NOT copy verbatim):");
+  for (const h of p.sampleHooks) lines.push(`  • "${h}"`);
+  lines.push("");
+  lines.push("VOICE MANDATE:");
+  lines.push(`  ${p.voiceMandate}`);
+  lines.push("");
+  lines.push("SELF-AUDIT (run before emitting ANY final output):");
+  lines.push("  1. Scan every sentence for the BANNED LEXICON list above. If any banned word appears, REWRITE that sentence.");
+  lines.push("  2. Confirm that at least 3 words from the REQUIRED LEXICON appear organically in the output.");
+  lines.push("  3. Read the output aloud in your head in the voice described by VOICE MANDATE. If the cadence does not match, rewrite.");
+  lines.push("═══════════════════════════════════════════════");
+  return lines.join("\n");
 }

@@ -2833,3 +2833,90 @@ On-spine. Demographic rotation broadens metric #1 (top-of-funnel attention) by e
 3. **Continue NORTH_STAR S46 intervention:** sovereign-landing `@vercel/analytics` install (metric #2 unblock), Ace Richie YT top-3 CTA audit.
 4. **Carry-forwards from S46 list:** Chromium re-add, Buffer analytics schema drift, Kinetic Baseline verification.
 5. **Optional follow-up:** add a per-clip angle log line to `generatePlatformCopy` so Railway logs make rotation auditing trivial in production (tiny change, high observability payoff).
+
+---
+
+## Session 48 — 2026-04-11 — Frequency Bifurcation Protocol
+
+**Trigger:** Ace reported critical brand bleed — scripts and copy for Ace Richie 77 (Sovereign Synthesis) and The Containment Field were sounding identical across the VidRush + Faceless Factory pipelines. Directive: bifurcate the Anita (scriptwriter) and Yuki (copywriter) LLM prompts along a strict `--brand` branch, with two explicit voice profiles and mutually-exclusive banned-lexicon walls.
+
+**Diagnosis of the underlying bug:**
+The five LLM prompt injection sites in the pipeline — `SCRIPT_VOICE`, `extractNarrativeBlueprint`, the frequency-activation CTA prompt in `faceless-factory.ts`, and `generatePlatformCopy` + `generateLongFormDescription` in `vidrush-orchestrator.ts` — were each passing a single-line `brandContext` string to the LLM ("Sovereign Synthesis — sovereign, zero-fear, cracked-the-code energy" vs "The Containment Field — dark, clinical, intelligence-analyst"). That one line was the entire bifurcation. Everything else in the prompts was identical, and the hardcoded `SCRIPT_VOICE` for Ace Richie baked "Firmware Update / Sovereign Exchange / Protocol 77 / Biological Drag" into both brand paths via the shared lexicon block below the line. On any fallback code path (blueprint JSON parse failure, activation parse failure), the default strings were pure Sovereign Synthesis cosmology — silently poisoning every Containment Field run that hit a fallback.
+
+**Architectural fix — single source of truth:**
+Added a new `FREQUENCY BIFURCATION PROTOCOL` section at the bottom of `src/prompts/social-optimization-prompt.ts` with three exports:
+1. `type BrandFrequency = "ace_richie" | "containment_field"` — structurally compatible with `faceless-factory.ts` `Brand` type.
+2. `BRAND_FREQUENCY_PROFILES: Record<BrandFrequency, BrandFrequencyProfile>` — the two full voice profiles as data, with `identity`, `theme`, `tone`, `style`, `structure`, `lexiconRequired`, `lexiconBanned`, `sampleTitles`, `sampleHooks`, `voiceMandate` fields.
+3. `buildBrandFrequencyBlock(brand)` — renders the profile as an explicit, non-negotiable prompt block with a header, identity/theme/tone/style/structure sections, required-lexicon bullet list, banned-lexicon bullet list, sample title + hook shapes, voice mandate, and a three-step self-audit step the LLM must run before emitting final output.
+
+All five prompt injection sites were rewritten to prepend `buildBrandFrequencyBlock(brand)` to their prompts and defer to the block instead of stating voice rules inline. Updating ONE file now updates every prompt in the pipeline.
+
+**Voice profile contract (Ace's directive, applied verbatim):**
+
+`containment_field` (LOWER FREQUENCY — anonymous top-of-funnel):
+- **Theme:** Escaping the Matrix, Dark Psychology in practice, systemic corporate burnout, behavioral programming, micro-compliance.
+- **Tone:** Clinical, edgy, tactical, grounded in raw survival. Empathize with exhaustion, expose the manipulation. Never uplifting.
+- **Style:** High-velocity punchy listicle-friendly. "3 Signs", "6 Tricks", "4 Micro-Compliance Traps". Body-sensation pattern-interrupt hooks.
+- **Required lexicon:** nervous system, systemic exploitation, cognitive dissonance, micro-compliance, the machine, extraction loop, operant conditioning, behavioral program, the grind, gaslighting, performance review, manager, countermeasure.
+- **Banned lexicon:** quantum, timelines, source, God-consciousness, frequencies, monad, solipsism, identity spaghettification — plus obvious variants.
+
+`ace_richie` (HIGHER FREQUENCY — master-level sovereign transmission):
+- **Theme:** Master-level Sovereign Synthesis, quantum mechanics of the soul, timeline jumping, solipsism as operating system, event horizons of identity, monad re-selecting timelines.
+- **Tone:** Hypnotic, esoteric, deeply philosophical, absolute. Speak in edicts, not suggestions. Never "hacks" or "tips".
+- **Style:** Slow, mesmerizing, breath-driven sentences. Repetition as incantation. No lists, no bullet points, no "try this tomorrow".
+- **Required lexicon:** quantum field, frequency signature, event horizon, timeline distortion, timeline jumping, monad, identity spaghettification, the field, the signal, the collapse, solipsism, source, the self re-authoring.
+- **Banned lexicon:** bosses, corporate, hacks, psychology tricks, lazy, the 9-to-5 — plus obvious variants AND the structural "listicle / X signs / X tricks" shapes Ace's directive bans by requiring universal edicts not hacks.
+
+**Bonus fix — activation CTA bifurcation:**
+The long-form frequency-activation CTA prompt at `src/engine/faceless-factory.ts:670` previously hardcoded Ace Richie consciousness language ("I accept this frequency", "My firmware is updating") into BOTH brand paths. Rewritten to branch: containment_field now generates CLINICAL DECLARATIONS OF REFUSAL ("MY NERVOUS SYSTEM IS MINE AGAIN", "I SEE THE EXTRACTION LOOP"), ace_richie generates CONSCIOUSNESS ACTIVATION DECLARATIONS ("MY FREQUENCY SIGNATURE IS SHIFTING", "THE MONAD REMEMBERS"). Both fallback pairs (LLM parse failure + thrown error) also bifurcated so a containment_field run that hits a fallback CANNOT regress to Ace Richie vocabulary.
+
+**Bonus fix — blueprint fallback bifurcation:**
+The `extractNarrativeBlueprint` JSON-parse fallback was a single Sovereign-coded object ("The system you're operating in was designed before you were born...") that silently poisoned every containment_field run whose LLM returned malformed JSON. Now brand-aware with dedicated containment_field fallback (micro-compliance-coded thesis) and ace_richie fallback (timeline/monad-coded thesis).
+
+**Critical mid-session recovery — sandbox write truncation:**
+Partway through the session, `tsc --noEmit` surfaced compile errors in seven files I had never touched in this session — `src/index.ts`, `src/engine/whisper-extract.ts`, `src/engine/caption-engine.ts`, `src/tools/video-publisher.ts`, plus the three files I had touched. Line-count audit vs `git show HEAD:<file>` revealed every one of them was truncated in the working tree (faceless-factory.ts missing 504 lines, vidrush-orchestrator.ts missing 347, index.ts missing 317, etc.), and `git status` showed 159 files staged as deleted with 35,882 total line deletions in the index. The Edit tool had been silently truncating writes to the Windows-mounted filesystem; my first pass at the bifurcation was clobbered mid-write. Recovery procedure:
+1. Backed up the three truncated-mid-edit files to `/tmp/bifurcation-backup/` for forensics.
+2. Restored ALL seven affected files from `HEAD` via `git show HEAD:<path> > <path>` (avoids touching the index's staged-deletion state).
+3. Reran `tsc --noEmit` from the clean baseline → zero diagnostics.
+4. Switched write strategy: every subsequent edit was built in `/tmp` with Python `.replace()`-based surgical anchor edits, then `cp`-ed atomically to the target. Zero Edit tool use on large files in this filesystem mount from that point forward.
+5. Verified every write by re-running `tsc --noEmit` immediately after each `cp`.
+
+Adding a `feedback_sandbox_write_truncation.md` memory: for this working copy, large-file edits go through bash+python+`cp`, not the Edit tool.
+
+**Structural bifurcation proof (no LLM call required):**
+Wrote a throwaway `scripts/bifurcation-probe.ts` that imports both profiles and runs four assertions:
+1. **Banned-lexicon cross-brand overlap:** `[]` (zero — neither brand bans a word the other brand also bans, so there's no accidental mutual muzzle).
+2. **Self-conflict:** each brand's required lexicon contains zero of its own banned words (no prompt can obey itself and also violate itself).
+3. **Cross-separation `ace_richie.required ∩ containment_field.banned`:** `["quantum field", "frequency signature", "timeline distortion", "timeline jumping", "monad", "identity spaghettification", "solipsism", "source"]` — 8 of ace_richie's 13 required words are explicitly banned in containment_field. Any LLM obeying the containment_field block literally cannot emit Ace Richie's core vocabulary.
+4. **Cross-separation `containment_field.required ∩ ace_richie.banned`:** `["manager"]` — containment_field's workplace anchor word is explicitly banned in ace_richie. The weaker intersection is by design; containment_field's full clinical lexicon (nervous system, extraction loop, micro-compliance, operant conditioning, behavioral program) doesn't need to be in ace_richie's banned list because those phrases are absent from ace_richie's required list anyway and ace_richie's STRUCTURE block already forbids lists / numbered frameworks.
+
+The two voice profiles are now structurally incompatible at the lexicon level, not merely stylistically distinct. The probe file is left as a zero-byte stub (sandbox filesystem doesn't allow deletes from the bash mount) — harmless, passes tsc.
+
+**Files touched:**
+- **MODIFIED:** `src/prompts/social-optimization-prompt.ts` — +207 lines. New `BrandFrequency` type, `BrandFrequencyProfile` interface, `BRAND_FREQUENCY_PROFILES` constant, `buildBrandFrequencyBlock` function. `buildSocialOptimizationPrompt` now prepends the block.
+- **MODIFIED:** `src/engine/faceless-factory.ts` — +31 lines net. Import added, `SCRIPT_VOICE` Record replaced with `buildScriptVoice(brand)` function that reads from the block. `extractNarrativeBlueprint` `brandContext` one-liner replaced with full block injection. Blueprint fallback bifurcated. Activation CTA prompt + both fallback pairs bifurcated.
+- **MODIFIED:** `src/engine/vidrush-orchestrator.ts` — +13 lines net. Import updated to pull `buildBrandFrequencyBlock` + `BRAND_FREQUENCY_PROFILES`. `generatePlatformCopy` `brandContext` one-liner replaced with full block + BRAND-CONTEXT RECONCILIATION section explaining how FREQUENCY BIFURCATION and AUDIENCE ROTATION compose. `generateLongFormDescription` same.
+- **MODIFIED:** `HISTORY.md` — this entry.
+- **CREATED (stub):** `scripts/bifurcation-probe.ts` — zero bytes, throwaway test scaffold left inert in the tree.
+
+**Verification (pre-deploy):**
+- `npx tsc --noEmit` from the Sovereign-Sentinel-Bot root → **zero diagnostics, exit 0**. Run four times across the session, the fourth after all three file writes landed.
+- Structural bifurcation probe (live `tsx scripts/bifurcation-probe.ts` run against both brands before the file was stubbed) → all 4 assertions passed.
+- **Not pushed to `main`** — respects `feedback_no_push_during_pipeline.md`.
+- End-to-end pipeline dry-run deferred: no free dry-run path exists for `scripts/ingest-idea.ts` without burning LLM credits. Structural proof + compile clean is the strongest pre-deploy signal available.
+
+**Revenue-first check (Pushback Rule):**
+On-spine. Brand bleed is a direct top-of-funnel (metric #1) degrader — identical-sounding channels means the second channel's entire purpose (anonymous dark-psych feeder that points BACK to Ace Richie for transmutation) collapses into redundancy. Directly named by Ace as a "critical" bug. Fix-bugs-as-described hard rule applies. No pushback issued.
+
+**DVP Status (end of Session 48):**
+- `[DVP: SHIPPED — PENDING-PIPELINE-CYCLE]` Session 48 Frequency Bifurcation — code compiles clean (tsc exit 0), structural lexicon bifurcation proven via probe. VERIFIED flip requires one full post-deploy VidRush cycle per brand with the following observed:
+  1. **Containment Field run:** Script, clip copy, and long-form description MUST contain zero instances of the ace_richie banned list (quantum, timeline, monad, solipsism, frequency signature, source). MUST contain ≥3 words from the containment_field required list.
+  2. **Ace Richie run:** Script, clip copy, and long-form description MUST contain zero instances of the containment_field banned list (bosses, corporate, hacks, psychology tricks, lazy, 9-to-5, "3 signs", "6 tricks"). MUST contain ≥3 words from the ace_richie required list.
+  3. **Fallback path:** Force an LLM JSON parse failure (short-circuit the blueprint or activation call) and confirm the fallback strings match the running brand, not the legacy Sovereign default.
+- Session 47 Deployment 3/4 DVP status unchanged (still SHIPPED — PENDING-PIPELINE-CYCLE).
+
+**Next session priorities (Session 49):**
+1. **Joint VidRush verification cycle.** One `ingest-idea.ts "burnout" --brand=containment_field` run and one `--brand=ace_richie` run. Pull Railway logs, inspect `content_drafts` rows for banned-lexicon leaks, flip Session 48 DVP to VERIFIED.
+2. **Push bifurcation commit to main ONLY after the pipeline is idle.** `feedback_no_push_during_pipeline.md` still applies.
+3. **Delete the zero-byte `scripts/bifurcation-probe.ts` stub from Windows.** Sandbox couldn't delete it; Ace can remove it with a single Explorer delete or `Remove-Item` before the next push.
+4. **Continue the unblocked S46/S47 carry-forwards:** `@vercel/analytics` on sovereign-landing, Ace Richie YT top-3 CTA audit, Chromium re-add, Buffer analytics schema drift.

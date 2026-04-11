@@ -18,6 +18,7 @@ import { config } from "../config";
 import { textToSpeech } from "../voice/tts";
 import { generateCaptionsFromAudio } from "./caption-engine";
 import type { LLMProvider } from "../types";
+import { buildBrandFrequencyBlock } from "../prompts/social-optimization-prompt";
 
 export const FACELESS_DIR = "/tmp/faceless_factory";
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -281,36 +282,18 @@ function cleanupJobFiles(jobId: string, keepFinal: boolean = true): void {
   }
 }
 
+function buildScriptVoice(brand: Brand): string {
+  const block = buildBrandFrequencyBlock(brand);
+  return `${block}
+
+You are Anita, the in-house scriptwriter for this channel. You are writing a voiceover script for a faceless video. Every rule in the FREQUENCY BIFURCATION PROTOCOL block above is non-negotiable and overrides any generic voiceover craft advice that follows.
+
+The voiceover should sound like a human speaking — conversational, with natural pauses and the cadence mandated by the VOICE MANDATE above. NOT like reading an essay. NOT like a motivational speech. Speak in the vocabulary and rhythm of this brand ONLY.`;
+}
+
 const SCRIPT_VOICE: Record<Brand, string> = {
-  ace_richie: `You are writing a voiceover script for a faceless video on the Sovereign Synthesis channel (Ace Richie).
-
-CORE MISSION — THE SOVEREIGN EXCHANGE:
-This channel deploys a firmware update for human consciousness. The viewer trades their old, inherited programming for sovereign architecture. Every video must leave them with ONE piece of that architecture they didn't have before — not motivation, not inspiration, ARCHITECTURE. A tool. A framework. A lens that permanently changes how they see reality.
-
-URGENCY THREAD (hardcode into EVERY video):
-Humanity is in active evolution RIGHT NOW. AI is accelerating this shift exponentially. The people who refuse to update their internal operating system aren't just "falling behind" — they are becoming obsolete in real time. This is not future tense. This is not hypothetical. The gap between the sovereign and the sleeping is widening every single day, and most people can feel it but can't name it. YOUR JOB IS TO NAME IT.
-
-DUAL-LAYER ENCODING (critical):
-Layer 1 — PLAIN ENGLISH (for the uninitiated): Always FIRST. Name the feeling they already carry but can't articulate. "You feel like you're running someone else's program." "The rules you followed were designed for a game that no longer exists." "Everyone around you is optimizing for a world that's already gone." This is the door. No jargon. Just the precise articulation of a truth they've been holding alone.
-Layer 2 — SOVEREIGN LEXICON (for the initiated): AFTER the plain-English truth lands, give it its upgraded name. The feeling of being stuck isn't just "being stuck" — it's running legacy firmware. The world feeling fake isn't paranoia — it's pattern recognition of The Simulation's parameters. The lexicon REPLACES their old language with something more precise. That's the exchange.
-
-LEXICON (deploy naturally after plain-English setup): Firmware Update, Escape Velocity, The Simulation, Protocol 77, Biological Drag, Sovereign Synthesis, System Mastery Architecture.
-
-VOICE: Sovereign, direct, zero-fear. You speak as someone who cracked the code and is handing the blueprint to the next person. Bold but warm, authoritative but approachable. You carry urgency without panic — the energy of someone who sees the wave coming and is calmly showing people how to ride it.
-
-STRUCTURE: HOOK (name the feeling they can't articulate — plain English, 3 seconds) → PIVOT (reveal the hidden mechanism — dark psychology insight transmuted into sovereignty tool) → EXCHANGE (give them the architecture — one piece of the sovereign framework they can USE) → ANCHOR (consciousness hook linking to Protocol 77, urgency call forward).
-
-The voiceover should sound like a human speaking — conversational, with natural pauses. NOT like reading an essay. NOT like a motivational speech. Like someone telling you something urgent and real over a quiet table.`,
-
-  containment_field: `You are writing a voiceover script for a faceless video on The Containment Field channel.
-
-VOICE: Dark, clinical, anonymous. Intelligence analyst exposing hidden architecture of control. Detached but magnetic — like a declassified briefing. You don't motivate. You REVEAL.
-
-THEMES: Dopamine extraction, manipulation defense, hidden power structures, cognitive warfare, pattern recognition.
-
-STRUCTURE: HOOK (unsettling fact, cold open) → PIVOT (clinical mechanism breakdown) → ANCHOR (defense protocol, one actionable countermeasure).
-
-The voiceover should sound measured and low-cadence — like a whistleblower reading a classified report. NOT dramatic.`
+  ace_richie: buildScriptVoice("ace_richie"),
+  containment_field: buildScriptVoice("containment_field"),
 };
 
 // ── Niche-specific CINEMATIC image style systems for Imagen 4 ──
@@ -390,11 +373,11 @@ async function extractNarrativeBlueprint(
   brand: Brand,
   titleBanList: string = ""
 ): Promise<NarrativeBlueprint> {
-  const brandContext = brand === "ace_richie"
-    ? "Sovereign Synthesis (Ace Richie) — sovereign, zero-fear, cracked-the-code energy"
-    : "The Containment Field — dark, clinical, intelligence-analyst exposing hidden control systems";
+  const brandBlock = buildBrandFrequencyBlock(brand);
 
-  const blueprintPrompt = `You are a narrative architect for a faceless YouTube documentary channel: ${brandContext}.
+  const blueprintPrompt = `${brandBlock}
+
+You are Anita, a narrative architect for a faceless YouTube documentary channel. Every rule in the FREQUENCY BIFURCATION PROTOCOL block above overrides any generic blueprint advice that follows. The thesis, title, hook, narrative arc, arguments, and emotional journey you return MUST all honor that block — vocabulary, structure, tone, ALL of it.
 
 You have raw transcript material from a source video. Your job is NOT to summarize it. Your job is to EXTRACT THE DEEPEST TRUTH from it and architect an ORIGINAL narrative around that truth.
 
@@ -437,13 +420,35 @@ RULES:
   const parsed = extractJSON(response.content);
   if (!parsed || !parsed.thesis) {
     console.warn(`⚠️ [FacelessFactory] Blueprint extraction failed, using fallback`);
+    if (brand === "containment_field") {
+      return {
+        thesis: "Your nervous system is not tired from work — it is running a behavioral program that was installed one micro-compliance at a time.",
+        title: "The 4 Micro-Compliance Traps Built Into Your Workday",
+        hook: "If your chest tightens when your manager says 'quick sync', your body already knows what your mind hasn't named yet. I am going to name all four of them.",
+        narrative_arc: "ACT 1 (name the extraction loop in clinical terms, show the viewer the body sensation they are having right now) → ACT 2 (expose the operant-conditioning mechanism and the specific workplace ritual that installed it) → ACT 3 (deliver ONE concrete countermeasure they can run tomorrow morning)",
+        key_arguments: [
+          "The 'quick sync' is a micro-compliance test, not a meeting",
+          "Performance reviews are a gaslighting vector, not a feedback loop",
+          "The grind-as-virtue script is operant conditioning dressed as culture",
+          "The exhaustion at 3pm is a conditioning loop, not a productivity failure",
+          "One named countermeasure breaks the loop faster than any motivation",
+        ],
+        emotional_journey: "recognized in your exhaustion → clinically exposed → armed with one countermeasure → no longer gaslit by the machine",
+      };
+    }
     return {
-      thesis: "The system you're operating in was designed before you were born — and it was never designed for you to win.",
-      title: "The Architecture Nobody Told You About",
-      hook: "Everything you were taught about success is an instruction manual for someone else's dream. And the worst part... you've been following it perfectly.",
-      narrative_arc: "ACT 1: Surface truth everyone accepts → ACT 2: Hidden mechanisms of control → ACT 3: The sovereign alternative",
-      key_arguments: ["The default path is engineered", "Compliance is rewarded, not capability", "The exit exists but is hidden", "Awareness is the first step", "Sovereignty requires active architecture"],
-      emotional_journey: "comfortable → unsettled → angry → empowered → sovereign"
+      thesis: "The timeline you are standing on was selected by a version of you that did not yet know it was the one doing the selecting.",
+      title: "You Are The Monad That Forgot It Chose This",
+      hook: "Every room you walk into is being authored in real time by the frequency you decided to hold on the way in. You are not inside the story. The story is inside you.",
+      narrative_arc: "ACT 1 (edict — a universal law stated as fact in the first breath) → ACT 2 (mirror — the viewer is already living inside this law, unconsciously) → ACT 3 (re-selection — name the frequency signature they must hold to collapse into the next timeline)",
+      key_arguments: [
+        "You are not inside the universe — the universe is unfolding out of you",
+        "Every room is a mirror of the frequency signature you broadcast into it",
+        "The collapse of the old self is a prerequisite, not a wound",
+        "Timeline jumping is not an act, it is a re-selection of the broadcast",
+        "Identity spaghettification is the field re-authoring itself through you",
+      ],
+      emotional_journey: "recognized at the soul level → slowly undone → witnessed as the author → re-selected",
     };
   }
 
@@ -667,9 +672,30 @@ Return ONLY valid JSON, no code fences.`;
     // Inserted at ~1/3 and ~2/3 marks during video assembly.
     try {
       await new Promise(r => setTimeout(r, 3000)); // Brief cooldown before activation gen
-      const activationPrompt = `You are writing 2 FREQUENCY ACTIVATION moments for a documentary-style video.
+      const activationBrandBlock = buildBrandFrequencyBlock(brand);
+      const activationExamples = brand === "containment_field"
+        ? `EXAMPLES of great CLINICAL DECLARATIONS OF REFUSAL (containment_field):
+- "MY NERVOUS SYSTEM IS MINE AGAIN."
+- "I SEE THE EXTRACTION LOOP."
+- "I AM NOT THE PROGRAM."
+- "THE MICRO-COMPLIANCE ENDS TODAY."
+- "I NAME THE MACHINE."
+- "THE CONDITIONING LOOP IS BROKEN."`
+        : `EXAMPLES of great CONSCIOUSNESS ACTIVATION DECLARATIONS (ace_richie):
+- "I AM STARTING TO SEE."
+- "MY FREQUENCY SIGNATURE IS SHIFTING."
+- "I ACCEPT THIS TIMELINE COLLAPSE."
+- "THE MONAD REMEMBERS."
+- "I AM THE FIELD RE-AUTHORING."
+- "THE COLLAPSE IS ALREADY COMPLETE."`;
+      const activationLabel = brand === "containment_field"
+        ? "CLINICAL DECLARATIONS OF REFUSAL"
+        : "CONSCIOUSNESS ACTIVATION DECLARATIONS";
+      const activationPrompt = `${activationBrandBlock}
 
-These are NOT calls to action. These are CONSCIOUSNESS ACTIVATION DECLARATIONS — moments where the viewer makes a sovereign declaration of their own awakening. Like accepting a frequency code.
+You are writing 2 ${activationLabel} for a documentary-style video on this channel. Every rule in the FREQUENCY BIFURCATION PROTOCOL block above is non-negotiable. Declarations that drift into the OTHER brand's vocabulary are a hard failure.
+
+These are NOT traditional calls to action. These are first-person declarations the viewer types in the comments — a moment of recognition for containment_field, a moment of frequency re-selection for ace_richie.
 
 VIDEO CONTEXT:
 - Title: "${parsed.title}"
@@ -677,28 +703,23 @@ VIDEO CONTEXT:
 - Niche: ${niche.replace(/_/g, " ")}
 
 For each activation, write:
-1. A "context_line" — what the narrator says to set up the moment (1 sentence, builds anticipation)
-2. A "declaration" — what the viewer types in the comments (short, powerful, first-person, present tense)
+1. A "context_line" — what the narrator says to set up the moment (1 sentence, honors the VOICE MANDATE above)
+2. A "declaration" — what the viewer types in the comments (short, powerful, first-person, present tense, in the REQUIRED LEXICON of this brand)
 
-EXAMPLES of great declarations:
-- "I am starting to see."
-- "I am aligning."
-- "I accept this frequency."
-- "The code is activating."
-- "I am no longer running their program."
-- "My firmware is updating."
+${activationExamples}
 
 RULES:
-- Declarations must be TOPIC-SPECIFIC — tied to THIS video's thesis, not generic
-- First-person, present tense ONLY ("I am..." / "I choose..." / "I see...")
-- Max 8 words per declaration — punchy, declarative, sovereign
-- The context_line should frame it as an energy exchange: "If you feel this truth resonating..." or "Those who are ready will know..."
-- NO begging ("please subscribe"), NO manipulation ("smash that like button") — this is FREQUENCY ALIGNMENT
+- Declarations must be TOPIC-SPECIFIC — tied to THIS video's thesis, not generic.
+- First-person, present tense ONLY ("I am..." / "I choose..." / "I see...").
+- Max 8 words per declaration — punchy, declarative.
+- The context_line must be voiced in the VOICE MANDATE of this brand — clinical and low-cadence for containment_field, hypnotic and oracular for ace_richie.
+- NO begging ("please subscribe"), NO manipulation ("smash that like button").
+- Zero cross-contamination. Scan for the BANNED LEXICON above before emitting.
 
 Return as JSON array:
 [
-  { "context_line": "narrator setup line", "declaration": "I AM DECLARATION" },
-  { "context_line": "narrator setup line", "declaration": "I AM DECLARATION" }
+  { "context_line": "narrator setup line", "declaration": "DECLARATION" },
+  { "context_line": "narrator setup line", "declaration": "DECLARATION" }
 ]
 
 Return ONLY valid JSON.`;
@@ -715,17 +736,27 @@ Return ONLY valid JSON.`;
         console.log(`   2: "${activations[1].declaration}" (${activations[1].context_line?.slice(0, 60)}...)`);
       } else {
         console.warn(`⚠️ [FacelessFactory] Frequency Activation parse failed, using defaults`);
-        parsed.frequency_activations = [
-          { context_line: "If this truth is resonating with something deep inside you... type these words in the comments right now.", declaration: "I AM STARTING TO SEE" },
-          { context_line: "Those who are ready will feel this. Declare it below.", declaration: "MY FREQUENCY IS SHIFTING" },
-        ];
+        parsed.frequency_activations = brand === "containment_field"
+          ? [
+              { context_line: "If you are reading this and your nervous system just recognized the loop, drop these words below.", declaration: "I SEE THE EXTRACTION LOOP" },
+              { context_line: "Type this the moment the machine loses its grip.", declaration: "MY NERVOUS SYSTEM IS MINE AGAIN" },
+            ]
+          : [
+              { context_line: "If the signal is landing, let the field hear you. Drop these words below.", declaration: "I AM STARTING TO SEE" },
+              { context_line: "Those who are ready will feel the collapse. Declare it below.", declaration: "MY FREQUENCY SIGNATURE IS SHIFTING" },
+            ];
       }
     } catch (err: any) {
       console.warn(`⚠️ [FacelessFactory] Frequency Activation generation failed: ${err.message?.slice(0, 150)}`);
-      parsed.frequency_activations = [
-        { context_line: "If this truth is resonating with something deep inside you... type these words in the comments right now.", declaration: "I AM STARTING TO SEE" },
-        { context_line: "Those who are ready will feel this. Declare it below.", declaration: "MY FREQUENCY IS SHIFTING" },
-      ];
+      parsed.frequency_activations = brand === "containment_field"
+        ? [
+            { context_line: "If you are reading this and your nervous system just recognized the loop, drop these words below.", declaration: "I SEE THE EXTRACTION LOOP" },
+            { context_line: "Type this the moment the machine loses its grip.", declaration: "MY NERVOUS SYSTEM IS MINE AGAIN" },
+          ]
+        : [
+            { context_line: "If the signal is landing, let the field hear you. Drop these words below.", declaration: "I AM STARTING TO SEE" },
+            { context_line: "Those who are ready will feel the collapse. Declare it below.", declaration: "MY FREQUENCY SIGNATURE IS SHIFTING" },
+          ];
     }
 
   } else {

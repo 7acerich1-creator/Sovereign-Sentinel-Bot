@@ -34,6 +34,8 @@ import {
   angleForClipIndex,
   buildAudienceRotationBlock,
   hashStringToAngleOffset,
+  buildBrandFrequencyBlock,
+  BRAND_FREQUENCY_PROFILES,
   type AudienceAngle,
 } from "../prompts/social-optimization-prompt";
 import type { LLMProvider } from "../types";
@@ -778,11 +780,18 @@ async function generatePlatformCopy(
 
     // Session 36: Enhanced with social-optimization-prompt intelligence.
     // Deployment 4: Now wrapped with the Audience Rotation Protocol block.
-    const brandContext = brand === "ace_richie"
-      ? "Sovereign Synthesis (Ace Richie) — personal brand, liberation framework transmuted through specific demographics. Voice: authoritative, warm, destiny-coded BUT always speaking the assigned demographic's vocabulary, not the internal Sovereign lexicon."
-      : "The Containment Field — anonymous top-of-funnel feeder brand. Voice: clinical, cold, pattern-interrupt. Never reference Ace Richie. Still obey the Audience Rotation Protocol.";
+    // Session 48: Now ALSO wrapped with the FREQUENCY BIFURCATION PROTOCOL block
+    // so Yuki can NEVER bleed Ace Richie vocabulary into Containment Field copy
+    // or vice versa, regardless of which demographic angle is assigned.
+    const brandBlock = buildBrandFrequencyBlock(brand);
+    const brandLabel = BRAND_FREQUENCY_PROFILES[brand].brandLabel;
 
-    const prompt = `You are an elite social media distribution engine for ${brandContext}
+    const prompt = `${brandBlock}
+
+You are Yuki, an elite social media distribution engine for ${brandLabel}. Every rule in the FREQUENCY BIFURCATION PROTOCOL block above overrides any generic distribution advice that follows.
+
+BRAND-CONTEXT RECONCILIATION (how FREQUENCY BIFURCATION and AUDIENCE ROTATION compose):
+The FREQUENCY BIFURCATION block locks the CHANNEL voice. The AUDIENCE ROTATION block locks the DEMOGRAPHIC angle. They compose; they do not collide. For ace_richie: translate every demographic's pain into the quantum/monad/timeline/frequency vocabulary of the REQUIRED LEXICON above — a corporate-burnout clip on Ace Richie becomes an edict about the timeline the viewer has been broadcasting, not a listicle about their manager. For containment_field: translate every demographic's pain into the clinical extraction-loop/micro-compliance/behavioral-program vocabulary — a spiritual-awakening clip on Containment Field becomes a clinical exposure of the nervous-system conditioning loop that manufactured the "awakening", never a cosmological edict. The demographic angle changes WHO the content lands on; the frequency profile changes WHAT vocabulary it lands in. Both are non-negotiable, and the bifurcation wins any tie.
 
 SOURCE VIDEO TITLE: "${sourceTitle}"
 NICHE: ${niche.replace(/_/g, " ")}
@@ -904,15 +913,19 @@ async function generateLongFormDescription(
   const offset = hashStringToAngleOffset(sourceTitle || niche || "sovereign");
   const angle = angleForClipIndex(1, offset);
 
-  const brandContext = brand === "ace_richie"
-    ? "Sovereign Synthesis (Ace Richie) — personal brand, liberation framework transmuted through specific demographics. Voice: authoritative, warm, destiny-coded BUT always speaking the assigned demographic's vocabulary, not the internal Sovereign lexicon."
-    : "The Containment Field — anonymous top-of-funnel feeder brand. Voice: clinical, cold, pattern-interrupt. Never reference Ace Richie. Still obey the Audience Rotation Protocol.";
+  const brandBlock = buildBrandFrequencyBlock(brand);
+  const brandLabel = BRAND_FREQUENCY_PROFILES[brand].brandLabel;
 
   const rotationBlock = buildAudienceRotationBlock([
     { clipLabel: "LONG-FORM YOUTUBE DESCRIPTION", angle },
   ]);
 
-  const prompt = `You are an elite YouTube SEO copywriter for ${brandContext}
+  const prompt = `${brandBlock}
+
+You are Yuki, an elite YouTube SEO copywriter for ${brandLabel}. Every rule in the FREQUENCY BIFURCATION PROTOCOL block above overrides any generic SEO advice that follows.
+
+BRAND-CONTEXT RECONCILIATION (how FREQUENCY BIFURCATION and AUDIENCE ROTATION compose):
+The FREQUENCY BIFURCATION block locks the CHANNEL voice. The AUDIENCE ROTATION block locks the DEMOGRAPHIC angle. They compose; they do not collide. For ace_richie: translate the assigned demographic's pain into the quantum/monad/timeline/frequency vocabulary of the REQUIRED LEXICON above. For containment_field: translate it into the clinical extraction-loop/micro-compliance/behavioral-program vocabulary. The demographic changes WHO the description lands on; the frequency profile changes WHAT vocabulary it lands in. Both are non-negotiable, and the bifurcation wins any tie.
 
 You are writing the DESCRIPTION for a long-form YouTube video that will be uploaded to the main channel. This is NOT a clip — it is the 10-15 minute anchor video.
 

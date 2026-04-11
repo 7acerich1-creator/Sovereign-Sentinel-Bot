@@ -447,6 +447,104 @@ async function main() {
         }
       }
 
+      // ── Session 47c: IDEA: prefix ingestion ──
+      // If the message starts with "IDEA:", strip the prefix, treat the remainder as a raw
+      // thesis, and feed it directly into the same dual-brand executeFullPipeline flow the
+      // bridge uses for Alfred's autonomous seeds. Bypasses yt-dlp + Whisper entirely.
+      // Example: `IDEA: The corporate ladder is a Faraday cage — every promotion thickens the walls.`
+      const ideaPrefixMatch = message.content.match(/^\s*IDEA:\s*(.+)$/is);
+      if (ideaPrefixMatch) {
+        const rawIdeaText = ideaPrefixMatch[1].trim();
+        if (rawIdeaText.length < 10) {
+          await telegram.sendMessage(message.chatId,
+            "⚠️ IDEA text too short. Provide at least a one-sentence thesis after the `IDEA:` prefix.",
+            { parseMode: "Markdown" }
+          );
+          return;
+        }
+
+        try {
+          const ideaHash = require("crypto")
+            .createHash("sha1")
+            .update(rawIdeaText)
+            .digest("hex")
+            .slice(0, 10);
+          const syntheticId = `raw_${ideaHash}`;
+          const ideaPreview = rawIdeaText.length > 120 ? rawIdeaText.slice(0, 120) + "…" : rawIdeaText;
+          console.log(`🌱 [IDEA:] Manual native seed ingested [${syntheticId}]: "${ideaPreview}"`);
+
+          await telegram.sendMessage(message.chatId,
+            `🌱 *NATIVE SEED INGESTED.* Assembling pipeline...\n\n` +
+            `_"${ideaPreview}"_\n\n` +
+            `Dual-brand faceless factory engaging. Expect progress messages shortly.`,
+            { parseMode: "Markdown" }
+          );
+
+          // Enqueue via pipeline queue — serializes with /pipeline runs and the Alfred auto-bridge.
+          // Same dual-brand loop + cooldown pattern as /pipeline and the bridge auto-trigger.
+          const manualEnqueue = (globalThis as any).__enqueuePipeline;
+          const manualBrands: Array<"ace_richie" | "containment_field"> = ["ace_richie", "containment_field"];
+          const manualPos = manualEnqueue ? manualEnqueue(`idea-${syntheticId}-dual`, async () => {
+            for (let bIdx = 0; bIdx < manualBrands.length; bIdx++) {
+              const brand = manualBrands[bIdx];
+              const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
+
+              if (bIdx > 0) {
+                const cooldownMs = parseInt(process.env.PIPELINE_COOLDOWN_MS || "180000", 10);
+                const cooldownSec = Math.round(cooldownMs / 1000);
+                console.log(`⏳ [IDEA:] Inter-brand cooldown: ${cooldownSec}s...`);
+                try {
+                  await telegram.sendMessage(message.chatId, `⏳ Cooling down ${cooldownSec}s before ${brandLabel} pipeline...`);
+                } catch { /* non-critical */ }
+                await new Promise(r => setTimeout(r, cooldownMs));
+              }
+
+              try {
+                await telegram.sendMessage(message.chatId, `--- ${brandLabel} PIPELINE (raw_idea) ---`);
+              } catch { /* non-critical */ }
+
+              try {
+                const result = await executeFullPipeline(
+                  syntheticId,
+                  brand === "containment_field" ? tcfPipelineLLM : pipelineLLM,
+                  brand,
+                  async (step: string, detail: string) => {
+                    try {
+                      await telegram.sendMessage(message.chatId, `[${brandLabel}] ${step}: ${detail}`);
+                    } catch { /* non-critical */ }
+                  },
+                  { rawIdea: rawIdeaText }
+                );
+                const report = formatPipelineReport(result);
+                try {
+                  await telegram.sendMessage(message.chatId, `${brandLabel} COMPLETE:\n${report}`, { parseMode: "Markdown" });
+                } catch {
+                  await telegram.sendMessage(message.chatId, `${brandLabel} COMPLETE:\n${report.replace(/[*_`]/g, "")}`);
+                }
+              } catch (pipeErr: any) {
+                console.error(`❌ [IDEA:] ${brandLabel} Pipeline CRASHED: ${pipeErr.message}`);
+                try {
+                  await telegram.sendMessage(message.chatId,
+                    `${brandLabel} Pipeline FAILED: ${pipeErr.message?.slice(0, 500)}`
+                  );
+                } catch { /* silent */ }
+                // Continue to next brand even if one fails
+              }
+            }
+          }) : 0;
+
+          if (manualPos > 1) {
+            try { await telegram.sendMessage(message.chatId, `⏳ Pipeline queued (position ${manualPos}). Will start after current run.`); } catch { /* non-critical */ }
+          }
+        } catch (ideaErr: any) {
+          console.error(`❌ [IDEA:] Handler error: ${ideaErr.message}`);
+          try {
+            await telegram.sendMessage(message.chatId, `⚠️ IDEA ingestion failed: ${ideaErr.message?.slice(0, 400)}`);
+          } catch { /* nothing */ }
+        }
+        return;
+      }
+
       // ── Command routing ──
       if (message.content.startsWith("/")) {
         const handled = await handleCommand(message);
@@ -523,6 +621,36 @@ async function main() {
       }
     }
   });
+
+  // ── Session 47c: Alfred Native Seed Generator directive (shared) ──
+  // Single source of truth for Alfred's daily scan directive. Used by both the 15:05 UTC
+  // scheduler and the /alfred Telegram force-trigger command. Edit once, effect both.
+  const ALFRED_DAILY_SCAN_DIRECTIVE =
+    "DAILY NATIVE SEED GENERATION — You are the autonomous Native Seed Generator for the Sovereign Synthesis machine. " +
+    "DO NOT search the web. DO NOT look for YouTube URLs. DO NOT cite competitors. " +
+    "Your job is to PROJECT the Sovereign frequency outward, not to react to the simulation's noise.\n\n" +
+    "Generate ONE single, high-impact, highly specific original thesis for today's faceless video. " +
+    "It must be a complete, standalone concept — not a niche label, not a topic, not a list. A thesis statement plus a 1-2 sentence framing.\n\n" +
+    "TARGET DOMAINS (rotate across days; pick the one with the strongest psychic charge today):\n" +
+    "• Corporate burnout & the high-performer trapdoor — quiet quitting, escape velocity from W-2 servitude, the burnout-to-sovereignty pivot.\n" +
+    "• Covert psychological manipulation — dark triad tactics in dating/workplace/family, narcissist defense architecture, gray rock as a frequency shield.\n" +
+    "• Dopamine, frame control, and masculine recalibration — monk mode, cold exposure, the self-discipline operating system.\n" +
+    "• Spiritual awakening / simulation theory / reality shifting — the Firmware Update, escape velocity, biological drag, the painting dad metaphor.\n" +
+    "• Sovereign individual / one-person empire — the architecture of the $1M solo business, digital nomad without the cope.\n\n" +
+    "FOR THE THESIS YOU PICK, USE NICHE-CHARGED LANGUAGE so downstream classification routes the right color grade and brand voice. " +
+    "Embed at least 3 keywords from the chosen domain (e.g., 'narcissist', 'manipulation', 'dark psychology' for the dark_psychology lane; 'burnout', 'corporate', 'recovery' for the burnout lane).\n\n" +
+    "OUTPUT CONTRACT (mandatory — your response is parsed by regex):\n" +
+    "1. A short brief to the Architect (1-3 sentences explaining why this thesis hits today).\n" +
+    "2. The hook line in 4-Part Copy Architecture (GLITCH → PIVOT → BRIDGE → ANCHOR).\n" +
+    "3. The final line MUST be exactly: PIPELINE_IDEA: <your one-sentence thesis here>\n" +
+    "Example: PIPELINE_IDEA: The corporate ladder is a Faraday cage — every promotion thickens the walls. The high-performer's burnout is not failure, it's the system finally hitting resonance frequency and breaking its own shielding.\n\n" +
+    "If for any reason you cannot generate a thesis today, write: PIPELINE_IDEA: NONE\n" +
+    "Your PIPELINE_IDEA line is the primary deliverable — VidRush ingests it as a raw_idea and bypasses Whisper entirely.\n\n" +
+    "CRITICAL — TOOL USAGE CONTRACT:\n" +
+    "• DO NOT call the crew_dispatch tool. Your FINAL assistant text message IS your deliverable.\n" +
+    "• The bridge parses PIPELINE_IDEA from your final text response. If you put it inside a crew_dispatch result field, it WILL be lost and the pipeline will not fire.\n" +
+    "• You may call read_protocols ONCE if you need to refresh context, but after that your next output must be the final text containing the PIPELINE_IDEA line.\n" +
+    "• No tool calls in your final turn. Just the brief, the 4-part hook, and the PIPELINE_IDEA line.";
 
   // ── Command Handler ──
   async function handleCommand(message: Message): Promise<boolean> {
@@ -885,6 +1013,57 @@ async function main() {
         }
       }
 
+      case "/alfred": {
+        // Session 47c: Force-trigger Alfred's daily_trend_scan from Telegram, bypassing
+        // the autonomousFiredDates gate and the 15:05 UTC time window. Use when:
+        //   • Railway redeployed during the normal fire window and the cron was skipped
+        //   • Architect wants to trigger today's video on demand from phone
+        //   • Debugging the Native Seed Generator flow
+        //
+        // This dispatches the EXACT same task payload the scheduler uses — the bridge
+        // auto-pipeline trigger then picks up Alfred's PIPELINE_IDEA from the final text
+        // and fans out into dual-brand executeFullPipeline just like the cron path.
+        console.log(`⚡ [/alfred] Manual override — force-triggering daily_trend_scan`);
+        try {
+          // Reset the fired-dates gate so if the 15:05 window still hits later, it won't double-fire.
+          // (autonomousFiredDates persists in-memory only — this flip is enough.)
+          autonomousFiredDates.alfredScan = new Date().toDateString();
+
+          await telegram.sendMessage(message.chatId,
+            `⚡ *ALFRED OVERRIDE ACTIVATED*\n\nScanning for native seed...\n\n` +
+            `Alfred is generating today's thesis directly from the Sovereign Synthesis framework. ` +
+            `When he emits PIPELINE_IDEA, the bridge will fan out into dual-brand executeFullPipeline. ` +
+            `Expect pipeline progress messages in ~1-2 minutes.`,
+            { parseMode: "Markdown" }
+          );
+
+          const dispatchId = await dispatchTask({
+            from_agent: "system",
+            to_agent: "alfred",
+            task_type: "daily_trend_scan",
+            priority: 1,
+            chat_id: message.chatId,
+            payload: {
+              directive: ALFRED_DAILY_SCAN_DIRECTIVE,
+              triggered_at: new Date().toISOString(),
+              scan_type: "manual_override",
+              trigger_source: "telegram_/alfred",
+              triggered_by: message.userId || "architect",
+            },
+          });
+
+          console.log(`✅ [/alfred] Dispatched daily_trend_scan task id=${dispatchId}`);
+        } catch (err: any) {
+          console.error(`❌ [/alfred] Dispatch failed: ${err.message}`);
+          try {
+            await telegram.sendMessage(message.chatId,
+              `⚠️ /alfred dispatch failed: ${err.message?.slice(0, 400)}`
+            );
+          } catch { /* nothing */ }
+        }
+        return true;
+      }
+
       case "/mesh":
         if (!arg) {
           await telegram.sendMessage(message.chatId, "Usage: /mesh <goal>");
@@ -1066,7 +1245,11 @@ async function main() {
       const hour = now.getUTCHours();
       const minute = now.getUTCMinutes();
       const dateKey = now.toDateString();
-      if (hour === 15 && minute >= 5 && minute <= 7 && autonomousFiredDates.alfredScan !== dateKey) {
+      // Session 47c: widened fire window. Previous 15:05–15:07 UTC slot was too narrow —
+      // a redeploy anywhere in the day would miss the day entirely. Now any minute from
+      // 15:05 UTC onward fires once per date, so a container restart at 14:59 still catches it.
+      const afterFireTime = hour > 15 || (hour === 15 && minute >= 5);
+      if (afterFireTime && autonomousFiredDates.alfredScan !== dateKey) {
         autonomousFiredDates.alfredScan = dateKey;
         console.log(`🔍 [AutoOps] Alfred daily trend scan firing for ${dateKey}`);
         try {
@@ -1083,26 +1266,9 @@ async function main() {
               // the Sovereign Synthesis framework and hands it to VidRush as a raw_idea. This
               // severs the pipeline's dependency on external URL availability and removes the
               // yt-dlp / Whisper failure surface entirely.
-              directive: "DAILY NATIVE SEED GENERATION — You are the autonomous Native Seed Generator for the Sovereign Synthesis machine. " +
-                "DO NOT search the web. DO NOT look for YouTube URLs. DO NOT cite competitors. " +
-                "Your job is to PROJECT the Sovereign frequency outward, not to react to the simulation's noise.\n\n" +
-                "Generate ONE single, high-impact, highly specific original thesis for today's faceless video. " +
-                "It must be a complete, standalone concept — not a niche label, not a topic, not a list. A thesis statement plus a 1-2 sentence framing.\n\n" +
-                "TARGET DOMAINS (rotate across days; pick the one with the strongest psychic charge today):\n" +
-                "• Corporate burnout & the high-performer trapdoor — quiet quitting, escape velocity from W-2 servitude, the burnout-to-sovereignty pivot.\n" +
-                "• Covert psychological manipulation — dark triad tactics in dating/workplace/family, narcissist defense architecture, gray rock as a frequency shield.\n" +
-                "• Dopamine, frame control, and masculine recalibration — monk mode, cold exposure, the self-discipline operating system.\n" +
-                "• Spiritual awakening / simulation theory / reality shifting — the Firmware Update, escape velocity, biological drag, the painting dad metaphor.\n" +
-                "• Sovereign individual / one-person empire — the architecture of the $1M solo business, digital nomad without the cope.\n\n" +
-                "FOR THE THESIS YOU PICK, USE NICHE-CHARGED LANGUAGE so downstream classification routes the right color grade and brand voice. " +
-                "Embed at least 3 keywords from the chosen domain (e.g., 'narcissist', 'manipulation', 'dark psychology' for the dark_psychology lane; 'burnout', 'corporate', 'recovery' for the burnout lane).\n\n" +
-                "OUTPUT CONTRACT (mandatory — your response is parsed by regex):\n" +
-                "1. A short brief to the Architect (1-3 sentences explaining why this thesis hits today).\n" +
-                "2. The hook line in 4-Part Copy Architecture (GLITCH → PIVOT → BRIDGE → ANCHOR).\n" +
-                "3. The final line MUST be exactly: PIPELINE_IDEA: <your one-sentence thesis here>\n" +
-                "Example: PIPELINE_IDEA: The corporate ladder is a Faraday cage — every promotion thickens the walls. The high-performer's burnout is not failure, it's the system finally hitting resonance frequency and breaking its own shielding.\n\n" +
-                "If for any reason you cannot generate a thesis today, write: PIPELINE_IDEA: NONE\n" +
-                "Your PIPELINE_IDEA line is the primary deliverable — VidRush ingests it as a raw_idea and bypasses Whisper entirely.",
+              // Session 47c: directive text lives at module-level const ALFRED_DAILY_SCAN_DIRECTIVE
+              // so /alfred force-trigger and the 15:05 UTC scheduler emit identical payloads.
+              directive: ALFRED_DAILY_SCAN_DIRECTIVE,
               triggered_at: new Date().toISOString(),
               scan_type: "daily",
             },
@@ -2836,8 +3002,15 @@ async function main() {
                 console.warn(`[ProtocolInjection] Non-fatal error for ${agentName}/${task.task_type}: ${injErr.message?.slice(0, 200)}`);
               }
 
+              // Session 47c: daily_trend_scan is heavy (iterCap=6) but the deliverable is the
+              // PIPELINE_IDEA line in the final assistant text — the bridge parser regex-matches
+              // the text response, not crew_dispatch tool payloads. Forcing crew_dispatch
+              // completion here sinks Alfred's seed into a tool result field and the bridge
+              // drops it. Treat it like a light task for completion purposes: no tail, auto-complete from text.
               const completionTail = isLightTask
                 ? "" // Light tasks auto-complete from the text response; no crew_dispatch tail.
+                : task.task_type === "daily_trend_scan"
+                ? "" // Session 47c: Native Seed Generator emits PIPELINE_IDEA in final text, no dispatch tail.
                 : `\n\nWhen done, use crew_dispatch tool with action "complete" and task_id "${task.id}" to mark it done.`;
 
               const dispatchMessage: Message = {

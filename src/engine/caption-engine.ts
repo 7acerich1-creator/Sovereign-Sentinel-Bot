@@ -42,6 +42,13 @@ export interface CaptionOptions {
   maxChunkDuration?: number;
   /** Font name. Default "Bebas Neue". */
   fontName?: string;
+  /**
+   * Session 47: Uniform time offset (seconds) applied to every chunk AFTER
+   * skipUntilSeconds filtering. Used when the audio track that was whisper'd
+   * gets adelayed in the final mix (e.g. brand intro pre-shift on long-form
+   * horizontals). Defaults to 0 (legacy behavior — no shift).
+   */
+  timeOffsetSeconds?: number;
 }
 
 export interface CaptionResult {
@@ -392,6 +399,16 @@ export async function generateCaptionsFromAudio(
     maxChunkDuration: opts.maxChunkDuration ?? 1.5,
     skipUntilSeconds: opts.skipUntilSeconds ?? 0,
   });
+
+  // Session 47: shift every chunk by timeOffsetSeconds so captions align with the
+  // final muxed audio when upstream adelay was applied (brand intro pre-shift).
+  const offset = opts.timeOffsetSeconds ?? 0;
+  if (offset > 0) {
+    for (const c of chunks) {
+      c.start += offset;
+      c.end += offset;
+    }
+  }
 
   writeAssFile(chunks, opts);
 

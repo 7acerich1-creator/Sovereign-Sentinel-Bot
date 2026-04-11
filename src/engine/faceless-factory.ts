@@ -23,6 +23,34 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
 const STORAGE_BUCKET = "public-assets";
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SESSION 47 — BRAND INTRO + TERMINAL OVERRIDE TIMING CONTRACT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// The long-form opening sequence (horizontal only) is:
+//
+//   0.0s  → 3.0s    : Brand Intro (trimmed clip from brand-assets/intro_long{,_tcf}.mp4)
+//   3.0s  → 3.0+TO  : Terminal Override typewriter hook (green-on-black drawtext reveal)
+//   3.0+TO → end    : Kinetic Ken Burns scenes (TTS segments 1..N-1)
+//
+// TO duration = max(TERMINAL_OVERRIDE_DUR_MIN, TTS segment 0 duration). This is the
+// floor — the TO must never be shorter than its audible voiceover. 5.0s is the minimum
+// so even a short hook still holds screen for the typewriter reveal to land.
+//
+// BRAND_INTRO_DUR is a HARD constant — the brand intro clip is always trimmed to this
+// length regardless of the source asset's native duration. This keeps the pre-scene
+// overhead predictable at exactly BRAND_INTRO_DUR + TO_DUR seconds.
+//
+// The kinetic captions `.ass` file's skipUntilSeconds MUST equal BRAND_INTRO_DUR + TO_DUR
+// so word-level captions never fire while the intro or typewriter is on screen.
+export const BRAND_INTRO_DUR = 3.0;              // seconds, horizontal long-form only
+export const TERMINAL_OVERRIDE_DUR_MIN = 5.0;    // seconds, floor for TO visual duration
+
+/** Compute actual Terminal Override duration from TTS seg 0 length. */
+export function computeTerminalOverrideDuration(firstSegDur: number | undefined): number {
+  const seg0 = firstSegDur && firstSegDur > 0 ? firstSegDur : 4.0;
+  return Math.max(TERMINAL_OVERRIDE_DUR_MIN, seg0);
+}
+
 // ── Session 40: Title uniqueness — fetch recent titles to prevent repetition ──
 async function getRecentTitles(limit: number = 20): Promise<string[]> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return [];
@@ -1297,47 +1325,42 @@ async function generateThumbnail(
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// DEPLOYMENT 3: Long-Form YouTube Thumbnail (keyframe-based)
+// DEPLOYMENT 3: Long-Form YouTube Thumbnail (raw-scene-image-based)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Port of the Session 39 short-form ffmpeg thumbnail technique, adapted for 1920x1080
-// long-form YouTube assets. Does NOT call Imagen — the cost is zero, the failure surface
-// is pure ffmpeg, and the visual is guaranteed to be on-brand because it IS a frame from
-// the finished video.
+// SESSION 47 REWRITE: The old implementation seeked a middle keyframe from the FINAL
+// assembled video. That video has .ass kinetic captions + Terminal Override text
+// burned into it — extracting a frame meant dragging caption text into the thumbnail.
+// Architect diagnosed this as the root cause of "thumbnail has burned-in captions."
+//
+// New contract: accept a PRE-CAPTION scene image path (PNG straight out of
+// generateSceneImage / Imagen 4) and build the thumbnail from that clean source.
+// Zero burned-in text from the video pipeline. Guaranteed on-brand because it's the
+// same imagery the video opens with.
 //
 // Pipeline:
-//   1. Seek to the middle of the finished long-form video (high-contrast narrative beat)
+//   1. Read the raw scene image (no video seek, no keyframe extraction)
 //   2. Scale + crop to canonical 1920x1080
-//   3. vignette=PI/4 for depth
+//   3. eq contrast bump + vignette=PI/4 for depth
 //   4. drawbox @ 60% opacity across the lower-middle band (text plate)
-//   5. drawtext Bebas Neue (white, thick black border) with the video title on the bar
+//   5. drawtext Bebas Neue (white, thick black border) with the video title
 //
 // Output is preserved past cleanupJobFiles so the orchestrator can feed it to the
 // YouTube Data API thumbnails.set endpoint.
 async function generateLongFormThumbnail(
-  videoPath: string,
+  cleanScenePath: string,
   script: FacelessScript,
   jobId: string,
   _brand: Brand
 ): Promise<string | null> {
-  if (!existsSync(videoPath)) {
-    console.warn(`[FacelessFactory] Long-form video missing for thumbnail: ${videoPath}`);
+  if (!existsSync(cleanScenePath)) {
+    console.warn(`[FacelessFactory] Long-form clean scene missing for thumbnail: ${cleanScenePath}`);
     return null;
   }
 
   const thumbPath = `${FACELESS_DIR}/${jobId}_longform_thumb.jpg`;
 
-  // Probe duration so we can seek to the actual middle of the final video
-  let durationSec = 0;
-  try {
-    const out = execSync(
-      `ffprobe -v error -show_entries format=duration -of csv=p=0 "${videoPath}"`,
-      { timeout: 10_000, stdio: "pipe" }
-    ).toString().trim();
-    durationSec = parseFloat(out) || 0;
-  } catch { /* non-fatal — fall through with 0 */ }
-
-  // Middle keyframe. Clamp to at least 1s in case probe fails or video is tiny.
-  const seekSec = Math.max(1, (durationSec || 60) / 2).toFixed(2);
+  // No seek — we're rendering a single frame directly from the PNG. The `-frames:v 1`
+  // flag and image-file input make this a one-shot render with no timestamp math.
 
   // Title text: prefer explicit thumbnail_text (scroll-stopper hook from script gen),
   // fall back to full title. Normalize for drawtext (strip hostile punctuation).
@@ -1395,15 +1418,15 @@ async function generateLongFormThumbnail(
 
   try {
     execSync(
-      `ffmpeg -ss ${seekSec} -i "${videoPath}" -frames:v 1 -vf "${vf}" -q:v 2 -y "${thumbPath}"`,
+      `ffmpeg -i "${cleanScenePath}" -frames:v 1 -vf "${vf}" -q:v 2 -y "${thumbPath}"`,
       { timeout: 20_000, stdio: "pipe" }
     );
     if (existsSync(thumbPath)) {
       const size = readFileSync(thumbPath).length;
       if (size > 1000) {
         console.log(
-          `🖼️ [FacelessFactory] Long-form keyframe thumbnail rendered: "${titleText || "(untitled)"}" ` +
-          `(${(size / 1024).toFixed(0)}KB @ ${seekSec}s)`
+          `🖼️ [FacelessFactory] Long-form pre-caption thumbnail rendered: "${titleText || "(untitled)"}" ` +
+          `(${(size / 1024).toFixed(0)}KB from ${cleanScenePath.split(/[/\\]/).pop()})`
         );
         return thumbPath;
       }
@@ -1638,13 +1661,12 @@ export async function assembleVideo(
       .slice(0, 60); // Cap at 60 chars to keep the drawtext chain manageable.
 
     if (sanitizedHook.length > 0) {
-      // Hook duration: prefer actual first-segment TTS duration when available, clamped 3-5s.
-      // Falls back to 4.0s for shorts (no per-segment timing).
+      // Session 47: Terminal Override duration = max(TERMINAL_OVERRIDE_DUR_MIN, TTS seg0).
+      // No upper clamp — if the hook voiceover is 7.2s, the typewriter holds for 7.2s so
+      // the audio and visual stay locked. Falls back to TERMINAL_OVERRIDE_DUR_MIN (5.0s)
+      // for shorts and for cases where segmentDurations is missing.
       const firstSegDur = segmentDurations?.[0];
-      terminalOverrideDuration = Math.min(
-        5.0,
-        Math.max(3.0, firstSegDur && firstSegDur > 0 ? firstSegDur : 4.0)
-      );
+      terminalOverrideDuration = computeTerminalOverrideDuration(firstSegDur);
 
       const terminalClipPath = `${sceneClipDir}/_terminal_override.mp4`;
       const typingAudioPath = `${brandAssetsDir}/typing.mp3`;
@@ -1685,8 +1707,11 @@ export async function assembleVideo(
             : (i * stepInterval).toFixed(3);
         const fontfileFilter = hasFont ? `fontfile='${fontPath}':` : "";
         // Bright terminal green (#00FF88) on pure black, sharp black border for crispness.
-        // Font size scales to orientation: larger on horizontal (1920w), smaller on vertical (1080w).
-        const fsize = orientation === "horizontal" ? 64 : 56;
+        // Session 47: fontsize raised to 120 (horizontal) / 110 (vertical) — the old 64/56
+        // scale was producing tiny centered text that got lost in the Terminal Override.
+        // 120px Bebas Neue at 1920x1080 fills roughly a third of the frame height which
+        // is the architect-specified scroll-stopper intensity.
+        const fsize = orientation === "horizontal" ? 120 : 110;
         drawFilters.push(
           `drawtext=${fontfileFilter}textfile='${escRevealPath}':fontsize=${fsize}:fontcolor=0x00FF88:borderw=2:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${startTime},${endTime})'`
         );
@@ -1723,6 +1748,54 @@ export async function assembleVideo(
           console.log(
             `⌨️  [FacelessFactory] Terminal Override hook rendered: "${sanitizedHook.slice(0, 60)}" (${terminalOverrideDuration.toFixed(1)}s, ${stepCount} words / ${charCount} chars, typing=${hasTyping})`
           );
+        }
+
+        // ── SESSION 47: PREPEND BRAND INTRO (horizontal long-form only) ──
+        // The architect-specified opening sequence demands a 3s brand logo stinger
+        // BEFORE the Terminal Override typewriter. Source: brand-assets/intro_long{,_tcf}.mp4.
+        // Trim to exactly BRAND_INTRO_DUR seconds, normalize to the canonical output
+        // dimensions + fps so xfade can splice it into the filter chain without re-encode
+        // surprises. Shorts (vertical) deliberately skip this — the Terminal Override IS
+        // the opener on shorts.
+        //
+        // The brand intro's own embedded audio is NOT carried through the xfade
+        // filter_complex (which only maps [vout]). The brand intro audio is mixed into
+        // the composite audio track upstream in produceFacelessVideo's Step 2b block.
+        if (terminalOverrideRendered && orientation === "horizontal") {
+          const brandIntroAsset = `${brandAssetsDir}/intro_long${brandSuffix}.mp4`;
+          const brandIntroClipPath = `${sceneClipDir}/_brand_intro.mp4`;
+          if (existsSync(brandIntroAsset)) {
+            try {
+              execSync(
+                `ffmpeg -i "${brandIntroAsset}" -t ${BRAND_INTRO_DUR.toFixed(2)} ` +
+                  `-vf "scale=${dim.width}:${dim.height}:force_original_aspect_ratio=increase,crop=${dim.width}:${dim.height},fps=${fps}" ` +
+                  `-an ` +
+                  `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p ` +
+                  `-y "${brandIntroClipPath}"`,
+                { timeout: 60_000, stdio: "pipe" }
+              );
+              if (existsSync(brandIntroClipPath)) {
+                // splice(0, 0, ...) prepends the brand intro so the final order is:
+                // [brand_intro, terminal_override, ...scenes, outro]
+                sceneClipPaths.splice(0, 0, brandIntroClipPath);
+                clipDurations.splice(0, 0, BRAND_INTRO_DUR);
+                console.log(
+                  `🎬 [FacelessFactory] Brand intro prepended: ${brandIntroAsset} trimmed to ${BRAND_INTRO_DUR.toFixed(1)}s`
+                );
+              }
+            } catch (err: any) {
+              const fullStderr = err.stderr ? err.stderr.toString() : "";
+              const stderrTail = fullStderr.length > 1500 ? fullStderr.slice(-1500) : fullStderr;
+              console.warn(
+                `[FacelessFactory] Brand intro prepend failed (non-fatal, continuing with TO only): ${err.message?.slice(0, 200)}`
+              );
+              if (stderrTail) console.warn(`  STDERR (tail):\n${stderrTail}`);
+            }
+          } else {
+            console.warn(
+              `[FacelessFactory] Brand intro asset missing: ${brandIntroAsset} — continuing with TO only`
+            );
+          }
         }
       } catch (err: any) {
         // SESSION 46 FIX: Capture the TAIL of stderr, not the head.
@@ -2555,18 +2628,27 @@ export async function produceFacelessVideo(
   const brandSfx = brand === "containment_field" ? "_tcf" : "";
   const outroSig = `${brandAssetsRoot}/signature_outro${brandSfx}.mp3`;
   const typingBed = `${brandAssetsRoot}/typing.mp3`;
+  const brandIntroAsset = `${brandAssetsRoot}/intro_long${brandSfx}.mp4`;
 
-  // Hook duration mirrors the assembleVideo Terminal Override calculation:
-  // clamp segmentDurations[0] to [3.0, 5.0]; default 4.0 if missing.
+  // SESSION 47: Terminal Override duration is now max(TERMINAL_OVERRIDE_DUR_MIN, seg0Dur).
+  // No upper clamp. This mirrors computeTerminalOverrideDuration inside assembleVideo.
   const firstSegDurForHook = audioResult.segmentDurations?.[0] || 0;
-  const hookDuration = Math.min(5.0, Math.max(3.0, firstSegDurForHook > 0 ? firstSegDurForHook : 4.0));
+  const hookDuration = computeTerminalOverrideDuration(firstSegDurForHook);
+
+  // SESSION 47 — BRAND INTRO + TO TIMING CONTRACT (composite audio side).
+  //   Horizontal long-form: voice + typing + outro are ALL adelayed by BRAND_INTRO_DUR,
+  //     and the brand intro audio track is mixed UNDER t=0 → BRAND_INTRO_DUR.
+  //   Vertical shorts: no brand intro, preShift = 0 — existing behavior preserved.
+  const preShiftSec = orientation === "horizontal" ? BRAND_INTRO_DUR : 0;
+  const preShiftMs = Math.round(preShiftSec * 1000);
 
   const compositeAudioPath = `${FACELESS_DIR}/${jobId}_composite_audio.mp3`;
   try {
     const hasOutro = existsSync(outroSig);
     const hasTyping = existsSync(typingBed);
+    const hasBrandIntroAudio = orientation === "horizontal" && existsSync(brandIntroAsset);
 
-    if (hasOutro || hasTyping) {
+    if (hasOutro || hasTyping || hasBrandIntroAudio) {
       // Get TTS duration
       const ttsDur = parseFloat(
         execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${audioPath}"`,
@@ -2575,9 +2657,17 @@ export async function produceFacelessVideo(
 
       if (ttsDur > 0) {
         // Build inputs and filter graph dynamically based on what assets we have.
-        // Index 0 is always the TTS voice. Typing and outro are appended as available.
+        // Index 0 is always the TTS voice.
+        // The brand intro, typing bed, and outro are appended as available.
         const inputs: string[] = [`-i "${audioPath}"`];
-        const filterParts: string[] = [`[0:a]volume=1.0[voice]`];
+        const filterParts: string[] = [];
+
+        // Voice: adelay by preShiftMs so the TTS starts after the brand intro.
+        // If preShiftMs=0 (shorts) the adelay is a no-op — we still emit the filter
+        // to keep the graph uniform.
+        filterParts.push(
+          `[0:a]adelay=${preShiftMs}|${preShiftMs},volume=1.0[voice]`
+        );
         const mixLabels: string[] = [`[voice]`];
         let inputIdx = 1;
 
@@ -2585,9 +2675,10 @@ export async function produceFacelessVideo(
           // Loop the typing bed so it always covers the hook window even if it's short.
           inputs.push(`-stream_loop -1 -t ${hookDuration.toFixed(2)} -i "${typingBed}"`);
           // Bed it under the hook: low volume, fade in fast, fade out before hook ends.
+          // Delay by preShiftMs so it lines up with the Terminal Override visual.
           const fadeOutStart = Math.max(0, hookDuration - 0.4);
           filterParts.push(
-            `[${inputIdx}:a]volume=0.35,afade=t=in:st=0:d=0.15,afade=t=out:st=${fadeOutStart.toFixed(2)}:d=0.4[typing]`
+            `[${inputIdx}:a]adelay=${preShiftMs}|${preShiftMs},volume=0.35,afade=t=in:st=${preShiftSec.toFixed(2)}:d=0.15,afade=t=out:st=${(preShiftSec + fadeOutStart).toFixed(2)}:d=0.4[typing]`
           );
           mixLabels.push(`[typing]`);
           inputIdx++;
@@ -2595,9 +2686,23 @@ export async function produceFacelessVideo(
 
         if (hasOutro) {
           inputs.push(`-i "${outroSig}"`);
-          const outroOffsetMs = Math.round(ttsDur * 1000);
+          // Outro fires AFTER the shifted TTS finishes.
+          const outroOffsetMs = Math.round((preShiftSec + ttsDur) * 1000);
           filterParts.push(`[${inputIdx}:a]adelay=${outroOffsetMs}|${outroOffsetMs},volume=0.85[outro]`);
           mixLabels.push(`[outro]`);
+          inputIdx++;
+        }
+
+        if (hasBrandIntroAudio) {
+          // Pull the brand intro clip's own audio track, trimmed to BRAND_INTRO_DUR seconds,
+          // and mix it in at t=0 so the brand stinger audio lands under the brand intro visual.
+          inputs.push(`-t ${BRAND_INTRO_DUR.toFixed(2)} -i "${brandIntroAsset}"`);
+          // Short fade-out at the tail so the transition into the Terminal Override is clean.
+          const introFadeStart = Math.max(0, BRAND_INTRO_DUR - 0.3);
+          filterParts.push(
+            `[${inputIdx}:a]volume=0.9,afade=t=out:st=${introFadeStart.toFixed(2)}:d=0.3[brandintro]`
+          );
+          mixLabels.push(`[brandintro]`);
           inputIdx++;
         }
 
@@ -2613,8 +2718,10 @@ export async function produceFacelessVideo(
         );
         console.log(
           `🔊 [FacelessFactory] Composite audio: TTS(${ttsDur.toFixed(1)}s)` +
+            (preShiftSec > 0 ? ` +${preShiftSec.toFixed(1)}s pre-shift` : "") +
+            (hasBrandIntroAudio ? ` + brand-intro(${BRAND_INTRO_DUR.toFixed(1)}s)` : "") +
             (hasTyping ? ` + typing-bed(${hookDuration.toFixed(1)}s)` : "") +
-            (hasOutro ? ` + outro@${ttsDur.toFixed(1)}s` : "")
+            (hasOutro ? ` + outro@${(preShiftSec + ttsDur).toFixed(1)}s` : "")
         );
       }
 
@@ -2622,8 +2729,8 @@ export async function produceFacelessVideo(
         audioPath = compositeAudioPath;
         // NOTE: segmentDurations is INTENTIONALLY NOT modified.
         // The Terminal Override is segment 0 — the visual is generated FROM segmentDurations[0],
-        // not in addition to it. Prepending introPad here would double-count the hook.
-        console.log(`🔊 [FacelessFactory] Audio track now includes typing bed + outro signature`);
+        // not in addition to it. The brand intro pre-shift is applied at the audio layer only.
+        console.log(`🔊 [FacelessFactory] Audio track now includes brand intro + typing bed + outro signature`);
       }
     }
   } catch (err: any) {
@@ -2669,8 +2776,23 @@ export async function produceFacelessVideo(
 
   // STEP 3c: Dynamic Kinetic Captions — transcribe the raw TTS narration with Groq Whisper
   // (word-level timestamps) and emit a styled .ass file. Non-fatal: a caption failure must
-  // never kill a render. skipUntilSeconds hides captions during the Terminal Override hook
-  // so they don't collide with the typewriter drawtext reveal on segment 0.
+  // never kill a render. skipUntilSeconds hides captions during the brand intro AND the
+  // Terminal Override hook so they don't collide with the typewriter drawtext reveal.
+  //
+  // SESSION 47: captionSkipSec = BRAND_INTRO_DUR (horizontal only) + full TO duration.
+  // The whisper transcription is running on the RAW TTS track (not the composite), so
+  // "TTS word at t=X" means "t=X on the TTS clock". Because the composite audio shifts
+  // the TTS by preShiftSec on horizontal, every transcribed word on horizontal lands
+  // at `preShiftSec + word_time` in the final video. That means skipUntilSeconds (which
+  // the caption engine compares against RAW TTS timestamps) must be `hookDuration`
+  // alone — preShiftSec is baked in at the audio mix layer, not the transcription layer.
+  // HOWEVER: the caption engine also burns captions at those same raw timestamps, and
+  // they get muxed into the shifted final video, so libass actually fires them at
+  // `preShiftSec + word_time`. So raw skipUntil = hookDuration IS correct — it
+  // suppresses the first hookDuration seconds of whisper words (segment 0 voice), which
+  // in the final video corresponds to `[preShiftSec, preShiftSec + hookDuration]`.
+  // That is exactly the window of the Terminal Override. The brand intro window
+  // `[0, preShiftSec]` has NO TTS words because the TTS is adelayed — nothing to skip.
   let assCaptionPath: string | null = null;
   try {
     console.log(`🎬 [FacelessFactory] Generating kinetic captions (Groq Whisper word-level)...`);
@@ -2680,6 +2802,9 @@ export async function produceFacelessVideo(
       videoWidth: dims.width,
       videoHeight: dims.height,
       skipUntilSeconds: hookDuration,
+      // Session 47: shift caption timestamps so they land on the composite audio
+      // timeline (which adelayed the TTS voice by preShiftSec for horizontal long-form).
+      timeOffsetSeconds: preShiftSec,
       maxWordsPerChunk: 3,
       maxChunkDuration: 1.5,
       fontName: "Bebas Neue",
@@ -2700,23 +2825,34 @@ export async function produceFacelessVideo(
   console.log(`🎬 [FacelessFactory] Assembling video...`);
   const videoPath = await assembleVideo(script, audioPath, imagePaths, jobId, orientation, audioResult.segmentDurations, assCaptionPath);
 
-  // STEP 4b (Deployment 3): For long-form (16:9), replace the Imagen-based thumbnail
-  // with a keyframe pulled from the middle of the finished video. This guarantees:
-  //   1. Zero Imagen spend on the thumbnail path (billing crisis insurance)
-  //   2. Brand-coherence (thumb IS a frame from the actual video, not a synthetic still)
-  //   3. YouTube always gets a custom thumbnail instead of auto-picking a generic frame
+  // STEP 4b (Session 47 REWRITE): For long-form (16:9), render the thumbnail from a
+  // RAW pre-caption scene PNG instead of seeking the final assembled video. The old
+  // keyframe-extraction path pulled frames that had .ass kinetic captions + Terminal
+  // Override text burned in — Architect diagnosed this as the thumbnail-pollution bug.
   //
-  // The Imagen thumbnail is kept as a fallback: if keyframe generation fails,
-  // `thumbnailPath` stays whatever Step 3b produced. Shorts (vertical) still use the
-  // Imagen path since the vidrush orchestrator handles per-clip thumbnails separately.
+  // New contract: hand generateLongFormThumbnail a raw image from imagePaths[] so the
+  // text overlay lands on a clean background with zero leaked caption text. Prefer a
+  // post-hook scene (index 1) so the title art doesn't collide with the Terminal
+  // Override opening beat, fall back to index 0 if nothing past it exists.
+  //
+  // The Imagen thumbnail is kept as a fallback: if generation fails, `thumbnailPath`
+  // stays whatever Step 3b produced. Shorts (vertical) still use the Imagen path since
+  // the vidrush orchestrator handles per-clip thumbnails separately.
   if (orientation === "horizontal") {
     try {
-      const keyframeThumb = await generateLongFormThumbnail(videoPath, script, jobId, brand);
-      if (keyframeThumb) {
-        thumbnailPath = keyframeThumb;
+      const cleanScenePath =
+        imagePaths.find((p, i) => i >= 1 && !!p && existsSync(p)) ||
+        imagePaths.find(p => !!p && existsSync(p));
+      if (cleanScenePath) {
+        const keyframeThumb = await generateLongFormThumbnail(cleanScenePath, script, jobId, brand);
+        if (keyframeThumb) {
+          thumbnailPath = keyframeThumb;
+        }
+      } else {
+        console.warn(`⚠️ [FacelessFactory] No clean scene image available for long-form thumbnail (keeping Imagen fallback)`);
       }
     } catch (err: any) {
-      console.warn(`⚠️ [FacelessFactory] Long-form keyframe thumbnail failed (keeping Imagen fallback): ${err.message?.slice(0, 200)}`);
+      console.warn(`⚠️ [FacelessFactory] Long-form pre-caption thumbnail failed (keeping Imagen fallback): ${err.message?.slice(0, 200)}`);
     }
   }
 

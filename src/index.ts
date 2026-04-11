@@ -83,6 +83,59 @@ import { GroupManager } from "./ux/groups";
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+/**
+ * Session 47e: Durable dup-fire guard for autonomous daily scans.
+ *
+ * The `autonomousFiredDates` map in main() is in-memory only — it resets on every
+ * container restart. Combined with Session 47c's widened fire window for Alfred
+ * (hour >= 15:05 UTC for the rest of the day), any Railway redeploy after 15:05 UTC
+ * would re-fire the daily_trend_scan and produce a duplicate pipeline run.
+ *
+ * This helper queries the Supabase crew_dispatch table for any row matching
+ * (to_agent, task_type) with created_at >= today's UTC midnight. If a row exists,
+ * the scan already fired today and the scheduler must skip. Cross-restart durable
+ * because it's reading from a persistent table, not process memory.
+ *
+ * Fail-open on Supabase errors: if the query fails, return false and let the
+ * in-memory flag handle duplicates within the session. Worst case degrades to
+ * pre-fix behavior (one potential dup per redeploy), not worse.
+ */
+async function hasAlreadyFiredToday(toAgent: string, taskType: string): Promise<boolean> {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseKey) return false; // fail-open: no Supabase = no guard
+
+  try {
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const sinceIso = todayStart.toISOString();
+
+    const url = `${supabaseUrl}/rest/v1/crew_dispatch` +
+      `?to_agent=eq.${encodeURIComponent(toAgent)}` +
+      `&task_type=eq.${encodeURIComponent(taskType)}` +
+      `&created_at=gte.${encodeURIComponent(sinceIso)}` +
+      `&select=id&limit=1`;
+
+    const resp = await fetch(url, {
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+      },
+    });
+
+    if (!resp.ok) {
+      console.warn(`[AutoOps] hasAlreadyFiredToday query failed: ${resp.status} ${resp.statusText}`);
+      return false; // fail-open
+    }
+
+    const rows = (await resp.json()) as any[];
+    return Array.isArray(rows) && rows.length > 0;
+  } catch (err: any) {
+    console.warn(`[AutoOps] hasAlreadyFiredToday error: ${err.message}`);
+    return false; // fail-open
+  }
+}
+
 async function main() {
   console.log("⚡ GRAVITY CLAW v3.0 — Initializing...");
   console.log(`🔒 Security: Max ${config.security.maxAgentIterations} agent iterations`);
@@ -1229,6 +1282,15 @@ async function main() {
       const minute = now.getUTCMinutes();
       const dateKey = now.toDateString();
       if (hour === 17 && minute >= 0 && minute <= 2 && autonomousFiredDates.vectorSweep !== dateKey) {
+        // Session 47e: Durable dup-fire guard (same pattern as Alfred). Vector's window is
+        // narrow (17:00–17:02 UTC), so the risk is lower than Alfred's widened window, but
+        // a redeploy landing inside those 3 minutes would still duplicate-fire without this.
+        const alreadyFired = await hasAlreadyFiredToday("vector", "daily_metrics_sweep");
+        if (alreadyFired) {
+          autonomousFiredDates.vectorSweep = dateKey;
+          console.log(`📊 [AutoOps] Vector already fired today (per Supabase) — skipping redeploy duplicate`);
+          return;
+        }
         autonomousFiredDates.vectorSweep = dateKey;
         console.log(`📊 [AutoOps] Vector daily metrics sweep firing for ${dateKey}`);
         try {
@@ -1278,31 +1340,41 @@ async function main() {
       // 15:05 UTC onward fires once per date, so a container restart at 14:59 still catches it.
       const afterFireTime = hour > 15 || (hour === 15 && minute >= 5);
       if (afterFireTime && autonomousFiredDates.alfredScan !== dateKey) {
-        autonomousFiredDates.alfredScan = dateKey;
-        console.log(`🔍 [AutoOps] Alfred daily trend scan firing for ${dateKey}`);
-        try {
-          await dispatchTask({
-            from_agent: "system",
-            to_agent: "alfred",
-            task_type: "daily_trend_scan",
-            priority: 1,
-            chat_id: defaultChatId,
-            payload: {
-              // SESSION 47b — NATIVE SEED GENERATOR PIVOT.
-              // Alfred no longer scrapes YouTube. The machine projects the Sovereign frequency
-              // outward from its own core. Alfred generates ONE original thesis per day from
-              // the Sovereign Synthesis framework and hands it to VidRush as a raw_idea. This
-              // severs the pipeline's dependency on external URL availability and removes the
-              // yt-dlp / Whisper failure surface entirely.
-              // Session 47c: directive text lives at module-level const ALFRED_DAILY_SCAN_DIRECTIVE
-              // so /alfred force-trigger and the 15:05 UTC scheduler emit identical payloads.
-              directive: ALFRED_DAILY_SCAN_DIRECTIVE,
-              triggered_at: new Date().toISOString(),
-              scan_type: "daily",
-            },
-          });
-        } catch (err: any) {
-          console.error(`[AutoOps] Alfred trend scan dispatch failed: ${err.message}`);
+        // Session 47e: Durable dup-fire guard. autonomousFiredDates is in-memory and resets
+        // on every container restart, so without this check a Railway redeploy after 15:05 UTC
+        // would produce a duplicate daily_trend_scan and a duplicate pipeline run. Query the
+        // persistent crew_dispatch table to see if alfred/daily_trend_scan already fired today.
+        const alreadyFired = await hasAlreadyFiredToday("alfred", "daily_trend_scan");
+        if (alreadyFired) {
+          autonomousFiredDates.alfredScan = dateKey; // cache result to skip the query on subsequent ticks
+          console.log(`🔍 [AutoOps] Alfred already fired today (per Supabase) — skipping redeploy duplicate`);
+        } else {
+          autonomousFiredDates.alfredScan = dateKey;
+          console.log(`🔍 [AutoOps] Alfred daily trend scan firing for ${dateKey}`);
+          try {
+            await dispatchTask({
+              from_agent: "system",
+              to_agent: "alfred",
+              task_type: "daily_trend_scan",
+              priority: 1,
+              chat_id: defaultChatId,
+              payload: {
+                // SESSION 47b — NATIVE SEED GENERATOR PIVOT.
+                // Alfred no longer scrapes YouTube. The machine projects the Sovereign frequency
+                // outward from its own core. Alfred generates ONE original thesis per day from
+                // the Sovereign Synthesis framework and hands it to VidRush as a raw_idea. This
+                // severs the pipeline's dependency on external URL availability and removes the
+                // yt-dlp / Whisper failure surface entirely.
+                // Session 47c: directive text lives at module-level const ALFRED_DAILY_SCAN_DIRECTIVE
+                // so /alfred force-trigger and the 15:05 UTC scheduler emit identical payloads.
+                directive: ALFRED_DAILY_SCAN_DIRECTIVE,
+                triggered_at: new Date().toISOString(),
+                scan_type: "daily",
+              },
+            });
+          } catch (err: any) {
+            console.error(`[AutoOps] Alfred trend scan dispatch failed: ${err.message}`);
+          }
         }
       }
     },

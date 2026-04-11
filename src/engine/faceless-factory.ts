@@ -33,9 +33,12 @@ const STORAGE_BUCKET = "public-assets";
 //   3.0s  → 3.0+TO  : Terminal Override typewriter hook (green-on-black drawtext reveal)
 //   3.0+TO → end    : Kinetic Ken Burns scenes (TTS segments 1..N-1)
 //
-// TO duration = max(TERMINAL_OVERRIDE_DUR_MIN, TTS segment 0 duration). This is the
-// floor — the TO must never be shorter than its audible voiceover. 5.0s is the minimum
-// so even a short hook still holds screen for the typewriter reveal to land.
+// SESSION 47 FIX (post-prod, architect order): TO duration is HARD-CAPPED at 5.0s FLAT.
+// The previous behavior — max(TERMINAL_OVERRIDE_DUR_MIN, TTS seg0) — let the typewriter
+// stretch to the full first-segment voiceover length, producing a 47s typewriter on the
+// live Railway run that broke pacing. The visual phase MUST disconnect from the audio
+// segment duration so the Corporate Noir scenes are revealed on schedule. The TTS hook
+// voiceover still plays through the composite audio mix; only the visual hold is capped.
 //
 // BRAND_INTRO_DUR is a HARD constant — the brand intro clip is always trimmed to this
 // length regardless of the source asset's native duration. This keeps the pre-scene
@@ -44,12 +47,18 @@ const STORAGE_BUCKET = "public-assets";
 // The kinetic captions `.ass` file's skipUntilSeconds MUST equal BRAND_INTRO_DUR + TO_DUR
 // so word-level captions never fire while the intro or typewriter is on screen.
 export const BRAND_INTRO_DUR = 3.0;              // seconds, horizontal long-form only
-export const TERMINAL_OVERRIDE_DUR_MIN = 5.0;    // seconds, floor for TO visual duration
+export const TERMINAL_OVERRIDE_DUR_MIN = 5.0;    // seconds, hard-cap for TO visual duration (architect order)
 
-/** Compute actual Terminal Override duration from TTS seg 0 length. */
-export function computeTerminalOverrideDuration(firstSegDur: number | undefined): number {
-  const seg0 = firstSegDur && firstSegDur > 0 ? firstSegDur : 4.0;
-  return Math.max(TERMINAL_OVERRIDE_DUR_MIN, seg0);
+/**
+ * Returns the Terminal Override visual phase duration. As of Session 47 post-prod fix:
+ * this is ALWAYS TERMINAL_OVERRIDE_DUR_MIN (5.0s flat). The `firstSegDur` argument is
+ * intentionally ignored — kept in the signature for callsite compatibility — because
+ * the architect's contract is that the typewriter visual is decoupled from segment 0
+ * voiceover length. Used by both assembleVideo() (visual) and produceFacelessVideo()
+ * (audio bed window + caption skip window) so all three stay locked at 5.0s flat.
+ */
+export function computeTerminalOverrideDuration(_firstSegDur: number | undefined): number {
+  return TERMINAL_OVERRIDE_DUR_MIN;
 }
 
 /**
@@ -1359,7 +1368,14 @@ async function generateThumbnail(
 //   2. Scale + crop to canonical 1920x1080
 //   3. eq contrast bump + vignette=PI/4 for depth
 //   4. drawbox @ 60% opacity across the lower-middle band (text plate)
-//   5. drawtext Bebas Neue (white, thick black border) with the video title
+//   5. subtitles= filter burns Bebas Neue title from a 1-line .ass file (was drawtext)
+//
+// SESSION 47 FIX (post-prod): drawtext was ripped OUT entirely. Railway's ffmpeg build
+// threw `No such filter: 'drawtext'` (libavfilter built without --enable-libfreetype),
+// which aborted thumbnail generation on every long-form render. Replacement: dynamically
+// write a 1-line .ass subtitle file and burn it with the `subtitles=` filter — that
+// filter is part of libass (not freetype) and is 100% stable in the Railway environment
+// (already proven by the Terminal Override typewriter path).
 //
 // Output is preserved past cleanupJobFiles so the orchestrator can feed it to the
 // YouTube Data API thumbnails.set endpoint.
@@ -1380,7 +1396,7 @@ export async function generateLongFormThumbnail(
   // flag and image-file input make this a one-shot render with no timestamp math.
 
   // Title text: prefer explicit thumbnail_text (scroll-stopper hook from script gen),
-  // fall back to full title. Normalize for drawtext (strip hostile punctuation).
+  // fall back to full title. Normalize (strip hostile punctuation that would break .ass).
   const rawTitle = (script.thumbnail_text || script.title || "").trim();
   const titleText = rawTitle
     .toUpperCase()
@@ -1397,66 +1413,94 @@ export async function generateLongFormThumbnail(
     line2 = words.slice(mid).join(" ");
   }
 
-  const thumbTextFile = `${FACELESS_DIR}/${jobId}_longform_thumb_text.txt`;
-  try {
-    // Session 38 lesson: never pass long strings through shell quoting; write to file + textfile=
-    writeFileSync(thumbTextFile, line2 ? `${line1}\n${line2}` : line1);
-  } catch (err: any) {
-    console.warn(`[FacelessFactory] Long-form thumb text-file write failed: ${err.message?.slice(0, 150)}`);
-  }
-
-  // Session 47 FIX 1: resolve to an absolute canonical path BEFORE sanitizing.
-  // On Windows, `${__dirname}/../../brand-assets` produces mixed separators
-  // (`C:\Users\...\src\engine/../../brand-assets/...`) which some libavfilter
-  // builds + freetype path handlers choke on. `path.resolve` flattens the `..`
-  // segments into a clean absolute path that then sanitizes to a valid
-  // `C\:/Users/.../brand-assets/BebasNeue-Regular.ttf` for drawtext.
+  // Brand assets — Bebas Neue is referenced by family name from inside the .ass [V4+ Styles]
+  // block, with `fontsdir=` pointing libass at the local TTF directory.
   const brandAssetsDir = resolvePath(__dirname, "..", "..", "brand-assets");
   const fontPath = resolvePath(brandAssetsDir, "BebasNeue-Regular.ttf");
   const hasFont = existsSync(fontPath);
-  // Sanitize Windows-native path — drawtext chokes on backslashes and drive-letter
-  // colons. Forward slashes + escaped colon is the canonical ffmpeg fix.
-  const safeFontPath = sanitizeFontPathForDrawtext(fontPath);
-  const safeThumbTextFile = sanitizeFontPathForDrawtext(resolvePath(thumbTextFile));
-  const fontFilter = hasFont ? `fontfile='${safeFontPath}':` : "";
+  const assFontName = hasFont ? "Bebas Neue" : "Sans";
 
-  // Visual grammar:
-  //   - Bar occupies ih*0.62 → ih*0.84 (lower-middle third), keeps keyframe subject's head-room
-  //   - Black @ 60% opacity = the 60% architect spec
-  //   - Bebas Neue white + 4px black border = guaranteed legibility on any keyframe
-  //   - fontsize scales down when we had to wrap to two lines so nothing clips the bar
+  // Visual grammar (unchanged from drawtext era — only the burn mechanism changed):
+  //   - Bar occupies ih*0.62 → ih*0.84 (lower-middle third), keeps subject head-room
+  //   - Black @ 60% opacity = the architect-spec text plate
+  //   - Bebas Neue white + thick black border = guaranteed legibility on any keyframe
+  //   - Fontsize scales down when we wrap to two lines so nothing clips the bar
   const barY = "ih*0.62";
   const barH = "ih*0.22";
   const fontSize = line2 ? 88 : 120;
-  // Single-line: vertical-center on bar. Two-line: nudge up so both lines fit inside the bar.
-  //
-  // Session 47 FIX 1b: drawtext's y/x expression parser does NOT understand `ih`/`iw`
-  // (those are only valid in size-setting filters like drawbox, scale, pad). Inside
-  // drawtext, the main video dimensions are `h`/`w`. Using `ih*0.645` or
-  // `(h-text_h)/2+ih*0.23` crashes ffmpeg with:
-  //   "Undefined constant or missing '(' in 'ih*0.23'"
-  //   "Failed to parse expression: (h-text_h)/2+ih*0.23"
-  // which was the REAL cause of the thumbnail failure the Architect reported — not
-  // the font path. Fix: swap `ih` → `h`.
-  const textY = line2 ? `h*0.645` : `(h-text_h)/2+h*0.23`;
 
-  const textOverlay = titleText
-    ? `,drawtext=${fontFilter}textfile='${safeThumbTextFile}':fontsize=${fontSize}:fontcolor=white:borderw=4:bordercolor=black@0.85:x=(w-text_w)/2:y=${textY}:line_spacing=10`
+  // ── BUILD THE 1-LINE .ass FILE ─────────────────────────────────────────────
+  // libass dialogue text uses `\N` for hard line breaks (caps N). The \ must be
+  // escaped to `\\N` inside the JS template literal. Escape `{` and `}` defensively
+  // even though the title sanitizer above already strips them.
+  const escapeAssText = (t: string): string =>
+    t.replace(/\\/g, "\\\\").replace(/\{/g, "(").replace(/\}/g, ")");
+  const dialogueText = line2
+    ? `${escapeAssText(line1)}\\N${escapeAssText(line2)}`
+    : escapeAssText(line1);
+
+  // ASS color format is &HAABBGGRR (little-endian BGR + alpha).
+  //   PrimaryColour  = white opaque        → &H00FFFFFF
+  //   OutlineColour  = black opaque        → &H00000000
+  //   BackColour     = transparent         → &HFF000000
+  // Alignment 5 = middle-center anchor (an=5). MarginV is the offset from that anchor.
+  // We want the title centered on the drawbox bar (bar center is ih*0.73 ≈ 73% from top).
+  // For Alignment 5, y is the screen vertical center (540 at 1080p). To land at 73% (788),
+  // we need to push DOWN by 248px. ASS MarginV with alignment 5 doesn't shift vertically
+  // (MarginV only affects align 1/2/3 + 7/8/9), so we use {\pos(960,788)} inline override
+  // on the dialogue line to anchor the text on the bar exactly.
+  const playResX = 1920;
+  const playResY = 1080;
+  // Bar center math: barY=0.62, barH=0.22 → bar vertical center = 0.62 + 0.11 = 0.73
+  const posX = Math.round(playResX / 2);          // 960
+  const posY = Math.round(playResY * 0.73);       // 788
+  const dialogueWithPos = `{\\pos(${posX},${posY})}${dialogueText}`;
+
+  const thumbAssPath = resolvePath(`${FACELESS_DIR}/${jobId}_longform_thumb.ass`);
+  const assContent =
+    `[Script Info]\n` +
+    `Title: Long-form Thumbnail\n` +
+    `ScriptType: v4.00+\n` +
+    `PlayResX: ${playResX}\n` +
+    `PlayResY: ${playResY}\n` +
+    `WrapStyle: 2\n` +
+    `ScaledBorderAndShadow: yes\n` +
+    `\n` +
+    `[V4+ Styles]\n` +
+    `Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n` +
+    `Style: Thumb,${assFontName},${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&HFF000000,1,0,0,0,100,100,0,0,1,5,0,5,40,40,40,1\n` +
+    `\n` +
+    `[Events]\n` +
+    `Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n` +
+    `Dialogue: 0,0:00:00.00,0:00:10.00,Thumb,,0,0,0,,${dialogueWithPos}\n`;
+
+  try {
+    if (titleText) writeFileSync(thumbAssPath, assContent, "utf8");
+  } catch (err: any) {
+    console.warn(`[FacelessFactory] Long-form thumb .ass write failed: ${err.message?.slice(0, 150)}`);
+  }
+
+  // The `subtitles=` filter argument is colon-separated; Windows-native paths must have
+  // their drive-letter colon escaped (`C\:/...`). Forward slashes work on both platforms.
+  const safeAssPath = thumbAssPath.replace(/\\/g, "/").replace(/:/g, "\\:");
+  const safeFontsDir = brandAssetsDir.replace(/\\/g, "/").replace(/:/g, "\\:");
+
+  const subsFilter = titleText
+    ? `,subtitles=filename='${safeAssPath}':fontsdir='${safeFontsDir}':original_size=${playResX}x${playResY}`
     : "";
 
-  // Single-filter-chain (not filter_complex) because we have one video stream and output one frame.
+  // Single-filter-chain (not filter_complex) because we have one video stream and one frame.
   //
-  // Session 47 fix: the old `scale=1920:1080:force_original_aspect_ratio=increase`
-  // syntax was throwing `Invalid argument` on some ffmpeg builds (older libavfilter
-  // that parses the `:force_...=` suffix as a bad option set). Replaced with the
-  // portable `scale=-1:1080,crop=1920:1080` idiom — resize to height 1080 preserving
-  // aspect, then crop to exact 1920×1080. Works on every libavfilter we've seen.
+  // Session 47 fix: the old `scale=1920:1080:force_original_aspect_ratio=increase` syntax
+  // was throwing `Invalid argument` on some ffmpeg builds. Replaced with the portable
+  // `scale=-1:1080,crop=1920:1080` idiom — resize to height 1080 preserving aspect,
+  // then crop to exact 1920×1080. Works on every libavfilter we've seen.
   const vf =
     `scale=-1:1080,crop=1920:1080,` +
-    `eq=contrast=1.1:brightness=-0.02:saturation=1.05,` + // subtle pop for 120x68 render
+    `eq=contrast=1.1:brightness=-0.02:saturation=1.05,` +
     `vignette=PI/4,` +
     `drawbox=x=0:y=${barY}:w=iw:h=${barH}:c=black@0.6:t=fill` +
-    textOverlay;
+    subsFilter;
 
   try {
     // Resolve inputs/outputs to absolute paths. Windows cmd.exe + ffmpeg handle
@@ -1704,19 +1748,30 @@ export async function assembleVideo(
       .split(/[.!?]/)[0]
       .trim()
       .toUpperCase();
-    const sanitizedHook = rawFirstSentence
+    // SESSION 47 FIX (post-prod): truncate to first 8-10 words BEFORE the 60-char slice.
+    // The architect-mandated visual contract is: typewriter reads HIGH, PUNCHY, vanishes
+    // at the 5.0s mark. Long sanitizedHook strings (full first sentences ~50-60 chars)
+    // could not finish typing in 5.0s and crowded the frame. Cap at the first 9 words.
+    const sanitizedFull = rawFirstSentence
       .replace(/[^A-Z0-9 .,!?\-]/g, " ")
       .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 60); // Cap at 60 chars to keep the drawtext chain manageable.
+      .trim();
+    const sanitizedHook = sanitizedFull
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 9)
+      .join(" ")
+      .slice(0, 60); // Belt-and-suspenders: still cap at 60 chars in case 9 words run long.
 
     if (sanitizedHook.length > 0) {
-      // Session 47: Terminal Override duration = max(TERMINAL_OVERRIDE_DUR_MIN, TTS seg0).
-      // No upper clamp — if the hook voiceover is 7.2s, the typewriter holds for 7.2s so
-      // the audio and visual stay locked. Falls back to TERMINAL_OVERRIDE_DUR_MIN (5.0s)
-      // for shorts and for cases where segmentDurations is missing.
-      const firstSegDur = segmentDurations?.[0];
-      terminalOverrideDuration = computeTerminalOverrideDuration(firstSegDur);
+      // SESSION 47 FIX (post-prod): HARD-CAP Terminal Override at 5.0s FLAT.
+      // The previous behavior — max(TERMINAL_OVERRIDE_DUR_MIN, TTS seg0) — synced the TO
+      // visual phase to the audio segment, which on the live Railway run produced a 47s
+      // typewriter that broke pacing. Per architect order: disconnect TO duration from
+      // audio segment duration entirely. The TTS audio bed for segment 0 still plays
+      // through Step 2b mixing, but the VISUAL phase truncates to 5.0s flat to reveal
+      // the Corporate Noir scenes on schedule.
+      terminalOverrideDuration = TERMINAL_OVERRIDE_DUR_MIN;
 
       const terminalClipPath = `${sceneClipDir}/_terminal_override.mp4`;
       const typingAudioPath = `${brandAssetsDir}/typing.mp3`;

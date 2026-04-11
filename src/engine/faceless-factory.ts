@@ -15,9 +15,10 @@ import { execSync } from "child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from "fs";
 import { config } from "../config";
 import { textToSpeech } from "../voice/tts";
+import { generateCaptionsFromAudio } from "./caption-engine";
 import type { LLMProvider } from "../types";
 
-const FACELESS_DIR = "/tmp/faceless_factory";
+export const FACELESS_DIR = "/tmp/faceless_factory";
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
 const STORAGE_BUCKET = "public-assets";
@@ -45,11 +46,11 @@ async function getRecentTitles(limit: number = 20): Promise<string[]> {
 
 // ── Types ──
 
-type Brand = "ace_richie" | "containment_field";
-type Orientation = "horizontal" | "vertical";
+export type Brand = "ace_richie" | "containment_field";
+export type Orientation = "horizontal" | "vertical";
 
 // Dimension presets per orientation — single source of truth for all image gen + ffmpeg
-const DIMS: Record<Orientation, {
+export const DIMS: Record<Orientation, {
   width: number; height: number;         // ffmpeg output (Ken Burns, fallback)
   pollW: number; pollH: number;          // Pollinations API
   aspectRatio: string;                   // Imagen 4 API
@@ -60,18 +61,18 @@ const DIMS: Record<Orientation, {
   vertical:   { width: 1080, height: 1920, pollW: 1024, pollH: 1792, aspectRatio: "9:16", dalleSize: "1024x1792", promptTag: "{ORIENTATION} portrait composition" },
 };
 
-interface ScriptSegment {
+export interface ScriptSegment {
   voiceover: string;
   visual_direction: string;
   duration_hint: number; // seconds
 }
 
-interface FrequencyActivation {
+export interface FrequencyActivation {
   declaration: string;    // "I am starting to see" — the viewer's conviction statement
   context_line: string;   // Brief line the narrator says BEFORE the declaration to set it up
 }
 
-interface FacelessScript {
+export interface FacelessScript {
   title: string;
   niche: string;
   brand: Brand;
@@ -260,28 +261,44 @@ The voiceover should sound measured and low-cadence — like a whistleblower rea
 // Each prompt gets the style prefix + the scene-specific visual_direction from the LLM.
 // The LLM's visual_direction provides the WHAT; the style prefix provides the HOW.
 
+// VISUAL DNA v3 — HBO PRESTIGE DRAMA DOCUMENTARY LOOK
+// Every prompt forces: ARRI Alexa 65, 35mm prime, Kodak Vision3 500T,
+// tangible skin texture, practical tungsten lighting, shallow DOF.
+// ABSOLUTELY BANNED: silhouettes, sacred geometry, abstract light tendrils,
+// wireframe holograms, symbolic figures, generic AI-art gradient smoothness.
+// Every scene MUST depict a specific, concrete, tangible subject — a person,
+// a room, an object — shot like a still from a prestige HBO or A24 film.
 const SCENE_VISUAL_STYLE: Record<string, Record<Brand, string>> = {
   dark_psychology: {
-    ace_richie: "Photorealistic cinematic still, shot on ARRI Alexa 65, 2.39:1 anamorphic lens with GOLDEN AMBER flares, Deakins-style single-source warm amber lighting cutting through volumetric haze, deep blacks with crushed shadows, brutalist concrete and steel textures, grain structure matching Kodak Vision3 500T, shallow depth of field f/1.4, DOMINANT COLOR PALETTE: warm amber/gold (#d4a843) is the PRIMARY accent light — every image MUST have visible gold/amber tones as the dominant warm element. Teal (#00e5c7) appears ONLY in deep shadows or background edges, NEVER as the primary color. {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
-    containment_field: "Photorealistic surveillance photograph, CCTV camera angle, rain-slicked urban alley at 2AM, sodium vapor streetlights creating harsh orange pools against cold blue ambient, wet concrete reflecting neon, lens distortion and chromatic aberration, high ISO grain, shallow focus with background bokeh, oppressive claustrophobic composition, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
+    ace_richie: "Hyper-realistic documentary still from a prestige HBO drama, captured on ARRI Alexa 65 with 35mm Zeiss Master Prime at f/2.0, Kodak Vision3 500T film emulation, practical tungsten lighting motivated by a single visible source in-frame, tangible human skin texture with visible pores stubble and micro-expressions, shallow depth of field with organic bokeh, warm amber/gold (#d4a843) key light wrapping the subject with teal (#00e5c7) only in deep shadow fall-off, crushed blacks and warm highlights, subtle film grain, NO silhouettes NO abstract shapes NO symbolic figures NO AI-art smoothness — show real specific physical subjects in real rooms. {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
+    containment_field: "Hyper-realistic documentary still, captured on ARRI Alexa 65 with 35mm anamorphic prime at f/2.0, Kodak Vision3 500T film stock, practical sodium-vapor streetlamp or fluorescent tube as visible motivated light source, wet concrete and weathered building textures rendered with forensic sharpness, tangible skin with visible pores and imperfections, shallow DOF with natural bokeh, cool cyan-teal shadows with warm sodium highlights, heavy film grain, NO silhouettes NO abstract surveillance graphics NO HUD overlays NO wireframes — depict real physical subjects in real documented environments like a Michael Mann film still. {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
   },
   self_improvement: {
-    ace_richie: "Photorealistic cinematic still, golden hour magic hour lighting with long shadows, shot from low angle looking upward, warm amber and honey tones, figure silhouetted against dramatic sky, architectural grandeur with classical columns or sweeping landscape, lens flare kissing the frame edge, Kodachrome color science, rich saturated warmth, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
-    containment_field: "Photorealistic corporate interior photograph, sterile fluorescent overhead lighting washing out human features, glass and chrome minimalism, reflections in polished surfaces, desaturated palette with clinical white balance, uncomfortable symmetry, liminal space energy, medium format camera look with extreme sharpness, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
+    ace_richie: "Hyper-realistic documentary still from a prestige drama, captured on ARRI Alexa 65 with 35mm prime at f/2.0, Kodak Vision3 250D film emulation, natural golden-hour window light or single practical bulb as motivated key, tangible human skin with visible texture stubble and sweat, hands and faces shown in specific concrete action, warm honey tones grounded by real wooden and fabric textures, shallow depth of field, NO silhouettes NO symbolic landscapes NO epic-cinematic AI gloss — show a real person doing a real specific thing in a real room, shot like a Terrence Malick or Chloe Zhao frame. {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
+    containment_field: "Hyper-realistic documentary still, captured on ARRI Alexa 65 with 35mm prime at f/2.0, Kodak Vision3 500T film stock, harsh practical fluorescent tube overhead as visible motivated source, worn corporate interior with tangible scuffs marks and wear on surfaces, real human skin with visible fatigue pores and bad-lighting shadows under eyes, shallow DOF with cramped framing, desaturated clinical palette with slight green cast from the tubes, NO liminal-space AI-art smoothness NO abstract symmetry NO silhouettes — depict a real specific human in a real specific deteriorating workplace like a still from Severance or The Office of Strategic Influence. {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
   },
   burnout: {
-    ace_richie: "Photorealistic cinematic still, transition from industrial decay to natural rebirth, warm undertones breaking through cold industrial blue, particle effects catching backlight, chains or barriers dissolving into golden light fragments, Fincher-style low-key lighting with motivated practicals, detailed texture on rust and organic elements, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
-    containment_field: "Photorealistic photograph, human figure dwarfed by walls of glowing screens, blue-white LED light washing out skin tones, claustrophobic framing, toxic green accent lighting from device screens, long exposure motion blur on the figure suggesting trapped repetition, voyeuristic telephoto compression, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
+    ace_richie: "Hyper-realistic documentary still, captured on ARRI Alexa 65 with 35mm prime at f/2.0, Kodak Vision3 500T film stock, single practical tungsten bulb or low window light as motivated source, tangible human subject shown with exhausted posture and specific concrete environmental details — a cold coffee, rumpled bedding, hands on a face, stubble, dark circles, physical weight on the body, shallow DOF, warm practical highlights against natural shadow, NO silhouettes NO symbolic chains NO metaphor imagery NO particle effects — show the actual physical reality of the moment like a frame from The Banshees of Inisherin or Manchester by the Sea. {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
+    containment_field: "Hyper-realistic documentary still, captured on ARRI Alexa 65 with 35mm prime at f/2.0, Kodak Vision3 500T film emulation, real laptop or phone screen as visible motivated practical light source on a tired human face, tangible skin with visible blue-screen pallor bags under eyes stubble and the specific texture of late-night exhaustion, cramped real interior with mundane clutter, shallow DOF, NO voyeuristic HUD NO motion-blur abstraction NO silhouettes — depict a real specific person in a real specific domestic scene like a still from Fleishman Is in Trouble or Severance. {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
   },
   quantum: {
-    ace_richie: "Photorealistic cinematic still with abstract light elements, deep indigo void with electric gold energy tendrils, sacred geometry patterns rendered as actual light refractions in atmosphere, prismatic lens effects, cosmic scale with human silhouette for perspective, bioluminescent particle systems, Villeneuve-style vast negative space, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
-    containment_field: "Photorealistic photograph overlaid with subtle wireframe holographic elements, reality glitching at the edges, code-green scan lines barely visible on physical surfaces, dark teal and phosphor green palette, CRT monitor glow illuminating a dark space, data streams visualized as fiber optic light trails, analog noise artifacts, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
+    ace_richie: "Hyper-realistic documentary still, captured on ARRI Alexa 65 with 35mm prime at f/2.0, Kodak Vision3 500T film stock, single practical light source (a lamp, a window, a monitor) motivated in-frame casting warm amber key with deep natural shadow fall-off, tangible human subject in a specific physical act of focused thought — hands, books, handwritten notes, a real desk with real objects, visible skin texture and breath — shallow DOF, NO abstract light tendrils NO sacred geometry NO cosmic void NO bioluminescent particles NO silhouettes — show a real specific human mind at work in a real specific room like a still from Oppenheimer or A Beautiful Mind. {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
+    containment_field: "Hyper-realistic documentary still, captured on ARRI Alexa 65 with 35mm prime at f/2.0, Kodak Vision3 500T film stock, CRT monitor or single practical source as motivated key light on a real human face, tangible skin with visible texture eye-strain and focus, real cluttered desk with real physical objects — papers, cables, a mug — shallow DOF, cool phosphor accents grounded by warm skin tones, NO wireframe holograms NO glitch overlays NO code-rain NO silhouettes — depict a real specific person in a real specific room like a still from Mr. Robot or Tinker Tailor Soldier Spy. {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
   },
   brand: {
-    ace_richie: "Photorealistic cinematic still, midnight blue atmospheric haze with DOMINANT warm amber/gold (#d4a843) accent lighting, sovereign throne-like composition, architectural mastery with dramatic perspective lines converging on subject, rich fabric and stone textures, single warm GOLDEN practical light source creating Rembrandt lighting pattern, amber/gold is the PRIMARY color accent in every frame — teal only in deep shadow edges. Film grain and subtle lens vignette, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
-    containment_field: "Photorealistic noir photograph, single focused cold blue (#5A9CF5) light illuminating classified documents on dark desk, smoke or atmospheric haze catching the light beam, teal (#00e5c7) accent glow on steel surfaces, extreme chiaroscuro, intelligence briefing room aesthetic, cold steel and leather textures, Dutch angle creating unease, {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
+    ace_richie: "Hyper-realistic documentary still, captured on ARRI Alexa 65 with 35mm prime at f/2.0, Kodak Vision3 500T film emulation, single warm practical tungsten source motivated in-frame casting Rembrandt-pattern key on a tangible human subject, visible skin texture stubble and breath, real architectural interior with real fabric stone and wood surfaces rendered with forensic sharpness, amber/gold (#d4a843) dominant warm tones with teal (#00e5c7) only in deep shadow edges, subtle film grain and organic lens vignette, shallow DOF, NO throne-room fantasy NO sovereign-symbol AI-art NO silhouettes NO epic gloss — show a real specific person in a real specific room with quiet weight like a still from Succession or The Godfather. {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
+    containment_field: "Hyper-realistic documentary still, captured on ARRI Alexa 65 with 35mm prime at f/2.0, Kodak Vision3 500T film stock, single cold practical desk lamp or window light as motivated source on real physical documents and a real tangible human hand, visible paper texture ink creases skin pores, cold blue (#5A9CF5) key with teal (#00e5c7) only in shadow fall-off, real steel leather and wood desk surfaces, shallow DOF with natural bokeh, NO Dutch-angle gimmicks NO noir-pastiche AI gloss NO silhouettes NO smoke-machine haze — depict a real specific moment in a real specific room like a still from Tinker Tailor Soldier Spy or The Americans. {ORIENTATION}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.",
   },
 };
+
+// ── Universal NEGATIVE prompt appended to every Imagen 4 call ──
+// This is the ban list. Imagen 4 respects "no X" patterns well in practice.
+const IMAGEN_NEGATIVE_BAN =
+  "no silhouettes, no abstract representations, no symbolic figures, no sacred geometry, " +
+  "no wireframe holograms, no HUD overlays, no code rain, no glitch effects, no particle tendrils, " +
+  "no generic digital art, no AI-art gradient smoothness, no plastic skin, no symmetrical perfection, " +
+  "no neon cyberpunk, no cartoon, no illustration, no 3D render look, no Midjourney fever dream, " +
+  "no throne-room fantasy, no epic-cinematic gloss";
 
 // ── Niche color grades for ffmpeg (same as clip-generator.ts) ──
 
@@ -459,28 +476,27 @@ Generate as JSON:
   "title": "UNIQUE CTR-optimized title (max 60 chars) — curiosity gap, emotional trigger, or bold claim. MUST be different from ALL previously used titles.${recentTitles.length > 0 ? " BANNED (already used): " + recentTitles.slice(0, 5).map(t => `'${t}'`).join(", ") : ""}",
   "hook": "${blueprint.hook}",
   "thumbnail_text": "2-5 words ALL CAPS that STOP the scroll. This is the TEXT that goes ON the thumbnail image. Think: 'BREAK THE BLOCK', 'YOU WERE CHOSEN', 'SYSTEM FAILURE', 'THEY LIED TO YOU'. Must create instant curiosity or emotional reaction in under 1 second.",
-  "thumbnail_visual": "Thumbnail-specific visual: MUST be a single dramatic focal point image — lone silhouette against cosmic light, figure at the edge of a void, sacred geometry portal, shattered chains with golden fragments. HIGH CONTRAST required (bright focal element against deep dark background). This is a STILL IMAGE, not a video frame — it needs to read at 120x68px thumbnail size.",
+  "thumbnail_visual": "Thumbnail-specific visual: ONE real tangible human subject in ONE real specific room shot on ARRI Alexa 65 with 35mm prime, Kodak Vision3 500T, practical tungsten or window light, visible skin texture. HBO prestige drama still. HIGH CONTRAST. NO silhouettes, NO sacred geometry, NO AI-art gloss.",
   "segments": [
     {
       "voiceover": "The spoken text for this segment — conversational, measured, documentary cadence",
-      "visual_direction": "Cinematographer shot list: camera angle, lighting, physical elements, mood texture, specific objects",
+      "visual_direction": "Cinematographer shot list — a REAL specific tangible scene: who is in frame, what room, what props, what practical light source, what the subject is physically doing",
       "duration_hint": 35
     }
   ],
   "cta": "Organic closing directing to sovereign-synthesis.com"
 }
 
-VISUAL DIRECTION RULES:
-- Write like a cinematographer's shot list, NOT a vague concept
-- Include: camera angle (low angle, overhead, close-up), lighting (amber single-source, cold fluorescent, backlit), physical elements (cracked concrete, rain on glass, smoke through light), mood (grain, haze, shallow DOF)
-- Each segment's visual should MATCH the emotional beat of the voiceover
+VISUAL DIRECTION RULES (v3 — HBO PRESTIGE DOCUMENTARY):
+- Write like a documentary DP's shot list — specific, concrete, tangible. NOT symbolic. NOT abstract.
+- Every visual_direction MUST describe: (1) a real specific subject (a person doing a specific action, or a tangible object/room), (2) the physical environment with real tangible props, (3) a visible motivated practical light source, (4) camera angle and framing
+- Each segment's visual should MATCH the emotional beat of the voiceover with a CONCRETE scene
 - FORMAT: ${orientation === "horizontal" ? "LANDSCAPE 16:9 — wide establishing shots, negative space, cinematic framing" : "VERTICAL 9:16 — center subject, close crops, portrait framing"}
-- BRAND VISUAL DNA (CRITICAL — every image must carry these signature elements):
-  * NEVER write generic stock-photo descriptions (no "woman in blazer", "hands holding puzzle piece", "person at desk")
-  * ALWAYS include at least ONE of these recurring motifs: lone silhouette figure against vast space, concentric rings/circles of light, golden amber particles/fragments dissolving or coalescing, chains/barriers shattering into light, sacred geometry patterns, architectural grandeur with dramatic converging perspective lines, cosmic void with single warm light source
-  * COLOR MANDATE (CRITICAL — Session 38 enforcement): dominant deep blacks (#0a0a0f). For Ace Richie/Sovereign Synthesis: amber/gold (#d4a843) MUST be the PRIMARY visible accent in EVERY scene — warm golden light, amber particles, gold flares. Teal (#00e5c7) is SECONDARY ONLY — used sparingly in deep shadows or background edges, NEVER as the dominant color. For The Containment Field: cold blue (#5A9CF5) is primary, teal is secondary. NO bright daylight, NO office settings, NO casual modern environments. If a scene description doesn't explicitly mention gold/amber lighting, ADD IT.
-  * ATMOSPHERE: volumetric haze, dust particles catching light beams, shallow DOF with bokeh, film grain. Every scene should feel like a frame from a Villeneuve or Fincher film, NOT a LinkedIn banner
-  * PEOPLE: If human figures appear, they must be SYMBOLIC (silhouetted, partially obscured, seen from behind, dwarfed by environment) — NEVER stock-photo-style portraits or corporate poses
+- HARD BANS (never write these — Imagen refuses them): silhouette, silhouetted, sacred geometry, concentric light rings, cosmic void, particles dissolving, chains shattering into light, abstract light tendrils, symbolic figure, wireframe hologram, converging perspective lines to nothing, stock-photo descriptions, corporate poses
+- REQUIRED: "shot on ARRI Alexa 65, 35mm prime, f/2.0, Kodak Vision3 500T, practical tungsten lighting, shallow depth of field, tangible skin texture" or equivalent language in the spirit of a prestige HBO/A24 frame (Succession, Severance, Oppenheimer, The Banshees of Inisherin, Mr. Robot, Tinker Tailor)
+- PEOPLE: Show real specific humans with real tangible imperfections — stubble, pores, fatigue, sweat, worn clothing, real hands doing real things. Never silhouetted. Never symbolic. Never dwarfed-by-environment clichés.
+- COLOR: deep blacks grounded by a single practical warm (amber/tungsten) or cool (fluorescent/window) source. The palette comes from real light in real rooms, not color-graded gradients.
+- EXAMPLES of good visual_direction: "Close-up of a man's hands wrapping around a chipped ceramic mug at a worn wooden table, single tungsten bulb overhead, visible stubble on his forearm, Kodak Vision3 500T, f/2.0" / "Medium shot of a woman sitting on the edge of an unmade bed at dawn, window light raking across her face, phone dark on the nightstand, tangible fabric texture, ARRI Alexa 65 35mm prime"
 
 duration_hint MUST be 25-40 seconds per segment. Total for these 9 segments: 225-360 seconds.
 Return ONLY valid JSON, no code fences, no explanation.`;
@@ -557,12 +573,13 @@ Generate as JSON:
   ]
 }
 
-VISUAL DIRECTION RULES (same as Part 1 — maintain visual continuity):
-- Cinematographer shot list, NOT vague concepts
-- BRAND VISUAL DNA: lone silhouettes against vast space, concentric light rings, golden particles dissolving/coalescing, chains shattering into light, sacred geometry, converging architectural lines, cosmic void with warm light
-- COLOR (CRITICAL): deep blacks (#0a0a0f). Ace Richie: amber/gold (#d4a843) is DOMINANT accent in EVERY scene. Teal (#00e5c7) SECONDARY only (deep shadows/edges). TCF: cold blue primary, teal secondary. NO daylight, NO offices, NO stock-photo settings
-- PEOPLE: symbolic only (silhouetted, from behind, dwarfed by environment) — NEVER stock portraits
-- ATMOSPHERE: volumetric haze, particle-laden light beams, film grain, shallow DOF
+VISUAL DIRECTION RULES (v3 — HBO PRESTIGE DOCUMENTARY, same as Part 1):
+- Documentary DP shot list — concrete, tangible, specific. NOT symbolic. NOT abstract.
+- Every visual_direction describes a REAL scene: a real person doing a real action in a real room with real props and a real motivated practical light source
+- HARD BANS: silhouette, sacred geometry, concentric rings, cosmic void, abstract particles, chains shattering into light, wireframe holograms, symbolic figures, stock-photo poses
+- REQUIRED LANGUAGE: "shot on ARRI Alexa 65, 35mm prime, f/2.0, Kodak Vision3 500T, practical tungsten lighting, tangible skin texture" — aim for Succession / Severance / Oppenheimer / Mr. Robot / A24 documentary frame
+- PEOPLE: real humans with real imperfections — stubble, pores, sweat, worn clothing, hands doing specific physical things. NEVER silhouetted, NEVER symbolic, NEVER dwarfed-by-environment.
+- COLOR grounded in real practical light sources, not color-graded gradients. Deep blacks + single warm or cool motivated source.
 
 duration_hint: 30-45 seconds each. Total for these ${pass2SegCount} segments: ${pass2SegCount * 30}-${pass2SegCount * 45} seconds.
 Return ONLY valid JSON, no code fences.`;
@@ -668,9 +685,9 @@ Generate as JSON:
   "title": "UNIQUE CTR-optimized title (max 60 chars) — curiosity gap or bold claim. MUST be different from all previously used titles.${recentTitles.length > 0 ? " BANNED: " + recentTitles.slice(0, 5).map(t => `'${t}'`).join(", ") : ""}",
   "hook": "Opening line that stops the scroll — a STATEMENT, not a question",
   "thumbnail_text": "2-5 words ALL CAPS for thumbnail overlay — instant emotional hit at 120x68px",
-  "thumbnail_visual": "Single dramatic focal point: silhouette, portal, shattered chains, cosmic void. HIGH CONTRAST. Must read at tiny thumbnail size.",
+  "thumbnail_visual": "ONE real specific tangible subject in ONE real room. ARRI Alexa 65, 35mm, Kodak Vision3 500T, practical tungsten lighting, visible skin texture, HBO prestige drama still. NO silhouettes, NO sacred geometry, NO AI-art gloss.",
   "segments": [
-    { "voiceover": "2-4 spoken sentences (30-50 words)", "visual_direction": "camera angle, lighting, elements, mood", "duration_hint": ${durationHintExample} }
+    { "voiceover": "2-4 spoken sentences (30-50 words)", "visual_direction": "REAL specific scene: who, what room, what props, what motivated practical light, what physical action", "duration_hint": ${durationHintExample} }
   ],
   "cta": "Organic CTA to sovereign-synthesis.com"
 }
@@ -681,7 +698,7 @@ RULES:
 - Hook must stop mid-scroll in 3 seconds
 - FORMAT: ${orientation === "horizontal" ? "LANDSCAPE 16:9" : "VERTICAL 9:16"}
 - duration_hint per segment ~8-12s, total ~45s
-- VISUAL DNA: every visual_direction MUST include brand motifs (lone silhouette against vast space, concentric light rings, golden particles, chains shattering into light, sacred geometry, cosmic void). Colors: deep black + amber/gold (#d4a843) as DOMINANT accent + teal as secondary edge-only. NO stock photos, NO offices, NO generic people. Humans are SYMBOLIC (silhouetted, from behind, dwarfed).
+- VISUAL DNA v3 (HBO prestige documentary): every visual_direction describes a concrete real scene — a real person doing a real thing in a real room with real props and a real motivated practical light source. Shot on ARRI Alexa 65, 35mm prime, f/2.0, Kodak Vision3 500T, tangible skin texture. HARD BANS: silhouette, sacred geometry, cosmic void, abstract particles, chains shattering into light, wireframe holograms, stock-photo poses, symbolic dwarfed-by-environment clichés. Think Succession / Severance / Oppenheimer / Mr. Robot / A24 frame, NOT Midjourney fever dream.
 - BANNED: "Imagine...", "But here's the thing...", "Let that sink in", "Think about it", "Here's the truth"
 - Return ONLY valid JSON`;
 
@@ -796,7 +813,7 @@ Return ONLY valid JSON:
 // STEP 2: Render TTS Audio from Script
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-interface AudioRenderResult {
+export interface AudioRenderResult {
   audioPath: string;
   /** Per-segment durations in seconds (voiceover + trailing silence/chapter pad).
    *  Length matches the number of actual TTS segments rendered.
@@ -804,7 +821,7 @@ interface AudioRenderResult {
   segmentDurations: number[];
 }
 
-async function renderAudio(script: FacelessScript, jobId: string): Promise<AudioRenderResult> {
+export async function renderAudio(script: FacelessScript, jobId: string): Promise<AudioRenderResult> {
   const audioPath = `${FACELESS_DIR}/${jobId}_voiceover.mp3`;
 
   // For long-form (many segments), TTS APIs have character limits
@@ -1168,11 +1185,11 @@ async function generateThumbnail(
   // ── Generate base image via Imagen 4 ──
   // Thumbnail-specific prompt: HIGH CONTRAST, single focal point, NO text in image
   const thumbStyle = brand === "containment_field"
-    ? "Ultra high contrast noir photograph, single cold blue light source piercing total darkness, volumetric haze, lone silhouette or symbolic object as focal point, extreme chiaroscuro, 16:9 landscape"
-    : "Ultra high contrast cinematic still, single amber/gold light source against deep void (#0a0a0f), volumetric golden particles, lone silhouette or sacred geometry as dramatic focal point, teal (#00e5c7) accent rim light, 16:9 landscape";
+    ? "Hyper-realistic documentary still from a prestige thriller, ARRI Alexa 65, 35mm prime, f/2.0, Kodak Vision3 500T film emulation, single cold practical light source (desk lamp, monitor, window) motivated in-frame, tangible real human subject with visible skin texture and imperfections, real cluttered interior with tangible props, shallow depth of field, 16:9 landscape, large empty dark area left or right third for text overlay"
+    : "Hyper-realistic documentary still from a prestige HBO drama, ARRI Alexa 65, 35mm prime, f/2.0, Kodak Vision3 500T film emulation, single warm practical tungsten source motivated in-frame, tangible real human subject with visible skin texture stubble and breath, real physical room with real props, amber/gold (#d4a843) warm key with deep natural shadow fall-off, shallow depth of field, 16:9 landscape, large empty dark area left or right third for text overlay";
 
-  const thumbVisual = script.thumbnail_visual || "lone figure silhouetted against a vast cosmic light source, concentric rings of golden energy";
-  const thumbPrompt = `${thumbStyle}. Scene: ${thumbVisual}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks. The image must have a large dark area (left or right third) where text will be overlaid.`;
+  const thumbVisual = script.thumbnail_visual || "a weathered man in his late 30s sitting alone at a worn wooden table, single tungsten bulb overhead, hands wrapped around a chipped ceramic coffee mug, visible stubble, tangible skin texture";
+  const thumbPrompt = `${thumbStyle}. Scene: ${thumbVisual}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.\n\nNEGATIVE: ${IMAGEN_NEGATIVE_BAN}`;
 
   // SESSION 35: Use ONLY imagenKey — no fallback to apiKey (embedding key ≠ image gen key).
   const geminiKey = config.llm.providers.gemini?.imagenKey;
@@ -1287,7 +1304,7 @@ async function generateSceneImage(
   const dim = DIMS[orientation];
   const rawStyle = SCENE_VISUAL_STYLE[niche]?.[brand] || SCENE_VISUAL_STYLE.brand[brand];
   const stylePrefix = rawStyle.replace(/\{ORIENTATION\}/g, dim.promptTag);
-  const prompt = `${stylePrefix} Scene: ${visualDirection}`;
+  const prompt = `${stylePrefix} Scene: ${visualDirection}\n\nNEGATIVE: ${IMAGEN_NEGATIVE_BAN}`;
   const imgPath = `${FACELESS_DIR}/${jobId}_scene_${segmentIndex}.png`;
 
   // ── PRIMARY: Gemini Imagen 4 (highest quality, cinematic scenes) ──
@@ -1412,13 +1429,14 @@ async function generateSceneImage(
 // STEP 4: Assemble Video (Ken Burns + Voiceover + Captions)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-async function assembleVideo(
+export async function assembleVideo(
   script: FacelessScript,
   audioPath: string,
   imagePaths: (string | null)[],
   jobId: string,
   orientation: Orientation = "vertical",
-  segmentDurations?: number[]
+  segmentDurations?: number[],
+  assCaptionPath?: string | null
 ): Promise<string> {
   const outputPath = `${FACELESS_DIR}/${jobId}_final.mp4`;
   const nicheFilter = NICHE_FILTERS[script.niche] || NICHE_FILTERS.brand;
@@ -1641,11 +1659,69 @@ async function assembleVideo(
   const kineticPunchThreshold = (kineticBeatPeriod - KINETIC_PUNCH_WIDTH).toFixed(2);
   const kineticBeatPeriodStr = kineticBeatPeriod.toFixed(2);
 
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // PHASE 4 — CUMULATIVE TARGET FRAME BOUNDARIES + XFADE COMPENSATION
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // TWO bugs fixed in one pass:
+  //
+  //   BUG A (rounding drift): per-segment `Math.round(segDur * fps)` applied
+  //   independently to each scene accumulates ±0.5 frame of rounding error
+  //   per scene. Across 16 segments at 30fps this drifts the visual track up
+  //   to ±8 frames (≈0.27s) away from audio.
+  //
+  //   BUG B (xfade shrinkage): each xfade transition consumes `xfadeDuration`
+  //   seconds of overlap between adjacent clips. With N clips and N-1
+  //   transitions at 0.6s each, the final video is (N-1)*0.6 SECONDS
+  //   shorter than `sum(clipDurations)`. For a 16-segment long-form that's
+  //   9 seconds of "video goes black while audio keeps playing." The old
+  //   safety clamp extended the LAST scene to paper over this — functional,
+  //   but blunt. The correct fix is to compensate UP-FRONT: pad every clip
+  //   except the last with xfadeDuration of tail, so the xfade eats the
+  //   padding and the post-xfade total length equals the audio exactly.
+  //
+  // Algorithm:
+  //   1. cumAudio[k] = sum of audio segment durations for scenes [0..k)
+  //   2. cumFrames[k] = round(cumAudio[k] * fps)            ← rounded ONCE
+  //   3. audioFrames[k] = cumFrames[k+1] - cumFrames[k]     ← drift-free
+  //   4. renderFrames[k] = audioFrames[k] + xfadeFrames for k < N-1
+  //                      = audioFrames[N-1] for the last scene
+  //   5. segDurations[k] = renderFrames[k] / fps             ← exact -t value
+  //
+  // Post-xfade total = sum(renderFrames)/fps - (N-1) * xfadeDuration
+  //                  = audioFrames/fps + (N-1)*xfadeFrames/fps - (N-1)*xfadeDuration
+  //                  = audioDuration  (exact, when xfadeDuration is a multiple of 1/fps).
+  const xfadeFrames = Math.round(xfadeDuration * fps);
+  const cumAudio: number[] = [0];
+  for (let k = 0; k < validSegments.length; k++) {
+    cumAudio.push(cumAudio[k] + getSegDuration(k));
+  }
+  const cumFrames = cumAudio.map(t => Math.round(t * fps));
+  const N_SEGS = validSegments.length;
+  const segFrames: number[] = [];
+  const segDurations: number[] = [];
+  for (let k = 0; k < N_SEGS; k++) {
+    const audioFramesK = Math.max(1, cumFrames[k + 1] - cumFrames[k]);
+    // Every scene except the last absorbs one xfade-overlap of tail padding.
+    const renderFramesK = k < N_SEGS - 1 ? audioFramesK + xfadeFrames : audioFramesK;
+    segFrames.push(renderFramesK);
+    segDurations.push(renderFramesK / fps);
+  }
+  const totalAudioFramesExpected = cumFrames[cumFrames.length - 1];
+  const totalSourceFramesExpected = segFrames.reduce((a, b) => a + b, 0);
+  const totalOutputFramesExpected = totalSourceFramesExpected - Math.max(0, N_SEGS - 1) * xfadeFrames;
+  console.log(
+    `🎯 [FacelessFactory] Drift-free frame map: ${N_SEGS} segs, ` +
+    `audio=${totalAudioFramesExpected}f (${(totalAudioFramesExpected / fps).toFixed(3)}s), ` +
+    `source=${totalSourceFramesExpected}f, ` +
+    `post-xfade=${totalOutputFramesExpected}f (${(totalOutputFramesExpected / fps).toFixed(3)}s) ` +
+    `@ ${fps}fps`
+  );
+
   for (let i = 0; i < validSegments.length; i++) {
     const seg = validSegments[i];
     const clipPath = `${sceneClipDir}/scene_${i.toString().padStart(2, "0")}.mp4`;
-    const thisSegDuration = getSegDuration(i);
-    const thisFrames = Math.round(thisSegDuration * fps);
+    const thisFrames = segFrames[i];
+    const thisSegDuration = segDurations[i];
 
     // Pulse expression — 1 inside punch window, 0 elsewhere, masked by edge margins.
     // Reused in both the crop punch-in and the rgbashift chromatic aberration filters.
@@ -1855,12 +1931,13 @@ async function assembleVideo(
 
   // Ken Burns is now applied per-scene above. Video assembly just concats + applies color grade + hook.
 
-  // ── SESSION 38 FIX: Audio/Visual Sync Safety Clamp ──
-  // Problem: xfade transitions eat xfadeDuration per transition from the total video length.
-  // With N clips and N-1 transitions at 0.6s each, total visual is ~(N-1)*0.6s shorter than sum(clipDurations).
-  // If segmentDurations undercount (missing intro/outro/CTA padding), video goes black while audio continues.
-  // Fix: probe the assembled video duration, compare to audio duration. If video < audio, extend the
-  // LAST scene clip to cover the gap, then re-assemble.
+  // ── SESSION 46 PHASE 4: Residual Drift Safety Clamp ──
+  // With the xfade-compensated cumulative frame map above, the post-xfade
+  // total should equal audioDuration to the frame. This clamp now catches
+  // only residual drift (e.g. if segmentDurations underreports the true TTS
+  // length for some reason), not the old (N-1)*xfadeDuration shortfall.
+  // Threshold lowered from 2.0s to 0.5s: anything bigger is a real bug
+  // worth surfacing loudly.
   if (usedXfade) {
     try {
       const videoDurStr = execSync(
@@ -1869,7 +1946,7 @@ async function assembleVideo(
       ).toString().trim();
       const videoDur = parseFloat(videoDurStr) || 0;
       const gap = audioDuration - videoDur;
-      if (gap > 2.0) {
+      if (gap > 0.5) {
         // Video is significantly shorter than audio — extend last scene
         console.warn(`⚠️ [FacelessFactory] Video/audio desync detected: video=${videoDur.toFixed(1)}s, audio=${audioDuration.toFixed(1)}s, gap=${gap.toFixed(1)}s. Extending last scene.`);
         const lastIdx = sceneClipPaths.length - 1;
@@ -1919,6 +1996,37 @@ async function assembleVideo(
   // hookOverlay stays as an empty string so the existing filter_complex string concat below
   // keeps working without further surgery.
   const hookOverlay = "";
+
+  // ── PHASE 2: DYNAMIC KINETIC CAPTIONS (.ass) ──
+  // If a caption file was generated upstream (from Groq Whisper word-level timestamps),
+  // burn it into the video via ffmpeg's subtitles filter. The .ass styling (Bebas Neue,
+  // bold, centered, opaque-box plate, visible pop-in) is baked into the file itself.
+  //
+  // ffmpeg's subtitles filter is a libass wrapper. The filename must be escaped carefully:
+  //   : → \:     (filter arg separator)
+  //   , → \,     (filter chain separator)
+  //   \ → \\     (escape char)
+  //   ' → \'     (single-quote)
+  //
+  // Session 47 HARD FIX — BULLETPROOF FONT PATH:
+  //   libass falls back silently to Arial when it can't find the declared font (Bebas Neue).
+  //   That's exactly what happened in the last local Windows run. We now pass `fontsdir=`
+  //   pointing at brand-assets/ (where BebasNeue-Regular.ttf lives) so libass loads the
+  //   font from the repo regardless of OS font registry state. Works on Linux, macOS, Windows.
+  let captionFilter = "";
+  if (assCaptionPath && existsSync(assCaptionPath)) {
+    const escapePath = (p: string): string =>
+      p.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "\\'");
+    const escaped = escapePath(assCaptionPath);
+    // brand-assets/ is the single source of truth for Bebas Neue + music + stingers.
+    // Resolved relative to this compiled file so it works from dist/ and tsx both.
+    const fontsDir = `${__dirname}/../../brand-assets`;
+    const escapedFontsDir = escapePath(fontsDir);
+    captionFilter = `,subtitles='${escaped}':fontsdir='${escapedFontsDir}'`;
+    console.log(
+      `🎬 [FacelessFactory] Kinetic captions will be burned in from ${assCaptionPath} (fontsdir=${fontsDir})`
+    );
+  }
 
   // ── BACKGROUND MUSIC BED ──
   // Session 37 REWRITE: ALL synthetic audio generation (sine, aevalsrc, anoisesrc) is DEAD.
@@ -2093,7 +2201,7 @@ async function assembleVideo(
   try {
     execSync(
       `ffmpeg ${videoInput} -i "${audioPath}" ${musicInput}` +
-        `-filter_complex "[0:v]${nicheFilter}${hookOverlay}[v]${audioFilter ? ";" + audioFilter : ""}" ` +
+        `-filter_complex "[0:v]${nicheFilter}${captionFilter}${hookOverlay}[v]${audioFilter ? ";" + audioFilter : ""}" ` +
         `-map "[v]" ${audioMap} ` +
         `-c:v libx264 -preset fast -crf 23 ` +
         `-c:a aac -b:a 192k ` +
@@ -2102,8 +2210,43 @@ async function assembleVideo(
     );
   } catch (err: any) {
     // Fallback: no filter_complex for video — just pass through + audio mix
-    console.warn(`[FacelessFactory] Color grade/hook failed, trying plain assembly: ${err.message?.slice(0, 200)}`);
-    if (audioFilter) {
+    console.warn(`[FacelessFactory] Color grade/hook/captions failed, trying plain assembly: ${err.message?.slice(0, 200)}`);
+    // Second try: keep captions but drop niche grade + hook overlay (they're cosmetic)
+    if (captionFilter) {
+      try {
+        execSync(
+          `ffmpeg ${videoInput} -i "${audioPath}" ${musicInput}` +
+            `-filter_complex "[0:v]${captionFilter.replace(/^,/, "")}[v]${audioFilter ? ";" + audioFilter : ""}" ` +
+            `-map "[v]" ${audioMap} ` +
+            `-c:v libx264 -preset fast -crf 23 ` +
+            `-c:a aac -b:a 192k ` +
+            `-shortest -y "${outputPath}"`,
+          { timeout: 600_000, stdio: "pipe" }
+        );
+        console.warn(`[FacelessFactory] Plain-captions assembly succeeded (dropped niche grade)`);
+      } catch (err2: any) {
+        console.warn(`[FacelessFactory] Plain-captions assembly also failed — dropping captions: ${err2.message?.slice(0, 200)}`);
+        if (audioFilter) {
+          execSync(
+            `ffmpeg ${videoInput} -i "${audioPath}" ${musicInput}` +
+              `-filter_complex "${audioFilter}" ` +
+              `-map 0:v ${audioMap} ` +
+              `-c:v libx264 -preset fast -crf 23 ` +
+              `-c:a aac -b:a 192k ` +
+              `-shortest -y "${outputPath}"`,
+            { timeout: 600_000, stdio: "pipe" }
+          );
+        } else {
+          execSync(
+            `ffmpeg ${videoInput} -i "${audioPath}" ` +
+              `-c:v libx264 -preset fast -crf 23 ` +
+              `-c:a aac -b:a 192k ` +
+              `-shortest -y "${outputPath}"`,
+            { timeout: 600_000, stdio: "pipe" }
+          );
+        }
+      }
+    } else if (audioFilter) {
       execSync(
         `ffmpeg ${videoInput} -i "${audioPath}" ${musicInput}` +
           `-filter_complex "${audioFilter}" ` +
@@ -2402,9 +2545,38 @@ export async function produceFacelessVideo(
     console.warn(`⚠️ [FacelessFactory] Thumbnail generation failed (non-fatal): ${err.message?.slice(0, 200)}`);
   }
 
+  // STEP 3c: Dynamic Kinetic Captions — transcribe the raw TTS narration with Groq Whisper
+  // (word-level timestamps) and emit a styled .ass file. Non-fatal: a caption failure must
+  // never kill a render. skipUntilSeconds hides captions during the Terminal Override hook
+  // so they don't collide with the typewriter drawtext reveal on segment 0.
+  let assCaptionPath: string | null = null;
+  try {
+    console.log(`🎬 [FacelessFactory] Generating kinetic captions (Groq Whisper word-level)...`);
+    const dims = DIMS[orientation];
+    const capResult = await generateCaptionsFromAudio(audioResult.audioPath, {
+      outputPath: `${FACELESS_DIR}/${jobId}_captions.ass`,
+      videoWidth: dims.width,
+      videoHeight: dims.height,
+      skipUntilSeconds: hookDuration,
+      maxWordsPerChunk: 3,
+      maxChunkDuration: 1.5,
+      fontName: "Bebas Neue",
+    });
+    assCaptionPath = capResult.assPath;
+    console.log(
+      `✅ [FacelessFactory] Captions: ${capResult.chunkCount} chunks from ${capResult.wordCount} words ` +
+      `(${capResult.firstWordStart.toFixed(2)}s → ${capResult.lastWordEnd.toFixed(2)}s)`
+    );
+  } catch (err: any) {
+    console.warn(
+      `⚠️ [FacelessFactory] Caption generation failed (non-fatal, video will render uncaptioned): ${err.message?.slice(0, 300)}`
+    );
+    assCaptionPath = null;
+  }
+
   // STEP 4: Assemble video
   console.log(`🎬 [FacelessFactory] Assembling video...`);
-  const videoPath = await assembleVideo(script, audioPath, imagePaths, jobId, orientation, audioResult.segmentDurations);
+  const videoPath = await assembleVideo(script, audioPath, imagePaths, jobId, orientation, audioResult.segmentDurations, assCaptionPath);
 
   // Get final duration
   let finalDuration = 0;
@@ -2444,7 +2616,7 @@ export async function produceFacelessVideo(
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // BATCH PRODUCTION: produceFacelessBatch()
 // Produces multiple videos from one source (both brands)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export async function produceFacelessBatch(
   llm: LLMProvider,

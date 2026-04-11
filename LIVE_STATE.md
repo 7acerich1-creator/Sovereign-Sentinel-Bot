@@ -5,14 +5,14 @@
 > reference contradicts this file, **this file wins** — the master reference only holds
 > invariants, not live values.
 
-**Last verified:** `2026-04-10T21:24:54.635Z`
+**Last verified:** `2026-04-11T04:06:47.017Z`
 **Generator:** `scripts/verify-state.ts`
 
 ## Git State
 - **Branch:** `main`
-- **HEAD:** `435288b9329a55d2f29d9060e3e20921fef8d3f8`
-- **Working tree:** DIRTY (169 files)
-- **Last commit:** 435288b Session 45: Kinetic Baseline (YT Growth Protocol Task 3) - per-scene punch-ins + chromatic aberration + Ken Burns reversal (14 hours ago)
+- **HEAD:** `00d6bd807a923805575d3958aa346f6e55ccff40`
+- **Working tree:** DIRTY (177 files)
+- **Last commit:** 00d6bd8 Session 47: Caption engine hardening - BorderStyle 3 opaque plate + fontsdir bulletproof + 150ms pop-in (6 minutes ago)
 
 ## Package
 - **Name:** `gravity-claw`
@@ -21,7 +21,7 @@
 
 ## TTS Routing — src/voice/tts.ts
 ### Runtime Priority (computed from env vars + code)
-**edge → openai** (no ElevenLabs key available)
+**edge → elevenlabs → openai** (FORCE_ELEVENLABS unset/false — Edge fires first)
 
 ### Voice Identifiers
 - **ElevenLabs voice ID (source-coded default):** `IRHApOXLvnW57QJPQH2P`
@@ -29,7 +29,7 @@
 
 ### Environment
 - `FORCE_ELEVENLABS`: UNSET
-- `ELEVENLABS_API_KEY`: UNSET
+- `ELEVENLABS_API_KEY`: SET (redacted)
 - `ELEVENLABS_API_KEY_ALT`: UNSET
 
 ### Source Block (verbatim quote of the chain assembly)
@@ -55,9 +55,9 @@
 ### Environment
 - `LLM_FAILOVER_ORDER`: UNSET
 - `ANTHROPIC_API_KEY`: UNSET
-- `GROQ_API_KEY`: UNSET
-- `GROQ_API_KEY_TCF`: UNSET
-- `GEMINI_API_KEY`: UNSET
+- `GROQ_API_KEY`: SET (redacted)
+- `GROQ_API_KEY_TCF`: SET (redacted)
+- `GEMINI_API_KEY`: SET (redacted)
 - `OPENAI_API_KEY`: UNSET
 
 ### AGENT_LLM_TEAMS block (verbatim)

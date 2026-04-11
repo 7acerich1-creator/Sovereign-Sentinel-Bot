@@ -87,6 +87,7 @@ export interface FacelessScript {
 interface FacelessResult {
   videoUrl: string | null;
   thumbnailUrl?: string | null;
+  thumbnailPath?: string | null;  // Deployment 3: local path to long-form keyframe thumbnail for YouTube thumbnails.set
   localPath: string;
   title: string;
   niche: string;
@@ -200,6 +201,8 @@ function cleanupJobFiles(jobId: string, keepFinal: boolean = true): void {
     for (const f of files) {
       if (!f.startsWith(jobId)) continue;
       if (keepFinal && f.endsWith("_final.mp4")) continue;
+      // Deployment 3: preserve long-form keyframe thumbnail so it survives until YT thumbnails.set uploads it
+      if (keepFinal && f.endsWith("_longform_thumb.jpg")) continue;
       const fullPath = `${FACELESS_DIR}/${f}`;
       try {
         const stat = statSync(fullPath);
@@ -1290,6 +1293,125 @@ async function generateThumbnail(
       return existsSync(thumbFinalPath) ? thumbFinalPath : null;
     } catch { return null; }
   }
+  return null;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DEPLOYMENT 3: Long-Form YouTube Thumbnail (keyframe-based)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Port of the Session 39 short-form ffmpeg thumbnail technique, adapted for 1920x1080
+// long-form YouTube assets. Does NOT call Imagen — the cost is zero, the failure surface
+// is pure ffmpeg, and the visual is guaranteed to be on-brand because it IS a frame from
+// the finished video.
+//
+// Pipeline:
+//   1. Seek to the middle of the finished long-form video (high-contrast narrative beat)
+//   2. Scale + crop to canonical 1920x1080
+//   3. vignette=PI/4 for depth
+//   4. drawbox @ 60% opacity across the lower-middle band (text plate)
+//   5. drawtext Bebas Neue (white, thick black border) with the video title on the bar
+//
+// Output is preserved past cleanupJobFiles so the orchestrator can feed it to the
+// YouTube Data API thumbnails.set endpoint.
+async function generateLongFormThumbnail(
+  videoPath: string,
+  script: FacelessScript,
+  jobId: string,
+  _brand: Brand
+): Promise<string | null> {
+  if (!existsSync(videoPath)) {
+    console.warn(`[FacelessFactory] Long-form video missing for thumbnail: ${videoPath}`);
+    return null;
+  }
+
+  const thumbPath = `${FACELESS_DIR}/${jobId}_longform_thumb.jpg`;
+
+  // Probe duration so we can seek to the actual middle of the final video
+  let durationSec = 0;
+  try {
+    const out = execSync(
+      `ffprobe -v error -show_entries format=duration -of csv=p=0 "${videoPath}"`,
+      { timeout: 10_000, stdio: "pipe" }
+    ).toString().trim();
+    durationSec = parseFloat(out) || 0;
+  } catch { /* non-fatal — fall through with 0 */ }
+
+  // Middle keyframe. Clamp to at least 1s in case probe fails or video is tiny.
+  const seekSec = Math.max(1, (durationSec || 60) / 2).toFixed(2);
+
+  // Title text: prefer explicit thumbnail_text (scroll-stopper hook from script gen),
+  // fall back to full title. Normalize for drawtext (strip hostile punctuation).
+  const rawTitle = (script.thumbnail_text || script.title || "").trim();
+  const titleText = rawTitle
+    .toUpperCase()
+    .replace(/[^\w\s!?'-]/g, "")
+    .slice(0, 60);
+
+  // Wrap into max 2 lines for readability at 1920x1080 thumbnail scale
+  const words = titleText.split(/\s+/).filter(Boolean);
+  let line1 = titleText;
+  let line2 = "";
+  if (words.length > 4) {
+    const mid = Math.ceil(words.length / 2);
+    line1 = words.slice(0, mid).join(" ");
+    line2 = words.slice(mid).join(" ");
+  }
+
+  const thumbTextFile = `${FACELESS_DIR}/${jobId}_longform_thumb_text.txt`;
+  try {
+    // Session 38 lesson: never pass long strings through shell quoting; write to file + textfile=
+    writeFileSync(thumbTextFile, line2 ? `${line1}\n${line2}` : line1);
+  } catch (err: any) {
+    console.warn(`[FacelessFactory] Long-form thumb text-file write failed: ${err.message?.slice(0, 150)}`);
+  }
+
+  const brandAssetsDir = `${__dirname}/../../brand-assets`;
+  const fontPath = `${brandAssetsDir}/BebasNeue-Regular.ttf`;
+  const hasFont = existsSync(fontPath);
+  const fontFilter = hasFont ? `fontfile='${fontPath}':` : "";
+
+  // Visual grammar:
+  //   - Bar occupies ih*0.62 → ih*0.84 (lower-middle third), keeps keyframe subject's head-room
+  //   - Black @ 60% opacity = the 60% architect spec
+  //   - Bebas Neue white + 4px black border = guaranteed legibility on any keyframe
+  //   - fontsize scales down when we had to wrap to two lines so nothing clips the bar
+  const barY = "ih*0.62";
+  const barH = "ih*0.22";
+  const fontSize = line2 ? 88 : 120;
+  // Single-line: vertical-center on bar. Two-line: nudge up so both lines fit inside the bar.
+  const textY = line2 ? `ih*0.645` : `(h-text_h)/2+ih*0.23`;
+
+  const textOverlay = titleText
+    ? `,drawtext=${fontFilter}textfile='${thumbTextFile.replace(/'/g, "'\\''")}':fontsize=${fontSize}:fontcolor=white:borderw=4:bordercolor=black@0.85:x=(w-text_w)/2:y=${textY}:line_spacing=10`
+    : "";
+
+  // Single-filter-chain (not filter_complex) because we have one video stream and output one frame.
+  const vf =
+    `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,` +
+    `eq=contrast=1.1:brightness=-0.02:saturation=1.05,` + // subtle pop for 120x68 render
+    `vignette=PI/4,` +
+    `drawbox=x=0:y=${barY}:w=iw:h=${barH}:c=black@0.6:t=fill` +
+    textOverlay;
+
+  try {
+    execSync(
+      `ffmpeg -ss ${seekSec} -i "${videoPath}" -frames:v 1 -vf "${vf}" -q:v 2 -y "${thumbPath}"`,
+      { timeout: 20_000, stdio: "pipe" }
+    );
+    if (existsSync(thumbPath)) {
+      const size = readFileSync(thumbPath).length;
+      if (size > 1000) {
+        console.log(
+          `🖼️ [FacelessFactory] Long-form keyframe thumbnail rendered: "${titleText || "(untitled)"}" ` +
+          `(${(size / 1024).toFixed(0)}KB @ ${seekSec}s)`
+        );
+        return thumbPath;
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[FacelessFactory] Long-form thumbnail generation failed (non-fatal): ${err.message?.slice(0, 200)}`);
+  }
+
   return null;
 }
 
@@ -2578,6 +2700,26 @@ export async function produceFacelessVideo(
   console.log(`🎬 [FacelessFactory] Assembling video...`);
   const videoPath = await assembleVideo(script, audioPath, imagePaths, jobId, orientation, audioResult.segmentDurations, assCaptionPath);
 
+  // STEP 4b (Deployment 3): For long-form (16:9), replace the Imagen-based thumbnail
+  // with a keyframe pulled from the middle of the finished video. This guarantees:
+  //   1. Zero Imagen spend on the thumbnail path (billing crisis insurance)
+  //   2. Brand-coherence (thumb IS a frame from the actual video, not a synthetic still)
+  //   3. YouTube always gets a custom thumbnail instead of auto-picking a generic frame
+  //
+  // The Imagen thumbnail is kept as a fallback: if keyframe generation fails,
+  // `thumbnailPath` stays whatever Step 3b produced. Shorts (vertical) still use the
+  // Imagen path since the vidrush orchestrator handles per-clip thumbnails separately.
+  if (orientation === "horizontal") {
+    try {
+      const keyframeThumb = await generateLongFormThumbnail(videoPath, script, jobId, brand);
+      if (keyframeThumb) {
+        thumbnailPath = keyframeThumb;
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ [FacelessFactory] Long-form keyframe thumbnail failed (keeping Imagen fallback): ${err.message?.slice(0, 200)}`);
+    }
+  }
+
   // Get final duration
   let finalDuration = 0;
   try {
@@ -2605,6 +2747,7 @@ export async function produceFacelessVideo(
   return {
     videoUrl,
     localPath: videoPath,
+    thumbnailPath, // Deployment 3: long-form keyframe thumbnail (or Imagen fallback) for YouTube thumbnails.set
     title: script.title,
     niche,
     brand,

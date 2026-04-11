@@ -125,13 +125,17 @@ async function elevenLabsCallWithKey(apiKey: string, text: string, speed?: numbe
   // Old defaults: Rachel (female, wrong brand), stock Adam (too warm/PBS).
   const voiceId = config.voice.elevenLabsVoiceId || "IRHApOXLvnW57QJPQH2P"; // Adam Brooding, Dark & Tough
 
-  // VOICE EXPRESSIVENESS (Session 28 fix):
-  // Old: stability=0.80 made the voice rigid and monotone. Like reading a textbook.
-  // Reference channels (Grim Grit) have DYNAMIC delivery — emphasis, pauses, vocal variation.
-  // stability: 0.45 = expressive but still controlled (not chaotic)
-  // style: 0.60 = dramatic delivery with emphasis on key words
-  // similarity_boost: 0.75 = keeps the voice character but allows variation
-  const stability = speed && speed < 1.0 ? 0.45 : 0.50;
+  // VOICE EXPRESSIVENESS — HIGH EMOTION PROFILE (Session 46 lock-in):
+  // Ace auditioned 3 ElevenLabs profiles via scripts/test-voice.ts and selected HIGH EMOTION.
+  // Rationale: the Sovereign frequency demands volatility — dramatic swings, raw emphasis,
+  // sermonic weight. Session 28's "balanced" 0.45/0.60 was too measured for the Firmware
+  // Update cadence. Reference: Grim Grit, dark-psych faceless top-performers.
+  // stability: 0.30 = highly volatile / dramatic swings / risk of wobble accepted
+  // style: 0.85 = maximum dramatic emphasis and vocal variation
+  // similarity_boost: 0.70 = slightly looser lock on source DNA to allow the emotion through
+  // NOTE: `speed` parameter is intentionally ignored — HIGH EMOTION uses fixed settings
+  // regardless of rate override, because the profile IS the delivery signature.
+  const stability = 0.30;
 
   const resp = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
@@ -147,8 +151,8 @@ async function elevenLabsCallWithKey(apiKey: string, text: string, speed?: numbe
         model_id: "eleven_multilingual_v2",
         voice_settings: {
           stability,
-          similarity_boost: 0.75,
-          style: 0.60,
+          similarity_boost: 0.70,
+          style: 0.85,
           use_speaker_boost: true,
         },
       }),
@@ -270,7 +274,8 @@ export async function elevenLabsStreamTTS(
       body: JSON.stringify({
         text: text.slice(0, 5000),
         model_id: "eleven_multilingual_v2",
-        voice_settings: { stability: 0.45, similarity_boost: 0.75, style: 0.60, use_speaker_boost: true },
+        // HIGH EMOTION profile — matches elevenLabsCallWithKey (Session 46 lock-in)
+        voice_settings: { stability: 0.30, similarity_boost: 0.70, style: 0.85, use_speaker_boost: true },
       }),
     }
   );

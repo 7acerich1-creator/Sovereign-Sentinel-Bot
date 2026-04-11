@@ -517,6 +517,10 @@ export class YouTubeLongFormPublishTool implements Tool {
         type: "string",
         description: "Which brand/channel: 'ace_richie' (default) or 'containment_field'.",
       },
+      thumbnail_path: {
+        type: "string",
+        description: "Optional local path to a custom JPG/PNG thumbnail. Uploaded via YouTube thumbnails.set after the video upload succeeds. Skipping this lets YouTube auto-pick a frame (CTR killer).",
+      },
     },
     required: ["title", "description"],
   };
@@ -569,6 +573,7 @@ export class YouTubeLongFormPublishTool implements Tool {
     const description = String(args.description);
     const tags = args.tags ? String(args.tags).split(",").map((t) => t.trim()) : [];
     const niche = args.niche ? String(args.niche) : "unknown";
+    const thumbnailPath = args.thumbnail_path ? String(args.thumbnail_path) : null;
 
     if (!localPath && !videoUrl) {
       return "❌ Either local_path or video_url is required.";
@@ -656,6 +661,65 @@ export class YouTubeLongFormPublishTool implements Tool {
       const uploadData = await uploadResp.json() as any;
       const videoId = uploadData.id;
 
+      // ── Deployment 3: Custom thumbnail via YouTube thumbnails.set ──
+      // YouTube auto-picks a generic frame if we skip this. Custom thumbs drive CTR,
+      // CTR drives top-of-funnel attention (NORTH_STAR metric #1). Non-fatal — a
+      // thumbnail upload failure must never roll back a successful video upload.
+      let thumbnailNote = "";
+      if (thumbnailPath && videoId) {
+        try {
+          const { existsSync, readFileSync } = await import("fs");
+          if (!existsSync(thumbnailPath)) {
+            thumbnailNote = `\n⚠️ Thumbnail skipped — file not found: ${thumbnailPath}`;
+            console.warn(`[YouTubeLongForm] Thumbnail file missing: ${thumbnailPath}`);
+          } else {
+            const thumbBuffer = readFileSync(thumbnailPath) as Buffer;
+            const thumbSize = thumbBuffer.length;
+            // YouTube hard-caps custom thumbnails at 2 MiB
+            if (thumbSize > 2 * 1024 * 1024) {
+              thumbnailNote = `\n⚠️ Thumbnail skipped — too large (${Math.round(thumbSize / 1024)}KB > 2MB cap)`;
+              console.warn(`[YouTubeLongForm] Thumbnail too large: ${thumbSize} bytes`);
+            } else {
+              // Infer content-type from extension (jpg/jpeg/png); default to jpeg
+              const lower = thumbnailPath.toLowerCase();
+              const contentType = lower.endsWith(".png")
+                ? "image/png"
+                : "image/jpeg";
+
+              console.log(
+                `🖼️ [YouTubeLongForm] Uploading custom thumbnail (${(thumbSize / 1024).toFixed(0)}KB, ${contentType}) → video ${videoId}`
+              );
+              const thumbResp = await fetch(
+                `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(videoId)}&uploadType=media`,
+                {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": contentType,
+                    "Content-Length": String(thumbSize),
+                  },
+                  body: thumbBuffer,
+                }
+              );
+
+              if (thumbResp.ok) {
+                thumbnailNote = `\n🖼️ Custom thumbnail uploaded (${(thumbSize / 1024).toFixed(0)}KB)`;
+                console.log(`✅ [YouTubeLongForm] Custom thumbnail set for ${videoId}`);
+              } else {
+                const errText = await thumbResp.text();
+                thumbnailNote = `\n⚠️ Thumbnail upload failed (${thumbResp.status}) — video still published`;
+                console.warn(
+                  `[YouTubeLongForm] Thumbnail set failed (${thumbResp.status}): ${errText.slice(0, 300)}`
+                );
+              }
+            }
+          }
+        } catch (err: any) {
+          thumbnailNote = `\n⚠️ Thumbnail upload error (non-fatal): ${err.message?.slice(0, 150)}`;
+          console.warn(`[YouTubeLongForm] Thumbnail error: ${err.message?.slice(0, 200)}`);
+        }
+      }
+
       // Log to Supabase
       await logVideoPost({
         source: "youtube_longform",
@@ -669,6 +733,7 @@ export class YouTubeLongFormPublishTool implements Tool {
           format: "long_form",
           brand,
           channel: channelLabel,
+          custom_thumbnail: thumbnailPath ? true : false,
         },
         linkedin_post: description.slice(0, 500),
       });
@@ -678,7 +743,8 @@ export class YouTubeLongFormPublishTool implements Tool {
         `URL: https://youtube.com/watch?v=${videoId}\n` +
         `Title: ${title}\n` +
         `Brand: ${channelLabel}\n` +
-        `Niche: ${niche}`;
+        `Niche: ${niche}` +
+        thumbnailNote;
     } catch (err: any) {
       return `❌ YouTube long-form publish error: ${err.message}`;
     }

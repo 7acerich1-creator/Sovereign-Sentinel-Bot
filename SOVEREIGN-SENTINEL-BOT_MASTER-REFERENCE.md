@@ -2710,3 +2710,126 @@ Queried Supabase `crew_dispatch` for any rows with status in (`claimed`, `in_pro
 3. **Re-add chromium to production image** via `ghcr.io/puppeteer/puppeteer:latest` base (preferred) or `@puppeteer/browsers` runtime install. Verify TikTok/Instagram direct browser uploads stop 500-ing.
 4. **Investigate Buffer analytics schema drift** (flagged by Vector in S44, still open).
 5. **Revenue architecture** — still the top-line objective at 0.0000% velocity toward $1.2M by 2027-01-01. Every distribution win from the above targets only matters if it drives T2–T7 signups.
+
+---
+
+## Session 47 — Deployment 3: Long-Form YouTube Thumbnail (Keyframe Port) — 2026-04-10
+
+**Problem:** Long-form VidRush videos were uploading to YouTube with no custom thumbnail. YouTube auto-selected a generic frame, killing CTR on the strongest organic signal in the stack (Ace Richie YT: 14.3% CTR on "OUTDATED CODE", +12 subs/28d organic — see NORTH_STAR.md S46 audit). The existing `generateThumbnail()` in `faceless-factory.ts` relied on Imagen 4, which is exposed to the ongoing Gemini billing crisis (`project_gemini_billing_crisis.md`) and has never been reliably wired through to `YouTubeLongFormPublishTool` — that tool did not even accept a thumbnail parameter before this session.
+
+**Fix (three coordinated changes):**
+
+1. **`src/engine/faceless-factory.ts`** — ported the Session 39 per-clip ffmpeg thumbnail technique (`vidrush-orchestrator.ts` L419–454) up to the long-form path. New `generateLongFormThumbnail(videoPath, script, jobId, brand)` function: ffprobes the final assembled video, seeks to the midpoint, extracts a single frame, and pipes it through `scale=1920:1080 → eq(contrast+pop) → vignette=PI/4 → drawbox(y=0.62*ih h=0.22*ih c=black@0.6) → drawtext(Bebas Neue white borderw=4 bordercolor=black@0.85, one- or two-line wrap from `script.thumbnail_text || script.title`)`. Output: `${jobId}_longform_thumb.jpg`. Wired in at a new STEP 4b immediately after `assembleVideo()`, gated on `orientation === "horizontal"` — vertical shorts are untouched (the vidrush orchestrator handles per-clip thumbs separately). The Imagen path from Session 33 survives as a fallback if the keyframe generator returns `null`. `FacelessResult` interface extended with optional `thumbnailPath` field; `cleanupJobFiles()` extended to preserve `*_longform_thumb.jpg` so the file survives until the YT upload reads it.
+
+2. **`src/tools/video-publisher.ts` (`YouTubeLongFormPublishTool`)** — added `thumbnail_path` parameter to the tool definition. After the resumable video upload succeeds and a `videoId` is returned, reads the local thumbnail file, validates size (≤2 MiB YouTube cap), infers content-type from extension (`.png` / `.jpg`), and POSTs it to `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=…&uploadType=media` with the existing OAuth access token. Failure is non-fatal — a thumbnail error never rolls back a successful video upload, it only annotates the return message and logs to Supabase under `strategy_json.custom_thumbnail`.
+
+3. **`src/engine/vidrush-orchestrator.ts`** — STEP 3 (`YouTubeLongFormPublishTool.execute`) now passes `thumbnail_path: facelessResult.thumbnailPath || ""`. Dry-run literal unchanged (field is optional).
+
+**What was explicitly NOT touched:**
+- `assembleVideo()` — zero changes, the long-form path calls it identically.
+- `assCaptionPath` generation and the kinetic-caption pipeline (STEP 3c) — untouched.
+- The audio composite pipeline (STEP 2b, typing bed + outro mixing) — untouched.
+- The vertical shorts / per-clip thumbnail path from Session 39 — untouched, still the canonical short-form flow.
+- The Imagen 4 `generateThumbnail()` function from Session 33 — still present, still used for vertical orientation and still used as a fallback for long-form if the keyframe generator fails.
+
+**Files touched:**
+- **MODIFIED:** `src/engine/faceless-factory.ts` — +~130 lines (new `generateLongFormThumbnail` function, STEP 4b wiring, `FacelessResult.thumbnailPath`, cleanup preservation). 149,770 bytes / ~2,757 lines.
+- **MODIFIED:** `src/tools/video-publisher.ts` — +~60 lines in `YouTubeLongFormPublishTool.execute` (thumbnail_path param + thumbnails.set call). 35,939 bytes.
+- **MODIFIED:** `src/engine/vidrush-orchestrator.ts` — +3 lines (thumbnail_path in the STEP 3 payload + comment).
+- **MODIFIED:** `SOVEREIGN-SENTINEL-BOT_MASTER-REFERENCE.md` — this entry.
+
+**Verification (pre-deploy):**
+- `tsc --noEmit -p tsconfig.json` → exit 0, zero output. Full TypeScript compile clean.
+- Line-count and symbol spot-checks confirm all six edit landing zones present in the real Windows files (`generateLongFormThumbnail` at L1316, STEP 4b wiring at L2703, `thumbnails/set` endpoint at L693, orchestrator `thumbnail_path` at L1226).
+- Sandbox bash mount showed stale/truncated views of the edited files — a cache coherency glitch on the bash side, NOT a real write failure. Windows `Get-Item` confirmed full file sizes; Windows-native `tsc.cmd` confirmed clean compile. Per `feedback_file_truncation_risk.md`, the authoritative verifier after large edits is tsc, not wc.
+
+**Revenue-first check (Pushback Rule):**
+This task touches metric #1 (top-of-funnel attention via YouTube CTR) directly. NORTH_STAR S46 step 3 explicitly requires "publish ONE new Ace Richie long-form video this week with a boring, direct, front-loaded CTA" — that video now gets a custom thumbnail instead of an auto-picked frame. Revenue-relevant. No pushback issued.
+
+**DVP Status (end of Session 47):**
+- `[DVP: SHIPPED — PENDING-PIPELINE-CYCLE]` Session 47 Deployment 3 — code compiles clean (tsc exit 0), function wiring verified, cleanup preservation verified. VERIFIED flip requires one full post-deploy VidRush pipeline cycle: (a) confirm `${jobId}_longform_thumb.jpg` is created and ≥1 KB in `$FACELESS_DIR`, (b) confirm the YT long-form upload log line shows `🖼️ Custom thumbnail uploaded (XXXkB)`, (c) confirm the resulting YouTube video displays the custom thumbnail in Studio (not an auto-frame). Inspect the `custom_thumbnail: true` field in `video_posts.strategy_json` for the published row.
+- Previous Session 45/46 DVP entries unchanged.
+
+**Next session priorities (Session 48):**
+1. **Verify Deployment 3 in production.** Run one real (non-dry) VidRush cycle. Inspect logs for the new `🖼️ [FacelessFactory] Long-form keyframe thumbnail rendered` and `🖼️ [YouTubeLongForm] Uploading custom thumbnail` lines. Pull the YouTube Studio thumbnail for the resulting video and eyeball it at 120×68 scale. Flip SHIPPED → VERIFIED.
+2. **Measure the CTR delta.** Keep the "OUTDATED CODE" 14.3% CTR baseline in view. Next 2–3 long-form uploads with the new keyframe thumbnail are the first real signal on whether custom thumbs move the dial on NORTH_STAR metric #1.
+3. **Continue NORTH_STAR S46 intervention:** sovereign-landing `@vercel/analytics` install (20 min, metric #2 unblock), Ace Richie YT top-3 CTA audit.
+4. **Carry-forwards from S46 list:** Chromium re-add, Buffer analytics schema drift, Kinetic Baseline verification (still BLOCKED-ON-CYCLE if no new cycle has run).
+
+---
+
+## Session 47 — Deployment 4: Audience Rotation Protocol (Viral Brain Forced-Angle Diversity) — 2026-04-10
+
+**Problem:** Platform-copy generation was collapsing every clip of every video into the same narrow demographic frame — "Matrix / Dark Psychology / Sovereignty" keyword cluster, the same "The simulation doesn't want you to see this" title shape, the same `#darkpsychology #mindset #sovereignty` hashtag stack. This created three compounding leaks on NORTH_STAR metric #1 (top-of-funnel attention):
+
+1. **Audience saturation** — YouTube/TikTok recommender surfaces the same clip to the same ~40k-person "awakening" bubble we already hit weekly. New reach per pipeline cycle was approaching zero even as output volume climbed.
+2. **Generic title erosion** — "Matrix" and "Sovereign" as first-word openers on YouTube Shorts were correlating with sub-3% CTR in the Session 45 YT analytics audit. The algorithm learns that titles starting with these words = low-CTR content.
+3. **Buffer YouTube tag strip** — Buffer's YouTube integration drops the tags field entirely on publish. SEO discovery was dead on everything Buffer-scheduled; only the direct-publish `YouTubeShortsPublishTool` path retained tags.
+
+The weak "KEYWORD DIVERSITY RULE" added in Session 42 was a single sentence in the prompt telling the LLM "use different keywords" — easily ignored, because nothing downstream enforced it and the temperature was low.
+
+**Fix (two coordinated changes):**
+
+1. **`src/prompts/social-optimization-prompt.ts`** — added a structured angle library + rotation helpers:
+   - New exported `AudienceAngle` interface: `{id, name, demographic, voice, emotionalEntry, keywordSeeds[], titlePatterns[], bannedOpeners[]}`.
+   - New exported `AUDIENCE_ANGLES` constant with **8 hand-tuned demographic clusters** — each with vocabulary that a real person in that demographic would actually search for, not Sovereign Synthesis internal lexicon:
+     1. **Corporate Burnout** (knowledge workers 28–45, promotion-as-leash)
+     2. **Spiritual Awakening / Consciousness Shift** (25–45, integration phase, post-religion)
+     3. **Tech / AI Realism** (22–40, engineers watching GPT-5 / Sonnet 4.6 compress their field)
+     4. **Relationship Trauma Recovery** (25–45, post-narcissist, attachment-theory literate)
+     5. **Millennial Parent** (30–42, gentle-parenting fatigued, screen-time anxious)
+     6. **Late-Diagnosed Neurodivergent** (25–45, AuDHD identity reframe, masking burnout)
+     7. **Faith Deconstruction** (22–40, exvangelical / ex-Mormon / ex-JW rebuild)
+     8. **Financial Prisoner** (24–42, paycheck-to-paycheck on $80k–$150k)
+   - Each angle carries its own BANNED openers ("matrix", "dark psychology", "simulation", "sovereign") so the LLM cannot default to the Sovereign lexicon for that clip.
+   - New `angleForClipIndex(globalIndex, offset)` — deterministic modular rotation through the pool.
+   - New `hashStringToAngleOffset(s)` — cheap stable hash so the same source title always rotates the same way and different source videos start from different positions in the pool (no batch-to-batch collision between concurrent pipelines).
+   - New `buildAudienceRotationBlock(assignments)` — builds the full NON-NEGOTIABLE protocol block that gets injected into the LLM prompt, including the per-clip `ASSIGNMENTS`, the `TITLE VARIANCE RULES`, and the `TAG SMUGGLING PROTOCOL` section.
+   - **Tag smuggling is now mandatory and format-specified.** The protocol forces the LLM to append a `Related topics: <kw1>, <kw2>, …, <kw6>` line at the very bottom of every `youtube_short` description string, drawn ONLY from that clip's assigned angle's keyword seeds. This preserves SEO discovery through Buffer's tag-stripping YouTube integration by moving the keywords into the description body where Buffer cannot strip them.
+
+2. **`src/engine/vidrush-orchestrator.ts`** — rewrote the `generatePlatformCopy` batch loop:
+   - Imports the new helpers (`AUDIENCE_ANGLES`, `angleForClipIndex`, `buildAudienceRotationBlock`, `hashStringToAngleOffset`, `AudienceAngle` type) from `../prompts/social-optimization-prompt`.
+   - Computes a stable `contentOffset = hashStringToAngleOffset(sourceTitle || niche || "sovereign")` once per call, so the whole video rotates from a deterministic starting angle.
+   - Builds a `clipAngleMap: Map<number, AudienceAngle>` pre-assigning every clip its angle before batching.
+   - In every batch of 5, builds a `batchAssignments` array with a `usedInBatch` guard that walks forward through the pool if modular collision would otherwise repeat an angle inside the same batch (impossible at batch size 5 vs pool size 8, but defensive for future tuning).
+   - Each clip in the prompt's `CLIPS:` block now carries its assigned angle inline: `Clip N (…s-…s) [ASSIGNED ANGLE: Corporate Burnout] | TOPIC: "…" | RAW_TITLE: "…"` so the LLM cannot lose track mid-batch.
+   - The full rotation block (assignments + title variance rules + tag smuggling protocol) is concatenated into the prompt above the platform-specific rules. The platform rules were also rewritten to reference the assigned angle ("Title MUST come from the assigned angle's vocabulary, not Sovereign lexicon").
+   - Temperature raised from `0.7 → 0.75` to give the LLM more room to diverge angle voices.
+   - Added a **safety-net tag-smuggling injector**: after parsing the LLM response, if any `youtube_short` string is missing the `Related topics:` line, the orchestrator automatically appends the assigned angle's first 6 keyword seeds. This means tag smuggling is guaranteed regardless of LLM compliance.
+   - Rewrote the fallback path entirely. Previous fallback emitted static `#darkpsychology #mindset #sovereignty` boilerplate for every failed batch — exactly the audience collapse the protocol is supposed to prevent. New fallback walks the clip's assigned angle, picks two of its `titlePatterns`, joins its `keywordSeeds` into a `Related topics:` line, and emits demographic-coded captions across all 7 platforms. Even when the LLM is fully down, rotation still happens.
+
+**What was explicitly NOT touched:**
+- `src/engine/vidrush-orchestrator.ts distributeClips / scheduleBufferWeek / SERVICE_TO_COPY_KEY` — downstream distribution logic is unchanged, it just now receives richer `PlatformCopy` objects.
+- `src/engine/faceless-factory.ts` — the Deployment 3 long-form thumbnail path is untouched.
+- `src/tools/video-publisher.ts` — untouched.
+- `TARGET_AUDIENCES` and `PLATFORM_DEFAULTS` in `social-optimization-prompt.ts` — kept as legacy constants in case other call sites reference them. New work only reads from `AUDIENCE_ANGLES`.
+- The `buildSocialOptimizationPrompt` helper — kept intact; it's used by a different code path (per-platform deep generation) and was not where the saturation bug lived.
+
+**Files touched:**
+- **MODIFIED:** `src/prompts/social-optimization-prompt.ts` — +~220 lines. New `AudienceAngle` interface, `AUDIENCE_ANGLES` constant (8 angles × ~12 lines each), `angleForClipIndex`, `hashStringToAngleOffset`, `buildAudienceRotationBlock` helpers.
+- **MODIFIED:** `src/engine/vidrush-orchestrator.ts` — +6 lines in imports, rewritten `generatePlatformCopy` function (~+90 lines net). Rotation assignment, inline angle labels in CLIPS block, rotation-block injection, tag-smuggling safety net, rotating fallback.
+- **MODIFIED:** `SOVEREIGN-SENTINEL-BOT_MASTER-REFERENCE.md` — this entry.
+
+**Verification (pre-deploy):**
+- `node_modules\.bin\tsc.cmd --noEmit -p tsconfig.json` (Windows-native) → **exit 0, zero diagnostics**. Full TypeScript compile clean.
+- `tsc --listFilesOnly` confirmed both `src/prompts/social-optimization-prompt.ts` and `src/engine/vidrush-orchestrator.ts` are in the active compile graph — not tree-shaken, not orphaned.
+- Not pushed to `main` — respects `feedback_no_push_during_pipeline.md`.
+
+**Revenue-first check (Pushback Rule):**
+On-spine. Demographic rotation broadens metric #1 (top-of-funnel attention) by exposing the same universal content to 8 disjoint search-intent populations instead of 1 saturated one. Tag smuggling repairs an active SEO leak on every Buffer-scheduled YouTube post — a discoverability patch, not speculative infrastructure. No pushback issued.
+
+**DVP Status (end of Session 47 Deployment 4):**
+- `[DVP: SHIPPED — PENDING-PIPELINE-CYCLE]` Session 47 Deployment 4 — code compiles clean (tsc exit 0), both files in compile graph. VERIFIED flip requires one full post-deploy VidRush cycle producing ≥2 clips, with the following observed:
+  1. **Rotation verified:** Log the assigned angle per clip in orchestrator output (`[Orchestrator] Clip N → Corporate Burnout`, `Clip N+1 → Spiritual Awakening`, …). Confirm no two clips in the same batch share an angle.
+  2. **Title variance verified:** Published YouTube Shorts titles must NOT start with "Matrix", "Dark Psychology", "Simulation", "Sovereign", or "They Don't Want You To". Spot-check the first 4 words of each uploaded clip title.
+  3. **Tag smuggling verified:** Every `youtube_short` string in the `PlatformCopy` JSON must contain a `Related topics: …` trailing line. Inspect Buffer queue or Supabase `content_drafts` row for the raw string.
+  4. **Fallback rotation verified:** Force an LLM failure (pull the Anthropic key mid-batch) and confirm the fallback still rotates angles rather than collapsing to boilerplate.
+- Deployment 3 DVP status unchanged (still SHIPPED — PENDING-PIPELINE-CYCLE).
+- Previous Session 45/46 DVP entries unchanged.
+
+**Next session priorities (Session 48):**
+1. **Joint verification cycle.** Run ONE non-dry VidRush pipeline that validates both Deployment 3 (long-form thumbnail) and Deployment 4 (audience rotation) in a single cycle. Pull logs, inspect `content_drafts` for the `Related topics:` line, inspect YT Studio for the keyframe thumbnail, spot-check the rotation log lines. Flip both to VERIFIED.
+2. **Measure the CTR delta across BOTH interventions.** Hold "OUTDATED CODE" 14.3% CTR as baseline. Next 5–10 uploads (mix of long-form + shorts) are the first real signal on whether the combined intervention moves metric #1.
+3. **Continue NORTH_STAR S46 intervention:** sovereign-landing `@vercel/analytics` install (metric #2 unblock), Ace Richie YT top-3 CTA audit.
+4. **Carry-forwards from S46 list:** Chromium re-add, Buffer analytics schema drift, Kinetic Baseline verification.
+5. **Optional follow-up:** add a per-clip angle log line to `generatePlatformCopy` so Railway logs make rotation auditing trivial in production (tiny change, high observability payoff).

@@ -29,6 +29,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlink
 import { extractWhisperIntel, type WhisperResult } from "./whisper-extract";
 import { produceFacelessVideo } from "./faceless-factory";
 import { YouTubeLongFormPublishTool } from "../tools/video-publisher";
+import {
+  AUDIENCE_ANGLES,
+  angleForClipIndex,
+  buildAudienceRotationBlock,
+  hashStringToAngleOffset,
+  type AudienceAngle,
+} from "../prompts/social-optimization-prompt";
 import type { LLMProvider } from "../types";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -713,65 +720,99 @@ async function generatePlatformCopy(
 ): Promise<Map<number, PlatformCopy>> {
   const copyMap = new Map<number, PlatformCopy>();
 
+  // Deployment 4: Audience Rotation Protocol. Deterministic angle assignment keyed off
+  // a hash of the source title so (a) the same video always rotates the same way and
+  // (b) different sources start at different angles — no batch collisions.
+  const contentOffset = hashStringToAngleOffset(sourceTitle || niche || "sovereign");
+  // Track assigned angle per clip so fallback + downstream tag-smuggling can reuse it.
+  const clipAngleMap = new Map<number, AudienceAngle>();
+  for (const clip of clips) {
+    clipAngleMap.set(clip.index, angleForClipIndex(clip.index, contentOffset));
+  }
+
   // Process in batches of 5 to avoid LLM overload
   const batchSize = 5;
   for (let batchStart = 0; batchStart < clips.length; batchStart += batchSize) {
     const batch = clips.slice(batchStart, batchStart + batchSize);
-    // Session 42: Pass clip-specific semantic data (title, hook, thumbnail_text) to the LLM.
-    // Previously only sent generic "Segment from {sourceTitle}" — every clip got near-identical copy
-    // targeting the same audience with the same keywords. Now each clip gets unique context
-    // so the LLM produces diverse titles/keywords for wide YouTube distribution.
-    const clipDescriptions = batch.map(c => {
-      const parts = [`Clip ${c.index + 1} (${c.startSec.toFixed(0)}s-${c.endSec.toFixed(0)}s)`];
-      if (c.captionText && c.captionText !== sourceTitle) {
-        parts.push(`TOPIC: "${c.captionText}"`);
+
+    // Deployment 4: Build per-batch rotation assignments. Each clip in the batch gets a
+    // UNIQUE angle. Within a batch we force distinctness even if modular collision would
+    // otherwise repeat (e.g. batch sizes > AUDIENCE_ANGLES.length is impossible at
+    // batchSize=5, but we still guard via usedInBatch set).
+    const usedInBatch = new Set<string>();
+    const batchAssignments: Array<{ clipLabel: string; angle: AudienceAngle; clip: ClipMeta }> = [];
+    for (const clip of batch) {
+      let angle = clipAngleMap.get(clip.index) || angleForClipIndex(clip.index, contentOffset);
+      // If somehow duplicated in-batch, walk forward through the pool.
+      let walk = 0;
+      while (usedInBatch.has(angle.id) && walk < AUDIENCE_ANGLES.length) {
+        angle = angleForClipIndex(clip.index + (++walk), contentOffset);
       }
-      // StoryMoment title/hook stored on clip during extraction (Step 4)
-      if ((c as any).storyTitle) parts.push(`TITLE: "${(c as any).storyTitle}"`);
-      if ((c as any).storyHook) parts.push(`HOOK: "${(c as any).storyHook}"`);
-      if ((c as any).thumbnailText) parts.push(`THUMBNAIL: "${(c as any).thumbnailText}"`);
-      // Fallback if no semantic data
+      usedInBatch.add(angle.id);
+      clipAngleMap.set(clip.index, angle);
+      batchAssignments.push({
+        clipLabel: `Clip ${clip.index + 1} (${clip.startSec.toFixed(0)}s-${clip.endSec.toFixed(0)}s)`,
+        angle,
+        clip,
+      });
+    }
+
+    // Session 42: Pass clip-specific semantic data (title, hook, thumbnail_text) to the LLM.
+    // Deployment 4 extension: each clip description now also carries its assigned angle ID
+    // so the LLM cannot lose track of which clip belongs to which demographic.
+    const clipDescriptions = batchAssignments.map(({ clip, angle }) => {
+      const parts = [`Clip ${clip.index + 1} (${clip.startSec.toFixed(0)}s-${clip.endSec.toFixed(0)}s) [ASSIGNED ANGLE: ${angle.name}]`];
+      if (clip.captionText && clip.captionText !== sourceTitle) {
+        parts.push(`TOPIC: "${clip.captionText}"`);
+      }
+      if ((clip as any).storyTitle) parts.push(`RAW_TITLE: "${(clip as any).storyTitle}"`);
+      if ((clip as any).storyHook) parts.push(`RAW_HOOK: "${(clip as any).storyHook}"`);
+      if ((clip as any).thumbnailText) parts.push(`THUMBNAIL: "${(clip as any).thumbnailText}"`);
       if (parts.length === 1) parts.push(`Segment from "${sourceTitle}"`);
       return parts.join(" | ");
     }).join("\n");
 
-    // Session 36: Enhanced with social-optimization-prompt intelligence.
-    // Platform-specific algorithm awareness + audience psychology + copy architecture.
-    const brandContext = brand === "ace_richie"
-      ? "Sovereign Synthesis (Ace Richie) — personal brand, liberation framework, dark psychology transmuted into sovereignty. Voice: authoritative, warm, destiny-coded. CTA: Frequency Activation style."
-      : "The Containment Field — anonymous dark psychology feeder brand. Voice: clinical, cold, pattern-interrupt. Never reference Ace Richie.";
+    const rotationBlock = buildAudienceRotationBlock(
+      batchAssignments.map(({ clipLabel, angle }) => ({ clipLabel, angle }))
+    );
 
-    const prompt = `You are an elite social media marketing expert AND the distribution engine for ${brandContext}
+    // Session 36: Enhanced with social-optimization-prompt intelligence.
+    // Deployment 4: Now wrapped with the Audience Rotation Protocol block.
+    const brandContext = brand === "ace_richie"
+      ? "Sovereign Synthesis (Ace Richie) — personal brand, liberation framework transmuted through specific demographics. Voice: authoritative, warm, destiny-coded BUT always speaking the assigned demographic's vocabulary, not the internal Sovereign lexicon."
+      : "The Containment Field — anonymous top-of-funnel feeder brand. Voice: clinical, cold, pattern-interrupt. Never reference Ace Richie. Still obey the Audience Rotation Protocol.";
+
+    const prompt = `You are an elite social media distribution engine for ${brandContext}
 
 SOURCE VIDEO TITLE: "${sourceTitle}"
 NICHE: ${niche.replace(/_/g, " ")}
 TRANSCRIPT EXCERPT: ${transcript.slice(0, 1500)}
 
+${rotationBlock}
+
 PLATFORM-SPECIFIC OPTIMIZATION RULES (obey these exactly):
 
-- YOUTUBE_SHORT: Hook in first 3 words of title. Max 100 chars. Include #Shorts. YouTube pushes Shorts that get >40% watch-through — your title MUST create curiosity gap. Category: 22 (People & Blogs). Use "You" or identity-level hooks ("The chosen ones already know...").
-- TIKTOK: Hook within 1.5 seconds of reading. 2-3 lines + exactly 5 hashtags. TikTok rewards saves and shares over likes — write something people SCREENSHOT or send to a friend. Pattern-interrupt opening. No corporate voice.
-- INSTAGRAM: Reels caption: Hook line + value line + CTA. 3-5 lines + 8-12 hashtags (sweet spot). Instagram deprioritizes hashtag-only captions. First line IS the hook (it's what shows in feed). Suggest sharing to Feed.
-- X_TWITTER: Max 280 chars. Provocative. X penalizes hashtag-heavy posts — use 0-2 max. The algorithm favors replies and quotes, so write something DEBATABLE. Short declarative sentences.
-- THREADS: 2-3 lines, conversational. Threads deprioritizes hashtag-loaded posts — use 0 hashtags. Write like you're texting a smart friend. Thought-provoking.
-- LINKEDIN: Professional authority tone. 2-3 sentences. Frame as contrarian expertise, not promotion. 3-5 hashtags. LinkedIn rewards dwell time — longer reads beat snappy one-liners.
-- FACEBOOK: Shareable insight format. 2-3 lines + CTA. Facebook prioritizes posts that generate comments — ask a question or make a claim people want to respond to.
+- YOUTUBE_SHORT: Hook in first 3 words of title. Max 100 chars. Include #Shorts. Title MUST come from the assigned angle's vocabulary, not Sovereign lexicon. The youtube_short VALUE MUST be structured as: "<Title>\\n\\n<1-2 sentence hook>\\n\\nRelated topics: <5-7 comma-separated angle keywords>" — the Related topics line is MANDATORY (tag smuggling).
+- TIKTOK: Hook within 1.5 seconds of reading. 2-3 lines + exactly 5 hashtags drawn from the ASSIGNED ANGLE's demographic (NOT #darkpsychology/#sovereignty defaults unless the angle IS those). Pattern-interrupt opening in the assigned voice.
+- INSTAGRAM: Reels caption from the assigned angle's emotional entry. 3-5 lines + 8-12 hashtags tailored to THAT demographic. First line IS the hook.
+- X_TWITTER: Max 280 chars. Speak the assigned demographic's language. 0-2 hashtags max. Write something that demographic would QUOTE-TWEET.
+- THREADS: 2-3 lines in the assigned voice. 0 hashtags. Like texting a smart friend who shares that demographic.
+- LINKEDIN: Professional authority tone FROM the assigned angle (e.g. Corporate Burnout → contrarian ex-manager; Tech/AI Realism → staff engineer; etc.). 2-3 sentences. 3-5 hashtags. NOT generic #mindset/#leadership.
+- FACEBOOK: Shareable insight format in the assigned angle's voice. 2-3 lines + a question the assigned demographic would answer.
 
-COPY ARCHITECTURE: Use GLITCH (pattern interrupt) → PIVOT (reframe) → BRIDGE (to their world) → ANCHOR (to Protocol 77 / Sovereign Synthesis).
-
-KEYWORD DIVERSITY RULE (CRITICAL):
-Each clip MUST target a DIFFERENT keyword cluster and audience segment. The content is universal — what changes is WHO discovers it. If Clip 1 targets "dark psychology manipulation", Clip 2 must target something completely different like "corporate escape plan" or "subconscious reprogramming". YouTube distributes each clip independently. Same keywords = same audience = wasted reach. NEVER repeat the same core keyword across clips. Think: what DIFFERENT person would search for this specific insight?
+COPY ARCHITECTURE (applied through the assigned angle's lens):
+GLITCH (pattern interrupt that lands in the assigned demographic's world) → PIVOT (reframe using their vocabulary) → BRIDGE (to the universal insight) → ANCHOR (subtle, no Sovereign Synthesis name-drop unless natural).
 
 CLIPS:
 ${clipDescriptions}
 
-Return ONLY valid JSON — an array of objects, one per clip, each with keys: youtube_short, tiktok, instagram, x_twitter, threads, linkedin, facebook.
-All values are strings (the caption text for that platform). Each clip's youtube_short title MUST start with a UNIQUE keyword/topic angle.`;
+Return ONLY valid JSON — an array of objects, one per clip in the exact order shown above, each with keys: youtube_short, tiktok, instagram, x_twitter, threads, linkedin, facebook.
+All values are strings. The youtube_short string MUST contain a title, a hook, and a "Related topics: ..." trailing line (tag smuggling). No two clips may reuse the same angle keywords.`;
 
     try {
       const response = await llm.generate(
         [{ role: "user", content: prompt }],
-        { maxTokens: 4096, temperature: 0.7 }
+        { maxTokens: 4096, temperature: 0.75 }
       );
 
       let parsed: PlatformCopy[];
@@ -784,21 +825,35 @@ All values are strings (the caption text for that platform). Each clip's youtube
       }
 
       for (let i = 0; i < batch.length && i < parsed.length; i++) {
-        copyMap.set(batch[i].index, parsed[i]);
-        batch[i].captionText = parsed[i].youtube_short || parsed[i].tiktok || "Sovereign Synthesis";
+        const clip = batch[i];
+        const raw = parsed[i];
+        // Deployment 4 safety net: if the LLM forgot the "Related topics:" smuggled tag line,
+        // inject it from the assigned angle's keyword seeds so SEO is never lost.
+        const angle = clipAngleMap.get(clip.index);
+        if (angle && raw && typeof raw.youtube_short === "string" && !/Related topics:/i.test(raw.youtube_short)) {
+          const seeds = angle.keywordSeeds.slice(0, 6).join(", ");
+          raw.youtube_short = `${raw.youtube_short.trim()}\n\nRelated topics: ${seeds}`;
+        }
+        copyMap.set(clip.index, raw);
+        clip.captionText = (raw?.youtube_short?.split("\n")[0]) || raw?.tiktok || "Sovereign Synthesis";
       }
     } catch (err: any) {
       console.error(`[Orchestrator] Copy generation failed for batch at ${batchStart}: ${err.message}`);
-      // Fallback captions
-      for (const clip of batch) {
+      // Deployment 4: Rotating fallback — even fallback captions must not collapse to
+      // "dark psychology + sovereignty" boilerplate. Use the clip's assigned angle.
+      for (const { clip, angle } of batchAssignments) {
+        const firstPattern = angle.titlePatterns[0] || sourceTitle;
+        const secondPattern = angle.titlePatterns[1] || firstPattern;
+        const seeds = angle.keywordSeeds.slice(0, 6).join(", ");
+        const tagline5 = angle.keywordSeeds.slice(0, 5).map(s => "#" + s.replace(/[^a-z0-9]+/gi, "")).join(" ");
         copyMap.set(clip.index, {
-          youtube_short: `${sourceTitle} #Shorts #SovereignSynthesis`,
-          tiktok: `${sourceTitle}\n\n#darkpsychology #mindset #sovereignty`,
-          instagram: `${sourceTitle}\n\nThe Firmware Update continues.\n\n#sovereignty #mindset #protocol77 #awakening #darkpsychology #consciousness #escape #firmwareupdate #sovereign #growth`,
-          x_twitter: `${sourceTitle} — sovereign-synthesis.com`,
-          threads: `${sourceTitle}\n\nThe simulation doesn't want you to see this.`,
-          linkedin: `${sourceTitle}\n\nA framework for liberation. #MindsetShift #Leadership #Sovereignty`,
-          facebook: `${sourceTitle}\n\nFull protocol at sovereign-synthesis.com`,
+          youtube_short: `${firstPattern} #Shorts\n\n${secondPattern}\n\nRelated topics: ${seeds}`,
+          tiktok: `${firstPattern}\n\n${secondPattern}\n\n${tagline5}`,
+          instagram: `${firstPattern}\n\n${secondPattern}\n\n${tagline5}`,
+          x_twitter: `${firstPattern} — ${angle.name.toLowerCase()} edition.`,
+          threads: `${firstPattern}\n\n${secondPattern}`,
+          linkedin: `${firstPattern}\n\n${secondPattern}\n\n#${angle.id.replace(/_/g, "")}`,
+          facebook: `${firstPattern}\n\n${secondPattern}`,
         });
       }
     }
@@ -1221,6 +1276,9 @@ export async function executeFullPipeline(
         tags: `sovereign synthesis,protocol 77,${whisperResult.niche.replace(/_/g, ",")},firmware update,escape velocity,dark psychology,mindset`,
         niche: whisperResult.niche,
         brand,
+        // Deployment 3: custom long-form keyframe thumbnail (vignette + 60% bar + Bebas Neue title).
+        // Empty string if the factory couldn't produce one — YouTube will fall back to auto-frame.
+        thumbnail_path: facelessResult.thumbnailPath || "",
       });
 
       // Extract video ID from result

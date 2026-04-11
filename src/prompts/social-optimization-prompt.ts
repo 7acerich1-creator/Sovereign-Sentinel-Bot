@@ -131,3 +131,280 @@ export const PLATFORM_DEFAULTS = {
     bestFormat: "shareable_insight",
   },
 } as const;
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DEPLOYMENT 4 — AUDIENCE ROTATION PROTOCOL
+// Forces demographic-angle diversity across clips in a batch.
+// The content is universal. What changes per clip is WHO discovers it.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export interface AudienceAngle {
+  id: string;
+  name: string;
+  demographic: string;
+  voice: string;
+  emotionalEntry: string;
+  keywordSeeds: string[];
+  titlePatterns: string[];
+  bannedOpeners: string[];
+}
+
+export const AUDIENCE_ANGLES: readonly AudienceAngle[] = [
+  {
+    id: "corporate_burnout",
+    name: "Corporate Burnout",
+    demographic: "Knowledge workers 28-45, high-performing, salaried, sensing the career ladder is a trap. Middle managers, senior ICs, former 'high potential' hires who hit the ceiling.",
+    voice: "Authoritative, tactical, inside-baseball. 'I see what you see.' No woo, no mysticism, no slogans.",
+    emotionalEntry: "The quiet Sunday-night dread. The performance review that felt like gaslighting. The promotion that turned into a heavier leash.",
+    keywordSeeds: [
+      "corporate burnout recovery",
+      "quiet quitting 2026",
+      "escape 9 to 5 corporate",
+      "middle management trap",
+      "salary golden handcuffs",
+      "LinkedIn hustle fatigue",
+      "career ladder broken"
+    ],
+    titlePatterns: [
+      "Your 'Promotion' Was A Leash Upgrade",
+      "The 6-Figure Cage Nobody Names",
+      "Why Your Best Employees Leave At 34",
+      "The Review That Broke Me"
+    ],
+    bannedOpeners: ["matrix", "dark psychology", "simulation", "sovereign", "they don't want you"]
+  },
+  {
+    id: "spiritual_awakening",
+    name: "Spiritual Awakening / Consciousness Shift",
+    demographic: "25-45, post-religion seekers, kundalini/consciousness curious, reading Ram Dass, doing breathwork, tracking their own dark nights. Not 'love & light' — integration stage.",
+    voice: "Warm, initiated, fellow-traveler. 'I've been through the tunnel too.' Zero woo-woo vocabulary dumping.",
+    emotionalEntry: "The 3am awakening that won't stop. The dark night that nobody warned them about. The friends who can't hear them anymore.",
+    keywordSeeds: [
+      "spiritual awakening signs 2026",
+      "dark night of the soul integration",
+      "kundalini awakening symptoms",
+      "ego death recovery",
+      "awakening loneliness",
+      "consciousness shift phases",
+      "nervous system spiritual awakening"
+    ],
+    titlePatterns: [
+      "The Stage Of Awakening Nobody Warns You About",
+      "Why Your Third Eye Opened At 3am",
+      "The Integration Phase They Never Talk About",
+      "When Your Awakening Isolates You"
+    ],
+    bannedOpeners: ["matrix", "simulation", "dark psychology", "sovereign"]
+  },
+  {
+    id: "tech_ai_realism",
+    name: "Tech / AI Realism",
+    demographic: "22-40, software engineers, PMs, designers, knowledge workers watching AI compress their field. Pragmatic, not doomer, not hype-bro. They read Hacker News and track release notes.",
+    voice: "Data-forward, blunt, slightly cynical. Numbers in the hook. Name specific models and dates. No 'future of work' platitudes.",
+    emotionalEntry: "The release note that quietly deprecated their skill. The junior dev that got laid off first. The sinking feeling that '3-5 years safe' just became '18 months'.",
+    keywordSeeds: [
+      "AI job displacement 2026",
+      "software engineer AI layoffs",
+      "claude sonnet jobs replaced",
+      "knowledge worker obsolescence",
+      "post AI career pivot",
+      "AI proof skills 2026",
+      "GPT-5 career impact"
+    ],
+    titlePatterns: [
+      "Claude Sonnet 4.6 Just Made This Skill Worthless",
+      "The 3 Jobs GPT-5 Can't Touch Yet (Data)",
+      "Why Senior Engineers Are Quietly Panicking",
+      "The Layoff Math Nobody Is Doing Publicly"
+    ],
+    bannedOpeners: ["matrix", "simulation", "dark psychology", "sovereign"]
+  },
+  {
+    id: "relationship_trauma",
+    name: "Relationship Trauma Recovery",
+    demographic: "25-45, just left a narcissistic / avoidant / abusive partner, consuming attachment theory, cPTSD aware, doing IFS/EMDR. Knows the vocabulary, needs the deeper pattern.",
+    voice: "Clinical but tender. Name-the-pattern precise. No victim framing, no 'you are enough' platitudes. Specificity is the love language.",
+    emotionalEntry: "Month 4 of no-contact when they still miss them. The dream where the ex came back soft. The moment they realized the 'love bombing' was a technique.",
+    keywordSeeds: [
+      "narcissistic abuse recovery",
+      "avoidant attachment healing",
+      "trauma bond breaking",
+      "anxious attachment partner",
+      "cPTSD relationship symptoms",
+      "fawn response healing",
+      "post narcissist reclamation"
+    ],
+    titlePatterns: [
+      "The Silent Stage Of Narcissistic Recovery",
+      "Why You Still Miss Them At Month 4",
+      "The Avoidant's 3-Month Discard Pattern",
+      "The Closure You're Not Going To Get"
+    ],
+    bannedOpeners: ["matrix", "simulation", "dark psychology", "sovereign"]
+  },
+  {
+    id: "parent_millennial",
+    name: "Millennial Parent",
+    demographic: "30-42, raising 0-10 year olds, screen-time anxious, questioning public school, gentle-parenting fatigued. Reading Janet Lansbury AND Jonathan Haidt. Exhausted but not checked out.",
+    voice: "Raw, solidarity, 'you're not failing'. Admits hard things. No guilt stacks.",
+    emotionalEntry: "The iPad handoff they said they'd never do. The tantrum in Target that broke them. The realization their 4-year-old can't self-regulate after three years of 'gentle'.",
+    keywordSeeds: [
+      "gentle parenting burnout",
+      "screen time limits toddler",
+      "homeschool vs public 2026",
+      "millennial parent exhausted",
+      "phone free childhood",
+      "iPad kid generation",
+      "raising kids in 2026"
+    ],
+    titlePatterns: [
+      "The Gentle Parenting Lie Nobody Admits",
+      "Why Your 4-Year-Old Can't Self-Regulate",
+      "Phone-Free Childhood: 90-Day Result",
+      "The Target Tantrum That Broke Me"
+    ],
+    bannedOpeners: ["matrix", "simulation", "dark psychology", "sovereign"]
+  },
+  {
+    id: "late_diagnosed_nd",
+    name: "Late-Diagnosed Neurodivergent",
+    demographic: "25-45 adults who recently realized they have ADHD, autism, or AuDHD. Identity reframe phase. Masking burnout. They're grieving the version of themselves that didn't know.",
+    voice: "Validating, systems-aware, slight relief. 'It wasn't a character flaw, it was a wiring mismatch.'",
+    emotionalEntry: "The TikTok that broke the dam. The 30-year retrospective of every 'lazy' label. The first unmasked afternoon that felt terrifying and free.",
+    keywordSeeds: [
+      "late diagnosed ADHD adult",
+      "autistic burnout recovery",
+      "audhd women symptoms",
+      "RSD rejection sensitivity",
+      "executive dysfunction adult",
+      "masking burnout autism",
+      "ADHD tax daily"
+    ],
+    titlePatterns: [
+      "The ADHD Trait They Diagnosed As 'Lazy' For 30 Years",
+      "Why Autistic Burnout Feels Like Dying",
+      "The Masking Tax: 34 Years, 1 Collapse",
+      "The Diagnosis That Rewrote My Whole Childhood"
+    ],
+    bannedOpeners: ["matrix", "dark psychology", "simulation", "sovereign"]
+  },
+  {
+    id: "deconstruction",
+    name: "Faith Deconstruction",
+    demographic: "22-40, exvangelical / ex-Mormon / ex-JW / ex-Catholic, rebuilding identity post-religion. Grief phase, not triumphalist. Still loves their family.",
+    voice: "Careful, non-triumphalist, fellow-traveler. Does not dunk on believers. Honors the loss.",
+    emotionalEntry: "The first Christmas without the church family. The prayer muscle memory that won't quit. The morality they're building from scratch.",
+    keywordSeeds: [
+      "faith deconstruction 2026",
+      "exvangelical recovery",
+      "religious trauma syndrome",
+      "leaving church community grief",
+      "deconstructing christianity",
+      "ex Mormon rebuild identity",
+      "purity culture healing"
+    ],
+    titlePatterns: [
+      "The Stage Of Deconstruction Nobody Warns You About",
+      "Why Leaving Church Feels Like Grief",
+      "Rebuilding Morality Without Hell",
+      "The First Christmas After Leaving"
+    ],
+    bannedOpeners: ["matrix", "dark psychology", "simulation", "sovereign"]
+  },
+  {
+    id: "financial_prisoner",
+    name: "Financial Prisoner",
+    demographic: "24-42, in debt or paycheck-to-paycheck on 'good' income ($80k-$150k), knows budgeting advice is gaslighting, rents because priced out of homeownership.",
+    voice: "Unapologetic, math-forward, system-critical. Dave Ramsey voice BANNED. Name specific numbers.",
+    emotionalEntry: "The $127 grocery run that used to be $60. The rent increase that erased the raise. The student loan balance that's HIGHER than the original principal.",
+    keywordSeeds: [
+      "paycheck to paycheck 100k salary",
+      "student loan trap 2026",
+      "house poor millennial",
+      "inflation real wages 2026",
+      "middle class squeeze",
+      "budgeting doesn't work",
+      "rent vs buy 2026 math"
+    ],
+    titlePatterns: [
+      "Why $100K Still Feels Broke In 2026",
+      "The Budgeting Advice That's Making You Poorer",
+      "The 'Middle Class' Bracket That Doesn't Exist Anymore",
+      "The Raise That Erased Itself In 4 Months"
+    ],
+    bannedOpeners: ["matrix", "dark psychology", "simulation", "sovereign"]
+  }
+] as const;
+
+/**
+ * Deterministic angle assignment: given a clip's global index and a content offset
+ * (typically a hash of the source title), return the AudienceAngle that clip MUST target.
+ * Rotates through AUDIENCE_ANGLES modulo its length so no two clips in the same batch
+ * collide and different source videos start from different angles.
+ */
+export function angleForClipIndex(globalIndex: number, offset = 0): AudienceAngle {
+  const pool = AUDIENCE_ANGLES;
+  const idx = ((globalIndex + offset) % pool.length + pool.length) % pool.length;
+  return pool[idx];
+}
+
+/**
+ * Builds the AUDIENCE ROTATION PROTOCOL block that gets injected into the
+ * generatePlatformCopy LLM prompt. One assignment per clip in the batch.
+ */
+export function buildAudienceRotationBlock(
+  assignments: Array<{ clipLabel: string; angle: AudienceAngle }>
+): string {
+  const lines: string[] = [];
+  lines.push("═══════════════════════════════════════════════");
+  lines.push("AUDIENCE ROTATION PROTOCOL (NON-NEGOTIABLE)");
+  lines.push("═══════════════════════════════════════════════");
+  lines.push("");
+  lines.push("The content is universal. WHO discovers it changes per clip.");
+  lines.push("Every clip in this batch has a PRE-ASSIGNED demographic angle.");
+  lines.push("You MUST write that clip's titles, hooks, captions, and descriptions FROM THAT ANGLE'S PERSPECTIVE.");
+  lines.push("No two clips in this batch may share the same angle, keyword cluster, or emotional entry.");
+  lines.push("");
+  lines.push("ASSIGNMENTS (each clip → its angle):");
+  lines.push("");
+  for (const { clipLabel, angle } of assignments) {
+    lines.push(`━ ${clipLabel} → ${angle.name}`);
+    lines.push(`   Demographic: ${angle.demographic}`);
+    lines.push(`   Voice: ${angle.voice}`);
+    lines.push(`   Emotional entry: ${angle.emotionalEntry}`);
+    lines.push(`   SEO keyword seeds (weave 5-7 into the YouTube description bottom): ${angle.keywordSeeds.join(", ")}`);
+    lines.push(`   Title patterns (imitate the shape, do NOT copy verbatim): ${angle.titlePatterns.map(t => `"${t}"`).join(" | ")}`);
+    lines.push(`   BANNED opener words for this clip's title: ${angle.bannedOpeners.join(", ")}`);
+    lines.push("");
+  }
+  lines.push("TITLE VARIANCE RULES (APPLY TO EVERY CLIP):");
+  lines.push('- BANNED title starts (batch-wide): "The Matrix", "Dark Psychology", "The Simulation", "They Don\'t Want You To", "Sovereign" as first word, "Why The System".');
+  lines.push("- REQUIRED: hyper-specific, curiosity-gap, demographic-coded. Include a number, a name, a product, or a pattern-interrupt noun in the first 4 words when possible.");
+  lines.push("- Each clip's youtube_short title MUST use vocabulary from its assigned demographic, NOT the Sovereign Synthesis internal lexicon.");
+  lines.push('- Generic "awakening" / "mindset" / "liberation" titles are BANNED unless they are directly demographic-coded (e.g. "The Awakening Nobody Warned The Exvangelical Kids About").');
+  lines.push("");
+  lines.push("TAG SMUGGLING PROTOCOL (BUFFER DROPS YOUTUBE API TAGS — WORK AROUND IT):");
+  lines.push("Buffer's YouTube integration strips the tags field entirely. To preserve SEO discovery, you MUST append a 'Related topics:' line at the VERY BOTTOM of each youtube_short description string, containing 5-7 of that clip's assigned angle keyword seeds, comma-separated, blended naturally.");
+  lines.push("Format (exact): '\\n\\nRelated topics: <kw1>, <kw2>, <kw3>, <kw4>, <kw5>, <kw6>'");
+  lines.push("Rules:");
+  lines.push("  • Use ONLY keywords from the clip's assigned angle. Cross-contamination is banned.");
+  lines.push("  • Adapt the seeds to the clip's specific insight — do NOT dump the list verbatim.");
+  lines.push("  • No hashtags in the Related topics line. Plain text only.");
+  lines.push("  • No hype words ('insane', 'must-see', 'mind-blown').");
+  lines.push("  • The 'Related topics:' line is MANDATORY on every youtube_short description.");
+  lines.push("");
+  return lines.join("\n");
+}
+
+/**
+ * Cheap deterministic string hash → non-negative int. Used so the same source video
+ * always rotates angles the same way, and different sources start from different
+ * positions in the angle pool.
+ */
+export function hashStringToAngleOffset(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h * 31) + s.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}

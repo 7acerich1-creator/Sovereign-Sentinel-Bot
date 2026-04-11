@@ -1510,25 +1510,39 @@ async function assembleVideo(
       const typingAudioPath = `${brandAssetsDir}/typing.mp3`;
       const hasTyping = existsSync(typingAudioPath);
 
-      // Build char-reveal drawtext chain — one filter per revealed substring.
-      // Each filter writes its substring to a temp file (Session 38 lesson:
-      // textfile= bypasses shell quoting hell). Each filter is enabled
-      // between its reveal time and the next char's reveal time.
-      const chars = sanitizedHook.split("");
-      const charCount = chars.length;
-      const charInterval = terminalOverrideDuration / charCount;
+      // Build word-chunk reveal drawtext chain — one filter per revealed word group.
+      //
+      // SESSION 46 FIX: Previously built ONE drawtext filter PER CHARACTER (up to 60
+      // chained drawtexts + 60 temp textfiles). That was fragile on Alpine ffmpeg —
+      // the chain was too long, too many open textfiles, and when ffmpeg errored the
+      // stderr banner consumed all captured output so we could never see why (the
+      // old `.slice(0, 400)` on stderr captured only the ffmpeg banner, never the
+      // actual error at the tail of stderr).
+      //
+      // New approach: accumulate WORDS instead of chars. A 60-char hook is typically
+      // 8-12 words → 8-12 drawtext filters. Preserves the typewriter "reveal" feel
+      // (each word pops in on beat) while cutting filter count and textfile count
+      // ~6x. Each filter still writes its substring to a temp file (Session 38 lesson:
+      // textfile= bypasses shell quoting hell for apostrophes/quotes/etc.).
+      const words = sanitizedHook.split(" ").filter((w) => w.length > 0);
+      const stepCount = words.length;
+      const charCount = sanitizedHook.length; // preserved for the log line below
+      const stepInterval = terminalOverrideDuration / Math.max(stepCount, 1);
       const drawFilters: string[] = [];
 
-      for (let i = 1; i <= charCount; i++) {
-        const substr = chars.slice(0, i).join("");
+      for (let i = 1; i <= stepCount; i++) {
+        const substr = words.slice(0, i).join(" ");
         const revealFile = `${sceneClipDir}/_term_${i.toString().padStart(3, "0")}.txt`;
         writeFileSync(revealFile, substr);
-        const escRevealPath = revealFile.replace(/'/g, "'\\''").replace(/:/g, "\\:");
-        const startTime = ((i - 1) * charInterval).toFixed(3);
+        // ffmpeg drawtext textfile value is single-quote-delimited inside filter_complex.
+        // Paths here are ASCII-safe (/app/faceless/<jobId>_scenes/_term_NNN.txt), so the
+        // only special char to worry about is ':' which needs a backslash escape.
+        const escRevealPath = revealFile.replace(/:/g, "\\:");
+        const startTime = ((i - 1) * stepInterval).toFixed(3);
         const endTime =
-          i === charCount
+          i === stepCount
             ? terminalOverrideDuration.toFixed(3)
-            : (i * charInterval).toFixed(3);
+            : (i * stepInterval).toFixed(3);
         const fontfileFilter = hasFont ? `fontfile='${fontPath}':` : "";
         // Bright terminal green (#00FF88) on pure black, sharp black border for crispness.
         // Font size scales to orientation: larger on horizontal (1920w), smaller on vertical (1080w).
@@ -1546,6 +1560,11 @@ async function assembleVideo(
         : `-f lavfi -t ${terminalOverrideDuration.toFixed(2)} -i "anullsrc=channel_layout=stereo:sample_rate=44100"`;
 
       try {
+        // Defensive: refuse to invoke ffmpeg with an empty filter chain — it would
+        // emit a cryptic filter-parse error and waste a ffmpeg startup.
+        if (drawFilters.length === 0) {
+          throw new Error("no words after sanitization — skipping Terminal Override render");
+        }
         execSync(
           `ffmpeg -f lavfi -t ${terminalOverrideDuration.toFixed(2)} -i "color=c=black:s=${dim.width}x${dim.height}:r=${fps}" ` +
             `${audioInputFlags} ` +
@@ -1562,15 +1581,25 @@ async function assembleVideo(
           clipDurations.push(terminalOverrideDuration);
           terminalOverrideRendered = true;
           console.log(
-            `⌨️  [FacelessFactory] Terminal Override hook rendered: "${sanitizedHook.slice(0, 60)}" (${terminalOverrideDuration.toFixed(1)}s, ${charCount} chars, typing=${hasTyping})`
+            `⌨️  [FacelessFactory] Terminal Override hook rendered: "${sanitizedHook.slice(0, 60)}" (${terminalOverrideDuration.toFixed(1)}s, ${stepCount} words / ${charCount} chars, typing=${hasTyping})`
           );
         }
       } catch (err: any) {
+        // SESSION 46 FIX: Capture the TAIL of stderr, not the head.
+        // ffmpeg prints a ~30-line banner (version / build config / libs) before any
+        // real error message. Slicing the head of stderr just grabs banner noise.
+        // The actual error (filter graph parse failure, codec error, etc.) always
+        // lives at the end of stderr — so we tail the last 2000 chars.
+        const fullStderr = err.stderr ? err.stderr.toString() : "";
+        const stderrTail = fullStderr.length > 2000 ? fullStderr.slice(-2000) : fullStderr;
+        const msgTail =
+          err.message && err.message.length > 500
+            ? "…" + err.message.slice(-500)
+            : err.message || "(no message)";
         console.warn(
-          `[FacelessFactory] Terminal Override hook render failed (non-fatal): ${err.message?.slice(0, 200)}`
+          `[FacelessFactory] Terminal Override hook render failed (non-fatal): ${msgTail}`
         );
-        const stderr = err.stderr ? err.stderr.toString().slice(0, 400) : "";
-        if (stderr) console.warn(`  STDERR: ${stderr}`);
+        if (stderrTail) console.warn(`  STDERR (tail):\n${stderrTail}`);
       }
     }
   }

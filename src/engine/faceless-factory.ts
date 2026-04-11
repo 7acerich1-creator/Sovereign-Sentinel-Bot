@@ -1346,7 +1346,7 @@ async function generateThumbnail(
 //
 // Output is preserved past cleanupJobFiles so the orchestrator can feed it to the
 // YouTube Data API thumbnails.set endpoint.
-async function generateLongFormThumbnail(
+export async function generateLongFormThumbnail(
   cleanScenePath: string,
   script: FacelessScript,
   jobId: string,

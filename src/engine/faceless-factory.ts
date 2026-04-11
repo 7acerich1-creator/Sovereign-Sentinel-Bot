@@ -13,6 +13,7 @@
 
 import { execSync } from "child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from "fs";
+import { resolve as resolvePath } from "path";
 import { config } from "../config";
 import { textToSpeech } from "../voice/tts";
 import { generateCaptionsFromAudio } from "./caption-engine";
@@ -1404,13 +1405,19 @@ export async function generateLongFormThumbnail(
     console.warn(`[FacelessFactory] Long-form thumb text-file write failed: ${err.message?.slice(0, 150)}`);
   }
 
-  const brandAssetsDir = `${__dirname}/../../brand-assets`;
-  const fontPath = `${brandAssetsDir}/BebasNeue-Regular.ttf`;
+  // Session 47 FIX 1: resolve to an absolute canonical path BEFORE sanitizing.
+  // On Windows, `${__dirname}/../../brand-assets` produces mixed separators
+  // (`C:\Users\...\src\engine/../../brand-assets/...`) which some libavfilter
+  // builds + freetype path handlers choke on. `path.resolve` flattens the `..`
+  // segments into a clean absolute path that then sanitizes to a valid
+  // `C\:/Users/.../brand-assets/BebasNeue-Regular.ttf` for drawtext.
+  const brandAssetsDir = resolvePath(__dirname, "..", "..", "brand-assets");
+  const fontPath = resolvePath(brandAssetsDir, "BebasNeue-Regular.ttf");
   const hasFont = existsSync(fontPath);
   // Sanitize Windows-native path — drawtext chokes on backslashes and drive-letter
   // colons. Forward slashes + escaped colon is the canonical ffmpeg fix.
   const safeFontPath = sanitizeFontPathForDrawtext(fontPath);
-  const safeThumbTextFile = sanitizeFontPathForDrawtext(thumbTextFile);
+  const safeThumbTextFile = sanitizeFontPathForDrawtext(resolvePath(thumbTextFile));
   const fontFilter = hasFont ? `fontfile='${safeFontPath}':` : "";
 
   // Visual grammar:
@@ -1422,7 +1429,16 @@ export async function generateLongFormThumbnail(
   const barH = "ih*0.22";
   const fontSize = line2 ? 88 : 120;
   // Single-line: vertical-center on bar. Two-line: nudge up so both lines fit inside the bar.
-  const textY = line2 ? `ih*0.645` : `(h-text_h)/2+ih*0.23`;
+  //
+  // Session 47 FIX 1b: drawtext's y/x expression parser does NOT understand `ih`/`iw`
+  // (those are only valid in size-setting filters like drawbox, scale, pad). Inside
+  // drawtext, the main video dimensions are `h`/`w`. Using `ih*0.645` or
+  // `(h-text_h)/2+ih*0.23` crashes ffmpeg with:
+  //   "Undefined constant or missing '(' in 'ih*0.23'"
+  //   "Failed to parse expression: (h-text_h)/2+ih*0.23"
+  // which was the REAL cause of the thumbnail failure the Architect reported — not
+  // the font path. Fix: swap `ih` → `h`.
+  const textY = line2 ? `h*0.645` : `(h-text_h)/2+h*0.23`;
 
   const textOverlay = titleText
     ? `,drawtext=${fontFilter}textfile='${safeThumbTextFile}':fontsize=${fontSize}:fontcolor=white:borderw=4:bordercolor=black@0.85:x=(w-text_w)/2:y=${textY}:line_spacing=10`
@@ -1443,22 +1459,30 @@ export async function generateLongFormThumbnail(
     textOverlay;
 
   try {
+    // Resolve inputs/outputs to absolute paths. Windows cmd.exe + ffmpeg handle
+    // forward-slash absolute paths fine, but leaving `/tmp/...` relative-style
+    // paths in the exec string invites drive-root confusion on some setups.
+    const cleanSceneAbs = resolvePath(cleanScenePath);
+    const thumbAbs = resolvePath(thumbPath);
     execSync(
-      `ffmpeg -i "${cleanScenePath}" -frames:v 1 -vf "${vf}" -q:v 2 -y "${thumbPath}"`,
+      `ffmpeg -i "${cleanSceneAbs}" -frames:v 1 -vf "${vf}" -q:v 2 -y "${thumbAbs}"`,
       { timeout: 20_000, stdio: "pipe" }
     );
-    if (existsSync(thumbPath)) {
-      const size = readFileSync(thumbPath).length;
+    if (existsSync(thumbAbs)) {
+      const size = readFileSync(thumbAbs).length;
       if (size > 1000) {
         console.log(
           `🖼️ [FacelessFactory] Long-form pre-caption thumbnail rendered: "${titleText || "(untitled)"}" ` +
-          `(${(size / 1024).toFixed(0)}KB from ${cleanScenePath.split(/[/\\]/).pop()})`
+          `(${(size / 1024).toFixed(0)}KB from ${cleanSceneAbs.split(/[/\\]/).pop()})`
         );
-        return thumbPath;
+        return thumbAbs;
       }
     }
   } catch (err: any) {
+    const fullStderr = err.stderr ? err.stderr.toString() : "";
+    const stderrTail = fullStderr.length > 1500 ? fullStderr.slice(-1500) : fullStderr;
     console.warn(`[FacelessFactory] Long-form thumbnail generation failed (non-fatal): ${err.message?.slice(0, 200)}`);
+    if (stderrTail) console.warn(`  STDERR (tail):\n${stderrTail}`);
   }
 
   return null;
@@ -1698,75 +1722,121 @@ export async function assembleVideo(
       const typingAudioPath = `${brandAssetsDir}/typing.mp3`;
       const hasTyping = existsSync(typingAudioPath);
 
-      // Build word-chunk reveal drawtext chain — one filter per revealed word group.
+      // ── SESSION 47 FIX 2: TRUE CHARACTER-BY-CHARACTER TYPEWRITER VIA .ass ──
       //
-      // SESSION 46 FIX: Previously built ONE drawtext filter PER CHARACTER (up to 60
-      // chained drawtexts + 60 temp textfiles). That was fragile on Alpine ffmpeg —
-      // the chain was too long, too many open textfiles, and when ffmpeg errored the
-      // stderr banner consumed all captured output so we could never see why (the
-      // old `.slice(0, 400)` on stderr captured only the ffmpeg banner, never the
-      // actual error at the tail of stderr).
+      // The legacy word-chunked drawtext chain (one `drawtext=...enable='between(t,...)'`
+      // per word) rendered as a STATIC CHUNKY BLOCK — each word appeared full-formed on
+      // its beat rather than typing out character by character. The Architect's visual
+      // grammar demands an actual typewriter reveal, not a staccato word flash.
       //
-      // New approach: accumulate WORDS instead of chars. A 60-char hook is typically
-      // 8-12 words → 8-12 drawtext filters. Preserves the typewriter "reveal" feel
-      // (each word pops in on beat) while cutting filter count and textfile count
-      // ~6x. Each filter still writes its substring to a temp file (Session 38 lesson:
-      // textfile= bypasses shell quoting hell for apostrophes/quotes/etc.).
-      const words = sanitizedHook.split(" ").filter((w) => w.length > 0);
-      const stepCount = words.length;
-      const charCount = sanitizedHook.length; // preserved for the log line below
-      const stepInterval = terminalOverrideDuration / Math.max(stepCount, 1);
-      const drawFilters: string[] = [];
+      // Fix: emit a dedicated .ass (SubStation Alpha) subtitle file with one `Dialogue:`
+      // line per character step. Each dialogue shows the accumulating visible prefix
+      // with the remaining "future" characters hidden via an inline `{\alpha&HFF&}`
+      // transparency tag — this keeps the text layout stable (so the revealed chars
+      // don't jitter leftward) while producing a true per-character reveal cadence.
+      //
+      // libass's `subtitles=` filter renders the .ass over the black background, using
+      // Bebas Neue from `fontsdir=` (baked into the Docker image + the local repo).
+      // Alignment 5 = middle-center, color &H0088FF00 = terminal green #00FF88,
+      // outline 3 for crispness. At ~24 cps (≈42ms/char) the reveal is high-velocity
+      // without dropping frames.
+      const charCount = sanitizedHook.length;
+      const fsize = orientation === "horizontal" ? 120 : 110;
 
-      for (let i = 1; i <= stepCount; i++) {
-        const substr = words.slice(0, i).join(" ");
-        const revealFile = `${sceneClipDir}/_term_${i.toString().padStart(3, "0")}.txt`;
-        writeFileSync(revealFile, substr);
-        // ffmpeg drawtext textfile value is single-quote-delimited inside filter_complex.
-        // Paths here are ASCII-safe (/app/faceless/<jobId>_scenes/_term_NNN.txt), so the
-        // only special char to worry about is ':' which needs a backslash escape.
-        const escRevealPath = revealFile.replace(/:/g, "\\:");
-        const startTime = ((i - 1) * stepInterval).toFixed(3);
-        const endTime =
-          i === stepCount
-            ? terminalOverrideDuration.toFixed(3)
-            : (i * stepInterval).toFixed(3);
-        // Sanitize Windows-native fontPath before inlining — drawtext chokes on
-        // `C:\Users\...` because of the backslashes and drive-letter colon.
-        const safeFontPath = sanitizeFontPathForDrawtext(fontPath);
-        const fontfileFilter = hasFont ? `fontfile='${safeFontPath}':` : "";
-        // Bright terminal green (#00FF88) on pure black, sharp black border for crispness.
-        // Session 47: fontsize raised to 120 (horizontal) / 110 (vertical) — the old 64/56
-        // scale was producing tiny centered text that got lost in the Terminal Override.
-        // 120px Bebas Neue at 1920x1080 fills roughly a third of the frame height which
-        // is the architect-specified scroll-stopper intensity.
-        const fsize = orientation === "horizontal" ? 120 : 110;
-        drawFilters.push(
-          `drawtext=${fontfileFilter}textfile='${escRevealPath}':fontsize=${fsize}:fontcolor=0x00FF88:borderw=2:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${startTime},${endTime})'`
+      // Reveal finishes at 92% of the TO duration and the final full line holds for
+      // the last 8% — gives the eye a beat to lock onto the completed hook before
+      // the scenes kick in.
+      const holdTailFraction = 0.08;
+      const revealWindow = Math.max(0.1, terminalOverrideDuration * (1 - holdTailFraction));
+      const revealStepDur = revealWindow / Math.max(charCount, 1);
+
+      // ASS timestamp format: h:mm:ss.cc (centiseconds).
+      const fmtAssTime = (t: number): string => {
+        const clamped = Math.max(0, t);
+        const h = Math.floor(clamped / 3600);
+        const m = Math.floor((clamped % 3600) / 60);
+        const s = clamped - h * 3600 - m * 60;
+        return `${h}:${m.toString().padStart(2, "0")}:${s.toFixed(2).padStart(5, "0")}`;
+      };
+
+      // ASS text-field escapes: `{` and `}` are tag delimiters, `\N` is a line break.
+      // sanitizedHook was already stripped to `[A-Z0-9 .,!?-]` upstream so there are
+      // no real braces, but we guard anyway.
+      const escapeAssText = (t: string): string =>
+        t.replace(/\\/g, "\\\\").replace(/\{/g, "(").replace(/\}/g, ")");
+
+      const dialogues: string[] = [];
+      for (let i = 1; i <= charCount; i++) {
+        const visible = escapeAssText(sanitizedHook.slice(0, i));
+        const hidden = escapeAssText(sanitizedHook.slice(i));
+        const startT = (i - 1) * revealStepDur;
+        const endT = i === charCount ? terminalOverrideDuration : i * revealStepDur;
+        // `{\alpha&HFF&}` switches primary alpha to fully transparent for the rest
+        // of the line — the hidden tail still occupies layout so the visible prefix
+        // stays centered as it grows.
+        const lineText = hidden.length > 0
+          ? `${visible}{\\alpha&HFF&}${hidden}`
+          : visible;
+        dialogues.push(
+          `Dialogue: 0,${fmtAssTime(startT)},${fmtAssTime(endT)},Terminal,,0,0,0,,${lineText}`
         );
       }
 
-      const drawtextChain = drawFilters.join(",");
+      // ASS color format: &HAABBGGRR. Terminal green #00FF88:
+      //   RR=00, GG=FF, BB=88, AA=00 (opaque) → &H0088FF00
+      // Outline: pure black opaque → &H00000000.
+      // Alignment 5 = middle-center. BorderStyle 1 = outline (no box).
+      const assFontName = hasFont ? "Bebas Neue" : "Sans";
+      const assContent =
+        `[Script Info]\n` +
+        `Title: Terminal Override\n` +
+        `ScriptType: v4.00+\n` +
+        `PlayResX: ${dim.width}\n` +
+        `PlayResY: ${dim.height}\n` +
+        `WrapStyle: 2\n` +
+        `ScaledBorderAndShadow: yes\n` +
+        `\n` +
+        `[V4+ Styles]\n` +
+        `Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n` +
+        `Style: Terminal,${assFontName},${fsize},&H0088FF00,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,0,5,40,40,40,1\n` +
+        `\n` +
+        `[Events]\n` +
+        `Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n` +
+        dialogues.join("\n") +
+        `\n`;
+
+      const terminalAssPath = resolvePath(`${sceneClipDir}/_terminal_override.ass`);
+      writeFileSync(terminalAssPath, assContent, "utf8");
+
+      // Escape the .ass path + fontsdir for the subtitles filter argument.
+      // The `subtitles=` filter uses `:` as an argument separator, so colons in
+      // Windows-native paths must be escaped with a backslash. Forward-slash
+      // separators are fine on both platforms.
+      const safeAssPath = terminalAssPath.replace(/\\/g, "/").replace(/:/g, "\\:");
+      const safeFontsDir = resolvePath(brandAssetsDir).replace(/\\/g, "/").replace(/:/g, "\\:");
+
+      const subsFilter =
+        `subtitles=filename='${safeAssPath}'` +
+        `:fontsdir='${safeFontsDir}'` +
+        `:original_size=${dim.width}x${dim.height}`;
 
       // Audio: typing.mp3 looped to hookDuration with subtle fades. Falls back to silence.
       const audioInputFlags = hasTyping
-        ? `-stream_loop -1 -t ${terminalOverrideDuration.toFixed(2)} -i "${typingAudioPath}"`
+        ? `-stream_loop -1 -t ${terminalOverrideDuration.toFixed(2)} -i "${resolvePath(typingAudioPath)}"`
         : `-f lavfi -t ${terminalOverrideDuration.toFixed(2)} -i "anullsrc=channel_layout=stereo:sample_rate=44100"`;
 
       try {
-        // Defensive: refuse to invoke ffmpeg with an empty filter chain — it would
-        // emit a cryptic filter-parse error and waste a ffmpeg startup.
-        if (drawFilters.length === 0) {
-          throw new Error("no words after sanitization — skipping Terminal Override render");
+        if (charCount === 0) {
+          throw new Error("no characters after sanitization — skipping Terminal Override render");
         }
         execSync(
           `ffmpeg -f lavfi -t ${terminalOverrideDuration.toFixed(2)} -i "color=c=black:s=${dim.width}x${dim.height}:r=${fps}" ` +
             `${audioInputFlags} ` +
-            `-filter_complex "[0:v]${drawtextChain}[v];[1:a]volume=0.55,afade=t=in:st=0:d=0.2,afade=t=out:st=${Math.max(0, terminalOverrideDuration - 0.4).toFixed(2)}:d=0.4[a]" ` +
+            `-filter_complex "[0:v]${subsFilter}[v];[1:a]volume=0.55,afade=t=in:st=0:d=0.2,afade=t=out:st=${Math.max(0, terminalOverrideDuration - 0.4).toFixed(2)}:d=0.4[a]" ` +
             `-map "[v]" -map "[a]" ` +
             `-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p ` +
             `-c:a aac -b:a 128k ` +
-            `-y "${terminalClipPath}"`,
+            `-y "${resolvePath(terminalClipPath)}"`,
           { timeout: 90_000, stdio: "pipe" }
         );
 
@@ -1775,7 +1845,7 @@ export async function assembleVideo(
           clipDurations.push(terminalOverrideDuration);
           terminalOverrideRendered = true;
           console.log(
-            `⌨️  [FacelessFactory] Terminal Override hook rendered: "${sanitizedHook.slice(0, 60)}" (${terminalOverrideDuration.toFixed(1)}s, ${stepCount} words / ${charCount} chars, typing=${hasTyping})`
+            `⌨️  [FacelessFactory] Terminal Override hook rendered: "${sanitizedHook.slice(0, 60)}" (${terminalOverrideDuration.toFixed(1)}s, ${charCount} char typewriter @ ${(1 / revealStepDur).toFixed(1)}cps, typing=${hasTyping})`
           );
         }
 

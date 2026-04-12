@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Text-to-Speech
-// Three-tier fallback: ElevenLabs → Edge TTS (FREE) → OpenAI
+// Four-tier fallback: XTTS (sovereign) → ElevenLabs → Edge TTS (FREE) → OpenAI
 //
 // Session 48 — Brand Routing Matrix:
 //   - `brand` option bifurcates physical audio assets end-to-end.
@@ -19,7 +19,7 @@ import { config } from "../config";
 import { execSync } from "child_process";
 import { writeFileSync, readFileSync, unlinkSync, existsSync } from "fs";
 
-export type TTSProvider = "openai" | "elevenlabs" | "edge";
+export type TTSProvider = "openai" | "elevenlabs" | "edge" | "xtts";
 export type TTSBrand = "ace_richie" | "containment_field";
 
 export interface TTSOptions {
@@ -72,17 +72,25 @@ export async function textToSpeech(
   }
 
   // ── AUTOMATIC FALLBACK CHAIN ──
-  // Priority: Edge TTS (FREE, unlimited) → ElevenLabs (paid, if credits) → OpenAI (last resort)
-  // Set FORCE_ELEVENLABS=true env var to restore ElevenLabs as primary when credits are replenished.
+  // Priority: XTTS (sovereign, free) → ElevenLabs (paid) → Edge TTS (free) → OpenAI (last resort)
+  // Set FORCE_ELEVENLABS=true env var to promote ElevenLabs above XTTS when desired.
   const chain: TTSProvider[] = [];
   const forceElevenLabs = process.env.FORCE_ELEVENLABS === "true";
+  const xttsUrl = process.env.XTTS_SERVER_URL;
 
+  // XTTS sovereign engine — top of chain when available (zero per-character cost)
+  if (xttsUrl && !forceElevenLabs) {
+    chain.push("xtts");
+  }
   if (forceElevenLabs && config.voice.elevenLabsApiKey) {
     chain.push("elevenlabs"); // Only first if explicitly forced
   }
-  chain.push("edge"); // FREE — always primary unless forced otherwise
+  if (xttsUrl && forceElevenLabs) {
+    chain.push("xtts"); // Demoted behind EL when forced
+  }
+  chain.push("edge"); // FREE — always present as safety net
   if (!forceElevenLabs && config.voice.elevenLabsApiKey) {
-    chain.push("elevenlabs"); // Demoted to fallback
+    chain.push("elevenlabs"); // Demoted to fallback behind XTTS + Edge
   }
   if (config.voice.whisperApiKey) chain.push("openai");
 
@@ -117,6 +125,8 @@ async function callProvider(
   brand?: TTSBrand
 ): Promise<Buffer> {
   switch (provider) {
+    case "xtts":
+      return xttsTTS(text, speed, brand);
     case "elevenlabs":
       return elevenLabsTTS(text, speed, brand);
     case "edge":
@@ -126,6 +136,75 @@ async function callProvider(
     default:
       throw new Error(`Unknown TTS provider: ${provider}`);
   }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Provider 0: XTTS — Sovereign TTS Engine (RunPod GPU, zero per-character cost)
+// Session 49 — Self-hosted XTTSv2 on RunPod RTX A5000.
+// Voice cloning from reference WAV files stored on the pod's /workspace volume.
+// Brand routing:
+//   ace_richie         → XTTS_SPEAKER_WAV_ACE (TBD — distinct voice)
+//   containment_field  → XTTS_SPEAKER_WAV_TCF (Adam Brooding clone)
+//   (no brand)         → XTTS_SPEAKER_ID built-in speaker or TCF default
+// Env vars:
+//   XTTS_SERVER_URL      — RunPod proxy URL
+//   XTTS_SPEAKER_WAV_ACE — server-side path to Ace Richie voice ref on pod
+//   XTTS_SPEAKER_WAV_TCF — server-side path to TCF voice ref on pod
+//   XTTS_SPEAKER_ID      — fallback built-in speaker name (default: "Marcos Rudaski")
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+async function xttsTTS(text: string, _speed?: number, brand?: TTSBrand): Promise<Buffer> {
+  const baseUrl = process.env.XTTS_SERVER_URL;
+  if (!baseUrl) throw new Error("XTTS_SERVER_URL not configured");
+
+  const url = new URL("/api/tts", baseUrl);
+
+  // Brand-routed voice reference
+  const aceWav = process.env.XTTS_SPEAKER_WAV_ACE;
+  const tcfWav = process.env.XTTS_SPEAKER_WAV_TCF;
+  const speakerId = process.env.XTTS_SPEAKER_ID || "Marcos Rudaski";
+
+  // Resolve speaker: prefer cloned voice WAV, fall back to built-in speaker
+  let useSpeakerWav: string | undefined;
+  if (brand === "ace_richie" && aceWav) {
+    useSpeakerWav = aceWav;
+  } else if (brand === "containment_field" && tcfWav) {
+    useSpeakerWav = tcfWav;
+  } else if (tcfWav) {
+    useSpeakerWav = tcfWav; // Legacy: default to TCF voice if available
+  }
+
+  // Build query parameters
+  url.searchParams.set("text", text.slice(0, 10000));
+  url.searchParams.set("language_id", "en");
+  if (useSpeakerWav) {
+    url.searchParams.set("speaker_wav", useSpeakerWav);
+  } else {
+    url.searchParams.set("speaker_id", speakerId);
+  }
+
+  const resp = await fetch(url.toString(), {
+    method: "GET",
+    headers: { Accept: "audio/wav" },
+    signal: AbortSignal.timeout(120_000), // 2min timeout for long scripts
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "");
+    throw new Error(`XTTS error ${resp.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const arrayBuffer = await resp.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  console.log(
+    `\u{1F50A} [XTTS] Generated ${(buffer.length / 1024).toFixed(0)}KB audio` +
+    (useSpeakerWav ? ` (cloned: ${useSpeakerWav})` : ` (speaker: ${speakerId})`) +
+    (brand ? ` (brand=${brand})` : "") +
+    ` — sovereign engine, $0 cost`
+  );
+
+  return buffer;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

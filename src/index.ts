@@ -1268,7 +1268,46 @@ async function main() {
   // These dispatch tasks to crew agents via crew_dispatch, picked up by the dispatch poller.
   // Each fires once per day at a specific hour using the same minute-check pattern as briefings.
 
-  const autonomousFiredDates = { vectorSweep: "", alfredScan: "", veritasDirective: "" };
+  const autonomousFiredDates = { ytStatsFetch: "", vectorSweep: "", alfredScan: "", veritasDirective: "" };
+
+  // YouTube Analytics — Daily Stats Fetch (9:00 AM CDT = 14:00 UTC — before Alfred trend scan)
+  // Calls the fetch-youtube-stats Supabase Edge Function to pull real video stats from
+  // YouTube Data API v3 for both channels (Ace Richie + The Containment Field), calculate
+  // outlier scores, and upsert into youtube_analytics table. No auth required.
+  scheduler.add({
+    name: "YouTube Analytics — Daily Stats Fetch",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      const now = new Date();
+      const hour = now.getUTCHours();
+      const minute = now.getUTCMinutes();
+      const dateKey = now.toDateString();
+      if (hour === 14 && minute >= 0 && minute <= 2 && autonomousFiredDates.ytStatsFetch !== dateKey) {
+        autonomousFiredDates.ytStatsFetch = dateKey;
+        console.log(`📊 [AutoOps] YouTube stats fetch firing for ${dateKey}`);
+        try {
+          const resp = await fetch("https://wzthxohtgojenukmdubz.supabase.co/functions/v1/fetch-youtube-stats", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          });
+          const data: any = await resp.json();
+          if (data.success) {
+            const summary = (data.results || []).map((r: any) => `${r.channel}: ${r.videos_processed} videos`).join(", ");
+            console.log(`✅ [AutoOps] YouTube stats fetched: ${summary}`);
+            if (defaultChatId && telegram) {
+              await telegram.sendMessage(defaultChatId, `📊 *YouTube Analytics Updated*\n${summary}\nFetched at: ${data.fetched_at}`, { parseMode: "Markdown" });
+            }
+          } else {
+            console.error(`[AutoOps] YouTube stats fetch returned failure:`, data);
+          }
+        } catch (err: any) {
+          console.error(`[AutoOps] YouTube stats fetch failed: ${err.message}`);
+        }
+      }
+    },
+  });
 
   // Vector — Daily CRO Metrics Sweep (12:00 PM CDT = 17:00 UTC — after VidRush pipeline clears)
   scheduler.add({
@@ -1418,7 +1457,7 @@ async function main() {
     },
   });
 
-  console.log("⚡ [AutoOps] Scheduled: Alfred trend scan (10:05AM CDT/15:05UTC), Vector daily sweep (12:00PM CDT/17:00UTC), Veritas weekly directive (Mon 12:10PM CDT/17:10UTC)");
+  console.log("⚡ [AutoOps] Scheduled: YT stats fetch (9:00AM CDT/14:00UTC), Alfred trend scan (10:05AM CDT/15:05UTC), Vector daily sweep (12:00PM CDT/17:00UTC), Veritas weekly directive (Mon 12:10PM CDT/17:10UTC)");
 
   // ── Deterministic Content Engine — Daily Production + Distribution ──
   // Master ref Section 23. Posting guide: SOVEREIGN-POSTING-GUIDE.md
@@ -3577,12 +3616,13 @@ async function main() {
   // ── 10. Memory heartbeat log ──
   const mem = process.memoryUsage();
   console.log("\n━━━ GRAVITY CLAW v3.0 — FULLY ONLINE ━━━");
-  console.log(`🧠 Memory: ${memoryProviders.map((m) => m.name).join(" + ")}`);
-  console.log(`🔧 Tools: ${tools.length} loaded`);
-  console.log(`🧬 LLM: ${failoverLLM.listProviders().join(" → ")}`);
-  console.log(`📡 Channels: ${router.listChannels().join(", ")}`);
-  console.log(`✅ Maven Crew ONLINE — [${activeBotHandles.join(", ")}]`);
-  console.log(`📊 Process Memory — RSS: ${Math.round(mem.rss / 1024 / 1024)}MB | Heap: ${Math.round(mem.heapUsed / 1024 / 1024)}/${Math.round(mem.heapTotal / 1024 / 1024)}MB | External: ${Math.round(mem.external / 1024 / 1024)}MB`);
+  const memNames = memoryProviders.map((m) => m.name).join(" + ");
+  console.log("🧠 Memory: " + memNames);
+  console.log("🔧 Tools: " + tools.length + " loaded");
+  console.log("🧬 LLM: " + failoverLLM.listProviders().join(" → "));
+  console.log("📡 Channels: " + router.listChannels().join(", "));
+  console.log("✅ Maven Crew ONLINE — [" + activeBotHandles.join(", ") + "]");
+  console.log("📊 Process Memory — RSS: " + Math.round(mem.rss / 1024 / 1024) + "MB | Heap: " + Math.round(mem.heapUsed / 1024 / 1024) + "/" + Math.round(mem.heapTotal / 1024 / 1024) + "MB | External: " + Math.round(mem.external / 1024 / 1024) + "MB");
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
   // ── Memory Monitor (every 5 min) ──

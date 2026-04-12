@@ -340,6 +340,32 @@ const IMAGEN_NEGATIVE_BAN =
   "no neon cyberpunk, no cartoon, no illustration, no 3D render look, no Midjourney fever dream, " +
   "no throne-room fantasy, no epic-cinematic gloss";
 
+// ── Session 48: Brand Routing Matrix — aesthetic append injected per brand ──
+// This is appended to the style prefix on EVERY Imagen 4 scene call. Lexical,
+// not visual — the actual niche-level SCENE_VISUAL_STYLE still wins the base
+// photographic grammar. The append layers on the brand frequency:
+//   containment_field → corporate noir, brutalist, shadowy, high-stakes
+//   ace_richie        → quantum realism, luminous, expansive, sacred geometry
+// For ace_richie we ALSO strip "no sacred geometry" from the negative ban
+// because sacred geometry is PART of the ace_richie aesthetic — banning it
+// and asking for it at the same time confuses the model and produces mush.
+const BRAND_AESTHETIC_APPEND: Record<Brand, string> = {
+  containment_field:
+    "Corporate Noir, shadowy, high stakes, brutalist architecture, cinematic lighting.",
+  ace_richie:
+    "Quantum realism, ethereal, sacred geometry, luminous, expansive infinite spaces, mystical.",
+};
+
+// Ace Richie uses sacred geometry as a CORE aesthetic token. Containment Field
+// keeps the full ban. This guards the conflict between the aesthetic append
+// and the universal negative ban.
+function brandNegativeBan(brand: Brand): string {
+  if (brand === "ace_richie") {
+    return IMAGEN_NEGATIVE_BAN.replace(/no sacred geometry, ?/g, "");
+  }
+  return IMAGEN_NEGATIVE_BAN;
+}
+
 // ── Niche color grades for ffmpeg (same as clip-generator.ts) ──
 
 const NICHE_FILTERS: Record<string, string> = {
@@ -931,7 +957,7 @@ export async function renderAudio(script: FacelessScript, jobId: string): Promis
   // If total text fits in one call (short-form), do it in one shot
   if (totalChars <= 3800) {
     const fullText = allSegmentTexts.join(" ... ");
-    const audioBuffer = await textToSpeech(fullText, ttsSpeed ? { speed: ttsSpeed } : undefined);
+    const audioBuffer = await textToSpeech(fullText, { speed: ttsSpeed, brand: script.brand });
 
     const rawPath = `${FACELESS_DIR}/${jobId}_voiceover_raw.opus`;
     writeFileSync(rawPath, audioBuffer);
@@ -974,7 +1000,7 @@ export async function renderAudio(script: FacelessScript, jobId: string): Promis
     for (let attempt = 1; attempt <= MAX_TTS_RETRIES; attempt++) {
       try {
         console.log(`  🗣️ Segment ${i + 1}/${allSegmentTexts.length} (${segText.length} chars) — attempt ${attempt}/${MAX_TTS_RETRIES}...`);
-        segBuffer = await textToSpeech(segText, ttsSpeed ? { speed: ttsSpeed } : undefined);
+        segBuffer = await textToSpeech(segText, { speed: ttsSpeed, brand: script.brand });
         break; // Success — exit retry loop
       } catch (err: any) {
         console.error(`  ⚠️ TTS attempt ${attempt} failed for segment ${i + 1}: ${err.message?.slice(0, 200)}`);
@@ -1414,7 +1440,7 @@ export async function generateLongFormThumbnail(
   cleanScenePath: string,
   script: FacelessScript,
   jobId: string,
-  _brand: Brand
+  brand: Brand
 ): Promise<string | null> {
   if (!existsSync(cleanScenePath)) {
     console.warn(`[FacelessFactory] Long-form clean scene missing for thumbnail: ${cleanScenePath}`);
@@ -1444,12 +1470,17 @@ export async function generateLongFormThumbnail(
     line2 = words.slice(mid).join(" ");
   }
 
-  // Brand assets — Bebas Neue is referenced by family name from inside the .ass [V4+ Styles]
-  // block, with `fontsdir=` pointing libass at the local TTF directory.
+  // Brand assets — Session 48 Brand Routing Matrix:
+  //   containment_field → Bebas Neue (the condensed-gothic TCF look)
+  //   ace_richie        → Montserrat (elegant clean sans, carries the luminous bg)
+  // libass resolves by family name from inside the .ass [V4+ Styles] block with
+  // `fontsdir=` pointing at brand-assets/ for both fonts.
+  const isAceThumb = brand === "ace_richie";
   const brandAssetsDir = resolvePath(__dirname, "..", "..", "brand-assets");
-  const fontPath = resolvePath(brandAssetsDir, "BebasNeue-Regular.ttf");
+  const fontFileName = isAceThumb ? "Montserrat-SemiBold.ttf" : "BebasNeue-Regular.ttf";
+  const fontPath = resolvePath(brandAssetsDir, fontFileName);
   const hasFont = existsSync(fontPath);
-  const assFontName = hasFont ? "Bebas Neue" : "Sans";
+  const assFontName = hasFont ? (isAceThumb ? "Montserrat" : "Bebas Neue") : "Sans";
 
   // Visual grammar (unchanged from drawtext era — only the burn mechanism changed):
   //   - Bar occupies ih*0.62 → ih*0.84 (lower-middle third), keeps subject head-room
@@ -1499,7 +1530,9 @@ export async function generateLongFormThumbnail(
     `\n` +
     `[V4+ Styles]\n` +
     `Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n` +
-    `Style: Thumb,${assFontName},${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&HFF000000,1,0,0,0,100,100,0,0,1,5,0,5,40,40,40,1\n` +
+    // Session 48: Ace Richie = thinner outline + deeper drop-shadow (BorderStyle 1)
+    // with transparent back; TCF = thick outline (5) on top of the black drawbox.
+    `Style: Thumb,${assFontName},${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&HFF000000,1,0,0,0,100,100,0,0,1,${isAceThumb ? 2 : 5},${isAceThumb ? 4 : 0},5,40,40,40,1\n` +
     `\n` +
     `[Events]\n` +
     `Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n` +
@@ -1526,12 +1559,19 @@ export async function generateLongFormThumbnail(
   // was throwing `Invalid argument` on some ffmpeg builds. Replaced with the portable
   // `scale=-1:1080,crop=1920:1080` idiom — resize to height 1080 preserving aspect,
   // then crop to exact 1920×1080. Works on every libavfilter we've seen.
-  const vf =
-    `scale=-1:1080,crop=1920:1080,` +
-    `eq=contrast=1.1:brightness=-0.02:saturation=1.05,` +
-    `vignette=PI/4,` +
-    `drawbox=x=0:y=${barY}:w=iw:h=${barH}:c=black@0.6:t=fill` +
-    subsFilter;
+  // Session 48: Brand Routing Matrix — Ace Richie thumbnails must keep the
+  // luminous quantum background visible. Strip the vignette and the black
+  // drawbox plate; let the ASS Style's Shadow=4 carry text legibility via
+  // drop shadow. TCF keeps the noir vignette + 60% black plate.
+  const vf = isAceThumb
+    ? `scale=-1:1080,crop=1920:1080,` +
+      `eq=contrast=1.05:brightness=0.02:saturation=1.08` +
+      subsFilter
+    : `scale=-1:1080,crop=1920:1080,` +
+      `eq=contrast=1.1:brightness=-0.02:saturation=1.05,` +
+      `vignette=PI/4,` +
+      `drawbox=x=0:y=${barY}:w=iw:h=${barH}:c=black@0.6:t=fill` +
+      subsFilter;
 
   try {
     // Resolve inputs/outputs to absolute paths. Windows cmd.exe + ffmpeg handle
@@ -1574,7 +1614,11 @@ async function generateSceneImage(
   const dim = DIMS[orientation];
   const rawStyle = SCENE_VISUAL_STYLE[niche]?.[brand] || SCENE_VISUAL_STYLE.brand[brand];
   const stylePrefix = rawStyle.replace(/\{ORIENTATION\}/g, dim.promptTag);
-  const prompt = `${stylePrefix} Scene: ${visualDirection}\n\nNEGATIVE: ${IMAGEN_NEGATIVE_BAN}`;
+  // Session 48: Brand Routing Matrix — aesthetic append layered on top of the
+  // niche-level photographic grammar, and negative ban filtered for ace_richie.
+  const brandAppend = BRAND_AESTHETIC_APPEND[brand];
+  const negativeBan = brandNegativeBan(brand);
+  const prompt = `${stylePrefix} ${brandAppend} Scene: ${visualDirection}\n\nNEGATIVE: ${negativeBan}`;
   const imgPath = `${FACELESS_DIR}/${jobId}_scene_${segmentIndex}.png`;
 
   // ── PRIMARY: Gemini Imagen 4 (highest quality, cinematic scenes) ──
@@ -1765,6 +1809,25 @@ export async function assembleVideo(
 
   // Brand asset paths — baked into Docker image via brand-assets/
   const brandAssetsDir = `${__dirname}/../../brand-assets`;
+
+  // Session 48: Brand Routing Matrix — intro/outro stinger resolver.
+  // Prefers the flat brand filenames (intro_ace.mp4, intro_tcf.mp4, outro_ace.mp4,
+  // outro_tcf.mp4) per the matrix spec, and falls back to the legacy long-form
+  // naming (intro_long.mp4 / intro_long_tcf.mp4) when the flat asset is missing.
+  // Ace is provisioning intro_ace.mp4 and outro_ace.mp4 — until they land, the
+  // fallback keeps the pipeline green.
+  const resolveBrandAsset = (
+    kind: "intro" | "outro",
+    brandOverride?: Brand
+  ): string => {
+    const b = brandOverride ?? script.brand;
+    const primary = b === "containment_field" ? `${kind}_tcf.mp4` : `${kind}_ace.mp4`;
+    const primaryPath = `${brandAssetsDir}/${primary}`;
+    if (existsSync(primaryPath)) return primaryPath;
+    // Legacy fallback — existing repo assets
+    const legacySuffix = b === "containment_field" ? "_tcf" : "";
+    return `${brandAssetsDir}/${kind}_long${legacySuffix}.mp4`;
+  };
   const brandSuffix = script.brand === "containment_field" ? "_tcf" : "";
   const fontPath = `${brandAssetsDir}/BebasNeue-Regular.ttf`;
   const hasFont = existsSync(fontPath);
@@ -1868,11 +1931,42 @@ export async function assembleVideo(
         );
       }
 
-      // ASS color format: &HAABBGGRR. Terminal green #00FF88:
-      //   RR=00, GG=FF, BB=88, AA=00 (opaque) → &H0088FF00
-      // Outline: pure black opaque → &H00000000.
-      // Alignment 5 = middle-center. BorderStyle 1 = outline (no box).
-      const assFontName = hasFont ? "Bebas Neue" : "Sans";
+      // Session 48: Brand Routing Matrix — Terminal Override bifurcates:
+      //   containment_field → Hacker Green (#00FF88) in &H0088FF00, Bebas Neue,
+      //                       tight outline 3, no blur — the classic TCF terminal look.
+      //   ace_richie        → Pure White (#FFFFFF) in &H00FFFFFF, Montserrat, softer
+      //                       outline 2, added ASS {\blur2} inline glow prefix on every
+      //                       dialogue line to produce the cosmic-transmission feel.
+      // ASS color format is &HAABBGGRR (little-endian BGR + alpha, 00=opaque).
+      const isAceTerminal = script.brand === "ace_richie";
+      const terminalFontFile = isAceTerminal
+        ? resolvePath(brandAssetsDir, "Montserrat-SemiBold.ttf")
+        : resolvePath(brandAssetsDir, "BebasNeue-Regular.ttf");
+      const terminalHasFont = existsSync(terminalFontFile);
+      const assFontName = terminalHasFont
+        ? (isAceTerminal ? "Montserrat" : "Bebas Neue")
+        : "Sans";
+      const terminalPrimary = isAceTerminal ? "&H00FFFFFF" : "&H0088FF00";
+      const terminalOutline = isAceTerminal ? 2 : 3;
+      const terminalBorderStyle = 1; // outline only — never a box for Terminal Override
+      const terminalGlowPrefix = isAceTerminal ? "{\\blur2}" : "";
+
+      // Re-render dialogues with glow prefix when in ace mode (injected before the
+      // visible slice, outside the alpha transparency scope so only the visible
+      // prefix gets the soft-glow treatment).
+      const styledDialogues = isAceTerminal
+        ? dialogues.map((line) => {
+            // Inject {\blur2} right after the "Dialogue: ...,," marker (after the
+            // last comma before the text field). The text field is everything after
+            // the 9th comma in a Dialogue line: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+            const parts = line.split(",");
+            if (parts.length < 10) return line;
+            const head = parts.slice(0, 9).join(",");
+            const tail = parts.slice(9).join(",");
+            return `${head},${terminalGlowPrefix}${tail}`;
+          })
+        : dialogues;
+
       const assContent =
         `[Script Info]\n` +
         `Title: Terminal Override\n` +
@@ -1884,11 +1978,11 @@ export async function assembleVideo(
         `\n` +
         `[V4+ Styles]\n` +
         `Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n` +
-        `Style: Terminal,${assFontName},${fsize},&H0088FF00,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,0,5,40,40,40,1\n` +
+        `Style: Terminal,${assFontName},${fsize},${terminalPrimary},&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,${terminalBorderStyle},${terminalOutline},0,5,40,40,40,1\n` +
         `\n` +
         `[Events]\n` +
         `Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n` +
-        dialogues.join("\n") +
+        styledDialogues.join("\n") +
         `\n`;
 
       const terminalAssPath = resolvePath(`${sceneClipDir}/_terminal_override.ass`);
@@ -1947,7 +2041,7 @@ export async function assembleVideo(
         // filter_complex (which only maps [vout]). The brand intro audio is mixed into
         // the composite audio track upstream in produceFacelessVideo's Step 2b block.
         if (terminalOverrideRendered && orientation === "horizontal") {
-          const brandIntroAsset = `${brandAssetsDir}/intro_long${brandSuffix}.mp4`;
+          const brandIntroAsset = resolveBrandAsset("intro");
           const brandIntroClipPath = `${sceneClipDir}/_brand_intro.mp4`;
           if (existsSync(brandIntroAsset)) {
             try {
@@ -2200,7 +2294,7 @@ export async function assembleVideo(
 
       try {
         // Render TTS of the context line (uses the same textToSpeech imported at top)
-        const ctaAudioBuf = await textToSpeech(activation.context_line || "Type this in the comments below.");
+        const ctaAudioBuf = await textToSpeech(activation.context_line || "Type this in the comments below.", { brand: script.brand });
         const ctaAudioPath = `${sceneClipDir}/freq_activation_${ai}.mp3`;
         writeFileSync(ctaAudioPath, ctaAudioBuf);
 
@@ -2235,7 +2329,7 @@ export async function assembleVideo(
   // ── PRE-RENDERED BRAND OUTRO (long-form only) ──
   // Shorts = NO outro (kills algorithm retention). Long-form = outro_long.mp4 (7s)
   if (orientation === "horizontal") {
-    const outroAsset = `${brandAssetsDir}/outro_long${brandSuffix}.mp4`;
+    const outroAsset = resolveBrandAsset("outro");
     const outroDuration = 7.0;
     if (existsSync(outroAsset)) {
       sceneClipPaths.push(outroAsset);
@@ -2992,7 +3086,11 @@ export async function produceFacelessVideo(
       timeOffsetSeconds: preShiftSec,
       maxWordsPerChunk: 3,
       maxChunkDuration: 1.5,
-      fontName: "Bebas Neue",
+      // Session 48: Brand Routing Matrix — caption engine branches on brand.
+      // Bebas Neue (uppercase, opaque plate) for containment_field;
+      // Montserrat (mixed case, soft shadow) for ace_richie.
+      brand: script.brand,
+      fontName: script.brand === "ace_richie" ? "Montserrat" : "Bebas Neue",
     });
     assCaptionPath = capResult.assPath;
     console.log(

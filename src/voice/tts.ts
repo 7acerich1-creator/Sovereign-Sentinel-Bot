@@ -1,6 +1,18 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Text-to-Speech
 // Three-tier fallback: ElevenLabs → Edge TTS (FREE) → OpenAI
+//
+// Session 48 — Brand Routing Matrix:
+//   - `brand` option bifurcates physical audio assets end-to-end.
+//   - ElevenLabs: ace_richie → primary key FIRST (Adam Brooding, original DNA)
+//                 containment_field → alt key FIRST (fresh credits)
+//     Legacy order (alt → primary) is preserved when no brand is supplied.
+//   - Edge TTS failover is brand-routed: ace_richie → en-GB-ArthurNeural
+//                                        containment_field → en-US-ChristopherNeural
+//   - The entire ElevenLabs call is wrapped in a try/catch that detects
+//     quota/insufficient-credits errors and triggers a zero-cost Edge TTS
+//     failover WITH the correct brand-routed voice — no dead pipelines when
+//     credits dry up.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { config } from "../config";
@@ -8,18 +20,43 @@ import { execSync } from "child_process";
 import { writeFileSync, readFileSync, unlinkSync, existsSync } from "fs";
 
 export type TTSProvider = "openai" | "elevenlabs" | "edge";
+export type TTSBrand = "ace_richie" | "containment_field";
 
 export interface TTSOptions {
   provider?: TTSProvider;
   speed?: number; // 0.5-2.0 for OpenAI, maps to stability for ElevenLabs
+  /**
+   * Session 48 Brand Routing Matrix.
+   * Bifurcates ElevenLabs key order AND edge-tts voice selection.
+   * Undefined = legacy behavior (alt-first EL, en-US-AndrewMultilingualNeural Edge).
+   */
+  brand?: TTSBrand;
+}
+
+// ── Session 48: Brand Routing Matrix — voice maps ──────────────────────────
+// Edge TTS voices per brand. These fire when ElevenLabs quota is exhausted
+// OR when Edge is promoted to primary (FORCE_ELEVENLABS unset). Zero cost.
+const EDGE_VOICE_BY_BRAND: Record<TTSBrand, string> = {
+  ace_richie:        "en-GB-ArthurNeural",        // refined, oracular, UK gravitas
+  containment_field: "en-US-ChristopherNeural",   // clinical, low-cadence, corporate noir
+};
+// Fallback when no brand is supplied (legacy pipelines). Kept for backward compat.
+const EDGE_VOICE_DEFAULT = "en-US-AndrewMultilingualNeural";
+
+function resolveEdgeVoice(brand?: TTSBrand): string {
+  if (brand && EDGE_VOICE_BY_BRAND[brand]) return EDGE_VOICE_BY_BRAND[brand];
+  return EDGE_VOICE_DEFAULT;
 }
 
 /**
  * Three-tier TTS with automatic fallback.
- * Chain: ElevenLabs (best quality) → Edge TTS (FREE, no auth) → OpenAI (last resort)
+ * Chain: Edge TTS (FREE) → ElevenLabs (if credits) → OpenAI (last resort)
+ *
+ * When `opts.brand` is supplied, the chain routes per the Brand Routing Matrix:
+ *   - ace_richie → ElevenLabs primary key first + en-GB-ArthurNeural edge voice
+ *   - containment_field → ElevenLabs alt key first + en-US-ChristopherNeural edge voice
  *
  * If a specific provider is requested via opts.provider, only that provider is used.
- * Otherwise, the full fallback chain fires automatically.
  */
 export async function textToSpeech(
   text: string,
@@ -31,12 +68,11 @@ export async function textToSpeech(
 
   // If a specific provider is forced, use only that one (no fallback)
   if (opts.provider) {
-    return callProvider(opts.provider, text, opts.speed);
+    return callProvider(opts.provider, text, opts.speed, opts.brand);
   }
 
   // ── AUTOMATIC FALLBACK CHAIN ──
-  // Priority: Edge TTS (FREE, unlimited) → ElevenLabs (paid, if credits available) → OpenAI (last resort)
-  // Edge TTS is promoted to primary to prevent burning paid credits on routine pipeline runs.
+  // Priority: Edge TTS (FREE, unlimited) → ElevenLabs (paid, if credits) → OpenAI (last resort)
   // Set FORCE_ELEVENLABS=true env var to restore ElevenLabs as primary when credits are replenished.
   const chain: TTSProvider[] = [];
   const forceElevenLabs = process.env.FORCE_ELEVENLABS === "true";
@@ -54,7 +90,7 @@ export async function textToSpeech(
 
   for (const provider of chain) {
     try {
-      const buffer = await callProvider(provider, text, opts.speed);
+      const buffer = await callProvider(provider, text, opts.speed, opts.brand);
       if (buffer.length < 1000) {
         console.warn(`[TTS] ${provider} returned suspiciously small audio (${buffer.length}B), trying next...`);
         lastError = new Error(`${provider} returned ${buffer.length}B audio`);
@@ -64,19 +100,27 @@ export async function textToSpeech(
     } catch (err: any) {
       console.warn(`[TTS] ${provider} failed: ${err.message?.slice(0, 200)}`);
       lastError = err;
-      // Continue to next provider in chain
+      // Session 48: if ElevenLabs hit a quota/insufficient-credits wall,
+      // the wrapper below has already tried every key. Continue falling
+      // through the chain — the next iteration will hit Edge TTS with the
+      // correct brand voice and produce a zero-cost output.
     }
   }
 
   throw lastError || new Error("All TTS providers failed");
 }
 
-async function callProvider(provider: TTSProvider, text: string, speed?: number): Promise<Buffer> {
+async function callProvider(
+  provider: TTSProvider,
+  text: string,
+  speed?: number,
+  brand?: TTSBrand
+): Promise<Buffer> {
   switch (provider) {
     case "elevenlabs":
-      return elevenLabsTTS(text, speed);
+      return elevenLabsTTS(text, speed, brand);
     case "edge":
-      return edgeTTS(text, speed);
+      return edgeTTS(text, speed, brand);
     case "openai":
       return openaiTTS(text, speed);
     default:
@@ -86,18 +130,34 @@ async function callProvider(provider: TTSProvider, text: string, speed?: number)
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Provider 1: ElevenLabs (best quality, paid)
+// Session 48 — Brand routing of key order:
+//   ace_richie         → primary key first (Adam Brooding original DNA, full credits)
+//   containment_field  → alt key first (fresh credits, TCF voice signature)
+//   (no brand)         → alt → primary (legacy behavior)
+// The entire call is wrapped in a try/catch inside textToSpeech's outer loop,
+// so a quota/402/insufficient error cascades into the next provider in the
+// fallback chain (Edge TTS with the correct brand-routed voice).
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-async function elevenLabsTTS(text: string, speed?: number): Promise<Buffer> {
-  // Session 42: Dual-key support. ALT (fresh) → Primary (old) failover.
-  // Chain: ELEVENLABS_API_KEY_ALT → ELEVENLABS_API_KEY → fall through to Edge TTS
-  const altKey = config.voice.elevenLabsApiKeyAlt;   // Fresh credits — tried FIRST
-  const primaryKey = config.voice.elevenLabsApiKey;   // Original key — fallback
+async function elevenLabsTTS(text: string, speed?: number, brand?: TTSBrand): Promise<Buffer> {
+  const altKey = config.voice.elevenLabsApiKeyAlt;   // Fresh credits
+  const primaryKey = config.voice.elevenLabsApiKey;   // Original key (Adam Brooding)
 
   if (!primaryKey && !altKey) throw new Error("ElevenLabs API key not configured");
 
-  // ALT first (live/fresh), then primary (old/may be exhausted)
-  const keysToTry = [altKey, primaryKey].filter(Boolean) as string[];
+  // ── Session 48: Brand-routed key order ─────────────────────────────────
+  // ace_richie wants the Adam Brooding DNA on the PRIMARY key first.
+  // containment_field wants the fresh credits on the ALT key first.
+  // Legacy (no brand) keeps the old alt→primary order.
+  let keysToTry: string[];
+  if (brand === "ace_richie") {
+    keysToTry = [primaryKey, altKey].filter(Boolean) as string[];
+  } else if (brand === "containment_field") {
+    keysToTry = [altKey, primaryKey].filter(Boolean) as string[];
+  } else {
+    keysToTry = [altKey, primaryKey].filter(Boolean) as string[];
+  }
+
   let lastError: Error | null = null;
 
   for (const apiKey of keysToTry) {
@@ -106,9 +166,19 @@ async function elevenLabsTTS(text: string, speed?: number): Promise<Buffer> {
       return result;
     } catch (err: any) {
       const msg = err.message || "";
-      // Only failover on quota/auth errors, not on content or server errors
-      if (msg.includes("401") || msg.includes("402") || msg.includes("quota") || msg.includes("insufficient")) {
-        console.warn(`[ElevenLabs] Key exhausted/invalid, trying next key...`);
+      // Session 48: broaden quota detection — any of these means "try the
+      // next key, or if none remain, let it throw so the outer fallback
+      // chain spins up Edge TTS for free."
+      const isQuotaError =
+        msg.includes("401") ||
+        msg.includes("402") ||
+        msg.includes("403") ||
+        msg.includes("quota") ||
+        msg.includes("insufficient") ||
+        msg.includes("credits") ||
+        msg.includes("exceeded");
+      if (isQuotaError) {
+        console.warn(`[ElevenLabs] Key exhausted/invalid (${msg.slice(0, 80)}), trying next key...`);
         lastError = err;
         continue;
       }
@@ -116,25 +186,21 @@ async function elevenLabsTTS(text: string, speed?: number): Promise<Buffer> {
     }
   }
 
-  throw lastError || new Error("All ElevenLabs keys exhausted");
+  // All keys exhausted — throw so the outer chain falls through to Edge TTS.
+  // The edgeTTS call that follows will route to the brand-correct voice.
+  throw lastError || new Error("All ElevenLabs keys exhausted (quota)");
 }
 
 async function elevenLabsCallWithKey(apiKey: string, text: string, speed?: number): Promise<Buffer> {
   // Voice: Adam Brooding — dark, tough, weathered American male.
   // THE Sovereign Synthesis voice. Locked Session 28.
-  // Old defaults: Rachel (female, wrong brand), stock Adam (too warm/PBS).
-  const voiceId = config.voice.elevenLabsVoiceId || "IRHApOXLvnW57QJPQH2P"; // Adam Brooding, Dark & Tough
+  void speed; // HIGH EMOTION profile ignores speed override
+  const voiceId = config.voice.elevenLabsVoiceId || "IRHApOXLvnW57QJPQH2P"; // Adam Brooding
 
-  // VOICE EXPRESSIVENESS — HIGH EMOTION PROFILE (Session 46 lock-in):
-  // Ace auditioned 3 ElevenLabs profiles via scripts/test-voice.ts and selected HIGH EMOTION.
-  // Rationale: the Sovereign frequency demands volatility — dramatic swings, raw emphasis,
-  // sermonic weight. Session 28's "balanced" 0.45/0.60 was too measured for the Firmware
-  // Update cadence. Reference: Grim Grit, dark-psych faceless top-performers.
-  // stability: 0.30 = highly volatile / dramatic swings / risk of wobble accepted
-  // style: 0.85 = maximum dramatic emphasis and vocal variation
-  // similarity_boost: 0.70 = slightly looser lock on source DNA to allow the emotion through
-  // NOTE: `speed` parameter is intentionally ignored — HIGH EMOTION uses fixed settings
-  // regardless of rate override, because the profile IS the delivery signature.
+  // HIGH EMOTION profile (Session 46 lock-in):
+  //   stability 0.30 = volatile / dramatic swings
+  //   style     0.85 = max emphasis variation
+  //   similarity_boost 0.70 = looser DNA lock for emotion headroom
   const stability = 0.30;
 
   const resp = await fetch(
@@ -170,21 +236,18 @@ async function elevenLabsCallWithKey(apiKey: string, text: string, speed?: numbe
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Provider 2: Edge TTS (FREE — Microsoft's neural voices)
-// No API key, no auth, no billing. Unlimited.
-// Uses Python edge-tts CLI (pip install edge-tts) — battle-tested, 10M+ installs.
-// The Node.js edge-tts-node WebSocket library was unreliable on Railway.
+// Session 48 — Brand routing of voice selection:
+//   ace_richie         → en-GB-ArthurNeural (oracular, UK gravitas)
+//   containment_field  → en-US-ChristopherNeural (clinical corporate noir)
+//   (no brand)         → en-US-AndrewMultilingualNeural (legacy default)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-// Edge TTS voice mapping — deep male voice for sovereignty / dark psychology brand
-// Session 28: switched from AriaNeural (female) to GuyNeural (deep male)
-const EDGE_VOICE = "en-US-AndrewMultilingualNeural"; // Deep, cinematic, intonation-rich — Sovereign Synthesis signature voice
-
-async function edgeTTS(text: string, speed?: number): Promise<Buffer> {
+async function edgeTTS(text: string, speed?: number, brand?: TTSBrand): Promise<Buffer> {
+  const voice = resolveEdgeVoice(brand);
   const ts = Date.now();
   const tmpInput = `/tmp/edge_tts_input_${ts}.txt`;
   const tmpOutput = `/tmp/edge_tts_output_${ts}.mp3`;
 
-  // Write text to temp file (avoids shell escaping issues with quotes, apostrophes, etc.)
   writeFileSync(tmpInput, text.slice(0, 10000));
 
   // Map speed param: 0.9 = "-10%", 1.0 = "+0%", 1.1 = "+10%"
@@ -194,7 +257,7 @@ async function edgeTTS(text: string, speed?: number): Promise<Buffer> {
 
   try {
     execSync(
-      `edge-tts --voice "${EDGE_VOICE}" --rate="${rateStr}" --file "${tmpInput}" --write-media "${tmpOutput}"`,
+      `edge-tts --voice "${voice}" --rate="${rateStr}" --file "${tmpInput}" --write-media "${tmpOutput}"`,
       { timeout: 90_000, stdio: "pipe" }
     );
 
@@ -208,10 +271,13 @@ async function edgeTTS(text: string, speed?: number): Promise<Buffer> {
       throw new Error("Edge TTS returned empty audio file");
     }
 
-    console.log(`🔊 [EdgeTTS] Generated ${(buffer.length / 1024).toFixed(0)}KB audio via ${EDGE_VOICE} (Python CLI)`);
+    console.log(
+      `🔊 [EdgeTTS] Generated ${(buffer.length / 1024).toFixed(0)}KB audio via ${voice}` +
+      (brand ? ` (brand=${brand})` : "") +
+      ` (Python CLI)`
+    );
     return buffer;
   } finally {
-    // Cleanup temp files
     try { unlinkSync(tmpInput); } catch {}
     try { unlinkSync(tmpOutput); } catch {}
   }
@@ -222,7 +288,7 @@ async function edgeTTS(text: string, speed?: number): Promise<Buffer> {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async function openaiTTS(text: string, speed?: number): Promise<Buffer> {
-  const apiKey = config.voice.whisperApiKey; // Same OpenAI key
+  const apiKey = config.voice.whisperApiKey;
   if (!apiKey) throw new Error("OpenAI API key not configured for TTS");
 
   const resp = await fetch("https://api.openai.com/v1/audio/speech", {
@@ -234,7 +300,7 @@ async function openaiTTS(text: string, speed?: number): Promise<Buffer> {
     body: JSON.stringify({
       model: config.voice.openaiTtsModel || "tts-1",
       input: text.slice(0, 4096),
-      voice: "onyx", // Deep, authoritative voice for the sentinel
+      voice: "onyx",
       response_format: "opus",
       speed: speed || 1.0,
     }),
@@ -274,7 +340,6 @@ export async function elevenLabsStreamTTS(
       body: JSON.stringify({
         text: text.slice(0, 5000),
         model_id: "eleven_multilingual_v2",
-        // HIGH EMOTION profile — matches elevenLabsCallWithKey (Session 46 lock-in)
         voice_settings: { stability: 0.30, similarity_boost: 0.70, style: 0.85, use_speaker_boost: true },
       }),
     }

@@ -49,6 +49,14 @@ export interface CaptionOptions {
    * horizontals). Defaults to 0 (legacy behavior — no shift).
    */
   timeOffsetSeconds?: number;
+  /**
+   * Session 48 Brand Routing Matrix: when set, the caption engine switches its
+   * visual grammar (font, BorderStyle, casing, shadow) to match the brand.
+   *   - "containment_field" → Bebas Neue, uppercase, BorderStyle 3 opaque box (current look)
+   *   - "ace_richie"        → Montserrat, mixed case, BorderStyle 1 soft outline + shadow
+   * If unset, defaults to the legacy TCF look so existing callers don't regress.
+   */
+  brand?: "ace_richie" | "containment_field";
 }
 
 export interface CaptionResult {
@@ -321,19 +329,26 @@ function assEscape(text: string): string {
 }
 
 export function writeAssFile(chunks: CaptionChunk[], opts: CaptionOptions): string {
-  const fontName = opts.fontName || "Bebas Neue";
-  // Kinetic caption style (Session 47 upgrade — True Background Plate):
-  //   - Bold, bright white fill
-  //   - BorderStyle 3 = OPAQUE BOX (not outline/shadow) — forces a solid dark plate
-  //     behind the text. Survives the cinematic Corporate Noir contrast bath.
-  //   - BackColour = &H50000000 → alpha 0x50 (80/255 transparent = ~69% opaque black),
-  //     lands inside Ace's 60-70% opaque target. ASS alpha byte is INVERTED
-  //     (00 = opaque, FF = transparent), so smaller hex = heavier plate.
-  //   - Outline 4 now thickens the box padding (BorderStyle 3 repurposes Outline as
-  //     the box bleed around the glyphs). Shadow 0 — the plate replaces the drop shadow.
+  // ── Session 48 Brand Routing Matrix ─────────────────────────────────────────
+  // Two distinct caption aesthetics:
+  //   TCF   → Bebas Neue display caps, BorderStyle 3 OPAQUE BOX plate (current).
+  //           Reads like surveillance-footage chyron. High-stakes corporate noir.
+  //   Ace   → Montserrat semi-bold mixed-case, BorderStyle 1 soft outline + drop
+  //           shadow. Reads like elegant cosmic transmission. No box plate — the
+  //           luminous quantum background stays visible.
+  // The `brand` option drives every downstream knob: fontName, casing, border
+  // geometry, back-color alpha. Unset → legacy TCF look (no regression).
+  const isAceRichie = opts.brand === "ace_richie";
+  const defaultFont = isAceRichie ? "Montserrat" : "Bebas Neue";
+  const fontName = opts.fontName || defaultFont;
+
+  // Kinetic caption style (Session 47/48 — Brand Routing Matrix):
+  //   TCF: BorderStyle 3 OPAQUE BOX, Bold -1, uppercase, heavy dark plate.
+  //   Ace: BorderStyle 1 outline+shadow, lighter weight, mixed case, translucent back.
+  //
   //   - Alignment 2 = bottom-center. MarginV lifts it off the absolute bottom.
   //   - Font size scales with video height (vertical Shorts need bigger text).
-  //   - Spacing +2 for tracking (Bebas Neue reads cleaner with slight letter-spacing).
+  //   - Spacing +2 for Bebas tracking; 0 for Montserrat (already has tracking).
   const isVertical = opts.videoHeight > opts.videoWidth;
   const fontSize = isVertical ? 104 : 78;
   const marginV = isVertical ? Math.round(opts.videoHeight * 0.22) : Math.round(opts.videoHeight * 0.12);
@@ -341,8 +356,24 @@ export function writeAssFile(chunks: CaptionChunk[], opts: CaptionOptions): stri
   // ASS colors are &HAABBGGRR (alpha, blue, green, red) — alpha is INVERTED (00=opaque, FF=transparent).
   const PRIMARY = "&H00FFFFFF"; // white fill, fully opaque
   const SECONDARY = "&H000000FF"; // unused (karaoke)
-  const OUTLINE = "&H00000000"; // opaque black — box bleed around glyphs under BorderStyle 3
-  const BACK = "&H50000000"; // ~69% opaque black plate (0x50 = 80/255 transparent)
+  const OUTLINE_TCF = "&H00000000"; // opaque black — box bleed for BorderStyle 3
+  const OUTLINE_ACE = "&H00000000"; // thin opaque black outline for legibility
+  const BACK_TCF = "&H50000000"; // ~69% opaque black plate
+  const BACK_ACE = "&HFF000000"; // fully transparent — NO plate, luminous bg survives
+
+  // Brand-routed style parameters:
+  //   borderStyle: 3 = opaque box (TCF), 1 = outline+shadow (Ace)
+  //   outline: thickness of the border/box bleed
+  //   shadow: drop shadow distance (only visible under BorderStyle 1)
+  //   bold: -1 = full bold for Bebas display face; 0 = regular for Montserrat (semi-bold is already bold in the TTF)
+  //   spacing: 2 = extra tracking for Bebas, 0 = natural for Montserrat
+  const borderStyle = isAceRichie ? 1 : 3;
+  const outline     = isAceRichie ? 2 : 4;
+  const shadow      = isAceRichie ? 3 : 0;
+  const bold        = isAceRichie ? -1 : -1; // semi-bold montserrat still benefits from -1 synth-bold
+  const spacing     = isAceRichie ? 0 : 2;
+  const outlineColor = isAceRichie ? OUTLINE_ACE : OUTLINE_TCF;
+  const backColor    = isAceRichie ? BACK_ACE : BACK_TCF;
 
   const header = `[Script Info]
 ScriptType: v4.00+
@@ -353,7 +384,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Kinetic,${fontName},${fontSize},${PRIMARY},${SECONDARY},${OUTLINE},${BACK},-1,0,0,0,100,100,2,0,3,4,0,2,60,60,${marginV},1
+Style: Kinetic,${fontName},${fontSize},${PRIMARY},${SECONDARY},${outlineColor},${backColor},${bold},0,0,0,100,100,${spacing},0,${borderStyle},${outline},${shadow},2,60,60,${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -361,12 +392,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
   const lines: string[] = [];
   for (const chunk of chunks) {
-    // Uppercase the text — Bebas Neue is a display face that reads best in caps.
-    const upper = chunk.text.toUpperCase();
-    const escaped = assEscape(upper);
-    // Visible pop-in: scale 85% → 100% over the first 150ms (~4.5 frames @ 30fps).
-    // 80ms was only ~2 frames — imperceptible. 150ms registers as a snap.
-    const popIn = `{\\fscx85\\fscy85\\t(0,150,\\fscx100\\fscy100)}`;
+    // Brand-routed casing:
+    //   TCF uppercase → Bebas Neue display caps (corporate noir chyron)
+    //   Ace mixed case → Montserrat elegant sentence case (cosmic transmission)
+    const textBody = isAceRichie ? chunk.text : chunk.text.toUpperCase();
+    const escaped = assEscape(textBody);
+    // Visible pop-in: scale 85% → 100% over the first 150ms.
+    // Ace adds a subtle blur fade-in for the ethereal cosmic feel; TCF keeps the hard snap.
+    const popIn = isAceRichie
+      ? `{\\blur1\\fscx90\\fscy90\\t(0,180,\\blur0\\fscx100\\fscy100)}`
+      : `{\\fscx85\\fscy85\\t(0,150,\\fscx100\\fscy100)}`;
     lines.push(
       `Dialogue: 0,${assTime(chunk.start)},${assTime(chunk.end)},Kinetic,,0,0,0,,${popIn}${escaped}`
     );

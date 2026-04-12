@@ -20,6 +20,39 @@
 
 ---
 
+## SESSION 48 — BRAND ROUTING MATRIX LOCKED (2026-04-11)
+
+**Status:** All 6 Brand Routing Matrix specs implemented across `faceless-factory.ts` (3201 lines), `caption-engine.ts` (461 lines), and a full rewrite of `src/voice/tts.ts` (292 → 357 lines). `npx tsc --noEmit` clean across the full tree. **NOT pushed** per `feedback_no_push_during_pipeline.md` — Ace cuts the deploy when the pipeline is cold.
+
+**The 6 seams:**
+1. **Visual aesthetic (Imagen 4):** new `BRAND_AESTHETIC_APPEND: Record<Brand,string>` constant layered on top of every scene prompt in `generateSceneImage` (line ~1619). `brandNegativeBan()` helper strips `"no sacred geometry"` from `IMAGEN_NEGATIVE_BAN` ONLY for `ace_richie` — resolves the conflict between the ace aesthetic append ("sacred geometry") and the global ban.
+2. **Terminal Override .ass:** `assembleVideo` ~1941 branches on `script.brand`. TCF keeps hacker green `&H0088FF00` + Bebas Neue + outline 3. Ace uses pure white `&H00FFFFFF` + Montserrat + outline 2 + `{\blur2}` glow prefix injected per-dialogue via `split/join` after the 9th comma in each Dialogue line (preserves layout, adds soft-glow).
+3. **Long-form thumbnail:** `generateLongFormThumbnail` signature `_brand: Brand` → `brand: Brand`. `isAceThumb` branch: Montserrat, BorderStyle 1 outline+shadow with Outline=2 Shadow=4 (drop shadow), strips vignette + black drawbox plate from `vf`, lighter eq (brightness +0.02, saturation 1.08) to let the luminous quantum background survive.
+4. **Kinetic captions:** `writeAssFile` in caption-engine.ts now accepts `brand?: "ace_richie" | "containment_field"`. `isAceRichie` full branch on font (Montserrat vs Bebas), casing (mixed vs UPPER), BorderStyle (1 vs 3), Outline (2 vs 4), Shadow (3 vs 0), BackColour (&HFF000000 transparent vs &H50000000 ~69% opaque plate), Spacing (0 vs 2), and pop-in animation ({\blur1\fscx90\fscy90\t(0,180…)} for ace vs {\fscx85\fscy85\t(0,150…)} for TCF).
+5. **Intro/outro stingers:** new `resolveBrandAsset(kind: "intro"|"outro", brandOverride?: Brand)` helper prefers flat brand names (`intro_ace.mp4` / `intro_tcf.mp4` / `outro_ace.mp4` / `outro_tcf.mp4`) and falls back to legacy (`intro_long.mp4` / `intro_long_tcf.mp4` / `outro_long.mp4` / `outro_long_tcf.mp4`) when the flat asset is missing. Replaces hardcoded paths at the intro site (~2044) and outro site (~2332). Ace is provisioning `intro_ace.mp4` / `outro_ace.mp4` — until they land, ace_richie reuses the legacy `intro_long.mp4` / `outro_long.mp4` stingers cleanly.
+6. **TTS (full rewrite of `src/voice/tts.ts`):** new `TTSBrand = "ace_richie" | "containment_field"` type and `TTSOptions.brand?` field. ElevenLabs key order now brand-routed: `ace_richie` → primary key first (Adam Brooding DNA), `containment_field` → alt key first (fresh credits), no brand → legacy alt→primary. Quota detection broadened to 401/402/403/quota/insufficient/credits/exceeded. Edge TTS voice map `EDGE_VOICE_BY_BRAND`: `ace_richie` → `en-GB-ArthurNeural` (oracular, UK gravitas), `containment_field` → `en-US-ChristopherNeural` (clinical corporate noir), default `en-US-AndrewMultilingualNeural`. When EL blows on every key, the outer fallback chain falls through to `edgeTTS(text, speed, brand)` and fires a zero-cost brand-correct output — no dead pipelines when credits dry up.
+
+**Threading:** all three `textToSpeech` callsites in faceless-factory.ts now pass `{ brand: script.brand }`: `renderAudio` single-pass (line ~960), per-segment loop (~1003), frequency activation context_line (~2297). The `generateCaptionsFromAudio` call (~2839) also threads `brand: script.brand` + font name.
+
+**Font provisioning:** `Montserrat-SemiBold.ttf` (744KB) pulled from `google/fonts` on GitHub and committed to `brand-assets/`. libass resolves both `Montserrat` and `Bebas Neue` via the same `fontsdir=` pointing at `brand-assets/`.
+
+**Pushback observed:** Before any code was written, the NORTH_STAR pushback protocol fired because the matrix doesn't directly move any of the 5 revenue input metrics in <7 days. Ace explicitly chose option B (override + execute) AND committed to shipping the 4-step NORTH_STAR funnel spine reconnection (Vercel Analytics + YT CTA audit + new direct-CTA long-form + X/Twitter removal) by **Monday 2026-04-13**. Spine work is still the revenue-critical path; this matrix just ensures that when the spine is reconnected, both brand funnels produce distinct distribution-ready assets from the same pipeline.
+
+**Incidental repair:** `src/index.ts` on disk was sitting at 3540 lines with a truncated function call mid-line (carry-over from an earlier session's write corruption). Restored from `HEAD` via `git show HEAD:src/index.ts > src/index.ts` → back to 3633 lines, `tsc --noEmit` clean. Untouched by Session 48 otherwise.
+
+**Caption-engine fix-forward:** initial write of the `popIn` template literal and the `lines.join("\n") + "\n"` trailer were written via a Python heredoc that ate one level of backslash escaping — TS1002 unterminated-string errors at lines 410-413. Fixed by a targeted regex replace using `re.sub(pattern, lambda m: literal, …)` to bypass re.sub's backreference mangling. Final file: 461 lines, tsc clean.
+
+**Files touched:**
+- `src/engine/faceless-factory.ts` — 3103 → 3201 lines (+98, +5.7KB)
+- `src/engine/caption-engine.ts` — 426 → 461 lines (+35, brand branching)
+- `src/voice/tts.ts` — 292 → 357 lines (full rewrite, brand routing)
+- `src/index.ts` — restored from HEAD (unrelated truncation)
+- `brand-assets/Montserrat-SemiBold.ttf` — added (744KB)
+
+**Not touched:** `elevenLabsStreamTTS` (separate streaming path for voice replies) left at legacy behavior — streaming is only used for inbound voice chats, not the faceless pipeline, so brand routing there is a no-op.
+
+---
+
 ## CRITICAL STATUS REPORT (as of Session 28, 2026-04-05)
 
 **Mission Metrics:** Gemini text-gen hemorrhage fully diagnosed and killed. Voice locked. Script gen architecture overhauled. Revenue still $0.

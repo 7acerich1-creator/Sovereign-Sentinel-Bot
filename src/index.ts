@@ -63,6 +63,7 @@ import { ProposeTaskTool, SaveContentDraftTool, FileBriefingTool, CheckApprovedT
 import { StripeMetricsTool } from "./tools/stripe-metrics";
 import { BufferAnalyticsTool } from "./tools/buffer-analytics";
 import { VideoPublisherTool, TikTokPublishTool, InstagramReelsPublishTool, YouTubeShortsPublishTool, YouTubeLongFormPublishTool } from "./tools/video-publisher";
+import { YouTubeUpdateMetadataTool, YouTubePinCommentTool, YouTubeCTAAuditTool } from "./tools/youtube-cta-tools";
 
 // ── Voice ──
 import { transcribeAudio, downloadTelegramFile } from "./voice/transcription";
@@ -384,6 +385,14 @@ async function main() {
   // Direct Video Publisher (Path A — bypasses Buffer for video content)
   // Buffer v1 API has NO video upload capability. Videos go direct to platform APIs.
   tools.push(new VideoPublisherTool());
+
+  // YouTube CTA Optimization Tools (Session 50 — NORTH_STAR spine tools)
+  // update_metadata: edit existing video descriptions/tags (inject CTAs)
+  // pin_comment: post channel-owner comments with CTA links
+  // cta_audit: weekly scan → propose optimizations → DM Architect → approve → execute
+  tools.push(new YouTubeUpdateMetadataTool());
+  tools.push(new YouTubePinCommentTool());
+  tools.push(new YouTubeCTAAuditTool());
 
   // Sovereign Image Generator (Gemini Imagen 3 + DALL-E 3 fallback)
   tools.push(new ImageGeneratorTool());

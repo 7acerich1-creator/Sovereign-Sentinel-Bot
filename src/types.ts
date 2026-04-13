@@ -263,8 +263,6 @@ export interface GravityClawConfig {
     port: number;
   };
   vidRush: {
-    makeScenarioEWebhook: string;
-    makeScenarioFWebhook: string;
     bufferApiKey: string;
     bufferOrgId: string;
   };

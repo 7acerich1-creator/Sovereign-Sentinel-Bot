@@ -24,6 +24,30 @@
 
 ---
 
+## MISSION CONTROL CROSS-SYNC LOG
+
+*Written BY Mission Control sessions, READ BY Sentinel Bot sessions. Read at every session start. Most recent entries at TOP.*
+
+### 2026-04-13 — MC Session: Content Intel 3-Panel Upgrade + fetch-landing-analytics Edge Function
+
+**What shipped on MC side:**
+- Content Intel page (`/content`) refactored into 3-tab command surface: PERFORMANCE | CTA AUDIT | LANDING
+- New API route `src/app/api/cta-proposals/route.ts` — PATCH endpoint for approve/reject/skip on `cta_audit_proposals` rows
+- New Edge Function `fetch-landing-analytics` (v1) deployed to Supabase — pulls Vercel Web Analytics daily into `landing_analytics` table
+- Supabase secrets set: `VERCEL_API_TOKEN`, `VERCEL_PROJECT_ID`
+- Git commit `f40ff89` pushed to `main`, Vercel auto-deploying
+
+**BOT-SIDE IMPLICATION:**
+- MC dashboard now reads `cta_audit_proposals` and renders a review UI. Status flow the bot must honor: `pending_review` → Architect clicks Approve → status becomes `approved`, `reviewed_at` set. **Bot must poll for `status = 'approved'` rows, execute `youtube_update_metadata` + `youtube_pin_comment`, then set `status = 'executed'` + `executed_at = now()`.**
+- `fetch-landing-analytics` needs a daily cron trigger (recommended: 06:00 UTC POST to `https://wzthxohtgojenukmdubz.supabase.co/functions/v1/fetch-landing-analytics`). Wire this into the bot's scheduler or a Make.com scenario.
+- Full handoff spec with table schemas is at `MISSION-CONTROL-HANDOFF_content-intel-upgrade.md` (already in this repo).
+
+**What the bot does NOT need to do:**
+- No changes to `youtube_analytics` table or `fetch-youtube-stats` Edge Function — those are untouched
+- No changes to any existing bot tools — the 3 new youtube-cta-tools referenced in the handoff were already built bot-side
+
+---
+
 ## 0. ARCHITECTURAL DIRECTIVES (Non-Negotiable)
 
 These are hard rules that govern every session's work. Violations create the bugs history keeps archiving.

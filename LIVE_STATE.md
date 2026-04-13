@@ -5,14 +5,14 @@
 > reference contradicts this file, **this file wins** — the master reference only holds
 > invariants, not live values.
 
-**Last verified:** `2026-04-11T04:06:47.017Z`
+**Last verified:** `2026-04-12T12:51:19.170Z`
 **Generator:** `scripts/verify-state.ts`
 
 ## Git State
 - **Branch:** `main`
-- **HEAD:** `00d6bd807a923805575d3958aa346f6e55ccff40`
-- **Working tree:** DIRTY (177 files)
-- **Last commit:** 00d6bd8 Session 47: Caption engine hardening - BorderStyle 3 opaque plate + fontsdir bulletproof + 150ms pop-in (6 minutes ago)
+- **HEAD:** `9b9f1a61d5557d270581e41346ed5f1cadb3d927`
+- **Working tree:** CLEAN
+- **Last commit:** 9b9f1a6 feat: XTTS sovereign TTS and YouTube stats scheduler (3 hours ago)
 
 ## Package
 - **Name:** `gravity-claw`
@@ -25,7 +25,7 @@
 
 ### Voice Identifiers
 - **ElevenLabs voice ID (source-coded default):** `IRHApOXLvnW57QJPQH2P`
-- **Edge TTS voice (source-coded):** `en-US-AndrewMultilingualNeural`
+- **Edge TTS voice (source-coded):** `(not found)`
 
 ### Environment
 - `FORCE_ELEVENLABS`: UNSET
@@ -36,13 +36,21 @@
 ```typescript
   const chain: TTSProvider[] = [];
   const forceElevenLabs = process.env.FORCE_ELEVENLABS === "true";
+  const xttsUrl = process.env.XTTS_SERVER_URL;
 
+  // XTTS sovereign engine — top of chain when available (zero per-character cost)
+  if (xttsUrl && !forceElevenLabs) {
+    chain.push("xtts");
+  }
   if (forceElevenLabs && config.voice.elevenLabsApiKey) {
     chain.push("elevenlabs"); // Only first if explicitly forced
   }
-  chain.push("edge"); // FREE — always primary unless forced otherwise
+  if (xttsUrl && forceElevenLabs) {
+    chain.push("xtts"); // Demoted behind EL when forced
+  }
+  chain.push("edge"); // FREE — always present as safety net
   if (!forceElevenLabs && config.voice.elevenLabsApiKey) {
-    chain.push("elevenlabs"); // Demoted to fallback
+    chain.push("elevenlabs"); // Demoted to fallback behind XTTS + Edge
   }
   if (config.voice.whisperApiKey) chain.push("openai");
 

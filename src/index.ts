@@ -1641,7 +1641,7 @@ async function main() {
     return "delivered";
   });
 
-  // ── /api/release — Agent payloads ingest (Make.com, external tools) ──
+  // ── /api/release — Agent payloads ingest (external tools) ──
   webhookServer.register("/api/release", async (incoming: any) => {
     const { agent_name, payload_type, payload, data } = incoming as any;
     if (!agent_name) return "error: agent_name required";
@@ -1687,68 +1687,6 @@ async function main() {
     } catch (err: any) {
       return `error: ${err.message}`;
     }
-  });
-
-  // ── /api/vidrush — Make.com Scenario E/F callback endpoint ──
-  // Scenario E sends back transcript → dispatches to Alfred
-  // Scenario E sends transcript → Alfred | Scenario F sends timestamps → Yuki (sovereign clip pipeline)
-  webhookServer.register("/api/vidrush", async (incoming: any) => {
-    const { scenario, video_id, youtube_url, transcript, timestamps, clips, chat_id } = incoming as any;
-
-    if (scenario === "E" || incoming.transcript) {
-      // Transcript callback from DumplingAI → dispatch to Alfred for analysis
-      const id = await dispatchTask({
-        from_agent: "make_scenario_e",
-        to_agent: "alfred",
-        task_type: "transcript_analysis",
-        payload: {
-          transcript: transcript || incoming.data?.transcript,
-          video_id,
-          youtube_url,
-          source: "dumplingai",
-        },
-        priority: 2,
-        chat_id: chat_id || defaultChatId,
-      });
-
-      console.log(`📡 [VidRush] Scenario E callback → Alfred dispatch (id: ${id})`);
-      await telegram.sendMessage(
-        chat_id || defaultChatId,
-        `📜 _Transcript received for_ \`${video_id || "unknown"}\`\n_Dispatched to Alfred for analysis._`,
-        { parseMode: "Markdown" }
-      );
-
-      return id ? `dispatched:alfred:${id}` : "dispatch_failed";
-    }
-
-    if (scenario === "F" || incoming.timestamps || incoming.clips) {
-      // Sovereign clip pipeline — dispatch to Yuki with timestamps for in-house clip generation
-      const id = await dispatchTask({
-        from_agent: "make_scenario_f",
-        to_agent: "yuki",
-        task_type: "sovereign_clip_generation",
-        payload: {
-          timestamps: timestamps || clips || incoming.data?.timestamps,
-          video_id,
-          youtube_url,
-          source: "sovereign_pipeline",
-          pipeline: "yt-dlp + ffmpeg + whisper",
-        },
-        priority: 2,
-        chat_id: chat_id || defaultChatId,
-      });
-
-      console.log(`📡 [VidRush] Scenario F callback → Yuki sovereign clip dispatch (id: ${id})`);
-      await telegram.sendMessage(
-        chat_id || defaultChatId,
-        `🎬 _Sovereign clip pipeline triggered for_ \`${video_id || "unknown"}\`\n_Dispatched to Yuki — yt-dlp + ffmpeg in-house._`,
-        { parseMode: "Markdown" }
-      );
-
-      return id ? `dispatched:yuki:${id}` : "dispatch_failed";
-    }
-
-    return "error: unknown scenario — send {scenario: 'E'} or {scenario: 'F'}";
   });
 
   // ── /api/content-engine/produce — Manual trigger for daily content production ──
@@ -2568,7 +2506,7 @@ async function main() {
     }
   });
 
-  // ── Crew Dispatch webhook — external systems (Make.com) can push tasks to agents ──
+  // ── Crew Dispatch webhook — external systems can push tasks to agents ──
   webhookServer.register("/api/dispatch", async (incoming: any) => {
     const { from_agent, to_agent, task_type, payload: taskPayload, data, priority, chat_id } = incoming as any;
     if (!to_agent) return "error: to_agent required";

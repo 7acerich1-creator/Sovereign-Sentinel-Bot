@@ -138,6 +138,12 @@ async function hasAlreadyFiredToday(toAgent: string, taskType: string): Promise<
 }
 
 async function main() {
+  // SESSION 51: Graceful shutdown state — declared at main() scope
+  // so both dispatch poller (inner block) and shutdown handler can access them.
+  let shuttingDown = false;
+  let activeDispatchCount = 0;
+  let dispatchPollTimer: ReturnType<typeof setTimeout> | null = null;
+
   console.log("⚡ GRAVITY CLAW v3.0 — Initializing...");
   console.log(`🔒 Security: Max ${config.security.maxAgentIterations} agent iterations`);
 
@@ -2976,6 +2982,7 @@ async function main() {
     // The queue serializes overlapping pipeline requests — only one runs at a time,
     // subsequent requests wait in FIFO order instead of being silently dropped.
     let pipelineRunning = false;
+
     const setPipelineRunning = (val: boolean) => {
       pipelineRunning = val;
       console.log(`🔒 [PipelineLock] Pipeline ${val ? "STARTED — pollers paused" : "ENDED — pollers resumed"}`);
@@ -3027,13 +3034,19 @@ async function main() {
     const DISPATCH_POLL_BASE_MS = 60_000; // 60s base (was 15s — killed Supabase free tier)
     const DISPATCH_POLL_MAX_MS = 300_000; // 5 min max backoff
     let dispatchPollMs = DISPATCH_POLL_BASE_MS;
-    let dispatchPollTimer: ReturnType<typeof setTimeout> | null = null;
+    // dispatchPollTimer hoisted to main() scope for shutdown access
 
     if (agentLoops.size > 0) {
       const agentNames = [...agentLoops.keys()];
       console.log(`📡 [CrewDispatch] Starting batched dispatch poller for [${agentNames.join(", ")}] (base: ${DISPATCH_POLL_BASE_MS / 1000}s)`);
 
       const runDispatchPoll = async () => {
+        // SESSION 51: Respect shutdown flag — don't pick up new work while draining
+        if (shuttingDown) {
+          console.log(`🛑 [DispatchPoller] Skipped — container shutting down`);
+          return; // No reschedule — we're done
+        }
+
         // Skip if pipeline is running — Supabase needs all bandwidth for clip uploads
         if (pipelineRunning) {
           console.log(`⏸️ [DispatchPoller] Skipped — pipeline running`);
@@ -3081,6 +3094,9 @@ async function main() {
                 await new Promise((resolve) => setTimeout(resolve, 3000));
               }
 
+              // SESSION 51: Track in-flight dispatches for graceful shutdown
+              activeDispatchCount++;
+
               // Build a synthetic message from the dispatch payload
               const payloadStr = JSON.stringify(task.payload, null, 2);
 
@@ -3090,8 +3106,29 @@ async function main() {
               // introspection data it couldn't actually retrieve, then hit iter 4 on
               // the completion crew_dispatch call without a final text response.
               // Light mode: tools=undefined, iterCap=1, strip "use crew_dispatch" tail.
+              //
+              // SESSION 51: STASIS TRAP OVERRIDE — if the dispatch payload contains
+              // signals that require tool execution or memory extraction, override
+              // LIGHT_TASKS and route to full agent loop. Prevents execution-heavy
+              // tasks from being lobotomized by stasis_self_check's zero-tool mode.
               const LIGHT_TASKS = new Set(["stasis_self_check"]);
-              const isLightTask = LIGHT_TASKS.has(task.task_type);
+              let isLightTask = LIGHT_TASKS.has(task.task_type);
+
+              // Override: payload inspection for tool-requiring signals
+              if (isLightTask && task.payload) {
+                const payloadCheck = JSON.stringify(task.payload).toLowerCase();
+                const TOOL_REQUIRING_SIGNALS = [
+                  "extract", "generate", "publish", "post", "schedule",
+                  "analyze", "fetch", "search", "upload", "distribute",
+                  "crew_dispatch", "social_scheduler", "publish_video",
+                  "save_content_draft", "buffer", "stripe", "veritas",
+                ];
+                const requiresTools = TOOL_REQUIRING_SIGNALS.some((sig) => payloadCheck.includes(sig));
+                if (requiresTools) {
+                  isLightTask = false;
+                  console.warn(`⚡ [DispatchRouter] STASIS OVERRIDE — task ${task.id} (${task.task_type}) payload requires tools. Routing to FULL agent loop.`);
+                }
+              }
 
               // ── Task-type-specific execution directives ──
               // Without these, agents default to analysis/reporting instead of executing tools.
@@ -3449,6 +3486,9 @@ async function main() {
               } catch (processErr: any) {
                 console.error(`[DispatchPoller] ${agentName} failed on ${task.id}: ${processErr.message}`);
                 await completeDispatch(task.id, "failed", processErr.message);
+              } finally {
+                // SESSION 51: Always decrement in-flight counter
+                activeDispatchCount = Math.max(0, activeDispatchCount - 1);
               }
             }
           } catch (pollErr: any) {
@@ -3641,8 +3681,29 @@ async function main() {
   }, 300_000);
 
   // ── Graceful Shutdown ──
+  // SESSION 51: Railway sends SIGTERM before killing the container (~10s grace).
+  // Set shuttingDown flag to prevent new dispatch pickups, then drain in-flight tasks.
   const shutdown = async () => {
-    console.log("🛑 GRAVITY CLAW shutting down...");
+    console.log("🛑 GRAVITY CLAW shutting down — draining queue...");
+    shuttingDown = true;
+
+    // Cancel the dispatch poll timer so no new polls fire
+    if (dispatchPollTimer) {
+      clearTimeout(dispatchPollTimer);
+      dispatchPollTimer = null;
+    }
+
+    // Wait for in-flight dispatch tasks to complete (max 8s to stay within Railway's grace window)
+    const DRAIN_TIMEOUT_MS = 8000;
+    const drainStart = Date.now();
+    while (activeDispatchCount > 0 && (Date.now() - drainStart) < DRAIN_TIMEOUT_MS) {
+      console.log(`⏳ [Shutdown] Draining ${activeDispatchCount} in-flight dispatch task(s)...`);
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    if (activeDispatchCount > 0) {
+      console.warn(`⚠️ [Shutdown] ${activeDispatchCount} task(s) still in-flight after ${DRAIN_TIMEOUT_MS / 1000}s — force exiting`);
+    }
+
     heartbeat.stop();
     sapphireSentinel.stop();
     scheduler.shutdown();
@@ -3660,6 +3721,7 @@ async function main() {
     }
     knowledgeGraph.close();
     selfEvolvingMemory.close();
+    console.log("✅ [Shutdown] Queue drained, all systems closed. Exiting.");
     process.exit(0);
   };
 

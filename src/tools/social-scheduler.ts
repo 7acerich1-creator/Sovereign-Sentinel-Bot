@@ -16,33 +16,144 @@ function getBufferToken(): string {
   return token;
 }
 
+
+// ── content_transmissions payload sanitizer ──
+// Prevents Postgres CHECK constraint 23514 by validating all fields before insert.
+// Exported so video-publisher + vidrush-orchestrator can reuse it.
+const VALID_STATUSES = new Set(["draft", "scheduled", "published", "completed", "failed", "uncertain", "ready"]);
+
+export function sanitizeTransmissionPayload(raw: Record<string, unknown>): Record<string, unknown> {
+  const clean: Record<string, unknown> = {};
+
+  // source: required string, max 100 chars, no control characters
+  if (raw.source && typeof raw.source === "string") {
+    clean.source = raw.source.replace(/[\x00-\x1F\x7F]/g, "").slice(0, 100);
+  } else {
+    clean.source = "unknown";
+  }
+
+  // intent_tag: optional string, max 100 chars
+  if (raw.intent_tag && typeof raw.intent_tag === "string") {
+    clean.intent_tag = raw.intent_tag.replace(/[\x00-\x1F\x7F]/g, "").slice(0, 100);
+  }
+
+  // status: must be one of the allowed enum values
+  if (raw.status && typeof raw.status === "string" && VALID_STATUSES.has(raw.status)) {
+    clean.status = raw.status;
+  } else {
+    clean.status = "draft"; // Safe default
+  }
+
+  // strategy_json: must be a valid object (Postgres JSONB column)
+  if (raw.strategy_json !== undefined && raw.strategy_json !== null) {
+    try {
+      // Round-trip through JSON to ensure it's valid JSONB
+      const jsonStr = JSON.stringify(raw.strategy_json);
+      clean.strategy_json = JSON.parse(jsonStr);
+    } catch {
+      clean.strategy_json = { error: "payload_sanitized", original_type: typeof raw.strategy_json };
+    }
+  }
+
+  // linkedin_post: text field, strip control chars, cap at 2000 chars
+  if (raw.linkedin_post && typeof raw.linkedin_post === "string") {
+    clean.linkedin_post = raw.linkedin_post.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").slice(0, 2000);
+  }
+
+  // Pass through any other fields that aren't in the sanitized set (type, niche, etc.)
+  for (const [key, val] of Object.entries(raw)) {
+    if (!(key in clean) && val !== undefined && val !== null) {
+      if (typeof val === "string") {
+        clean[key] = val.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").slice(0, 2000);
+      } else if (typeof val === "object") {
+        try {
+          clean[key] = JSON.parse(JSON.stringify(val));
+        } catch {
+          // Skip unparseable objects
+        }
+      } else {
+        clean[key] = val;
+      }
+    }
+  }
+
+  return clean;
+}
+
+// ── Rate Limit Queue ──
+// Buffer GraphQL enforces a 24h rolling window rate limit (RATE_LIMIT_EXCEEDED).
+// This queue spaces requests and retries with exponential backoff on 429s.
+const BUFFER_MIN_INTERVAL_MS = 2000; // Min 2s between requests
+const BUFFER_MAX_RETRIES = 4;
+let lastBufferRequestAt = 0;
+
 async function bufferGraphQL(query: string, variables?: Record<string, unknown>): Promise<any> {
   const token = getBufferToken();
 
   const body: Record<string, unknown> = { query };
   if (variables) body.variables = variables;
 
-  const resp = await fetch(BUFFER_GRAPHQL_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-  });
+  let attempt = 0;
+  let backoffMs = 3000; // Initial backoff: 3s
 
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`Buffer GraphQL ${resp.status}: ${errText.slice(0, 500)}`);
+  while (attempt <= BUFFER_MAX_RETRIES) {
+    // Enforce minimum interval between requests (rate limit evasion)
+    const now = Date.now();
+    const elapsed = now - lastBufferRequestAt;
+    if (elapsed < BUFFER_MIN_INTERVAL_MS) {
+      await new Promise((r) => setTimeout(r, BUFFER_MIN_INTERVAL_MS - elapsed));
+    }
+    lastBufferRequestAt = Date.now();
+
+    const resp = await fetch(BUFFER_GRAPHQL_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    // Rate limit hit — backoff and retry
+    if (resp.status === 429) {
+      attempt++;
+      if (attempt > BUFFER_MAX_RETRIES) {
+        throw new Error(`Buffer RATE_LIMIT_EXCEEDED after ${BUFFER_MAX_RETRIES} retries. 24h window exhausted — queue posts for later.`);
+      }
+      const retryAfter = resp.headers.get("retry-after");
+      const waitMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : backoffMs;
+      console.warn(`⚠️ [Buffer] 429 Rate Limited — retry ${attempt}/${BUFFER_MAX_RETRIES} in ${waitMs / 1000}s`);
+      await new Promise((r) => setTimeout(r, waitMs));
+      backoffMs = Math.min(backoffMs * 2, 60_000); // Cap at 60s
+      continue;
+    }
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`Buffer GraphQL ${resp.status}: ${errText.slice(0, 500)}`);
+    }
+
+    const result: any = await resp.json();
+
+    // Check for GraphQL-level rate limit errors (not HTTP 429 but in error payload)
+    if (result.errors && result.errors.length > 0) {
+      const rateLimitError = result.errors.find((e: any) =>
+        e.message?.includes("RATE_LIMIT") || e.extensions?.code === "RATE_LIMIT_EXCEEDED"
+      );
+      if (rateLimitError && attempt < BUFFER_MAX_RETRIES) {
+        attempt++;
+        console.warn(`⚠️ [Buffer] GraphQL RATE_LIMIT — retry ${attempt}/${BUFFER_MAX_RETRIES} in ${backoffMs / 1000}s`);
+        await new Promise((r) => setTimeout(r, backoffMs));
+        backoffMs = Math.min(backoffMs * 2, 60_000);
+        continue;
+      }
+      throw new Error(`Buffer GraphQL error: ${result.errors.map((e: any) => e.message).join("; ")}`);
+    }
+
+    return result.data;
   }
 
-  const result: any = await resp.json();
-
-  if (result.errors && result.errors.length > 0) {
-    throw new Error(`Buffer GraphQL error: ${result.errors.map((e: any) => e.message).join("; ")}`);
-  }
-
-  return result.data;
+  throw new Error("Buffer GraphQL: exhausted retries");
 }
 
 // ── List Channels Tool ──
@@ -169,9 +280,51 @@ export class SocialSchedulerPostTool implements Tool {
 
       const results: string[] = [];
 
+      // ── PRE-FLIGHT: Resolve channel service types for smart routing ──
+      // YouTube rejects image-only payloads (requires video). Facebook requires type: "post".
+      let channelServiceMap: Map<string, string> = new Map();
+      try {
+        const chanQuery = `
+          query GetChannels {
+            channels(input: { organizationId: "${BUFFER_ORG_ID}" }) {
+              id
+              service
+            }
+          }
+        `;
+        const chanData = await bufferGraphQL(chanQuery);
+        if (Array.isArray(chanData?.channels)) {
+          for (const ch of chanData.channels) {
+            channelServiceMap.set(ch.id, (ch.service || "").toLowerCase());
+          }
+        }
+      } catch (chanErr: any) {
+        console.warn(`[SocialScheduler] Channel lookup failed — posting blind: ${chanErr.message}`);
+      }
+
+      // ── YOUTUBE IMAGE FILTER ──
+      // YouTube via Buffer inherently demands video. If the asset is static (image),
+      // splice YouTube channels OUT of the destination array before transmission.
+      let filteredChannelIds = channelIds;
+      if (mediaUrl && !isVideo) {
+        const youtubeIds = channelIds.filter((id) => channelServiceMap.get(id) === "youtube");
+        if (youtubeIds.length > 0) {
+          filteredChannelIds = channelIds.filter((id) => channelServiceMap.get(id) !== "youtube");
+          results.push(`⚠️ YouTube channels skipped (image-only asset — YouTube requires video): ${youtubeIds.join(", ")}`);
+          console.warn(`[SocialScheduler] YouTube filtered out — image asset incompatible with ${youtubeIds.length} YT channel(s)`);
+        }
+      }
+
+      if (filteredChannelIds.length === 0) {
+        return "⚠️ All target channels filtered out (YouTube-only + image asset). Use publish_video for video content.";
+      }
+
       // Buffer GraphQL createPost works per-channel, so loop
-      for (const channelId of channelIds) {
+      for (const channelId of filteredChannelIds) {
         try {
+          // Detect channel service for platform-specific payload adjustments
+          const channelService = channelServiceMap.get(channelId) || "unknown";
+
           // Build the input dynamically
           // Buffer assets support both images and videos
           let assetsBlock = "";
@@ -216,6 +369,14 @@ export class SocialSchedulerPostTool implements Tool {
             metadataBlock = `metadata: ${buildGqlObj(metadataObj)}`;
           }
 
+          // ── FACEBOOK TYPE INJECTION ──
+          // Facebook posts require an explicit `type: "post"` field or the API rejects with
+          // "Invalid post: Facebook posts require a type". Inject it for Facebook channels.
+          let facebookTypeBlock = "";
+          if (channelService === "facebook") {
+            facebookTypeBlock = `, type: post`;
+          }
+
           const query = `
             mutation CreatePost {
               createPost(input: {
@@ -226,6 +387,7 @@ export class SocialSchedulerPostTool implements Tool {
                 ${dueAtBlock ? `, ${dueAtBlock}` : ""}
                 ${assetsBlock ? `, ${assetsBlock}` : ""}
                 ${metadataBlock ? `, ${metadataBlock}` : ""}
+                ${facebookTypeBlock}
               }) {
                 ... on PostActionSuccess {
                   post {
@@ -256,11 +418,23 @@ export class SocialSchedulerPostTool implements Tool {
       }
 
       // Log to Supabase if available
+      // SESSION 51: Sanitize payload to prevent CHECK constraint 23514 violations.
       try {
         const supabaseUrl = process.env.SUPABASE_URL;
         // Session 42: Use SERVICE_ROLE_KEY to bypass RLS (Session 31 directive)
         const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
         if (supabaseUrl && supabaseKey) {
+          const payload = sanitizeTransmissionPayload({
+            source: "buffer_scheduler",
+            intent_tag: niche,
+            status: now ? "published" : "scheduled",
+            strategy_json: {
+              channel_ids: filteredChannelIds,
+              scheduled_at: scheduledAt || (now ? "immediate" : "queued"),
+              shareMode,
+            },
+            linkedin_post: text.slice(0, 500),
+          });
           await fetch(`${supabaseUrl}/rest/v1/content_transmissions`, {
             method: "POST",
             headers: {
@@ -269,21 +443,12 @@ export class SocialSchedulerPostTool implements Tool {
               "Content-Type": "application/json",
               Prefer: "return=minimal",
             },
-            body: JSON.stringify({
-              source: "buffer_scheduler",
-              intent_tag: niche,
-              status: now ? "published" : "scheduled",
-              strategy_json: {
-                channel_ids: channelIds,
-                scheduled_at: scheduledAt || (now ? "immediate" : "queued"),
-                shareMode,
-              },
-              linkedin_post: text.slice(0, 500),
-            }),
+            body: JSON.stringify(payload),
           });
         }
-      } catch {
+      } catch (logErr: any) {
         // Non-critical — log failure doesn't block posting
+        console.warn(`[SocialScheduler] Supabase log failed: ${logErr.message?.slice(0, 200)}`);
       }
 
       return `Buffer GraphQL Post Results (${shareMode}):\n` +

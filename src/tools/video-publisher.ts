@@ -12,14 +12,17 @@ import type { Tool, ToolDefinition } from "../types";
 import { config } from "../config";
 import { TikTokBrowserUploadTool } from "./tiktok-browser-upload";
 import { InstagramBrowserUploadTool } from "./instagram-browser-upload";
+import { sanitizeTransmissionPayload } from "./social-scheduler";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
 
 // ── Supabase logging helper ──
+// SESSION 51: Sanitize payload before insert to prevent CHECK constraint 23514.
 async function logVideoPost(data: Record<string, unknown>): Promise<void> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return;
   try {
+    const sanitized = sanitizeTransmissionPayload(data);
     await fetch(`${SUPABASE_URL}/rest/v1/content_transmissions`, {
       method: "POST",
       headers: {
@@ -28,10 +31,10 @@ async function logVideoPost(data: Record<string, unknown>): Promise<void> {
         "Content-Type": "application/json",
         Prefer: "return=minimal",
       },
-      body: JSON.stringify(data),
+      body: JSON.stringify(sanitized),
     });
-  } catch {
-    // Non-critical
+  } catch (err: any) {
+    console.warn(`[VideoPublisher] Supabase log failed: ${err.message?.slice(0, 200)}`);
   }
 }
 

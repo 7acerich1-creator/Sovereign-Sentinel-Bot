@@ -381,27 +381,52 @@ function getBufferToken(): string {
   return token;
 }
 
+const CE_BUFFER_MIN_INTERVAL_MS = 2000;
+const CE_BUFFER_MAX_RETRIES = 4;
+let ceLastBufferCall = 0;
+
 async function bufferGraphQL(query: string): Promise<any> {
   const token = getBufferToken();
-  const resp = await fetch(BUFFER_GRAPHQL_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ query }),
-  });
 
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`Buffer GraphQL ${resp.status}: ${errText.slice(0, 500)}`);
-  }
+  for (let attempt = 0; attempt <= CE_BUFFER_MAX_RETRIES; attempt++) {
+    // ── Rate-limit pacing ──
+    const now = Date.now();
+    const wait = CE_BUFFER_MIN_INTERVAL_MS - (now - ceLastBufferCall);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    ceLastBufferCall = Date.now();
 
-  const result: any = await resp.json();
-  if (result.errors?.length > 0) {
-    throw new Error(`Buffer GraphQL error: ${result.errors.map((e: any) => e.message).join("; ")}`);
+    const resp = await fetch(BUFFER_GRAPHQL_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ query }),
+    });
+
+    // ── 429 Rate Limit — exponential backoff ──
+    if (resp.status === 429) {
+      const backoff = CE_BUFFER_MIN_INTERVAL_MS * Math.pow(2, attempt + 1);
+      console.warn(`⚠️ [CE-BufferGQL] 429 rate-limited — backing off ${backoff}ms (attempt ${attempt + 1}/${CE_BUFFER_MAX_RETRIES})`);
+      if (attempt < CE_BUFFER_MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, backoff));
+        continue;
+      }
+      throw new Error(`Buffer GraphQL 429: Rate limited after ${CE_BUFFER_MAX_RETRIES} retries`);
+    }
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`Buffer GraphQL ${resp.status}: ${errText.slice(0, 500)}`);
+    }
+
+    const result: any = await resp.json();
+    if (result.errors?.length > 0) {
+      throw new Error(`Buffer GraphQL error: ${result.errors.map((e: any) => e.message).join("; ")}`);
+    }
+    return result.data;
   }
-  return result.data;
+  throw new Error("Buffer GraphQL: exhausted retries");
 }
 // ── Channel Discovery & Caching ──
 
@@ -919,6 +944,13 @@ export async function distributionSweep(): Promise<number> {
             metadataBlock = `metadata: { instagram: { type: post, shouldShareToFeed: true } }`;
           }
 
+          // CE-6 FIX: Facebook requires explicit type: post or Buffer rejects with
+          // "Invalid post: Facebook posts require a type"
+          let facebookTypeBlock = "";
+          if (service === "facebook") {
+            facebookTypeBlock = `, type: post`;
+          }
+
           // CE-2 FIX: schedulingType enum is "automatic" or "notification" (NOT "scheduled")
           // "automatic" = Buffer picks the optimal time from its queue
           const query = `
@@ -928,6 +960,7 @@ export async function distributionSweep(): Promise<number> {
                 channelId: "${channel.id}",
                 schedulingType: automatic,
                 mode: addToQueue
+                ${facebookTypeBlock}
                 ${metadataBlock ? `, ${metadataBlock}` : ""}
                 ${assetsBlock ? `, ${assetsBlock}` : ""}
               }) {

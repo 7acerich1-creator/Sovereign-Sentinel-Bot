@@ -506,6 +506,57 @@ The canonical roles for each agent. Supabase `personality_config` blueprints mat
 
 ---
 
+## LIVE FUNNEL ARCHITECTURE (Verified 2026-04-13)
+
+**sovereign-landing** — 27 pages live on `sovereign-synthesis.com` via Vercel. GitHub: `7acerich1-creator/sovereign-landing`, auto-deploys to Vercel on push to `main`.
+
+### Site Map — 27 Pages Live
+
+**Entry Points:**
+
+- `/` — Homepage. ROM email+name capture → Supabase `initiates` table + edge function nurture email. On success → redirects to `/tier-1/diagnostic`. P77 CTA with live Stripe link at bottom.
+- `/tier-0/links` — Containment Field linktree. Boot sequence animation. Single CTA → diagnostic. Hidden architect link → about.
+- `/about.html` — Architect profile. 3 sections: Who/Glitch/Signal. Links back to T0.
+
+**Funnel Tiers:**
+
+- **T1:** `/tier-1/diagnostic` (12Q interference pattern quiz) + `/tier-1/download.html` (ROM PDF download from Supabase storage)
+- **T2:** `/tier-2/protocol-77.html` ($77 sales) + `/tier-2/protocol-77-runner.html` (interactive runner, auth-gated) + `/tier-2/thank-you.html`
+- **T3:** `/tier-3/manifesto.html` ($177 sales) + `/tier-3/manifesto-navigator.html` + `/tier-3/thank-you.html` + `/manifesto-portal/`
+- **T4:** `/tier-4/course-portal.html` + `/tier-4/defense-protocol.html` ($477 sales) + `/tier-4/thank-you.html` — Phase 1: DECLASSIFICATION
+- **T5:** `/tier-5/course-portal.html` + `/tier-5/phase-2.html` ($1,497 sales) + `/tier-5/thank-you.html` — Phase 2: NEUTRALIZATION
+- **T6:** `/tier-6/course-portal.html` + `/tier-6/phase-3.html` ($3,777 sales) + `/tier-6/thank-you.html` — Phase 3: THE DEPLOYMENT
+- **T7:** `/tier-7/inner-circle.html` ($12,000 application) + `/tier-7/member-portal.html` + `/tier-7/thank-you.html`
+
+**Infrastructure Pages:** `/privacy.html`, `/terms.html`, `/unsubscribe.html`
+
+**Email Templates (11):** welcome, purchase confirmations (tiers 2–7), magic-link, nurture sequence (02–05)
+
+### Supabase Bridge
+
+The `product_tiers` table in Supabase (project: `wzthxohtgojenukmdubz`) contains the complete product catalog with Stripe price IDs, portal/sales URLs, curriculum, features, and psych-op descriptions for every tier. This is the **SINGLE SOURCE OF TRUTH** for product data. Both the bot and the dashboard should read from this table.
+
+### Design System
+
+- **Homepage:** EB Garamond + Courier Prime
+- **All other pages:** Space Grotesk + Space Mono
+- **Palette:** cyan `#3EF7E8`, gold `#C9A84C`, violet `#7C5CFC`
+- **Dark base** `#050508`, light theme toggle on all pages
+- **Aesthetic:** Editorial-architectural (NOT the old cyberpunk matrix rain from March 2026 — that is OBSOLETE)
+
+### Key Infrastructure
+
+| Resource | ID / URL |
+|---|---|
+| Vercel project (landing) | `prj_P8HfPP5BjJYAbAM9KT1FbC4KGpFm` |
+| Vercel project (MC) | `prj_L5oBItJKbcVKX4TIAkupbV7dN9s3` |
+| Vercel team | `team_BUxeWJBDqRUYPqpgf95jghug` |
+| Supabase | `wzthxohtgojenukmdubz.supabase.co` |
+| Stripe P77 checkout | `buy.stripe.com/eVq5kFcwy8sX4N0eD9fYY00` |
+| GitHub repo | `7acerich1-creator/sovereign-landing` (public, auto-deploys) |
+
+---
+
 ## 16. SESSION HANDOFF CHECKLIST
 
 At the END of every session, the session pilot MUST:

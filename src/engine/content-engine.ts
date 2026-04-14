@@ -381,8 +381,8 @@ function getBufferToken(): string {
   return token;
 }
 
-const CE_BUFFER_MIN_INTERVAL_MS = 2000;
-const CE_BUFFER_MAX_RETRIES = 4;
+const CE_BUFFER_MIN_INTERVAL_MS = 3500;
+const CE_BUFFER_MAX_RETRIES = 6;
 let ceLastBufferCall = 0;
 
 async function bufferGraphQL(query: string): Promise<any> {
@@ -404,15 +404,18 @@ async function bufferGraphQL(query: string): Promise<any> {
       body: JSON.stringify({ query }),
     });
 
-    // ── 429 Rate Limit — exponential backoff ──
+    // ── 429 Rate Limit — exponential backoff with Retry-After respect ──
     if (resp.status === 429) {
-      const backoff = CE_BUFFER_MIN_INTERVAL_MS * Math.pow(2, attempt + 1);
-      console.warn(`⚠️ [CE-BufferGQL] 429 rate-limited — backing off ${backoff}ms (attempt ${attempt + 1}/${CE_BUFFER_MAX_RETRIES})`);
-      if (attempt < CE_BUFFER_MAX_RETRIES) {
-        await new Promise((r) => setTimeout(r, backoff));
-        continue;
+      if (attempt >= CE_BUFFER_MAX_RETRIES - 1) {
+        throw new Error(`Buffer GraphQL 429: Rate limited after ${CE_BUFFER_MAX_RETRIES} attempts`);
       }
-      throw new Error(`Buffer GraphQL 429: Rate limited after ${CE_BUFFER_MAX_RETRIES} retries`);
+      const retryAfter = resp.headers.get("retry-after");
+      const backoff = retryAfter
+        ? Math.max(parseInt(retryAfter, 10) * 1000, CE_BUFFER_MIN_INTERVAL_MS)
+        : CE_BUFFER_MIN_INTERVAL_MS * Math.pow(2, attempt + 1);
+      console.warn(`⚠️ [CE-BufferGQL] 429 rate-limited — backing off ${backoff}ms (attempt ${attempt + 1}/${CE_BUFFER_MAX_RETRIES})`);
+      await new Promise((r) => setTimeout(r, backoff));
+      continue;
     }
 
     if (!resp.ok) {
@@ -431,13 +434,15 @@ async function bufferGraphQL(query: string): Promise<any> {
 // ── Channel Discovery & Caching ──
 
 let cachedChannelMap: BrandChannelMap | null = null;
+let channelCacheTimestamp = 0;
+const CHANNEL_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour — channels don't change mid-run
 
 /**
  * Fetch all Buffer channels and categorize by brand.
  * Uses known account names to sort channels into Ace Richie vs Containment Field.
  */
 export async function discoverChannels(): Promise<BrandChannelMap> {
-  if (cachedChannelMap) return cachedChannelMap;
+  if (cachedChannelMap && Date.now() - channelCacheTimestamp < CHANNEL_CACHE_TTL_MS) return cachedChannelMap;
 
   const orgId = process.env.BUFFER_ORG_ID || "69c613a244dbc563b3e05050";
   const query = `
@@ -478,6 +483,7 @@ export async function discoverChannels(): Promise<BrandChannelMap> {
   }
 
   cachedChannelMap = map;
+  channelCacheTimestamp = Date.now();
   console.log(
     `📡 [ContentEngine] Channel map cached: Ace Richie=${map.ace_richie.length} channels, ` +
     `Containment Field=${map.containment_field.length} channels`
@@ -490,6 +496,7 @@ export async function discoverChannels(): Promise<BrandChannelMap> {
 /** Force refresh channel cache (call if channels change) */
 export function invalidateChannelCache(): void {
   cachedChannelMap = null;
+  channelCacheTimestamp = 0;
 }
 
 // ── Supabase Helpers ──

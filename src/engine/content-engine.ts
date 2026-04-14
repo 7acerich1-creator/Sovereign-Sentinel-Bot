@@ -388,7 +388,7 @@ let ceLastBufferCall = 0;
 async function bufferGraphQL(query: string): Promise<any> {
   const token = getBufferToken();
 
-  for (let attempt = 0; attempt <= CE_BUFFER_MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt < CE_BUFFER_MAX_RETRIES; attempt++) {
     // ── Rate-limit pacing ──
     const now = Date.now();
     const wait = CE_BUFFER_MIN_INTERVAL_MS - (now - ceLastBufferCall);
@@ -876,11 +876,12 @@ export async function distributionSweep(): Promise<number> {
     const universalText = draft.universal_text || "";
     // CE-6: Parse existing buffer_results to skip channels that already succeeded (no duplicates on retry)
     const priorResults: string = draft.buffer_results || "";
-    const alreadySucceeded = new Set<string>();
+    const alreadyHandled = new Set<string>();
     for (const line of priorResults.split("\n")) {
-      if (line.startsWith("✅")) {
+      // Skip channels that already succeeded OR permanently failed (schema/400 errors)
+      if (line.startsWith("✅") || line.startsWith("🚫")) {
         const match = line.match(/\(([^)]+)\)/);
-        if (match) alreadySucceeded.add(match[1]);
+        if (match) alreadyHandled.add(match[1]);
       }
     }
 
@@ -897,9 +898,9 @@ export async function distributionSweep(): Promise<number> {
           continue;
         }
 
-        // CE-6: Skip channels that already succeeded in a prior sweep (prevents duplicates on retry)
-        if (alreadySucceeded.has(channel.id)) {
-          postResults.push(`✅ ${channel.service}(${channel.id}): Already posted (prior sweep)`);
+        // CE-6: Skip channels already succeeded or permanently failed in a prior sweep
+        if (alreadyHandled.has(channel.id)) {
+          postResults.push(`✅ ${channel.service}(${channel.id}): Already handled (prior sweep)`);
           continue;
         }
 
@@ -944,12 +945,9 @@ export async function distributionSweep(): Promise<number> {
             metadataBlock = `metadata: { instagram: { type: post, shouldShareToFeed: true } }`;
           }
 
-          // CE-6 FIX: Facebook requires explicit type: post or Buffer rejects with
-          // "Invalid post: Facebook posts require a type"
-          let facebookTypeBlock = "";
-          if (service === "facebook") {
-            facebookTypeBlock = `, type: post`;
-          }
+          // CE-6 REMOVED: Buffer dropped `type` from CreatePostInput schema (Apr 2026).
+          // Sending it causes "Field 'type' is not defined by type 'CreatePostInput'" 400.
+          const facebookTypeBlock = "";
 
           // CE-2 FIX: schedulingType enum is "automatic" or "notification" (NOT "scheduled")
           // "automatic" = Buffer picks the optimal time from its queue
@@ -985,19 +983,26 @@ export async function distributionSweep(): Promise<number> {
             postResults.push(`⚠️ ${channel.service}(${channel.id}): Unknown response`);
           }
         } catch (err: any) {
-          postResults.push(`❌ ${channel.service}(${channel.id}): ${err.message}`);
+          // Circuit breaker: 400/schema errors are permanent — mark with 🚫 so retries skip this channel
+          const isNonRetryable = err.message?.includes("not defined by type") ||
+            err.message?.includes("400") ||
+            err.message?.includes("GraphQL error");
+          const prefix = isNonRetryable ? "🚫" : "❌";
+          postResults.push(`${prefix} ${channel.service}(${channel.id}): ${err.message}`);
         }
       }
 
       // Update draft status
       const successCount = postResults.filter((r) => r.startsWith("✅")).length;
-      const failCount = postResults.filter((r) => r.startsWith("❌")).length;
+      const retryableFailCount = postResults.filter((r) => r.startsWith("❌")).length;
+      const permanentFailCount = postResults.filter((r) => r.startsWith("🚫")).length;
       const allResults = postResults.join("\n");
 
-      // CE-6: "partial" = some succeeded, some failed (retryable). "posted" = all possible channels hit.
+      // CE-6+CE-7: "partial" only if there are retryable failures. Permanent fails (🚫) don't trigger retry.
       let finalStatus = "failed";
-      if (successCount > 0 && failCount === 0) finalStatus = "posted";
-      else if (successCount > 0 && failCount > 0) finalStatus = "partial";
+      if (successCount > 0 && retryableFailCount === 0) finalStatus = "posted";
+      else if (successCount > 0 && retryableFailCount > 0) finalStatus = "partial";
+      else if (successCount === 0 && retryableFailCount === 0 && permanentFailCount > 0) finalStatus = "posted"; // all channels permanently failed = stop retrying
 
       await supabasePatch("content_engine_queue", draft.id, {
         status: finalStatus,

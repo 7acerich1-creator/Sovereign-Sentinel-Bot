@@ -96,7 +96,7 @@ async function bufferGraphQL(query: string, variables?: Record<string, unknown>)
   let attempt = 0;
   let backoffMs = 3000; // Initial backoff: 3s
 
-  while (attempt <= BUFFER_MAX_RETRIES) {
+  while (attempt < BUFFER_MAX_RETRIES) {
     // Enforce minimum interval between requests (rate limit evasion)
     const now = Date.now();
     const elapsed = now - lastBufferRequestAt;
@@ -369,13 +369,10 @@ export class SocialSchedulerPostTool implements Tool {
             metadataBlock = `metadata: ${buildGqlObj(metadataObj)}`;
           }
 
-          // ── FACEBOOK TYPE INJECTION ──
-          // Facebook posts require an explicit `type: "post"` field or the API rejects with
-          // "Invalid post: Facebook posts require a type". Inject it for Facebook channels.
-          let facebookTypeBlock = "";
-          if (channelService === "facebook") {
-            facebookTypeBlock = `, type: post`;
-          }
+          // ── FACEBOOK TYPE INJECTION — REMOVED ──
+          // Buffer dropped `type` from CreatePostInput schema (Apr 2026).
+          // Sending it causes 400: "Field 'type' is not defined by type 'CreatePostInput'"
+          const facebookTypeBlock = "";
 
           const query = `
             mutation CreatePost {

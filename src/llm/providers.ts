@@ -7,15 +7,15 @@ import { GoogleGenerativeAI, Content, Part, FunctionDeclarationSchema } from "@g
 import type { LLMProvider, LLMMessage, LLMOptions, LLMResponse, ToolDefinition, ToolCall } from "../types";
 
 // ── Rate-limit retry with exponential backoff ──
-// SESSION 31 FIX: Reduced MAX_RETRIES from 3→1 and capped retry-after to 5s.
-// ROOT CAUSE: fetchWithRetry's internal retry loop (up to 3 × 30s waits = 90s+)
-// was racing against FailoverLLM's 60s outer timeout. Groq's retry-after header
-// said 30s, so attempt 1 waited 30s, attempt 2 waited 30s → 60s total → timeout
-// fired BEFORE retries finished. Groq NEVER got a fair shot. Now: 1 retry with
-// max 5s wait = ~6s worst case, then fail fast to let FailoverLLM handle it.
-const MAX_RETRIES = 1;
+// SESSION 31 FIX (revised S55): Raised MAX_RETRIES to 2 and cap to 15s.
+// Original S31 reduced to 1 retry / 5s cap to avoid racing FailoverLLM's 60s timeout.
+// But Anthropic's retry-after headers are typically 15-20s for temporary rate limits.
+// Capping at 5s meant the retry always hit a STILL-limited endpoint → instant failure.
+// With 2 retries x 15s cap = 30s worst case, well within the 60s outer timeout.
+// Groq's 30s retry-after headers are STILL capped — they'd burn 30s of 60s budget.
+const MAX_RETRIES = 2;
 const BASE_DELAY_MS = 2000;
-const MAX_RETRY_AFTER_MS = 5000; // Cap server-requested delay — don't let a 30s retry-after burn the timeout
+const MAX_RETRY_AFTER_MS = 15000; // Cap server-requested delay — respects Anthropic's ~19s but blocks Groq's 30s+
 
 async function fetchWithRetry(url: string, init: RequestInit, providerName: string): Promise<Response> {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -355,12 +355,23 @@ export class OpenAICompatibleProvider implements LLMProvider {
     };
 
     // Convert tools to OpenAI format
+    // SESSION 55: Groq's Llama models choke on large tool payloads (35 tools = ~6K tokens
+    // of schema JSON). When Groq is the FALLBACK after Anthropic 429, this bloat causes
+    // instant failure. Cap tools at 12 for Groq to keep payload under its effective limit.
     if (options?.tools && options.tools.length > 0) {
-      body.tools = options.tools.map((t) => ({
+      const isGroq = this.name === "groq";
+      const GROQ_TOOL_CAP = 12;
+      const toolsToSend = isGroq && options.tools.length > GROQ_TOOL_CAP
+        ? options.tools.slice(0, GROQ_TOOL_CAP)
+        : options.tools;
+      if (isGroq && options.tools.length > GROQ_TOOL_CAP) {
+        console.warn(`⚠️ [Groq] Capped tools from ${options.tools.length} → ${GROQ_TOOL_CAP} to fit context limit`);
+      }
+      body.tools = toolsToSend.map((t) => ({
         type: "function",
         function: {
           name: t.name,
-          description: t.description,
+          description: (t.description || "").slice(0, 256), // Trim descriptions for Groq
           parameters: {
             type: "object",
             properties: Object.fromEntries(

@@ -306,13 +306,17 @@ async function main() {
   //      A single VidRush pipeline burns 30-50 calls. That leaves nothing for agents.
   //      Anthropic (claude-sonnet) costs ~$0.003/dispatch call (~700 tokens). $10 = ~3,300 calls = months of runway.
   //      Groq's strength is speed on bulk sequential work, not availability for on-demand agent tasks.
+  // SESSION 55: Give agents 1 primaryRetry so Anthropic gets a real second chance
+  // on 429s before falling to Groq. Previously 0 = one shot, instant failover.
+  // With fetchWithRetry now doing 2 internal retries x 15s cap, plus 1 FailoverLLM
+  // retry with 3s backoff, Anthropic gets ~35s of runway before Groq is attempted.
   const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
-    alfred: buildTeamLLM(["anthropic", "groq"], 0, false),    // Anthropic-first — dispatches + user chat
-    anita: buildTeamLLM(["anthropic", "groq"], 0, true),      // Anthropic-first — dispatches + user chat
-    sapphire: buildTeamLLM(["anthropic", "groq"]),             // Anthropic-first (unchanged)
-    veritas: buildTeamLLM(["anthropic", "groq"]),              // Anthropic-first (unchanged)
-    vector: buildTeamLLM(["anthropic", "groq"], 0, false),    // Anthropic-first — dispatches + user chat
-    yuki: buildTeamLLM(["anthropic", "groq"], 0, true),       // Anthropic-first — dispatches + user chat
+    alfred: buildTeamLLM(["anthropic", "groq"], 1, false),    // Anthropic-first — dispatches + user chat
+    anita: buildTeamLLM(["anthropic", "groq"], 1, true),      // Anthropic-first — dispatches + user chat
+    sapphire: buildTeamLLM(["anthropic", "groq"], 1),         // Anthropic-first (unchanged)
+    veritas: buildTeamLLM(["anthropic", "groq"], 1),          // Anthropic-first (unchanged)
+    vector: buildTeamLLM(["anthropic", "groq"], 1, false),    // Anthropic-first — dispatches + user chat
+    yuki: buildTeamLLM(["anthropic", "groq"], 1, true),       // Anthropic-first — dispatches + user chat
   };
 
   // Pipeline LLMs stay Groq-first — these are heavy batch jobs (25+ sequential calls)

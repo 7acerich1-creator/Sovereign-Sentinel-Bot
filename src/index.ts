@@ -72,6 +72,7 @@ import { textToSpeech } from "./voice/tts";
 // ── Proactive ──
 import { ProactiveBriefings } from "./proactive/briefings";
 import { HeartbeatSystem } from "./proactive/heartbeat";
+import { pollYouTubeComments } from "./proactive/youtube-comment-watcher";
 
 // ── Content Engine ──
 import { dailyContentProduction, distributionSweep, contentEngineStatus, discoverChannels, nukeBufferQueue } from "./engine/content-engine";
@@ -1613,6 +1614,27 @@ async function main() {
   });
 
   console.log("🌐 [LandingAnalytics] Scheduled: Daily 1:00AM CDT / 06:00 UTC");
+
+  // ── YouTube Comment Alert Layer — poll both channels every 5 min ──
+  // Session 58 (2026-04-14). Response to the @noemicsafordi signal that waited
+  // 2 days because no monitoring layer existed. See
+  // src/proactive/youtube-comment-watcher.ts and memory/project_first_audience_signal.md.
+  scheduler.add({
+    name: "YouTube Comment Alert Poll",
+    intervalMs: 5 * 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      if (!defaultChatId || !telegram) return;
+      try {
+        await pollYouTubeComments(telegram, defaultChatId);
+      } catch (err: any) {
+        console.error(`[YTCommentWatcher] poll failed: ${err.message}`);
+      }
+    },
+  });
+
+  console.log("🟡 [YTCommentWatcher] Scheduled: every 5min across both YT channels");
 
   // ── Stasis Detection — Daily Agent Self-Check (3:30 PM CDT = 20:30 UTC) ──
   const stasisFiredDate = { value: "" };

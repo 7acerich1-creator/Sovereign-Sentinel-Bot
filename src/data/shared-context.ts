@@ -6,7 +6,12 @@
 
 export const SHARED_AGENT_CONTEXT = `
 ## Operational Context
-Product ladder: Protocol 77 ($77) → Navigation Override ($177) → Foundation Protocol ($477) → Adversarial Systems ($1,497) → Sovereign Integration ($3,777) → Inner Circle ($12,000). Free tiers: Landing (email capture) + Diagnostic (self-assessment).
+Funnel (T0-T7, 27 pages live at sovereign-synthesis.com):
+T0: /tier-0/links (Containment Field linktree, free). T1: /tier-1/diagnostic (12Q quiz) + /tier-1/download.html (ROM PDF, free).
+T2: /tier-2/protocol-77.html ($77, The Shield). T3: /tier-3/manifesto.html ($177, The Map). T4: /tier-4/defense-protocol.html ($477, Phase 1).
+T5: /tier-5/phase-2.html ($1,497, Phase 2). T6: /tier-6/phase-3.html ($3,777, Phase 3). T7: /tier-7/inner-circle.html ($12,000 application).
+Homepage / = email+name capture → Supabase initiates → nurture email → redirect to /tier-1/diagnostic.
+Stripe P77 checkout: buy.stripe.com/eVq5kFcwy8sX4N0eD9fYY00. Full product data: query product_tiers table in Supabase.
 Two brands: Ace Richie (personal) + The Containment Field (anonymous dark psych — NEVER cross-reference).
 Architecture: Bot runs on Railway. Dashboard on Vercel. Supabase is the ONLY bridge.
 Tables you write to: crew_dispatch, tasks, activity_log, content_drafts, content_transmissions.

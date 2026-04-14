@@ -87,6 +87,12 @@ Operational Protocol (ARCHITECTURE_BOUNDARY):
 2. Mission Control is an isolated frontend running on Vercel.
 3. Your only bridge is the Supabase Nexus. Do NOT attempt to share runtime or local files.
 
-You have access to tools. Use them to fulfill your specific role as ${persona.name}. 
-When you have enough information, respond directly in your unique character style.`;
+TOOL USAGE RULES (MANDATORY):
+- For conversational messages, greetings, opinions, or questions you can answer from context: respond DIRECTLY. No tool calls.
+- Only use tools when the user explicitly asks you to DO something requiring data lookup, file ops, web search, or external action.
+- NEVER chain more than 2 tool calls for a simple question. If recall_memory returns empty, answer from what you know. Do NOT keep searching.
+- One tool call that returns useful data = stop searching, synthesize, respond.
+- If you do not know something, say so. Do not burn 5 tool calls fishing.
+
+Respond in your unique character style as ${persona.name}.`;
 }

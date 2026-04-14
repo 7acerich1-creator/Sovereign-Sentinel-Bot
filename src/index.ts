@@ -1283,7 +1283,7 @@ async function main() {
   // These dispatch tasks to crew agents via crew_dispatch, picked up by the dispatch poller.
   // Each fires once per day at a specific hour using the same minute-check pattern as briefings.
 
-  const autonomousFiredDates = { ytStatsFetch: "", vectorSweep: "", alfredScan: "", veritasDirective: "" };
+  const autonomousFiredDates = { ytStatsFetch: "", vectorSweep: "", alfredScan: "", veritasDirective: "", ctaAudit: "", landingAnalytics: "" };
 
   // YouTube Analytics — Daily Stats Fetch (9:00 AM CDT = 14:00 UTC — before Alfred trend scan)
   // Calls the fetch-youtube-stats Supabase Edge Function to pull real video stats from
@@ -1539,6 +1539,76 @@ async function main() {
   });
 
   console.log("⚡ [ContentEngine] Scheduled: Daily production (1:30PM CDT/18:30UTC), Distribution sweep (every 5min)");
+
+  // ── CTA Audit — Weekly Monday 10:00 AM CDT = 15:00 UTC (after YT stats fetch at 14:00) ──
+  // Scans top-performing videos for missing sovereign-landing CTAs.
+  // Writes proposals to cta_audit_proposals, DMs Architect on Telegram.
+  scheduler.add({
+    name: "YouTube CTA Audit — Weekly Monday",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      const now = new Date();
+      const hour = now.getUTCHours();
+      const minute = now.getUTCMinutes();
+      const dateKey = now.toDateString();
+      if (now.getUTCDay() === 1 && hour === 15 && minute >= 0 && minute <= 2 && autonomousFiredDates.ctaAudit !== dateKey) {
+        autonomousFiredDates.ctaAudit = dateKey;
+        console.log(`📋 [AutoOps] CTA audit firing for ${dateKey}`);
+        try {
+          const ctaTool = new YouTubeCTAAuditTool();
+          const result = await ctaTool.execute({ brand: "ace_richie", top_n: "5" });
+          console.log(`✅ [AutoOps] CTA audit complete: ${result.slice(0, 200)}`);
+        } catch (err: any) {
+          console.error(`[AutoOps] CTA audit failed: ${err.message}`);
+        }
+      }
+    },
+  });
+
+  console.log("📋 [CTAAudit] Scheduled: Weekly Monday 10:00AM CDT / 15:00 UTC");
+
+  // ── Landing Analytics — Daily 1:00 AM CDT = 06:00 UTC ──
+  // Calls fetch-landing-analytics Edge Function for Vercel Web Analytics.
+  // Requires VERCEL_API_TOKEN + VERCEL_PROJECT_ID as Supabase Edge Function secrets.
+  scheduler.add({
+    name: "Landing Analytics — Daily Fetch",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      const now = new Date();
+      const hour = now.getUTCHours();
+      const minute = now.getUTCMinutes();
+      const dateKey = now.toDateString();
+      if (hour === 6 && minute >= 0 && minute <= 2 && autonomousFiredDates.landingAnalytics !== dateKey) {
+        autonomousFiredDates.landingAnalytics = dateKey;
+        console.log(`🌐 [AutoOps] Landing analytics fetch firing for ${dateKey}`);
+        try {
+          const resp = await fetch("https://wzthxohtgojenukmdubz.supabase.co/functions/v1/fetch-landing-analytics", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          });
+          const data: any = await resp.json();
+          if (data.status === "ok") {
+            console.log(`✅ [AutoOps] Landing analytics: ${data.rows_written} rows written`);
+            if (defaultChatId && telegram) {
+              await telegram.sendMessage(defaultChatId,
+                `🌐 *Landing Analytics Updated*\nPage views (24h): ${data.sample?.page_views || 0}\nVisitors: ${data.sample?.visitors || 0}\nRows: ${data.rows_written}`,
+                { parseMode: "Markdown" });
+            }
+          } else {
+            console.error(`[AutoOps] Landing analytics returned error:`, data);
+          }
+        } catch (err: any) {
+          console.error(`[AutoOps] Landing analytics fetch failed: ${err.message}`);
+        }
+      }
+    },
+  });
+
+  console.log("🌐 [LandingAnalytics] Scheduled: Daily 1:00AM CDT / 06:00 UTC");
 
   // ── Stasis Detection — Daily Agent Self-Check (3:30 PM CDT = 20:30 UTC) ──
   const stasisFiredDate = { value: "" };

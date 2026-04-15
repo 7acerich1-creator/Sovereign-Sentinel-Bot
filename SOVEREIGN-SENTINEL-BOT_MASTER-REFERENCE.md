@@ -28,6 +28,32 @@
 
 *Written BY Mission Control sessions, READ BY Sentinel Bot sessions. Read at every session start. Most recent entries at TOP.*
 
+### 2026-04-14 — S57: Funnel Restructure SHIPPED (executed from Sentinel Bot cowork via Desktop Commander)
+
+**What shipped on the landing page repo side (`sovereign-synthesis.com`):**
+- `/` now serves the authority dossier (promoted from `/tier-0/links`) with new purpose subtext under STATUS: CONTAINED
+- `/diagnostic` captures email POST-result (not pre-result) via gated form; writes to Supabase `initiates` with new `dominant_pattern` field (A→approval-loop, B→overload-spiral, C→identity-lock)
+- `/about` publishes the canonical purpose statement in dossier aesthetic (Space Grotesk + Space Mono, gold CTA to `/diagnostic`)
+- `/manual` preserves the old root email-capture page (external links still resolve)
+- `/tier-0/links` → 307 → `/` (archived-link safety net)
+- Two commits: `f712fce` (initial) + `cd5685c` (fix: cleanUrls rewrite destination)
+
+**Supabase migration applied** on project `wzthxohtgojenukmdubz`: `ALTER TABLE initiates ADD COLUMN IF NOT EXISTS dominant_pattern text;`. Verified via `information_schema.columns`.
+
+**Verification (post-deploy, from workspace sandbox curl):**
+- `sovereign-synthesis.com/` → 307 → `www.sovereign-synthesis.com/` → 200 (apex-to-www is Vercel default DNS behavior, not a code choice)
+- `/diagnostic` → 200, body contains `SEND ME THE MANUAL` + `dominant_pattern`
+- `/about` → 200, body contains "never rewarded" + "formation"
+- `/manual` → 200, body is preserved old root
+- `/tier-0/links` → 307 → `/`
+
+**BOT-SIDE IMPLICATION:**
+- New lead source tag format: `diagnostic-{pattern-slug}`. If any bot tool queries `initiates` by source, update the filter to match this format.
+- `dominant_pattern` column now exists on `initiates` — the nurture sequence / email personalization can branch on A/B/C.
+- NO bot tool changes required — everything shipped is landing-page side.
+
+**Executed from:** Sentinel Bot cowork session, NOT MC cowork. Used Desktop Commander to reach Windows filesystem directly at `C:\Users\richi\Sovereign-Mission-Control\sovereign-landing\*`. New rule: `feedback_cross_folder_via_desktop_commander.md` in memory — never ask the Architect to switch cowork sessions when the target is outside the current mount.
+
 ### 2026-04-13 — MC Session: Content Intel 3-Panel Upgrade + fetch-landing-analytics Edge Function
 
 **What shipped on MC side:**

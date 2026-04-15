@@ -95,12 +95,26 @@ export interface StartPodOptions {
   image?: string;
   /** Override the attached network volume id. */
   networkVolumeId?: string;
+  /**
+   * If true, do NOT attach any network volume. Used by the Phase 2 contract
+   * test to isolate transport validation from the speaker/model volume region
+   * constraint (the volume is pinned to one datacenter; skipping it widens
+   * the pool of schedulable machines).
+   * Production pipelines leave this false — they need the speaker WAVs.
+   */
+  noVolume?: boolean;
   /** Override the GPU allowlist (first match wins). */
   gpuTypeIds?: readonly string[];
   /** Override container disk in GB. */
   containerDiskInGb?: number;
   /** Optional datacenter pin (matches the volume region). */
   dataCenterId?: string;
+  /**
+   * Override pod cloud class. SECURE = RunPod's vetted hosts (default, higher
+   * SLA). COMMUNITY = third-party hosts (wider capacity, cheaper, used by the
+   * contract test when SECURE is congested).
+   */
+  cloudType?: "SECURE" | "COMMUNITY";
   /** Pod name prefix for RunPod UI. Default: "sovereign-worker". */
   namePrefix?: string;
   /** Extra env vars to forward into the pod (overrides Railway env on conflict). */
@@ -161,21 +175,30 @@ export async function startPod(options: StartPodOptions = {}): Promise<PodHandle
   // enforce presence here because the worker fails closed without it.
   forwardedEnv["POD_WORKER_TOKEN"] = workerToken;
 
+  const cloudType = options.cloudType ?? "SECURE";
   const createBody: Record<string, unknown> = {
     name: `${namePrefix}-${shortTimestamp()}`,
     imageName: image,
-    cloudType: "SECURE",
+    cloudType,
     gpuTypeIds: Array.from(gpuTypeIds),
     gpuCount: 1,
     containerDiskInGb,
     volumeInGb: 0,
     ports: [`${DEFAULT_WORKER_PORT}/http`],
     env: forwardedEnv,
-    networkVolumeId,
-    volumeMountPath: DEFAULT_VOLUME_MOUNT_PATH,
     supportPublicIp: false,
   };
-  if (dataCenterId) createBody["dataCenterId"] = dataCenterId;
+  // Network volume is optional — Phase 2 contract test runs without it to
+  // avoid being pinned to a single datacenter (volume region ⇒ scheduler
+  // constraint). Production pipelines always attach the volume to reach the
+  // seeded speaker WAVs + model cache.
+  if (!options.noVolume) {
+    createBody["networkVolumeId"] = networkVolumeId;
+    createBody["volumeMountPath"] = DEFAULT_VOLUME_MOUNT_PATH;
+  }
+  // RunPod REST expects `dataCenterIds` (plural array), not `dataCenterId`.
+  // This was a pre-existing bug surfaced by the S65 contract-test probe.
+  if (dataCenterId) createBody["dataCenterIds"] = [dataCenterId];
 
   const created = await runpodApi<RunPodPod>("POST", "/pods", apiKey, {
     body: createBody,
@@ -199,7 +222,7 @@ export async function startPod(options: StartPodOptions = {}): Promise<PodHandle
   };
 
   console.log(
-    `\u{1F680} [RunPod] pod ${podId} created — image=${image} gpu=${gpuTypeIds[0]} volume=${networkVolumeId}`,
+    `\u{1F680} [RunPod] pod ${podId} created — image=${image} gpu=${gpuTypeIds[0]} cloud=${cloudType} volume=${options.noVolume ? "<none>" : networkVolumeId}`,
   );
   return handle;
 }

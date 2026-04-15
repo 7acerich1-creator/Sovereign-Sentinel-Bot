@@ -167,7 +167,41 @@ async function main(): Promise<void> {
     },
     // Idle window = 0 → stop pod the moment we return. Don't leave a
     // warm-window charge running after a test.
-    { idleWindowMs: 0 },
+    //
+    // startPodOptions: the Phase 1 skeleton worker has ZERO dependency on
+    // the speaker/model network volume or on an 80GB GPU. By passing
+    // noVolume + broader GPU allowlist + COMMUNITY cloud we widen the pool
+    // of schedulable machines enough to survive a transient SECURE/US-KS-2
+    // capacity dip (S65 observed HTTP 500 "no instances available" on the
+    // locked H100/A100-only SECURE path). Production pipelines at Phase 4+
+    // still use the default H100/A100 + SECURE + volume path because they
+    // actually need the GPU and the seeded speaker WAVs.
+    {
+      idleWindowMs: 0,
+      startPodOptions: {
+        noVolume: true,
+        cloudType: "SECURE",
+        gpuTypeIds: [
+          // Broad allowlist so the contract test can survive regional
+          // capacity dips in the H100/A100 pool. SECURE hosts also
+          // reliably pull from ghcr.io, which we empirically confirmed
+          // COMMUNITY hosts often refuse for this ~5GB image.
+          "NVIDIA H100 80GB HBM3",
+          "NVIDIA H100 PCIe",
+          "NVIDIA A100-SXM4-80GB",
+          "NVIDIA A100 80GB PCIe",
+          "NVIDIA RTX A6000",
+          "NVIDIA RTX A5000",
+          "NVIDIA RTX A4000",
+          "NVIDIA GeForce RTX 4090",
+          "NVIDIA GeForce RTX 3090",
+          "NVIDIA L40",
+          "NVIDIA L40S",
+          "NVIDIA L4",
+        ],
+        containerDiskInGb: 50,
+      },
+    },
   );
 
   // Belt-and-suspenders: even though idleWindowMs=0 schedules an immediate

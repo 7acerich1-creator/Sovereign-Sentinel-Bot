@@ -28,6 +28,31 @@
 
 *Written BY Mission Control sessions, READ BY Sentinel Bot sessions. Read at every session start. Most recent entries at TOP.*
 
+### 2026-04-15 — S62: Pod Foundation CLOSED (Phase 1 ☑; image published + speaker WAVs on volume)
+
+**What shipped on the bot side:**
+- `pod/Dockerfile` patched to resolve Ubuntu-22.04 distutils-`blinker` conflict (pre-install with `--ignore-installed` before `pip install -r requirements.txt`). Commit `57d786f`.
+- GitHub Actions `.github/workflows/pod-build.yml` (shipped S62 in `72133f4`) now green on run `24435104242` (10m53s). Image published to GHCR:
+  - `ghcr.io/7acerich1-creator/sovereign-sentinel-pod:latest`
+  - `ghcr.io/7acerich1-creator/sovereign-sentinel-pod:sha-57d786f`
+  - `ghcr.io/7acerich1-creator/sovereign-sentinel-pod:57d786fb0d6a8ad31b3871f1ae50f1048f91eebf`
+  - Manifest digest: `sha256:00212d098b3f6516614ccee2a57319fb8579a1f41442422828ca2cf83ccfd9eb`
+
+**Infrastructure state after this session:**
+- RunPod network volume `gai851lcfw` (50GB, US-KS-2) holds the XTTSv2 speaker references:
+  - `/runpod-volume/speakers/ace_ref.wav` (661578B, sha256 `8dec3af0362287a7…`)
+  - `/runpod-volume/speakers/tcf_ref.wav` (661578B, sha256 `524f9e333d248e03…`)
+- Railway env vars canonicalized: `XTTS_SPEAKER_WAV_ACE=/runpod-volume/speakers/ace_ref.wav`, `XTTS_SPEAKER_WAV_TCF=/runpod-volume/speakers/tcf_ref.wav`.
+- **Stale Railway vars PURGED:** `XTTS_SERVER_URL` (pointed to long-dead pod `a2shyagwexfhon`) and `RUNPOD_POD_ID` (same dead pod). Production TTS has been falling through the chain to Edge/ElevenLabs for ~12 sessions with no one flagging it. Post-Phase 2 wiring, TTS routing will invoke a fresh pod per job instead of a long-lived `RUNPOD_POD_ID`.
+- **Pod count after this session: 0.** Three pods terminated during cleanup — temp upload pod `n1tlik82n7phow`, orphan `org42k0erve9kr`, forgotten `1mcle290zo4dnc`. Total session spend on provisioning + upload ≈ $0.08.
+
+**Known hazard captured (reference for future sessions):**
+- `ssh.exe` on Windows writes directly to the console handle, NOT stdout — so Desktop Commander shells (and any MCP that captures stdout) cannot read ssh output, even from `ssh -V`. Workaround used this session: paramiko (pure-Python SSH + SFTP). If future sessions need interactive SSH to a pod, use paramiko, not ssh.exe.
+
+**Phase 1 closed. Next session opens Phase 2 Task 2.1** — `src/pod/runpod-client.ts` against the now-live image at `ghcr.io/7acerich1-creator/sovereign-sentinel-pod:latest` and volume `gai851lcfw`.
+
+---
+
 ### 2026-04-14 — S57: Funnel Restructure SHIPPED (executed from Sentinel Bot cowork via Desktop Commander)
 
 **What shipped on the landing page repo side (`sovereign-synthesis.com`):**

@@ -2,7 +2,11 @@
 // Shared operational context — injected into every agent's system prompt.
 // KEEP THIS UNDER 1,500 CHARS. Move details to protocols/Pinecone.
 // Session 27: Extracted from 10-12K shared tail that was bloating every agent.
+// Session 66 (Phase 3 Task 3.2): BRAND_NICHE_ALLOWLIST exported SEPARATELY
+// below so the intake-layer guard does NOT bloat the shared agent prompt.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+import type { Brand } from "../pod/types";
 
 export const SHARED_AGENT_CONTEXT = `
 ## Operational Context
@@ -37,3 +41,95 @@ Tables you write to: crew_dispatch, tasks, activity_log, content_drafts, content
 - call read_protocols before content tasks for niche-specific directives.
 - Stasis alert: if no tasks for 48h, flag it. Max 1 proactive msg/24h.
 `.trim();
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PHASE 3 Task 3.2 — Brand Niche Allowlist (INTAKE LAYER)
+//
+// Single source of truth for which niches each brand is permitted to produce
+// content in. Enforced at Alfred seed-generation time (Task 3.3) and hard-
+// failed at pipeline entry (Task 3.4 BrandNicheViolation).
+//
+// DO NOT embed this in SHARED_AGENT_CONTEXT — token economy rule. Personas
+// that need the list pull it on demand via nicheAllowlistLine(brand).
+//
+// Why the split: S48 Brand Routing Matrix (commits 67fe042 + 7761363) fixed
+// the RENDER layers (aesthetic/terminal/thumbnail/captions/stingers/TTS).
+// It did NOT fix Alfred's shared seed producing "burnout" for Ace Richie.
+// This allowlist is the intake-side fix.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/** Niches Ace Richie 77 (personal brand, sovereign architect) is allowed to produce. */
+export const ACE_RICHIE_NICHES = [
+  "sovereignty",
+  "authority",
+  "architecture",
+  "system-mastery",
+  "wealth-frequency",
+] as const;
+
+/** Niches The Containment Field (anonymous dark-psych top-of-funnel) is allowed to produce. */
+export const CONTAINMENT_FIELD_NICHES = [
+  "burnout",
+  "dark-psychology",
+  "containment",
+  "manipulation-exposed",
+  "pattern-interrupt",
+] as const;
+
+/** Allowed-niche string literal unions for type-level brand safety. */
+export type AceRichieNiche = (typeof ACE_RICHIE_NICHES)[number];
+export type ContainmentFieldNiche = (typeof CONTAINMENT_FIELD_NICHES)[number];
+export type AllowedNiche = AceRichieNiche | ContainmentFieldNiche;
+
+/** Canonical allowlist mapping, keyed by the Phase 4 Brand contract. */
+export const BRAND_NICHE_ALLOWLIST: Readonly<Record<Brand, readonly string[]>> = {
+  ace_richie: ACE_RICHIE_NICHES,
+  containment_field: CONTAINMENT_FIELD_NICHES,
+} as const;
+
+/**
+ * Normalize a free-form niche string to the kebab-case form used in the
+ * allowlists. Alfred may emit "wealth frequency" or "Wealth_Frequency" — the
+ * guard must treat those as the canonical "wealth-frequency".
+ */
+export function normalizeNiche(niche: string): string {
+  return niche
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+/**
+ * Returns the permitted niches for a brand. Throws if an unknown brand is
+ * passed in — a Brand-typed caller cannot hit this, but runtime payloads
+ * (e.g. from Supabase) are strings, so the throw is a tripwire.
+ */
+export function getAllowedNiches(brand: Brand): readonly string[] {
+  const allowed = BRAND_NICHE_ALLOWLIST[brand];
+  if (!allowed) {
+    throw new Error(`getAllowedNiches: unknown brand "${brand}"`);
+  }
+  return allowed;
+}
+
+/** Boolean gate — true when niche (after normalization) is permitted for brand. */
+export function isAllowedNiche(brand: Brand, niche: string): boolean {
+  const normalized = normalizeNiche(niche);
+  return getAllowedNiches(brand).includes(normalized);
+}
+
+/**
+ * Formats the brand allowlist as a one-line constraint string for injection
+ * into a persona prompt on demand (Alfred seed generation). Kept concise so
+ * callers that inline it do not blow the per-persona token budget.
+ *
+ * Example output:
+ *   "ACE_RICHIE allowed niches: sovereignty | authority | architecture | ..."
+ */
+export function nicheAllowlistLine(brand: Brand): string {
+  const niches = getAllowedNiches(brand).join(" | ");
+  return `${brand.toUpperCase()} allowed niches: ${niches}`;
+}

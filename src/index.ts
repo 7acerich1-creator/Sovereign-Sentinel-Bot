@@ -77,6 +77,30 @@ import { pollYouTubeComments } from "./proactive/youtube-comment-watcher";
 // ── Content Engine ──
 import { dailyContentProduction, distributionSweep, contentEngineStatus, discoverChannels, nukeBufferQueue } from "./engine/content-engine";
 
+// ── Brand Niche Allowlist (Phase 3 Task 3.2) ──
+// Intake-layer guard: Alfred's seeds and the pipeline entry both consume these
+// helpers to keep burnout-on-Ace-Richie (and sovereignty-on-TCF) from ever
+// reaching the render layer. The S48 Brand Routing Matrix fixed RENDER; this
+// fixes INTAKE. See src/data/shared-context.ts for the canonical allowlist.
+import {
+  ACE_RICHIE_NICHES,
+  CONTAINMENT_FIELD_NICHES,
+  normalizeNiche,
+  isAllowedNiche,
+  nicheAllowlistLine,
+} from "./data/shared-context";
+
+// ── Niche Cooldown (Phase 3 Task 3.5) ──
+// 30-day hard / 14-day soft cooldown ledger. Alfred consumes the snapshot at
+// directive-build time so he sees which niches are already spent; the bridge
+// calls recordNicheRun AFTER a seed successfully enters the factory (so an
+// aborted/rejected seed never burns a cooldown).
+import {
+  getNicheCooldownSnapshot,
+  cooldownSummaryLine,
+  recordNicheRun,
+} from "./tools/niche-cooldown";
+
 // ── Plugins ──
 import { PluginManager, MemoryTool, RecallTool } from "./plugins/system";
 
@@ -711,32 +735,84 @@ async function main() {
   // ── Session 47c: Alfred Native Seed Generator directive (shared) ──
   // Single source of truth for Alfred's daily scan directive. Used by both the 15:05 UTC
   // scheduler and the /alfred Telegram force-trigger command. Edit once, effect both.
-  const ALFRED_DAILY_SCAN_DIRECTIVE =
-    "DAILY NATIVE SEED GENERATION — You are the autonomous Native Seed Generator for the Sovereign Synthesis machine. " +
+  //
+  // Phase 3 Task 3.3 (2026-04-15): DUAL-SEED CONTRACT.
+  // Alfred now emits TWO brand-bound seeds per run, one per brand, each constrained
+  // to the brand's niche allowlist (src/data/shared-context.ts). This closes the
+  // Alfred-shared-seed cross-contamination bug where Ace Richie 77 was producing
+  // burnout-themed content (which belongs exclusively to The Containment Field).
+  // S48 Brand Routing Matrix fixed RENDER layers; this fixes INTAKE.
+  //
+  // Phase 3 Task 3.5 (2026-04-15): COOLDOWN INJECTION.
+  // This is now an async builder — at every dispatch it queries niche_last_run
+  // and injects two per-brand cooldown summaries so Alfred can actively steer
+  // AWAY from recently-used niches. Static-const the directive and Alfred would
+  // be blind to the ledger, leading to same-niche-two-days-in-a-row drift.
+  async function buildAlfredDailyScanDirective(): Promise<string> {
+    // Query both brands in parallel; each call is graceful-degrading (returns
+    // permissive "all fresh" snapshot if Supabase is unreachable).
+    const [aceSnap, tcfSnap] = await Promise.all([
+      getNicheCooldownSnapshot("ace_richie"),
+      getNicheCooldownSnapshot("containment_field"),
+    ]);
+    const aceCooldownLine = cooldownSummaryLine(aceSnap);
+    const tcfCooldownLine = cooldownSummaryLine(tcfSnap);
+    return STATIC_ALFRED_DIRECTIVE_HEAD +
+      "\n\nCOOLDOWN LEDGER (live — respect this, it is not advisory):\n" +
+      `  • ${aceCooldownLine}\n` +
+      `  • ${tcfCooldownLine}\n` +
+      "  Rules: prefer `fresh` niches. Only use `relax` niches if every `fresh` slot for that brand is empty. " +
+      "NEVER pick a `blocked` niche — the factory will reject it and the day's run will abstain. " +
+      "If the only unblocked option for a brand is a repeat of the last 48h, pick a different niche from the `fresh` set.\n\n" +
+      STATIC_ALFRED_DIRECTIVE_TAIL;
+  }
+
+  const STATIC_ALFRED_DIRECTIVE_HEAD =
+    "DAILY DUAL-SEED GENERATION — You are the autonomous Native Seed Generator for the Sovereign Synthesis machine. " +
     "DO NOT search the web. DO NOT look for YouTube URLs. DO NOT cite competitors. " +
     "Your job is to PROJECT the Sovereign frequency outward, not to react to the simulation's noise.\n\n" +
-    "Generate ONE single, high-impact, highly specific original thesis for today's faceless video. " +
-    "It must be a complete, standalone concept — not a niche label, not a topic, not a list. A thesis statement plus a 1-2 sentence framing.\n\n" +
-    "TARGET DOMAINS (rotate across days; pick the one with the strongest psychic charge today):\n" +
-    "• Corporate burnout & the high-performer trapdoor — quiet quitting, escape velocity from W-2 servitude, the burnout-to-sovereignty pivot.\n" +
-    "• Covert psychological manipulation — dark triad tactics in dating/workplace/family, narcissist defense architecture, gray rock as a frequency shield.\n" +
-    "• Dopamine, frame control, and masculine recalibration — monk mode, cold exposure, the self-discipline operating system.\n" +
-    "• Spiritual awakening / simulation theory / reality shifting — the Firmware Update, escape velocity, biological drag, the painting dad metaphor.\n" +
-    "• Sovereign individual / one-person empire — the architecture of the $1M solo business, digital nomad without the cope.\n\n" +
-    "FOR THE THESIS YOU PICK, USE NICHE-CHARGED LANGUAGE so downstream classification routes the right color grade and brand voice. " +
-    "Embed at least 3 keywords from the chosen domain (e.g., 'narcissist', 'manipulation', 'dark psychology' for the dark_psychology lane; 'burnout', 'corporate', 'recovery' for the burnout lane).\n\n" +
-    "OUTPUT CONTRACT (mandatory — your response is parsed by regex):\n" +
-    "1. A short brief to the Architect (1-3 sentences explaining why this thesis hits today).\n" +
-    "2. The hook line in 4-Part Copy Architecture (GLITCH → PIVOT → BRIDGE → ANCHOR).\n" +
-    "3. The final line MUST be exactly: PIPELINE_IDEA: <your one-sentence thesis here>\n" +
-    "Example: PIPELINE_IDEA: The corporate ladder is a Faraday cage — every promotion thickens the walls. The high-performer's burnout is not failure, it's the system finally hitting resonance frequency and breaking its own shielding.\n\n" +
-    "If for any reason you cannot generate a thesis today, write: PIPELINE_IDEA: NONE\n" +
-    "Your PIPELINE_IDEA line is the primary deliverable — VidRush ingests it as a raw_idea and bypasses Whisper entirely.\n\n" +
+    "BRAND SEPARATION IS NON-NEGOTIABLE. You generate TWO distinct theses today — one per brand — " +
+    "each constrained to that brand's niche allowlist. A single shared thesis is a hard failure.\n\n" +
+    "BRAND 1 — ACE RICHIE 77 (@ace_richie77)\n" +
+    "  Voice: sovereign architect, builder of systems, wealth-frequency, authority. Never victim-coded.\n" +
+    `  ${nicheAllowlistLine("ace_richie")}\n` +
+    "  Allowed topics: architecture of the one-person empire, monk mode / frame control, sovereign wealth mechanics, " +
+    "system mastery, the Firmware Update, escape velocity from consensus reality.\n" +
+    "  FORBIDDEN for Ace Richie: burnout, manipulation-exposed, narcissist defense, dark psychology, recovery framing. " +
+    "Those belong to Brand 2.\n\n" +
+    "BRAND 2 — THE CONTAINMENT FIELD (@TheContainmentField)\n" +
+    "  Voice: anonymous, dark-positioned, pattern-interrupt, exposes covert manipulation. Feeder channel.\n" +
+    `  ${nicheAllowlistLine("containment_field")}\n` +
+    "  Allowed topics: corporate burnout & the high-performer trapdoor, dark triad tactics, gray rock as frequency shield, " +
+    "narcissist architecture, the burnout-to-sovereignty pivot (framed from inside the burnout, not the sovereignty side).\n" +
+    "  FORBIDDEN for Containment Field: sovereignty gospel, wealth-frequency, 'you are the architect' language. " +
+    "Those belong to Brand 1.";
+
+  // The TAIL holds the OUTPUT CONTRACT + tool-usage contract. The async builder
+  // inserts the live cooldown ledger between HEAD and TAIL so Alfred sees the
+  // spend-state RIGHT after he's been reminded of each brand's lane.
+  const STATIC_ALFRED_DIRECTIVE_TAIL =
+    "EACH thesis must be a complete, standalone concept — thesis statement plus 1-2 sentence framing — " +
+    "not a niche label, not a topic, not a list. Embed at least 3 keywords from that brand's niche lane so downstream " +
+    "classification routes the right color grade and brand voice.\n\n" +
+    "OUTPUT CONTRACT (mandatory — your response is parsed by regex; failure = pipeline halt):\n" +
+    "1. A short brief to the Architect (2-4 sentences explaining why each thesis hits today and how the two contrast).\n" +
+    "2. The hook line for each brand in 4-Part Copy Architecture (GLITCH → PIVOT → BRIDGE → ANCHOR). Label them [ACE] and [TCF].\n" +
+    "3. Two final lines, each with format: `PIPELINE_IDEA_<BRAND>: <niche-tag> :: <thesis sentence>`\n" +
+    "   • `PIPELINE_IDEA_ACE: wealth-frequency :: <thesis>` — niche MUST be one of Ace Richie's allowed niches above.\n" +
+    "   • `PIPELINE_IDEA_TCF: burnout :: <thesis>` — niche MUST be one of The Containment Field's allowed niches above.\n" +
+    "   • The `::` separator is literal. No quotes, no markdown, no trailing punctuation after the thesis.\n\n" +
+    "EXAMPLE (for shape only — do NOT copy the content):\n" +
+    "  PIPELINE_IDEA_ACE: architecture :: The one-person empire is not a hustle, it's a lattice — every system you build subtracts a boss from your life until there's only you and the code.\n" +
+    "  PIPELINE_IDEA_TCF: burnout :: Your Monday dread isn't laziness — it's your nervous system correctly identifying the building as a Faraday cage disguised as a career.\n\n" +
+    "If for any reason you cannot generate a thesis for one brand, write `PIPELINE_IDEA_ACE: NONE` (or `_TCF: NONE`). " +
+    "Both NONE means the autonomous scan abstains today — preferable to a contaminated seed.\n\n" +
     "CRITICAL — TOOL USAGE CONTRACT:\n" +
     "• DO NOT call the crew_dispatch tool. Your FINAL assistant text message IS your deliverable.\n" +
-    "• The bridge parses PIPELINE_IDEA from your final text response. If you put it inside a crew_dispatch result field, it WILL be lost and the pipeline will not fire.\n" +
-    "• You may call read_protocols ONCE if you need to refresh context, but after that your next output must be the final text containing the PIPELINE_IDEA line.\n" +
-    "• No tool calls in your final turn. Just the brief, the 4-part hook, and the PIPELINE_IDEA line.";
+    "• The bridge parses PIPELINE_IDEA_ACE and PIPELINE_IDEA_TCF from your final text response. " +
+    "If you put them inside a crew_dispatch result field, they WILL be lost and the pipeline will not fire.\n" +
+    "• You may call read_protocols ONCE if you need to refresh context, but after that your next output must be the final text containing both PIPELINE_IDEA_* lines.\n" +
+    "• No tool calls in your final turn. Just the brief, the two 4-part hooks, and the two PIPELINE_IDEA_* lines.";
 
   // ── Command Handler ──
   async function handleCommand(message: Message): Promise<boolean> {
@@ -1142,7 +1218,8 @@ async function main() {
             priority: 1,
             chat_id: message.chatId,
             payload: {
-              directive: ALFRED_DAILY_SCAN_DIRECTIVE,
+              // Phase 3 Task 3.5: live cooldown ledger injected at dispatch time.
+              directive: await buildAlfredDailyScanDirective(),
               triggered_at: new Date().toISOString(),
               scan_type: "manual_override",
               trigger_source: "telegram_/alfred",
@@ -1424,9 +1501,10 @@ async function main() {
                 // the Sovereign Synthesis framework and hands it to VidRush as a raw_idea. This
                 // severs the pipeline's dependency on external URL availability and removes the
                 // yt-dlp / Whisper failure surface entirely.
-                // Session 47c: directive text lives at module-level const ALFRED_DAILY_SCAN_DIRECTIVE
+                // Session 47c: directive text lives at module-level buildAlfredDailyScanDirective()
                 // so /alfred force-trigger and the 15:05 UTC scheduler emit identical payloads.
-                directive: ALFRED_DAILY_SCAN_DIRECTIVE,
+                // Phase 3 Task 3.5: live cooldown ledger injected per-dispatch (async build).
+                directive: await buildAlfredDailyScanDirective(),
                 triggered_at: new Date().toISOString(),
                 scan_type: "daily",
               },
@@ -3296,69 +3374,138 @@ async function main() {
                   console.error(`[Pipeline] Handoff error for ${agentName}: ${handoffErr.message}`);
                 }
 
-                // ── AUTO-PIPELINE TRIGGER: Alfred's daily NATIVE SEED → VidRush ──
+                // ── AUTO-PIPELINE TRIGGER: Alfred's daily NATIVE SEEDS → VidRush ──
                 // SESSION 47b — NATIVE SEED GENERATOR PIVOT.
-                // Alfred no longer scrapes URLs. He generates an original thesis as a raw_idea.
-                // The bridge parses `PIPELINE_IDEA: <thesis>` from his response and feeds it
-                // directly into VidRush via the rawIdea option, which bypasses Step 1 (yt-dlp)
-                // and Step 2 (Whisper) entirely. The Faceless Factory builds the narrative
-                // blueprint from the raw thesis.
+                // Phase 3 Task 3.3 (2026-04-15) — DUAL-SEED CONTRACT.
+                // Alfred emits TWO brand-bound seeds per run with format:
+                //   PIPELINE_IDEA_ACE: <niche> :: <thesis>
+                //   PIPELINE_IDEA_TCF: <niche> :: <thesis>
+                // The bridge parses both, validates each niche against the brand's allowlist
+                // (shared-context.ts BRAND_NICHE_ALLOWLIST), and feeds each brand its OWN
+                // seed + niche into executeFullPipeline. Closes the cross-contamination bug
+                // where Ace Richie 77 was receiving burnout-themed seeds (S48 matrix fixed
+                // render, this fixes intake).
                 if (agentName === "alfred" && task.task_type === "daily_trend_scan") {
                   try {
-                    // Greedy match to end of line — captures the full thesis sentence Alfred emits.
-                    const pipelineIdeaMatch = response.match(/PIPELINE_IDEA:\s*([^\r\n]+?)\s*$/m);
-                    const rawIdeaText = pipelineIdeaMatch ? pipelineIdeaMatch[1].trim() : "";
-                    const ideaIsValid = rawIdeaText.length > 0 && rawIdeaText.toUpperCase() !== "NONE";
+                    // Dual-brand regex parser. Niche + thesis separated by literal `::`.
+                    // Each pattern is anchored to a line; greedy to end-of-line for thesis.
+                    const aceMatch = response.match(/PIPELINE_IDEA_ACE:\s*([^\r\n:]+?)\s*::\s*([^\r\n]+?)\s*$/m);
+                    const tcfMatch = response.match(/PIPELINE_IDEA_TCF:\s*([^\r\n:]+?)\s*::\s*([^\r\n]+?)\s*$/m);
 
-                    if (ideaIsValid) {
-                      // Synthetic identifier for jobId / queue dedupe — derived from idea text hash.
-                      const ideaHash = require("crypto")
-                        .createHash("sha1")
-                        .update(rawIdeaText)
-                        .digest("hex")
-                        .slice(0, 10);
-                      const syntheticId = `raw_${ideaHash}`;
-                      const ideaPreview = rawIdeaText.length > 120 ? rawIdeaText.slice(0, 120) + "…" : rawIdeaText;
+                    // Also tolerate "PIPELINE_IDEA_ACE: NONE" (no thesis) to abstain per-brand.
+                    const aceNoneMatch = response.match(/PIPELINE_IDEA_ACE:\s*NONE\s*$/m);
+                    const tcfNoneMatch = response.match(/PIPELINE_IDEA_TCF:\s*NONE\s*$/m);
 
-                      // Session 47d: Read brand_override from the task payload. Set by /alfred
-                      // when the Architect appends `ace only` / `tcf only` to the Telegram command.
-                      // Unset (undefined) → default dual-brand fan-out, matching the autonomous
-                      // daily cron behavior (which never sets brand_override).
-                      const brandOverrideRaw = (task.payload as any)?.brand_override;
-                      const autoBrandOverride: "ace_richie" | "containment_field" | undefined =
-                        brandOverrideRaw === "ace_richie" || brandOverrideRaw === "containment_field"
-                          ? brandOverrideRaw
-                          : undefined;
-                      const autoMode = autoBrandOverride === "ace_richie" ? "ACE RICHIE only"
-                        : autoBrandOverride === "containment_field" ? "THE CONTAINMENT FIELD only"
-                        : "Dual-brand";
-                      console.log(`🌱 [AutoPipeline] Alfred generated native seed [${syntheticId}] [${autoMode}]: "${ideaPreview}"`);
+                    type Seed = { brand: "ace_richie" | "containment_field"; niche: string; thesis: string };
+                    const seeds: Seed[] = [];
+                    const rejections: string[] = [];
+
+                    // ── ACE seed ingest ──
+                    if (aceMatch && !aceNoneMatch) {
+                      const rawNiche = aceMatch[1].trim();
+                      const thesis = aceMatch[2].trim();
+                      const normalized = normalizeNiche(rawNiche);
+                      if (thesis.length === 0) {
+                        rejections.push(`ACE: empty thesis`);
+                      } else if (!isAllowedNiche("ace_richie", rawNiche)) {
+                        rejections.push(`ACE: niche "${rawNiche}" (normalized "${normalized}") not in Ace Richie allowlist [${ACE_RICHIE_NICHES.join("|")}]`);
+                      } else {
+                        seeds.push({ brand: "ace_richie", niche: normalized, thesis });
+                      }
+                    } else if (aceNoneMatch) {
+                      console.log(`🔍 [AutoPipeline] Alfred abstained on Ace Richie (PIPELINE_IDEA_ACE: NONE)`);
+                    } else {
+                      rejections.push(`ACE: missing PIPELINE_IDEA_ACE line`);
+                    }
+
+                    // ── TCF seed ingest ──
+                    if (tcfMatch && !tcfNoneMatch) {
+                      const rawNiche = tcfMatch[1].trim();
+                      const thesis = tcfMatch[2].trim();
+                      const normalized = normalizeNiche(rawNiche);
+                      if (thesis.length === 0) {
+                        rejections.push(`TCF: empty thesis`);
+                      } else if (!isAllowedNiche("containment_field", rawNiche)) {
+                        rejections.push(`TCF: niche "${rawNiche}" (normalized "${normalized}") not in Containment Field allowlist [${CONTAINMENT_FIELD_NICHES.join("|")}]`);
+                      } else {
+                        seeds.push({ brand: "containment_field", niche: normalized, thesis });
+                      }
+                    } else if (tcfNoneMatch) {
+                      console.log(`🔍 [AutoPipeline] Alfred abstained on Containment Field (PIPELINE_IDEA_TCF: NONE)`);
+                    } else {
+                      rejections.push(`TCF: missing PIPELINE_IDEA_TCF line`);
+                    }
+
+                    // Session 47d: brand_override lets /alfred [ace only | tcf only] constrain
+                    // the fan-out. Filter seeds after parse so forbidden combos still raise.
+                    const brandOverrideRaw = (task.payload as any)?.brand_override;
+                    const autoBrandOverride: "ace_richie" | "containment_field" | undefined =
+                      brandOverrideRaw === "ace_richie" || brandOverrideRaw === "containment_field"
+                        ? brandOverrideRaw
+                        : undefined;
+                    const activeSeeds = autoBrandOverride
+                      ? seeds.filter(s => s.brand === autoBrandOverride)
+                      : seeds;
+
+                    if (rejections.length > 0) {
+                      console.log(`⚠️ [AutoPipeline] Seed validation rejections: ${rejections.join(" | ")}`);
                       try {
                         await channel.sendMessage(
                           task.chat_id || defaultChatId,
-                          `🌱 *NATIVE SEED INGESTED*\nAlfred generated:\n_"${ideaPreview}"_\n\n${autoMode} — VidRush bypassing Whisper, feeding directly into Faceless Factory...`,
+                          `⚠️ *Alfred seed validation*\n${rejections.map(r => `• ${r}`).join("\n")}${activeSeeds.length > 0 ? `\n\nProceeding with ${activeSeeds.length} valid seed(s).` : `\n\nNo valid seeds — aborting auto-pipeline.`}`,
+                          { parseMode: "Markdown" }
+                        );
+                      } catch { /* non-critical */ }
+                    }
+
+                    if (activeSeeds.length > 0) {
+                      const autoMode = autoBrandOverride === "ace_richie" ? "ACE RICHIE only"
+                        : autoBrandOverride === "containment_field" ? "THE CONTAINMENT FIELD only"
+                        : `Dual-brand (${activeSeeds.length}/2)`;
+
+                      // Synthetic queue key — hash of concatenated theses, deterministic per-run.
+                      const runHash = require("crypto")
+                        .createHash("sha1")
+                        .update(activeSeeds.map(s => `${s.brand}:${s.niche}:${s.thesis}`).join("|"))
+                        .digest("hex")
+                        .slice(0, 10);
+                      const syntheticRunId = `raw_${runHash}`;
+
+                      const seedPreview = activeSeeds.map(s => {
+                        const brandShort = s.brand === "ace_richie" ? "ACE" : "TCF";
+                        const t = s.thesis.length > 100 ? s.thesis.slice(0, 100) + "…" : s.thesis;
+                        return `[${brandShort} · ${s.niche}] ${t}`;
+                      }).join("\n\n");
+
+                      console.log(`🌱 [AutoPipeline] Alfred generated ${activeSeeds.length} seed(s) [${autoMode}] [${syntheticRunId}]:\n${seedPreview}`);
+                      try {
+                        await channel.sendMessage(
+                          task.chat_id || defaultChatId,
+                          `🌱 *NATIVE SEEDS INGESTED* (${autoMode})\n\n${seedPreview}\n\nVidRush bypassing Whisper, feeding each brand its own seed into Faceless Factory...`,
                           { parseMode: "Markdown" }
                         );
                       } catch { /* non-critical */ }
 
-                      // Session 40: Enqueue via pipeline queue — serializes with manual /pipeline runs.
-                      // Session 26: Dual-brand auto-pipeline — fires BOTH brands sequentially.
-                      // Session 47b: payload type is now `raw_idea` (vs `youtube_url`).
-                      // Session 47d: Filter by brand_override if set. Autonomous daily scans
-                      // (no override) still run full dual-brand.
+                      // Pipeline queue — serializes with manual /pipeline runs. Each brand
+                      // gets its own executeFullPipeline call with its own rawIdea + niche.
                       const autoEnqueue = (globalThis as any).__enqueuePipeline;
                       const autoChatId = task.chat_id || defaultChatId;
-                      const autoAllBrands: Array<"ace_richie" | "containment_field"> = ["ace_richie", "containment_field"];
-                      const autoBrands: Array<"ace_richie" | "containment_field"> = autoBrandOverride
-                        ? [autoBrandOverride]
-                        : autoAllBrands;
                       const autoQueueTag = autoBrandOverride === "ace_richie" ? "ace"
                         : autoBrandOverride === "containment_field" ? "tcf"
                         : "dual";
-                      const autoPos = autoEnqueue ? autoEnqueue(`auto-${syntheticId}-${autoQueueTag}`, async () => {
-                        for (let bIdx = 0; bIdx < autoBrands.length; bIdx++) {
-                          const brand = autoBrands[bIdx];
-                          const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
+                      const autoPos = autoEnqueue ? autoEnqueue(`auto-${syntheticRunId}-${autoQueueTag}`, async () => {
+                        for (let bIdx = 0; bIdx < activeSeeds.length; bIdx++) {
+                          const seed = activeSeeds[bIdx];
+                          const brandLabel = seed.brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
+
+                          // Per-brand synthetic id derived from that brand's thesis — keeps
+                          // downstream queue/dedupe working even though we have two theses.
+                          const seedHash = require("crypto")
+                            .createHash("sha1")
+                            .update(`${seed.brand}:${seed.niche}:${seed.thesis}`)
+                            .digest("hex")
+                            .slice(0, 10);
+                          const seedId = `raw_${seedHash}`;
 
                           // Inter-brand cooldown (same env var as manual pipeline: PIPELINE_COOLDOWN_MS)
                           if (bIdx > 0) {
@@ -3374,21 +3521,39 @@ async function main() {
                           }
 
                           try {
-                            await channel.sendMessage(autoChatId, `--- ${brandLabel} AUTO-PIPELINE (raw_idea) ---`);
+                            await channel.sendMessage(autoChatId, `--- ${brandLabel} AUTO-PIPELINE (niche: ${seed.niche}) ---`);
                           } catch { /* non-critical */ }
 
                           try {
                             const result = await executeFullPipeline(
-                              syntheticId, // First param is now a synthetic identifier; orchestrator ignores it when rawIdea is set.
-                              brand === "containment_field" ? tcfPipelineLLM : pipelineLLM,
-                              brand,
+                              seedId, // Synthetic identifier; orchestrator ignores when rawIdea is set.
+                              seed.brand === "containment_field" ? tcfPipelineLLM : pipelineLLM,
+                              seed.brand,
                               async (step: string, detail: string) => {
                                 try {
                                   await channel.sendMessage(autoChatId, `[${brandLabel}] ${step}: ${detail}`);
                                 } catch { /* non-critical */ }
                               },
-                              { rawIdea: rawIdeaText }
+                              { rawIdea: seed.thesis, niche: seed.niche }
                             );
+
+                            // Phase 3 Task 3.5: burn the cooldown AFTER successful factory entry.
+                            // If executeFullPipeline throws, we never reach this line — so an
+                            // aborted seed does not consume a 30-day slot. Fire-and-forget;
+                            // cooldown persistence must NEVER block pipeline progress.
+                            try {
+                              await recordNicheRun({
+                                brand: seed.brand,
+                                niche: seed.niche,
+                                thesis: seed.thesis,
+                                jobId: (result as any)?.jobId ?? (result as any)?.uploadId ?? seedId,
+                                source: "alfred_daily",
+                              });
+                              console.log(`🧊 [AutoPipeline] cooldown recorded: ${seed.brand}/${seed.niche}`);
+                            } catch (cooldownErr: any) {
+                              console.warn(`[AutoPipeline] cooldown record failed (non-fatal): ${cooldownErr?.message}`);
+                            }
+
                             const report = formatPipelineReport(result);
                             try {
                               await channel.sendMessage(autoChatId, `${brandLabel} COMPLETE:\n${report}`, { parseMode: "Markdown" });
@@ -3410,8 +3575,8 @@ async function main() {
                       if (autoPos > 1) {
                         try { await channel.sendMessage(autoChatId, `⏳ Auto-pipeline queued (position ${autoPos}). Will start after current run.`); } catch { /* non-critical */ }
                       }
-                    } else {
-                      console.log(`🔍 [AutoPipeline] Alfred scan complete — no valid PIPELINE_IDEA found in response`);
+                    } else if (rejections.length === 0) {
+                      console.log(`🔍 [AutoPipeline] Alfred scan complete — both brands abstained (NONE) or no PIPELINE_IDEA_* lines found`);
                     }
                   } catch (autoErr: any) {
                     console.error(`[AutoPipeline] Error checking Alfred response: ${autoErr.message}`);

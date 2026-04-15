@@ -19,6 +19,18 @@ import { textToSpeech } from "../voice/tts";
 import { generateCaptionsFromAudio } from "./caption-engine";
 import type { LLMProvider } from "../types";
 import { buildBrandFrequencyBlock } from "../prompts/social-optimization-prompt";
+// Phase 3 Task 3.4 — brand-niche intake guard. If a call reaches the factory with
+// a niche outside the brand allowlist, we throw BrandNicheViolation BEFORE any
+// model call, R2 upload, or pod job — cheap hard-fail beats downstream cross-
+// contamination. See src/data/shared-context.ts for the canonical allowlist.
+import { isAllowedNiche, normalizeNiche, getAllowedNiches } from "../data/shared-context";
+// Phase 3 Tasks 3.6 + 3.7 — uniqueness guard + shipped-script persistence.
+import {
+  assertScriptUnique,
+  checkScriptUniqueness,
+  persistShippedScript,
+  ScriptTooSimilarError,
+} from "../tools/script-uniqueness-guard";
 
 export const FACELESS_DIR = "/tmp/faceless_factory";
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -103,6 +115,30 @@ async function getRecentTitles(limit: number = 20): Promise<string[]> {
 
 export type Brand = "ace_richie" | "containment_field";
 export type Orientation = "horizontal" | "vertical";
+
+/**
+ * Phase 3 Task 3.4 — Brand/niche contract violation.
+ *
+ * Thrown at the top of produceFacelessVideo (and anywhere else the pipeline
+ * intakes a brand+niche pair) when the niche is not in that brand's allowlist.
+ *
+ * This is a HARD fail — the pipeline must not proceed. Downstream costs (LLM,
+ * R2 uploads, pod job minutes) are real. A cross-contaminated seed that makes
+ * it to render is the exact bug PROJECT_POD_MIGRATION Phase 3 exists to kill.
+ */
+export class BrandNicheViolation extends Error {
+  constructor(
+    public readonly brand: Brand,
+    public readonly niche: string,
+    public readonly allowed: readonly string[],
+  ) {
+    super(
+      `BrandNicheViolation: brand="${brand}" cannot run on niche="${niche}" ` +
+      `(normalized="${normalizeNiche(niche)}"). Allowed: [${allowed.join(" | ")}]`,
+    );
+    this.name = "BrandNicheViolation";
+  }
+}
 
 // Dimension presets per orientation — single source of truth for all image gen + ffmpeg
 export const DIMS: Record<Orientation, {
@@ -2864,6 +2900,21 @@ export async function produceFacelessVideo(
   brand: Brand,
   targetDuration: "short" | "long" = "short"
 ): Promise<FacelessResult> {
+  // Phase 3 Task 3.4 — INTAKE GUARD. Hard-fail before any model call, disk write,
+  // pod job, or R2 upload if the brand/niche pair violates the allowlist contract.
+  // This is the tripwire that catches anything upstream that slipped past the
+  // Alfred dual-seed parser (Task 3.3) or a manual caller passing the wrong pair.
+  if (!isAllowedNiche(brand, niche)) {
+    const allowed = getAllowedNiches(brand);
+    const violation = new BrandNicheViolation(brand, niche, allowed);
+    console.error(`❌ [FacelessFactory] ${violation.message}`);
+    throw violation;
+  }
+  // Normalize niche now that it's validated — downstream paths (jobId, file names,
+  // R2 keys) use the canonical kebab-case form so "Wealth Frequency" and
+  // "wealth-frequency" don't produce two different artifacts.
+  niche = normalizeNiche(niche);
+
   const jobId = `fv_${brand}_${niche}_${Date.now()}`;
 
   if (!existsSync(FACELESS_DIR)) mkdirSync(FACELESS_DIR, { recursive: true });
@@ -2874,9 +2925,49 @@ export async function produceFacelessVideo(
   console.log(`\n🔥 [FacelessFactory] Starting job ${jobId}`);
   console.log(`   Brand: ${brand} | Niche: ${niche} | Duration: ${targetDuration} | Orientation: ${orientation} (${DIMS[orientation].width}x${DIMS[orientation].height})`);
 
-  // STEP 1: Generate script
+  // STEP 1: Generate script — with Phase 3 Task 3.6 uniqueness guard + 2 retries.
+  //
+  // The writer is sampled from an LLM with its own temperature, so a retry with
+  // the same inputs IS a real re-roll (not a deterministic duplicate). After 2
+  // rejections we halt — better a missed day than another carbon-copy upload.
   console.log(`📝 [FacelessFactory] Generating script...`);
-  const script = await generateScript(llm, sourceIntelligence, niche, brand, targetDuration, orientation);
+  let script: Awaited<ReturnType<typeof generateScript>> | null = null;
+  const MAX_UNIQUENESS_RETRIES = 2;
+  for (let attempt = 0; attempt <= MAX_UNIQUENESS_RETRIES; attempt++) {
+    const candidate = await generateScript(llm, sourceIntelligence, niche, brand, targetDuration, orientation);
+    // Embed title + segment text — title alone is too short to produce stable
+    // cosine distances on paraphrases; full script is the real dedupe signal.
+    const corpusForCheck = [
+      candidate.title,
+      ...candidate.segments.map((s: any) => String(s.voiceover || s.text || "")),
+    ].join("\n\n");
+    try {
+      await assertScriptUnique(brand, corpusForCheck);
+      script = candidate;
+      if (attempt > 0) {
+        console.log(`✅ [FacelessFactory] Uniqueness cleared on retry ${attempt}`);
+      }
+      break;
+    } catch (err: any) {
+      if (err instanceof ScriptTooSimilarError) {
+        console.warn(
+          `⚠️ [FacelessFactory] Attempt ${attempt + 1}/${MAX_UNIQUENESS_RETRIES + 1} rejected: ` +
+          `cosine=${err.score.toFixed(4)} match=${err.matchId}`,
+        );
+        if (attempt === MAX_UNIQUENESS_RETRIES) {
+          console.error(`❌ [FacelessFactory] ${MAX_UNIQUENESS_RETRIES + 1} consecutive duplicates — halting.`);
+          throw err;
+        }
+        // Fall through to next attempt — generateScript() internally re-rolls.
+        continue;
+      }
+      throw err;
+    }
+  }
+  if (!script) {
+    // Unreachable: loop either assigns script or throws. Satisfy TS narrowing.
+    throw new Error("FacelessFactory: script uniqueness loop exited without result");
+  }
   console.log(`✅ [FacelessFactory] Script: "${script.title}" — ${script.segments.length} segments`);
 
   // Save script for reference
@@ -3153,6 +3244,36 @@ export async function produceFacelessVideo(
   console.log(`📤 [FacelessFactory] Uploading to Supabase...`);
   const videoUrl = await uploadAndQueue(videoPath, script, jobId, { brand, niche }, thumbnailPath);
 
+  // Phase 3 Task 3.7 — persist this script's vector into the brand's Pinecone
+  // namespace so future uniqueness guards (Task 3.6) can reject paraphrases.
+  // Fire-and-forget: failure to persist MUST NOT block completion — the
+  // worst case is that the next run's guard is one script weaker. Use the
+  // exact same corpus shape the guard embedded from (title + voiceover body).
+  if (videoUrl) {
+    try {
+      const corpusForPersist = [
+        script.title,
+        ...script.segments.map((s: any) => String(s.voiceover || s.text || "")),
+      ].join("\n\n");
+      await persistShippedScript({
+        brand,
+        script: corpusForPersist,
+        niche,
+        thesis: sourceIntelligence.slice(0, 500),
+        jobId,
+        youtubeUrl: videoUrl,
+        extra: {
+          duration: finalDuration,
+          segments: generatedCount,
+          orientation,
+          target_duration: targetDuration,
+        },
+      });
+    } catch (persistErr: any) {
+      console.warn(`[FacelessFactory] persistShippedScript non-fatal: ${persistErr?.message}`);
+    }
+  }
+
   // Clean up intermediate files (TTS segments, raw audio, images, concat lists)
   // Keep the final video — orchestrator needs it for chopping
   cleanupJobFiles(jobId, true);
@@ -3166,7 +3287,7 @@ export async function produceFacelessVideo(
   return {
     videoUrl,
     localPath: videoPath,
-    thumbnailPath, // Deployment 3: long-form keyframe thumbnail (or Imagen fallback) for YouTube thumbnails.set
+    thumbnailPath,
     title: script.title,
     niche,
     brand,

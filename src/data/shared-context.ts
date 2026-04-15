@@ -59,22 +59,33 @@ Tables you write to: crew_dispatch, tasks, activity_log, content_drafts, content
 // This allowlist is the intake-side fix.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/** Niches Ace Richie 77 (personal brand, sovereign architect) is allowed to produce. */
+/** Niches Ace Richie 77 (personal brand, sovereign architect) is allowed to produce.
+ *  S66 widen-pass: +3 niches to support 5-7/week cadence without cooldown starvation.
+ *  The added axes (exit-velocity, memetic-engineering, signal-discipline) all sit inside
+ *  the sovereign-architect frame — no brand drift. */
 export const ACE_RICHIE_NICHES = [
   "sovereignty",
   "authority",
   "architecture",
   "system-mastery",
   "wealth-frequency",
+  "exit-velocity",
+  "memetic-engineering",
+  "signal-discipline",
 ] as const;
 
-/** Niches The Containment Field (anonymous dark-psych top-of-funnel) is allowed to produce. */
+/** Niches The Containment Field (anonymous dark-psych top-of-funnel) is allowed to produce.
+ *  S66 widen-pass: +3 niches. information-warfare/narrative-capture/frame-control are
+ *  adjacent faces of dark-psychology applied to information systems — on-brand for TCF. */
 export const CONTAINMENT_FIELD_NICHES = [
   "burnout",
   "dark-psychology",
   "containment",
   "manipulation-exposed",
   "pattern-interrupt",
+  "information-warfare",
+  "narrative-capture",
+  "frame-control",
 ] as const;
 
 /** Allowed-niche string literal unions for type-level brand safety. */

@@ -24,8 +24,14 @@ import {
 } from "../data/shared-context";
 import type { Brand } from "../pod/types";
 
-const COOLDOWN_FRESH_DAYS = 30;
-const COOLDOWN_RELAX_DAYS = 14;
+// S66 re-tune: original 30/14 starved daily cadence with 5-niche allowlist.
+// Math: each niche can recycle via soft-relax every RELAX_DAYS → theoretical max
+// throughput = (allowlist_size ÷ RELAX_DAYS) per brand. At 14/7 with the widened
+// 8-niche allowlist, that's ~8/week/brand — comfortably above the 5-7/week target.
+// Content-level dedupe still belongs to the Pinecone 0.85 cosine guard; this cooldown
+// is just the COARSE brand-integrity signal so the channel doesn't read as single-topic.
+const COOLDOWN_FRESH_DAYS = 14;
+const COOLDOWN_RELAX_DAYS = 7;
 
 export type CooldownStatus = "fresh" | "relax" | "blocked";
 

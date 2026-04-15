@@ -60,8 +60,17 @@ RUN pip install --upgrade pip setuptools wheel \
         torchaudio==2.4.1
 
 # Pod-specific Python deps (see pod/requirements.txt for pinning rationale)
+#
+# blinker 1.4 ships pre-installed via python3-distutils in the Ubuntu 22.04
+# CUDA base image. pip cannot safely uninstall distutils-managed packages,
+# so any transitive dep (flask -> blinker>=1.6) fails with
+#   "error: uninstall-distutils-installed-package".
+# Fix: install a fresh blinker with --ignore-installed BEFORE the main
+# requirements install. After this, pip sees a pip-managed blinker it can
+# upgrade/replace cleanly.
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --ignore-installed blinker \
+    && pip install -r requirements.txt
 
 # Source: FastAPI worker + any shared utilities
 COPY worker.py .

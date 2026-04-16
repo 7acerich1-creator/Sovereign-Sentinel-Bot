@@ -1,6 +1,12 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// GRAVITY CLAW v3.0 — Sovereign Image Generator (Gap 4)
+// GRAVITY CLAW v3.0 — Sovereign Image Generator (NON-PIPELINE ONLY)
 // Gemini Imagen 4 (PRIMARY) → Pollinations.ai (fallback) → DALL-E 3 (fallback)
+//
+// Phase 4 Migration (S68): Pipeline image generation is now handled by the
+// RunPod GPU worker (pod/pipelines/flux.py — FLUX.1 [dev] bf16 at 1024x1024).
+// This tool is retained ONLY for Telegram bot /imagine commands and ad-hoc
+// one-off generation. The Faceless Factory no longer calls this module.
+//
 // Session 26: Imagen 4 REVERTED to fallback — Gemini billing $62+ with card declining.
 // Niche-aware prompt enhancement + Supabase logging
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

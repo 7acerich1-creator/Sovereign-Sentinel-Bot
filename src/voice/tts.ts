@@ -1,6 +1,10 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// GRAVITY CLAW v3.0 — Text-to-Speech
-// Four-tier fallback: XTTS (sovereign) → ElevenLabs → Edge TTS (FREE) → OpenAI
+// GRAVITY CLAW v3.0 — Text-to-Speech (NON-PIPELINE ONLY)
+// Three-tier fallback: XTTS (sovereign) → ElevenLabs → Edge TTS (FREE)
+//
+// Phase 4 Migration (S68): Pipeline TTS is now handled by the RunPod GPU
+// worker (pod/pipelines/xtts.py). This module is ONLY used for non-pipeline
+// callers (Telegram voice replies, ad-hoc bot TTS). OpenAI removed from chain.
 //
 // Session 48 — Brand Routing Matrix:
 //   - `brand` option bifurcates physical audio assets end-to-end.
@@ -92,7 +96,8 @@ export async function textToSpeech(
   if (!forceElevenLabs && config.voice.elevenLabsApiKey) {
     chain.push("elevenlabs"); // Demoted to fallback behind XTTS + Edge
   }
-  if (config.voice.whisperApiKey) chain.push("openai");
+  // Phase 4: OpenAI TTS removed from chain. Pipeline TTS is on the pod (XTTSv2).
+  // This module only serves non-pipeline callers now. XTTS + Edge cover that.
 
   let lastError: Error | null = null;
 

@@ -2,10 +2,13 @@
 // GRAVITY CLAW v3.0 — FACELESS VIDEO FACTORY
 // Deterministic faceless video production pipeline:
 //   1. LLM generates voiceover script from source intelligence
-//   2. ElevenLabs/OpenAI TTS renders audio
-//   3. Gemini Imagen 4 generates scene images (PRIMARY) → Pollinations.ai fallback → DALL-E 3 fallback
-//   4. ffmpeg assembles: Ken Burns on images + voiceover + captions + color grade
-//   5. Output → Supabase Storage → vid_rush_queue → auto-sweep to platforms
+//   2. Pod (RunPod GPU) handles TTS + image gen + composition + R2 upload
+//   3. Railway queues the R2 artifact URLs to vid_rush_queue for distribution
+//
+// Phase 4 Migration: TTS, image generation, and video composition are now
+// delegated to a RunPod GPU worker via withPodSession() + produceVideo().
+// Railway only generates the script (LLM) and handles distribution.
+// Legacy local rendering functions are retained for non-pipeline callers.
 //
 // This is the 95% engine — creates ORIGINAL content from extracted intelligence.
 // The clip ripper (vid-rush.ts) handles the 5% where Ace is on camera.
@@ -31,6 +34,11 @@ import {
   persistShippedScript,
   ScriptTooSimilarError,
 } from "../tools/script-uniqueness-guard";
+// Phase 4 — Pod delegation imports. Railway generates the script; the pod
+// handles TTS, image generation, video composition, and R2 upload.
+import { withPodSession } from "../pod/session";
+import { produceVideo } from "../pod/runpod-client";
+import type { JobSpec, Scene as PodScene, ArtifactUrls } from "../pod/types";
 
 export const FACELESS_DIR = "/tmp/faceless_factory";
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -1639,6 +1647,12 @@ export async function generateLongFormThumbnail(
   return null;
 }
 
+/**
+ * @deprecated Phase 4 Migration (S68): Pipeline image generation is now handled
+ * by the RunPod GPU worker (pod/pipelines/flux.py — FLUX.1 [dev] bf16).
+ * This function (Gemini Imagen 4) is retained ONLY for non-pipeline callers
+ * or manual one-off generation. produceFacelessVideo() no longer calls this.
+ */
 async function generateSceneImage(
   visualDirection: string,
   niche: string,
@@ -2902,41 +2916,31 @@ export async function produceFacelessVideo(
 ): Promise<FacelessResult> {
   // Phase 3 Task 3.4 — INTAKE GUARD. Hard-fail before any model call, disk write,
   // pod job, or R2 upload if the brand/niche pair violates the allowlist contract.
-  // This is the tripwire that catches anything upstream that slipped past the
-  // Alfred dual-seed parser (Task 3.3) or a manual caller passing the wrong pair.
   if (!isAllowedNiche(brand, niche)) {
     const allowed = getAllowedNiches(brand);
     const violation = new BrandNicheViolation(brand, niche, allowed);
     console.error(`❌ [FacelessFactory] ${violation.message}`);
     throw violation;
   }
-  // Normalize niche now that it's validated — downstream paths (jobId, file names,
-  // R2 keys) use the canonical kebab-case form so "Wealth Frequency" and
-  // "wealth-frequency" don't produce two different artifacts.
   niche = normalizeNiche(niche);
 
   const jobId = `fv_${brand}_${niche}_${Date.now()}`;
-
   if (!existsSync(FACELESS_DIR)) mkdirSync(FACELESS_DIR, { recursive: true });
 
-  // Long-form = YouTube = 16:9 horizontal. Shorts = TikTok/IG/YT Shorts = 9:16 vertical.
   const orientation: Orientation = targetDuration === "long" ? "horizontal" : "vertical";
 
   console.log(`\n🔥 [FacelessFactory] Starting job ${jobId}`);
   console.log(`   Brand: ${brand} | Niche: ${niche} | Duration: ${targetDuration} | Orientation: ${orientation} (${DIMS[orientation].width}x${DIMS[orientation].height})`);
 
-  // STEP 1: Generate script — with Phase 3 Task 3.6 uniqueness guard + 2 retries.
-  //
-  // The writer is sampled from an LLM with its own temperature, so a retry with
-  // the same inputs IS a real re-roll (not a deterministic duplicate). After 2
-  // rejections we halt — better a missed day than another carbon-copy upload.
+  // ──────────────────────────────────────────────────────────────────────────
+  // STEP 1: Generate script on Railway (LLM text gen — lightweight, stays here)
+  // Phase 3 Task 3.6 uniqueness guard + 2 retries.
+  // ──────────────────────────────────────────────────────────────────────────
   console.log(`📝 [FacelessFactory] Generating script...`);
   let script: Awaited<ReturnType<typeof generateScript>> | null = null;
   const MAX_UNIQUENESS_RETRIES = 2;
   for (let attempt = 0; attempt <= MAX_UNIQUENESS_RETRIES; attempt++) {
     const candidate = await generateScript(llm, sourceIntelligence, niche, brand, targetDuration, orientation);
-    // Embed title + segment text — title alone is too short to produce stable
-    // cosine distances on paraphrases; full script is the real dedupe signal.
     const corpusForCheck = [
       candidate.title,
       ...candidate.segments.map((s: any) => String(s.voiceover || s.text || "")),
@@ -2958,297 +2962,99 @@ export async function produceFacelessVideo(
           console.error(`❌ [FacelessFactory] ${MAX_UNIQUENESS_RETRIES + 1} consecutive duplicates — halting.`);
           throw err;
         }
-        // Fall through to next attempt — generateScript() internally re-rolls.
         continue;
       }
       throw err;
     }
   }
   if (!script) {
-    // Unreachable: loop either assigns script or throws. Satisfy TS narrowing.
     throw new Error("FacelessFactory: script uniqueness loop exited without result");
   }
   console.log(`✅ [FacelessFactory] Script: "${script.title}" — ${script.segments.length} segments`);
 
-  // Save script for reference
   writeFileSync(`${FACELESS_DIR}/${jobId}_script.json`, JSON.stringify(script, null, 2));
 
-  // STEP 2: Render TTS audio
-  console.log(`🗣️ [FacelessFactory] Rendering voiceover...`);
-  const audioResult = await renderAudio(script, jobId);
-  let audioPath = audioResult.audioPath;
+  // ──────────────────────────────────────────────────────────────────────────
+  // STEP 2: DELEGATE to RunPod GPU worker — TTS + FLUX images + Ken Burns
+  // composition + R2 upload all happen on the pod in a single session.
+  // Railway sends the script scenes as a JobSpec; pod returns R2 artifact URLs.
+  // ──────────────────────────────────────────────────────────────────────────
+  console.log(`🚀 [FacelessFactory] Delegating compute to pod (XTTS + FLUX + compose + R2)...`);
 
-  // STEP 2b: Mix Terminal Override typewriter bed + outro signature into the TTS track.
-  //
-  // SESSION 42 ARCHITECTURAL REWRITE:
-  //   Old behavior: prepended a 2-6s static brand-logo intro video AND delayed the TTS by
-  //   introPad seconds, then mixed signature_long.mp3 over that pad. This was destroying
-  //   retention — viewers saw a static logo for 5 seconds before any payload arrived.
-  //
-  //   New behavior:
-  //     • TTS plays at t=0 (NO adelay, NO introPad).
-  //     • typing.mp3 is mixed UNDER the first hookDuration seconds at low volume — this is
-  //       the audio bed for the Terminal Override clip rendered in assembleVideo() (the
-  //       green typewriter on black). The visual hook IS the video's first segment.
-  //     • signature_outro.mp3 is mixed in at t=ttsDur (after the voiceover finishes).
-  //     • signature_long / signature_short are NO LONGER prepended — the static-logo intro
-  //       is dead.
-  //     • segmentDurations is NOT modified; segment 0 IS the hook.
-  const brandAssetsRoot = `${__dirname}/../../brand-assets`;
-  const brandSfx = brand === "containment_field" ? "_tcf" : "";
-  const outroSig = `${brandAssetsRoot}/signature_outro${brandSfx}.mp3`;
-  const typingBed = `${brandAssetsRoot}/typing.mp3`;
-  const brandIntroAsset = `${brandAssetsRoot}/intro_long${brandSfx}.mp4`;
+  // Map script segments to pod scene format
+  const podScenes: PodScene[] = script.segments.map((seg, i) => ({
+    index: i,
+    image_prompt: seg.visual_direction,
+    tts_text: seg.voiceover,
+    duration_hint_s: seg.duration_hint || undefined,
+  }));
 
-  // SESSION 47: Terminal Override duration is now max(TERMINAL_OVERRIDE_DUR_MIN, seg0Dur).
-  // No upper clamp. This mirrors computeTerminalOverrideDuration inside assembleVideo.
-  const firstSegDurForHook = audioResult.segmentDurations?.[0] || 0;
-  const hookDuration = computeTerminalOverrideDuration(firstSegDurForHook);
+  const podJobSpec: JobSpec = {
+    brand: brand as "ace_richie" | "containment_field",
+    niche,
+    seed: sourceIntelligence.slice(0, 500),
+    script: script.segments.map(s => s.voiceover).join("\n\n"),
+    scenes: podScenes,
+    client_job_id: jobId,
+  };
 
-  // SESSION 47 — BRAND INTRO + TO TIMING CONTRACT (composite audio side).
-  //   Horizontal long-form: voice + typing + outro are ALL adelayed by BRAND_INTRO_DUR,
-  //     and the brand intro audio track is mixed UNDER t=0 → BRAND_INTRO_DUR.
-  //   Vertical shorts: no brand intro, preShift = 0 — existing behavior preserved.
-  const preShiftSec = orientation === "horizontal" ? BRAND_INTRO_DUR : 0;
-  const preShiftMs = Math.round(preShiftSec * 1000);
+  // withPodSession handles: wake pod (or reuse warm) → run fn → schedule sleep.
+  // produceVideo: POST /produce → poll /jobs/{id} until done → return artifact URLs.
+  const artifacts: ArtifactUrls = await withPodSession(async (handle) => {
+    return produceVideo(handle, podJobSpec);
+  });
 
-  const compositeAudioPath = `${FACELESS_DIR}/${jobId}_composite_audio.mp3`;
+  console.log(`✅ [FacelessFactory] Pod returned artifacts:`);
+  console.log(`   Video: ${artifacts.videoUrl}`);
+  console.log(`   Thumbnail: ${artifacts.thumbnailUrl}`);
+  console.log(`   Duration: ${artifacts.durationS.toFixed(1)}s`);
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // STEP 3: Queue R2 artifact URLs to vid_rush_queue for distribution.
+  // No Supabase Storage upload needed — pod already uploaded to R2.
+  // ──────────────────────────────────────────────────────────────────────────
+  console.log(`📤 [FacelessFactory] Queuing R2 artifacts to vid_rush_queue...`);
+  let videoUrl: string | null = artifacts.videoUrl;
   try {
-    const hasOutro = existsSync(outroSig);
-    const hasTyping = existsSync(typingBed);
-    const hasBrandIntroAudio = orientation === "horizontal" && existsSync(brandIntroAsset);
-
-    if (hasOutro || hasTyping || hasBrandIntroAudio) {
-      // Get TTS duration
-      const ttsDur = parseFloat(
-        execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${audioPath}"`,
-          { timeout: 10_000, maxBuffer: 1024 * 1024 }).toString().trim()
-      ) || 0;
-
-      if (ttsDur > 0) {
-        // Build inputs and filter graph dynamically based on what assets we have.
-        // Index 0 is always the TTS voice.
-        // The brand intro, typing bed, and outro are appended as available.
-        const inputs: string[] = [`-i "${audioPath}"`];
-        const filterParts: string[] = [];
-
-        // Voice: adelay by preShiftMs so the TTS starts after the brand intro.
-        // If preShiftMs=0 (shorts) the adelay is a no-op — we still emit the filter
-        // to keep the graph uniform.
-        filterParts.push(
-          `[0:a]adelay=${preShiftMs}|${preShiftMs},volume=1.0[voice]`
-        );
-        const mixLabels: string[] = [`[voice]`];
-        let inputIdx = 1;
-
-        if (hasTyping) {
-          // Loop the typing bed so it always covers the hook window even if it's short.
-          inputs.push(`-stream_loop -1 -t ${hookDuration.toFixed(2)} -i "${typingBed}"`);
-          // Bed it under the hook: low volume, fade in fast, fade out before hook ends.
-          // Delay by preShiftMs so it lines up with the Terminal Override visual.
-          const fadeOutStart = Math.max(0, hookDuration - 0.4);
-          filterParts.push(
-            `[${inputIdx}:a]adelay=${preShiftMs}|${preShiftMs},volume=0.35,afade=t=in:st=${preShiftSec.toFixed(2)}:d=0.15,afade=t=out:st=${(preShiftSec + fadeOutStart).toFixed(2)}:d=0.4[typing]`
-          );
-          mixLabels.push(`[typing]`);
-          inputIdx++;
-        }
-
-        if (hasOutro) {
-          inputs.push(`-i "${outroSig}"`);
-          // Outro fires AFTER the shifted TTS finishes.
-          const outroOffsetMs = Math.round((preShiftSec + ttsDur) * 1000);
-          filterParts.push(`[${inputIdx}:a]adelay=${outroOffsetMs}|${outroOffsetMs},volume=0.85[outro]`);
-          mixLabels.push(`[outro]`);
-          inputIdx++;
-        }
-
-        if (hasBrandIntroAudio) {
-          // Pull the brand intro clip's own audio track, trimmed to BRAND_INTRO_DUR seconds,
-          // and mix it in at t=0 so the brand stinger audio lands under the brand intro visual.
-          inputs.push(`-t ${BRAND_INTRO_DUR.toFixed(2)} -i "${brandIntroAsset}"`);
-          // Short fade-out at the tail so the transition into the Terminal Override is clean.
-          const introFadeStart = Math.max(0, BRAND_INTRO_DUR - 0.3);
-          filterParts.push(
-            `[${inputIdx}:a]volume=0.9,afade=t=out:st=${introFadeStart.toFixed(2)}:d=0.3[brandintro]`
-          );
-          mixLabels.push(`[brandintro]`);
-          inputIdx++;
-        }
-
-        const totalMixInputs = mixLabels.length;
-        const mixFilter = `${mixLabels.join("")}amix=inputs=${totalMixInputs}:duration=longest:normalize=0[out]`;
-        const filterComplex = `${filterParts.join(";")};${mixFilter}`;
-
-        execSync(
-          `ffmpeg ${inputs.join(" ")} ` +
-            `-filter_complex "${filterComplex}" ` +
-            `-map "[out]" -c:a libmp3lame -b:a 192k -y "${compositeAudioPath}"`,
-          { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 }
-        );
-        console.log(
-          `🔊 [FacelessFactory] Composite audio: TTS(${ttsDur.toFixed(1)}s)` +
-            (preShiftSec > 0 ? ` +${preShiftSec.toFixed(1)}s pre-shift` : "") +
-            (hasBrandIntroAudio ? ` + brand-intro(${BRAND_INTRO_DUR.toFixed(1)}s)` : "") +
-            (hasTyping ? ` + typing-bed(${hookDuration.toFixed(1)}s)` : "") +
-            (hasOutro ? ` + outro@${(preShiftSec + ttsDur).toFixed(1)}s` : "")
-        );
-      }
-
-      if (existsSync(compositeAudioPath)) {
-        audioPath = compositeAudioPath;
-        // NOTE: segmentDurations is INTENTIONALLY NOT modified.
-        // The Terminal Override is segment 0 — the visual is generated FROM segmentDurations[0],
-        // not in addition to it. The brand intro pre-shift is applied at the audio layer only.
-        console.log(`🔊 [FacelessFactory] Audio track now includes brand intro + typing bed + outro signature`);
-      }
+    if (SUPABASE_URL && SUPABASE_KEY) {
+      await fetch(`${SUPABASE_URL}/rest/v1/vid_rush_queue`, {
+        method: "POST",
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({
+          title: script.title,
+          topic: script.niche,
+          niche: script.niche,
+          script: script.segments.map(s => s.voiceover).join(" "),
+          video_url: artifacts.videoUrl,
+          status: "ready",
+          platform: "multi",
+          thumbnail_url: artifacts.thumbnailUrl,
+          metadata: {
+            type: "faceless",
+            brand: script.brand,
+            job_id: jobId,
+            pod_job_id: artifacts.jobId,
+            segment_count: script.segments.length,
+            cta: script.cta,
+            hook: script.hook,
+            thumbnail_text: script.thumbnail_text,
+            source: "pod_r2",
+          },
+        }),
+      });
+      console.log(`✅ [FacelessFactory] Queued to vid_rush_queue`);
     }
   } catch (err: any) {
-    console.error(`⚠️ [FacelessFactory] Signature audio mixing failed (non-fatal, using raw TTS): ${err.message?.slice(0, 300)}`);
-    const stderr = err.stderr ? err.stderr.toString().slice(0, 300) : "";
-    if (stderr) console.error(`  STDERR: ${stderr}`);
+    console.error(`[FacelessFactory] Queue error: ${err.message}`);
+    videoUrl = null;
   }
 
-  // STEP 3: Generate scene images (parallel, with rate limiting)
-  console.log(`🎨 [FacelessFactory] Generating ${script.segments.length} scene images...`);
-  const imagePaths: (string | null)[] = [];
-  for (let i = 0; i < script.segments.length; i++) {
-    const imgPath = await generateSceneImage(
-      script.segments[i].visual_direction,
-      niche,
-      brand,
-      jobId,
-      i,
-      orientation
-    );
-    imagePaths.push(imgPath);
-    // Small delay between Imagen requests to avoid rate limits
-    if (i < script.segments.length - 1) {
-      await new Promise(r => setTimeout(r, 1000));
-    }
-  }
-
-  const generatedCount = imagePaths.filter(Boolean).length;
-  console.log(`✅ [FacelessFactory] ${generatedCount}/${script.segments.length} images generated`);
-
-  if (generatedCount === 0) {
-    throw new Error("Zero scene images generated — check Gemini Imagen API key and quota");
-  }
-
-  // STEP 3b: Generate thumbnail (runs while scene images are fresh in Imagen quota)
-  console.log(`🖼️ [FacelessFactory] Generating thumbnail...`);
-  let thumbnailPath: string | null = null;
-  try {
-    thumbnailPath = await generateThumbnail(script, jobId, brand, niche);
-  } catch (err: any) {
-    console.warn(`⚠️ [FacelessFactory] Thumbnail generation failed (non-fatal): ${err.message?.slice(0, 200)}`);
-  }
-
-  // STEP 3c: Dynamic Kinetic Captions — transcribe the raw TTS narration with Groq Whisper
-  // (word-level timestamps) and emit a styled .ass file. Non-fatal: a caption failure must
-  // never kill a render. skipUntilSeconds hides captions during the brand intro AND the
-  // Terminal Override hook so they don't collide with the typewriter drawtext reveal.
-  //
-  // SESSION 47: captionSkipSec = BRAND_INTRO_DUR (horizontal only) + full TO duration.
-  // The whisper transcription is running on the RAW TTS track (not the composite), so
-  // "TTS word at t=X" means "t=X on the TTS clock". Because the composite audio shifts
-  // the TTS by preShiftSec on horizontal, every transcribed word on horizontal lands
-  // at `preShiftSec + word_time` in the final video. That means skipUntilSeconds (which
-  // the caption engine compares against RAW TTS timestamps) must be `hookDuration`
-  // alone — preShiftSec is baked in at the audio mix layer, not the transcription layer.
-  // HOWEVER: the caption engine also burns captions at those same raw timestamps, and
-  // they get muxed into the shifted final video, so libass actually fires them at
-  // `preShiftSec + word_time`. So raw skipUntil = hookDuration IS correct — it
-  // suppresses the first hookDuration seconds of whisper words (segment 0 voice), which
-  // in the final video corresponds to `[preShiftSec, preShiftSec + hookDuration]`.
-  // That is exactly the window of the Terminal Override. The brand intro window
-  // `[0, preShiftSec]` has NO TTS words because the TTS is adelayed — nothing to skip.
-  let assCaptionPath: string | null = null;
-  try {
-    console.log(`🎬 [FacelessFactory] Generating kinetic captions (Groq Whisper word-level)...`);
-    const dims = DIMS[orientation];
-    const capResult = await generateCaptionsFromAudio(audioResult.audioPath, {
-      outputPath: `${FACELESS_DIR}/${jobId}_captions.ass`,
-      videoWidth: dims.width,
-      videoHeight: dims.height,
-      skipUntilSeconds: hookDuration,
-      // Session 47: shift caption timestamps so they land on the composite audio
-      // timeline (which adelayed the TTS voice by preShiftSec for horizontal long-form).
-      timeOffsetSeconds: preShiftSec,
-      maxWordsPerChunk: 3,
-      maxChunkDuration: 1.5,
-      // Session 48: Brand Routing Matrix — caption engine branches on brand.
-      // Bebas Neue (uppercase, opaque plate) for containment_field;
-      // Montserrat (mixed case, soft shadow) for ace_richie.
-      brand: script.brand,
-      fontName: script.brand === "ace_richie" ? "Montserrat" : "Bebas Neue",
-    });
-    assCaptionPath = capResult.assPath;
-    console.log(
-      `✅ [FacelessFactory] Captions: ${capResult.chunkCount} chunks from ${capResult.wordCount} words ` +
-      `(${capResult.firstWordStart.toFixed(2)}s → ${capResult.lastWordEnd.toFixed(2)}s)`
-    );
-  } catch (err: any) {
-    console.warn(
-      `⚠️ [FacelessFactory] Caption generation failed (non-fatal, video will render uncaptioned): ${err.message?.slice(0, 300)}`
-    );
-    assCaptionPath = null;
-  }
-
-  // STEP 4: Assemble video
-  console.log(`🎬 [FacelessFactory] Assembling video...`);
-  const videoPath = await assembleVideo(script, audioPath, imagePaths, jobId, orientation, audioResult.segmentDurations, assCaptionPath);
-
-  // STEP 4b (Session 47 REWRITE): For long-form (16:9), render the thumbnail from a
-  // RAW pre-caption scene PNG instead of seeking the final assembled video. The old
-  // keyframe-extraction path pulled frames that had .ass kinetic captions + Terminal
-  // Override text burned in — Architect diagnosed this as the thumbnail-pollution bug.
-  //
-  // New contract: hand generateLongFormThumbnail a raw image from imagePaths[] so the
-  // text overlay lands on a clean background with zero leaked caption text. Prefer a
-  // post-hook scene (index 1) so the title art doesn't collide with the Terminal
-  // Override opening beat, fall back to index 0 if nothing past it exists.
-  //
-  // The Imagen thumbnail is kept as a fallback: if generation fails, `thumbnailPath`
-  // stays whatever Step 3b produced. Shorts (vertical) still use the Imagen path since
-  // the vidrush orchestrator handles per-clip thumbnails separately.
-  if (orientation === "horizontal") {
-    try {
-      const cleanScenePath =
-        imagePaths.find((p, i) => i >= 1 && !!p && existsSync(p)) ||
-        imagePaths.find(p => !!p && existsSync(p));
-      if (cleanScenePath) {
-        const keyframeThumb = await generateLongFormThumbnail(cleanScenePath, script, jobId, brand);
-        if (keyframeThumb) {
-          thumbnailPath = keyframeThumb;
-        }
-      } else {
-        console.warn(`⚠️ [FacelessFactory] No clean scene image available for long-form thumbnail (keeping Imagen fallback)`);
-      }
-    } catch (err: any) {
-      console.warn(`⚠️ [FacelessFactory] Long-form pre-caption thumbnail failed (keeping Imagen fallback): ${err.message?.slice(0, 200)}`);
-    }
-  }
-
-  // Get final duration
-  let finalDuration = 0;
-  try {
-    const dur = execSync(
-      `ffprobe -v error -show_entries format=duration -of csv=p=0 "${videoPath}"`,
-      { timeout: 10_000, stdio: "pipe" }
-    ).toString().trim();
-    finalDuration = parseFloat(dur) || 0;
-  } catch { /* non-critical */ }
-
-  // STEP 5: Upload + queue
-  console.log(`📤 [FacelessFactory] Uploading to Supabase...`);
-  const videoUrl = await uploadAndQueue(videoPath, script, jobId, { brand, niche }, thumbnailPath);
-
-  // Phase 3 Task 3.7 — persist this script's vector into the brand's Pinecone
-  // namespace so future uniqueness guards (Task 3.6) can reject paraphrases.
-  // Fire-and-forget: failure to persist MUST NOT block completion — the
-  // worst case is that the next run's guard is one script weaker. Use the
-  // exact same corpus shape the guard embedded from (title + voiceover body).
+  // Phase 3 Task 3.7 — persist shipped script vector for uniqueness guard
   if (videoUrl) {
     try {
       const corpusForPersist = [
@@ -3263,10 +3069,11 @@ export async function produceFacelessVideo(
         jobId,
         youtubeUrl: videoUrl,
         extra: {
-          duration: finalDuration,
-          segments: generatedCount,
+          duration: artifacts.durationS,
+          segments: script.segments.length,
           orientation,
           target_duration: targetDuration,
+          pod_job_id: artifacts.jobId,
         },
       });
     } catch (persistErr: any) {
@@ -3274,25 +3081,57 @@ export async function produceFacelessVideo(
     }
   }
 
-  // Clean up intermediate files (TTS segments, raw audio, images, concat lists)
-  // Keep the final video — orchestrator needs it for chopping
+  // ──────────────────────────────────────────────────────────────────────────
+  // STEP 4: Download R2 video to local temp for backward compat with the
+  // vidrush orchestrator's clip-chopping step (Phase 5 will remove this).
+  // The YouTube publisher can use the URL directly, but the clip-generator
+  // needs a local file path for ffmpeg operations.
+  // ──────────────────────────────────────────────────────────────────────────
+  let localVideoPath = "";
+  try {
+    console.log(`⬇️ [FacelessFactory] Downloading R2 video for local compat...`);
+    const dlResp = await fetch(artifacts.videoUrl);
+    if (dlResp.ok) {
+      const buf = Buffer.from(await dlResp.arrayBuffer());
+      localVideoPath = `${FACELESS_DIR}/${jobId}_final.mp4`;
+      writeFileSync(localVideoPath, buf);
+      console.log(`✅ [FacelessFactory] Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB → ${localVideoPath}`);
+    } else {
+      console.warn(`⚠️ [FacelessFactory] R2 download failed: ${dlResp.status} — clip chopping will be skipped`);
+    }
+  } catch (dlErr: any) {
+    console.warn(`⚠️ [FacelessFactory] R2 download failed (non-fatal): ${dlErr.message?.slice(0, 200)}`);
+  }
+
+  // Download thumbnail for YouTube custom thumbnail upload
+  let localThumbPath: string | null = null;
+  try {
+    const thumbResp = await fetch(artifacts.thumbnailUrl);
+    if (thumbResp.ok) {
+      const thumbBuf = Buffer.from(await thumbResp.arrayBuffer());
+      localThumbPath = `${FACELESS_DIR}/${jobId}_thumbnail.jpg`;
+      writeFileSync(localThumbPath, thumbBuf);
+    }
+  } catch { /* non-fatal */ }
+
   cleanupJobFiles(jobId, true);
 
   console.log(`\n🔥 [FacelessFactory] JOB COMPLETE — ${jobId}`);
   console.log(`   Title: ${script.title}`);
-  console.log(`   Duration: ${finalDuration.toFixed(1)}s`);
-  console.log(`   Segments: ${generatedCount}`);
-  console.log(`   URL: ${videoUrl || "upload failed"}`);
+  console.log(`   Duration: ${artifacts.durationS.toFixed(1)}s`);
+  console.log(`   Segments: ${script.segments.length}`);
+  console.log(`   Video URL: ${videoUrl || "queue failed"}`);
+  console.log(`   Thumbnail URL: ${artifacts.thumbnailUrl}`);
 
   return {
     videoUrl,
-    localPath: videoPath,
-    thumbnailPath,
+    localPath: localVideoPath,
+    thumbnailPath: localThumbPath,
     title: script.title,
     niche,
     brand,
-    duration: finalDuration,
-    segmentCount: generatedCount,
+    duration: artifacts.durationS,
+    segmentCount: script.segments.length,
   };
 }
 

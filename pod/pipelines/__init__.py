@@ -1,13 +1,29 @@
-"""Pod pipeline modules — skeleton.
-
-Per PROJECT_POD_MIGRATION.md this package will host the real inference and
-composition pipelines in Phase 4:
-
-    xtts.py      — XTTSv2 per-chunk, speaker WAV from /runpod-volume/speakers/
-    flux.py      — FLUX.1 [dev] bf16 1024x1024 @ 30 steps / 3.5 guidance (D2)
-    compose.py   — Ken Burns + ffmpeg concat + mux, audio-validated pre-upload
-    r2.py        — Cloudflare R2 upload (D5), boto3 with endpoint_url override
-
-Phase 1 Task 1.3 ships the FastAPI skeleton (worker.py) only. Nothing in
-this package is imported by worker.py until Phase 4 wires the real calls.
 """
+Pod pipeline modules -- Phase 4 real inference + composition.
+
+    xtts.py      -- XTTSv2 per-chunk TTS
+    flux.py      -- FLUX.1 [dev] bf16 1024x1024 image gen
+    compose.py   -- Ken Burns + ffmpeg concat + mux
+    r2.py        -- Cloudflare R2 upload (boto3 S3 compat)
+"""
+from .xtts import load_model as load_xtts
+from .xtts import is_loaded as xtts_loaded
+from .xtts import synthesize_scenes
+from .flux import load_model as load_flux
+from .flux import is_loaded as flux_loaded
+from .flux import generate_scene_images
+from .compose import compose_video
+from .r2 import upload_artifacts
+from .r2 import is_configured as r2_configured
+
+__all__ = [
+    "load_xtts",
+    "xtts_loaded",
+    "synthesize_scenes",
+    "load_flux",
+    "flux_loaded",
+    "generate_scene_images",
+    "compose_video",
+    "upload_artifacts",
+    "r2_configured",
+]

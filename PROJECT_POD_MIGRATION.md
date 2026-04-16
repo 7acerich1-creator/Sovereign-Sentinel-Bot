@@ -16,7 +16,7 @@
 | **Last session** | Session 68 -- 2026-04-16 -- **PHASE 4 COMPLETE.** R2 buckets created (Ace walked through Cloudflare dashboard). 6 R2 env vars set on Railway. Pod code committed at `37f6678` (7 files, 1038 insertions). Docker image rebuilt (4m24s, GH Actions success). Railway-side delegation committed at `dfd30d6` (3 files, +155 -305 lines). tsc clean on both commits. |
 | **Last commit touching this work** | `dfd30d6` (origin/main) -- Phase 4.2-4.5 Railway-side delegation. |
 | **Blocker** | **None.** Phase 4 complete. Next action = Phase 5 Task 5.1 (audit script assembly for clip-awareness). |
-| **Next session's first action** | **Phase 5 Task 5.1:** Audit `src/engine/content-engine.ts` + `src/agent/personas.ts` for clip-awareness in the long-form script writer. Document every place the prompt hints the script will be clipped/chopped/optimized for shorts. Then Task 5.2: strip all clipping awareness so the writer produces one coherent 8-12 minute narrative. |
+| **Next session's first action** | **Phase 5 Task 5.1:** Audit `src/engine/content-engine.ts` + `src/agent/personas.ts` for clip-awareness in the long-form script writer. Document every place the prompt hints the script will be clipped/chopped/optimized for shorts. Phase 5 is expanded (S69): Tasks 5.1-5.7 (script-first + shorts curator) + Tasks 5.8-5.12 (pod-native brand assembly — intro prepend, terminal override redesign, kinetic caption redesign, composite audio mixing, Docker rebuild). |
 
 **Rule:** if you are a future session and this STATUS block has not been updated in your current session before you close, the session failed regardless of what was built.
 
@@ -212,20 +212,22 @@ Each phase has bite-sized tasks. Every task lists the EXACT file path it touches
 
 ---
 
-### PHASE 5 — Script-First Architecture + Surgical Shorts Curator
+### PHASE 5 — Script-First Architecture + Pod-Native Brand Assembly + Surgical Shorts Curator
 
-**Exit criterion:** The long-form script writer operates with ZERO knowledge that the video will ever be clipped. A separate `shorts-curator` pass reads the finished long-form script + audio, identifies 3–4 natural climax/hook moments, and extracts those surgical clips ONLY. The current "chop into 9–19 shorts" behavior is retired. Every short that ships can stand on its own and exists to drive the viewer back to the long-form channel.
+**Exit criterion:** (A) The long-form script writer operates with ZERO knowledge that the video will ever be clipped. (B) The pod's `compose.py` is the SINGLE assembly point — brand intro prepend, terminal override typewriter, kinetic captions (Whisper word-level on GPU), and composite audio mixing are ALL rebuilt from scratch in Python on the pod. When the pod returns a video, it is the FINISHED product. Railway's `assembleVideo()` stays dead. (C) A separate `shorts-curator` pass reads the finished long-form script + audio, identifies 3–4 natural climax/hook moments, and extracts those surgical clips ONLY. The current "chop into 9–19 shorts" behavior is retired. Every short that ships can stand on its own and exists to drive the viewer back to the long-form channel.
 
-> Architect directive: *"its important to audit how the script is assembled, it seems like in order to create the short narratives the script is revolved around that and ends up repeating itself. its better to get only 3 or 4 high quality shorts from a high quality script that is clipped in the right places, which is conservative, but just to make a point, rather than 9 or 19 broken shorts. the short should be good enough to make them click the channel and find the long forms. Thats how this is going to flow."*
+> Architect directive (script-first): *"its important to audit how the script is assembled, it seems like in order to create the short narratives the script is revolved around that and ends up repeating itself. its better to get only 3 or 4 high quality shorts from a high quality script that is clipped in the right places, which is conservative, but just to make a point, rather than 9 or 19 broken shorts. the short should be good enough to make them click the channel and find the long forms. Thats how this is going to flow."*
+
+> Architect directive (caption trust gate — S69): The kinetic captions are the 3-5 second TRUST GATE after the viewer clicks. They subconsciously read and follow the opening moment — the quote/topic/memetic trigger — and decide whether to stay. The current green captions are unattractive, uninviting, serve no brand aesthetic, and are out of alignment with BOTH brands. They must be either clean-and-clear or brand-specific-aligned. Their job: "This is what you need to align with. Drop your guard. It's quality." If the captions don't hit that frequency, the viewer bounces regardless of the content underneath. This is a full redesign, not a port of the Railway code.
 
 > **Principle:** Long-form YouTube is the foundation. Shorts, TikTok, IG Reels, and everything Buffer distributes flow DOWN from those two successful long-form runs per day (one Ace Richie, one TCF). If the long-form isn't great, nothing downstream matters.
 
-- ☐ **Task 5.1 — Audit current script assembly.** Read `src/engine/content-engine.ts` + `src/agent/personas.ts` (Veritas/script-writer agent). Identify every place the prompt hints the script will be clipped, chopped, or optimized for shorts. Document findings in Phase 5 Audit Log.
+- ☑ **Task 5.1 — Audit current script assembly.** DONE S69 2026-04-16. Full audit of 6 files. Long-form script writer is CLEANER than expected — no clip/shorts references in the prompt itself. Real repetition vectors: (1) segment expansion logic (splits short segs into 2 without anti-repetition), (2) `targetDuration` default is `"short"`, (3) `produceFacelessBatch` hard-codes `"short"`. Yuki persona still says "cut short clips." All findings + remediation table documented in Phase 5 Audit Log.
   - Files: `src/engine/content-engine.ts`, `src/agent/personas.ts`, `src/data/shared-context.ts`
-  - Verification: audit note naming EVERY "clip-aware" phrase in the long-form script prompt
-- ☐ **Task 5.2 — Strip all clipping awareness from the long-form script writer.** The script writer produces ONE coherent 8–12 minute narrative with natural escalation. No "and here's another angle," no "let me give you five examples" padding. Write for the full-length reader, not the short-video scroller.
-  - Files: `src/agent/personas.ts` (script-writer persona prompt), `src/engine/content-engine.ts` (any shorts-related instruction in the long-form prompt path)
-  - Verification: diff of the prompt before/after; `grep -i "short\|clip\|segment\|chop" src/agent/personas.ts` returns zero matches in the long-form writer section
+  - Verification: ☑ audit note naming EVERY clip-aware phrase and architectural vector in the Phase 5 Audit Log
+- ☑ **Task 5.2 — Strip all clipping awareness from the long-form script writer.** DONE S69 2026-04-16. Five changes: (1) `generateScript` default flipped `"short"→"long"` + orientation `"vertical"→"horizontal"`. (2) `produceFacelessVideo` default flipped `"short"→"long"`. (3) `produceFacelessBatch` hard-coded `"short"` changed to `"long"`. (4) Segment expansion logic (the repetition factory) REMOVED entirely — replaced with a warn+proceed. (5) Yuki persona rewritten: "cut short clips" → "Schedule curated shorts across platforms." Short-form path marked `@deprecated`. `tsc --noEmit` clean.
+  - Files: `src/engine/faceless-factory.ts` (3 changes), `src/agent/personas.ts` (1 change)
+  - Verification: ☑ `tsc --noEmit` exit 0; `grep "cut short clip\|Attempting segment expansion\|Rewrite this as TWO"` returns 0 matches
 - ☐ **Task 5.3 — Create `shorts-curator` persona + pipeline step.** NEW agent that runs AFTER the long-form is produced. Inputs: final script text + scene-level timestamps from the pod's composition step. Output: 3–4 short candidates, each with `{start_ts, end_ts, hook_text, why_this_moment, cta_overlay}`. Curator prompt optimizes for "stand-alone hook that makes viewer click the channel handle," NOT "more content."
   - File: `src/agent/personas.ts` (new persona), `src/engine/shorts-curator.ts` (new)
   - Verification: run on one existing long-form; output shows ≤4 clips with non-overlapping timestamps and each has a hook line
@@ -241,6 +243,21 @@ Each phase has bite-sized tasks. Every task lists the EXACT file path it touches
 - ☐ **Task 5.7 — Long-form = foundation gate.** Confirm the downstream order: long-form completes → shorts curated → Buffer/TikTok/IG all fed from that artifact set. No platform fires before the long-form upload succeeds.
   - File: `src/engine/faceless-factory.ts` orchestration
   - Verification: if long-form upload throws, no downstream distribution jobs run; Telegram alert fires
+- ☐ **Task 5.8 — Brand intro prepend in `pod/pipelines/compose.py`.** Brand-specific intro clip (trimmed to 3.0s) is either baked into the Docker image at `brand-assets/` or staged on R2 as a shared asset. `compose_video()` prepends the intro before scene 1. Brand routing: `ace_richie` → `intro_ace.mp4`, `containment_field` → `intro_tcf.mp4`. If the asset is missing, skip (no crash) but log a warning + Telegram alert so Ace knows to provision it.
+  - Files: `pod/pipelines/compose.py`, `pod/Dockerfile` (COPY brand-assets if baking in), `pod/pipelines/r2.py` (if staging on R2)
+  - Verification: output video's first 3s matches the brand intro clip frame-for-frame; `ffprobe -show_entries format=duration` on the output is ≥ 3s longer than the sum of scene durations
+- ☐ **Task 5.9 — Terminal Override typewriter redesign in `pod/pipelines/compose.py`.** The 5.0s hook typewriter is rebuilt from scratch in Python using `.ass` generation on the pod. FULL REDESIGN per Architect S69 directive — the green-on-black chyron is dead. New aesthetic per brand: **TCF** → clean monospace terminal, dark matte background, white or silver text with subtle scan-line texture, no green. **Ace Richie** → premium sans-serif (Montserrat SemiBold), warm accent color from design tokens, soft glow, elegant reveal. Both must read as "quality" within 3 seconds. The typewriter reveals the first 8-9 words of the hook, holds for 8% tail. Fonts baked into Docker image at `/app/brand-assets/`.
+  - Files: `pod/pipelines/compose.py` (new `_render_terminal_override()` function), `pod/Dockerfile` (COPY fonts)
+  - Verification: manual playback of the first 8s of a produced video for each brand — terminal override is visually distinct from the old green, reads as premium, holds for exactly 5.0s
+- ☐ **Task 5.10 — Kinetic captions via GPU Whisper in `pod/pipelines/compose.py`.** Whisper word-level transcription runs ON THE POD (GPU-accelerated via `whisper` or `faster-whisper` Python package — NOT the Groq API). Output: word-level timestamps → chunked into 2-4 word kinetic bursts → `.ass` file → burned via ffmpeg `subtitles=` filter during final composition. FULL CAPTION AESTHETIC REDESIGN: the green opaque-box captions are retired. New styles per brand: **TCF** → Bebas Neue uppercase, thin dark outline only (BorderStyle 1), NO opaque box plate, crisp white or silver text, minimal pop-in animation. **Ace Richie** → Montserrat SemiBold mixed-case, warm outline, soft shadow, NO opaque box, subtle scale pop-in (90→100% over 180ms). Both styles must feel "premium editorial" not "budget YouTube captioner." `skipUntilSeconds` syncs to brand_intro_dur + terminal_override_dur so captions never overlap the opening sequence.
+  - Files: `pod/pipelines/compose.py` (new `_generate_captions()` function), `pod/requirements.txt` (add `faster-whisper` or `openai-whisper`)
+  - Verification: (1) Whisper runs on GPU (log shows CUDA device, not CPU); (2) .ass file has no green color codes (`grep '00FF' *.ass` returns 0); (3) captions start AFTER intro+TO; (4) visual spot-check on produced video shows clean, brand-aligned text
+- ☐ **Task 5.11 — Composite audio mixing in `pod/pipelines/compose.py`.** Music bed + TTS narration + brand stings (intro audio, typing sound for TO) mixed as ONE audio composite before muxing with video. Audio pipeline: (1) Concat all scene WAVs into full narration track, (2) Mix music bed underneath at -18dB (ambient, never competing), (3) Apply brand intro audio for first 3s, (4) Apply typing.mp3 during TO window, (5) Output single mixed audio track. Music bed and sting assets either baked into Docker or staged on R2.
+  - Files: `pod/pipelines/compose.py` (new `_mix_audio()` function), `pod/Dockerfile` (COPY audio assets)
+  - Verification: `ffprobe -show_streams -select_streams a` on output shows exactly 1 audio stream; manual playback confirms music bed present underneath narration without drowning speech
+- ☐ **Task 5.12 — Docker image rebuild + live pod test of full composition.** Rebuild Docker image with all new assets (fonts, intro clips, music beds, stings) and the updated compose.py. Run one end-to-end pod job per brand. Verify: brand intro → terminal override → scenes with kinetic captions → music bed throughout → final.mp4 is the FINISHED product.
+  - Files: `pod/Dockerfile`, `.github/workflows/pod-build.yml`
+  - Verification: GH Actions build succeeds; live pod job returns a video that requires ZERO post-processing from Railway
 
 ---
 
@@ -309,6 +326,48 @@ If any phase breaks production:
 7. If you discover new decisions or open questions mid-phase, add them to the Open Decisions table with a `☐`. Don't skip this — it's how context persists across sessions.
 
 **If you find yourself considering work OUTSIDE the current phase, stop.** The whole point of this file is to NOT lose momentum on rabbit-hole fixes. Log the idea in the Open Decisions table and keep moving.
+
+---
+
+## Phase 5 Audit Log
+
+### S69 2026-04-16 — Task 5.1 (Script Assembly Clip-Awareness Audit) ✅
+
+**Audited files:** `src/engine/faceless-factory.ts` (generateScript, assembleVideo, produceFacelessVideo), `src/agent/personas.ts`, `src/data/shared-context.ts`, `src/engine/content-engine.ts`, `src/engine/vidrush-orchestrator.ts`, `src/index.ts` (auto-pipeline trigger).
+
+**FINDING 1: The long-form script writer is CLEANER THAN EXPECTED.**
+
+The `generateScript()` function (faceless-factory.ts lines 533-932) with `targetDuration === "long"` has ZERO explicit references to shorts, clips, TikTok, or chopping. The prompt actively says: *"This is NOT a compilation of short clips. This is ONE COHESIVE STORY with a beginning, middle, and end — like a Netflix documentary scene."* The two-pass architecture (ACT 1+2 → ACT 3) is structurally sound for long-form narrative.
+
+**FINDING 2: The clip-awareness contamination is NOT in the script prompt — it's in the ARCHITECTURE.**
+
+The real repetition problem comes from these sources:
+
+1. **Segment expansion (lines 893-932)**: When the script has <10 segments, each SHORT segment is LLM-expanded into TWO segments. This literally asks: *"Rewrite this as TWO separate segments."* The expansion prompt has no anti-repetition guardrails — it just splits ideas without checking what the other segments already covered. This creates the "same point restated from a different angle" problem.
+
+2. **`produceFacelessBatch()` (line 3143-3161)**: Calls `produceFacelessVideo()` with `"short"` — meaning the batch path uses the SHORT-FORM script writer (5 segments, 30-60s). This is ONLY used for the manual `/api/faceless/produce` webhook. The scheduled auto-pipeline via Alfred seeds goes through `executeFullPipeline` → VidRush → `produceFacelessVideo(llm, ..., "long")`. So the primary production path IS long-form. The `"short"` default parameter on `produceFacelessVideo` (line 2915) is misleading but NOT active in production.
+
+3. **Yuki persona (personas.ts line 40)**: *"Find viral moments, cut short clips, apply pattern interrupts."* This is the clip-chopper agent, not the script writer. But it feeds into how clips are extracted from the long-form.
+
+4. **Short-form path (lines 833-862)**: A separate single-pass script writer for 30-60s verticals. Uses `"Write a ... faceless short"` language. This path is dormant in production (only triggered by manual webhook or explicit `"short"` parameter), but its existence means the codebase still carries the short-first mindset.
+
+**FINDING 3: The "5 segments" short-form writer IS a clip-awareness vector.**
+
+The short-form prompt (line 839) says: *"Write a ${durationRange} voiceover script for a ${niche} faceless short. ONE powerful idea, not a summary."* While this is clean in isolation, the fact that `generateScript` defaults to `targetDuration: "short"` (line 538) means any caller that forgets to pass `"long"` gets the short-form writer. Risk: future code paths accidentally produce short-form when long-form was intended.
+
+**FINDING 4: No clip-awareness language in `shared-context.ts` or `content-engine.ts`.**
+
+Both are clean. The seed generation (Alfred in `index.ts`) is also clean — it just emits `PIPELINE_IDEA_ACE` / `PIPELINE_IDEA_TCF` with niche + thesis, no mention of clips or shorts.
+
+**SUMMARY OF ITEMS TO STRIP IN TASK 5.2:**
+
+| Location | What to change | Why |
+|---|---|---|
+| `faceless-factory.ts` line 538 | Change default from `"short"` to `"long"` | Long-form is the foundation; short-form should require explicit opt-in |
+| `faceless-factory.ts` lines 893-932 | Remove or rewrite segment expansion | Creates the repetition Ace identified; 16-segment target should be hit by the writer, not by splitting |
+| `faceless-factory.ts` lines 833-862 | Mark short-form path as `@deprecated` | Short-form scripts are now produced by the shorts-curator from long-form, not written independently |
+| `faceless-factory.ts` line 3153 | Change `"short"` to `"long"` in `produceFacelessBatch` | Batch path should produce long-form by default |
+| `personas.ts` line 40 | Rewrite Yuki's goal to remove "cut short clips" | Yuki's role changes: she schedules curated shorts (Phase 5.3 output), she doesn't cut them |
 
 ---
 

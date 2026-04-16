@@ -535,8 +535,8 @@ export async function generateScript(
   sourceIntelligence: string,
   niche: string,
   brand: Brand,
-  targetDuration: "short" | "long" = "short",
-  orientation: Orientation = "vertical"
+  targetDuration: "short" | "long" = "long",
+  orientation: Orientation = "horizontal"
 ): Promise<FacelessScript> {
   const voice = SCRIPT_VOICE[brand];
   // Session 40: Raised long-form from 12→16 segments to reduce static image hold time.
@@ -831,6 +831,11 @@ Return ONLY valid JSON.`;
 
   } else {
     // ── SHORT-FORM: Single pass, tighter prompt ──
+    // @deprecated Phase 5 Task 5.2 (S69): Short-form scripts are now produced by the
+    // shorts-curator from finished long-form, not written independently. This path
+    // remains for backward compat but should not be called in production. Long-form
+    // is the foundation; shorts flow downstream from it.
+    console.warn(`⚠️ [FacelessFactory] SHORT-FORM script path invoked — this is deprecated (Phase 5). Use long-form + shorts-curator instead.`);
     const shortPrompt = `${voice}
 
 You have source material to draw INSPIRATION from (do NOT copy it):
@@ -890,64 +895,13 @@ RULES:
   const estimatedMinutes = (totalWords / 140).toFixed(1); // ~140 WPM for measured narration
   console.log(`📊 [FacelessFactory] Script word counts: [${wordCounts.join(", ")}] | Total: ${totalWords} words | Estimated: ~${estimatedMinutes} min at 140 WPM`);
 
-  // QUALITY GATE (Session 23/32/40): Enforce minimum segment count for long-form.
-  // Session 40: Target raised to 16 segments. Quality gate at 10 (was 8).
+  // Phase 5 Task 5.2 (S69): Segment expansion REMOVED.
+  // The old logic split short segments into two via LLM — this created the repetitive
+  // "same idea restated from different angle" problem Ace identified. The 2-pass writer
+  // (Pass 1 = 9 segments, Pass 2 = 7 segments) should hit 16 on its own. If it doesn't,
+  // a shorter but cohesive video is better than a padded one with recycled ideas.
   if (targetDuration === "long" && segments.length < 10) {
-    console.warn(`⚠️ [FacelessFactory] Only ${segments.length} segments (need 10+). Attempting segment expansion...`);
-    // Don't retry the whole LLM call (costs time + tokens) — instead, expand what we have.
-    // Take each short segment and ask the LLM to elaborate it into 2 segments.
-    const expansionNeeded = Math.max(10 - segments.length, 3);
-    const segmentsToExpand = segments
-      .map((s: any, i: number) => ({ ...s, _idx: i, _words: s.voiceover.split(/\s+/).filter(Boolean).length }))
-      .sort((a: any, b: any) => a._words - b._words) // Expand shortest segments first
-      .slice(0, expansionNeeded);
-
-    for (const seg of segmentsToExpand) {
-      try {
-        const expandPrompt = `You are expanding a voiceover script segment for a faceless documentary video.
-
-ORIGINAL SEGMENT: "${seg.voiceover}"
-VISUAL: "${seg.visual_direction}"
-
-Rewrite this as TWO separate segments. Each segment should be 6-10 sentences (80-130 words).
-The first segment sets up the idea. The second segment deepens it with examples, implications, or a provocative question.
-Write in a measured, documentary-style voice — not fast-talking.
-
-Return ONLY valid JSON:
-[
-  { "voiceover": "first segment text", "visual_direction": "visual for first", "duration_hint": 35 },
-  { "voiceover": "second segment text", "visual_direction": "visual for second", "duration_hint": 35 }
-]`;
-
-        // Groq free tier: 12k TPM. Space expansion calls to avoid hitting the per-minute cap.
-        // Each call is ~2.3k tokens. 5 calls in <60s would consume ~11.5k of the 12k budget.
-        if (seg !== segmentsToExpand[0]) {
-          await new Promise(r => setTimeout(r, 3000)); // 3s between expansion calls
-        }
-        const expandResponse = await llm.generate(
-          [{ role: "user", content: expandPrompt }],
-          { maxTokens: 2048, temperature: 0.7 }
-        );
-
-        const expandParsed = extractJSON(expandResponse.content);
-        if (Array.isArray(expandParsed) && expandParsed.length === 2) {
-          // Replace the original segment with the two expanded ones
-          const idx = segments.findIndex((s: any) => s.voiceover === seg.voiceover);
-          if (idx !== -1) {
-            segments.splice(idx, 1,
-              { voiceover: expandParsed[0].voiceover, visual_direction: expandParsed[0].visual_direction || seg.visual_direction, duration_hint: Math.max(expandParsed[0].duration_hint || 35, 25) },
-              { voiceover: expandParsed[1].voiceover, visual_direction: expandParsed[1].visual_direction || seg.visual_direction, duration_hint: Math.max(expandParsed[1].duration_hint || 35, 25) }
-            );
-            console.log(`  📝 Expanded segment ${seg._idx}: ${seg._words}w → ${expandParsed[0].voiceover.split(/\s+/).length}w + ${expandParsed[1].voiceover.split(/\s+/).length}w`);
-          }
-        }
-      } catch (err: any) {
-        console.warn(`  ⚠️ Expansion failed for segment ${seg._idx}: ${err.message?.slice(0, 100)}`);
-      }
-    }
-
-    const newTotal = segments.reduce((sum: number, s: any) => sum + s.voiceover.split(/\s+/).filter(Boolean).length, 0);
-    console.log(`📊 [FacelessFactory] After expansion: ${segments.length} segments, ${newTotal} words (~${(newTotal / 140).toFixed(1)} min)`);
+    console.warn(`⚠️ [FacelessFactory] Only ${segments.length} segments (target 16). Proceeding with shorter but cohesive script — no expansion padding.`);
   }
 
   if (targetDuration === "long" && totalWords < 800) {
@@ -2912,7 +2866,7 @@ export async function produceFacelessVideo(
   sourceIntelligence: string,
   niche: string,
   brand: Brand,
-  targetDuration: "short" | "long" = "short"
+  targetDuration: "short" | "long" = "long"
 ): Promise<FacelessResult> {
   // Phase 3 Task 3.4 — INTAKE GUARD. Hard-fail before any model call, disk write,
   // pod job, or R2 upload if the brand/niche pair violates the allowlist contract.
@@ -3150,7 +3104,7 @@ export async function produceFacelessBatch(
 
   for (const brand of brands) {
     try {
-      const result = await produceFacelessVideo(llm, sourceIntelligence, niche, brand, "short");
+      const result = await produceFacelessVideo(llm, sourceIntelligence, niche, brand, "long");
       results.push(result);
     } catch (err: any) {
       console.error(`[FacelessFactory] Failed for ${brand}: ${err.message}`);

@@ -130,17 +130,21 @@ async function main(): Promise<void> {
     async (handle: PodHandle) => {
       console.log(`[full-composition] pod live: ${handle.workerUrl} (pod=${handle.podId})`);
 
-      // Health check (retry up to 3 times — RunPod proxy can 404 transiently)
-      console.log("[full-composition] /health:");
+      // Health check — retry generously. The /health/live liveness probe passes
+      // before models load, but /health (readiness) needs FLUX + XTTS loaded.
+      // On cold start that can take 2-5 min after the pod reports "ready".
+      const HEALTH_MAX_ATTEMPTS = 20;
+      const HEALTH_RETRY_DELAY_MS = 15_000; // 15s between attempts = up to 5 min total
+      console.log(`[full-composition] /health (up to ${HEALTH_MAX_ATTEMPTS} attempts, ${HEALTH_RETRY_DELAY_MS / 1000}s apart):`);
       let health: Awaited<ReturnType<typeof fetchHealth>> | null = null;
-      for (let attempt = 1; attempt <= 3; attempt++) {
+      for (let attempt = 1; attempt <= HEALTH_MAX_ATTEMPTS; attempt++) {
         try {
           health = await fetchHealth(handle);
           break;
         } catch (err) {
-          console.warn(`[full-composition] /health attempt ${attempt}/3 failed: ${err instanceof Error ? err.message : err}`);
-          if (attempt === 3) throw err;
-          await new Promise((r) => setTimeout(r, 5000));
+          console.warn(`[full-composition] /health attempt ${attempt}/${HEALTH_MAX_ATTEMPTS} failed: ${err instanceof Error ? err.message : err}`);
+          if (attempt === HEALTH_MAX_ATTEMPTS) throw err;
+          await new Promise((r) => setTimeout(r, HEALTH_RETRY_DELAY_MS));
         }
       }
       console.log(JSON.stringify(health, null, 2));

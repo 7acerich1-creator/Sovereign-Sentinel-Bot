@@ -2951,12 +2951,17 @@ export async function produceFacelessVideo(
     duration_hint_s: seg.duration_hint || undefined,
   }));
 
+  // Extract hook text for the pod's opening typewriter overlay (Task 5.9).
+  // Prefer the script's explicit hook; fall back to first segment's voiceover.
+  const hookText = (script.hook || script.segments[0]?.voiceover || "").trim();
+
   const podJobSpec: JobSpec = {
     brand: brand as "ace_richie" | "containment_field",
     niche,
     seed: sourceIntelligence.slice(0, 500),
     script: script.segments.map(s => s.voiceover).join("\n\n"),
     scenes: podScenes,
+    hook_text: hookText || undefined,
     client_job_id: jobId,
   };
 

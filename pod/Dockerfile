@@ -68,13 +68,17 @@ RUN pip install --upgrade pip setuptools wheel \
 # Fix: install a fresh blinker with --ignore-installed BEFORE the main
 # requirements install. After this, pip sees a pip-managed blinker it can
 # upgrade/replace cleanly.
-COPY requirements.txt .
+COPY pod/requirements.txt .
 RUN pip install --ignore-installed blinker \
     && pip install -r requirements.txt
 
 # Source: FastAPI worker + any shared utilities
-COPY worker.py .
-COPY pipelines/ ./pipelines/
+COPY pod/worker.py .
+COPY pod/pipelines/ ./pipelines/
+
+# Brand assets: animated brand cards (.mp4), fonts (.ttf), audio stings (.mp3).
+# Phase 5 Tasks 5.8-5.11. Worker reads via BRAND_ASSETS_DIR (default /app/brand-assets).
+COPY brand-assets/ ./brand-assets/
 
 # Speaker reference WAVs live on /runpod-volume (Task 1.5), not baked in.
 # Model weights (FLUX.1 [dev], XTTSv2) download to $HF_HOME on first /health

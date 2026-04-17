@@ -33,6 +33,9 @@ export interface JobSpec {
   script: string;
   /** Scene breakdown — long-form only; shorts come from Phase 5 curator. */
   scenes: Scene[];
+  /** Hook text for the opening typewriter overlay (first 8-9 words of hook).
+   *  Falls back to first ~9 words of the script if omitted. */
+  hook_text?: string;
   /** Optional idempotency key (server accepts up to 64 chars). */
   client_job_id?: string;
 }

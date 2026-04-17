@@ -20,6 +20,7 @@ on:
     branches: [main]
     paths:
       - "pod/**"
+      - "brand-assets/**"
       - ".github/workflows/pod-build.yml"
   workflow_dispatch:
 
@@ -67,7 +68,7 @@ jobs:
       - name: Build + push
         uses: docker/build-push-action@v5
         with:
-          context: ./pod
+          context: .
           file: ./pod/Dockerfile
           platforms: linux/amd64
           push: true

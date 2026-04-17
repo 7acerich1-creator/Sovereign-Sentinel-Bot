@@ -117,6 +117,10 @@ class ProduceRequest(BaseModel):
     seed: str = Field(min_length=1, max_length=240)
     script: str = Field(min_length=10)
     scenes: list[Scene] = Field(min_length=1)
+    hook_text: Optional[str] = Field(
+        default=None, max_length=500,
+        description="Opening typewriter text. Falls back to first ~9 words of script.",
+    )
     client_job_id: Optional[str] = Field(default=None, max_length=64)
 
     @field_validator("scenes")
@@ -308,7 +312,7 @@ def _run_pipeline(job_id: str, req: ProduceRequest) -> None:
         scene_images = img_result["scene_images"]
         log.info("pipeline_flux_done", job_id=job_id, count=img_result["count"])
 
-        # Stage 3: Compose — Ken Burns + concat -> final MP4 + thumbnail
+        # Stage 3: Compose — Opening Sequence + Ken Burns + concat -> final MP4
         log.info("pipeline_compose_start", job_id=job_id)
         from pipelines.compose import compose_video
         compose_result = compose_video(
@@ -317,6 +321,8 @@ def _run_pipeline(job_id: str, req: ProduceRequest) -> None:
             durations_s=durations,
             job_dir=job_dir,
             brand=brand,
+            hook_text=req.hook_text,
+            script=req.script,
         )
         video_path = compose_result["video_path"]
         thumb_path = compose_result["thumbnail_path"]

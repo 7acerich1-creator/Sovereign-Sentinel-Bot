@@ -43,6 +43,10 @@ class ProduceRequest(BaseModel):
     seed: str = Field(min_length=1, max_length=240)
     script: str = Field(min_length=10)
     scenes: list[Scene] = Field(min_length=1)
+    hook_text: Optional[str] = Field(
+        default=None, max_length=500,
+        description="Opening typewriter text (first 8-9 words of hook). Falls back to first ~9 words of script.",
+    )
     client_job_id: Optional[str] = Field(default=None, max_length=64)
 
     @field_validator("scenes")

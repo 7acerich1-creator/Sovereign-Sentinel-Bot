@@ -384,6 +384,90 @@ export async function fetchHealth(handle: PodHandle): Promise<HealthReport> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Pod safety net — list + sweep orphans
+// ─────────────────────────────────────────────────────────────────────────────
+
+const RUNPOD_GQL_URL = "https://api.runpod.io/graphql";
+const SOVEREIGN_POD_PREFIX = "sovereign-worker-";
+/** Default max pod age before the sweeper kills it (30 min). */
+const DEFAULT_MAX_POD_AGE_S = 30 * 60;
+
+export interface SovereignPodInfo {
+  id: string;
+  name: string;
+  desiredStatus: string;
+  uptimeSeconds: number;
+}
+
+/**
+ * List all sovereign-worker pods on the account via GraphQL.
+ * Returns only pods whose name starts with SOVEREIGN_POD_PREFIX.
+ */
+export async function listSovereignPods(): Promise<SovereignPodInfo[]> {
+  const apiKey = process.env.RUNPOD_API_KEY;
+  if (!apiKey) return [];
+
+  const query = `{ myself { pods { id name desiredStatus runtime { uptimeInSeconds } } } }`;
+  const resp = await fetch(RUNPOD_GQL_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ query }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!resp.ok) {
+    console.warn(`[RunPod] listSovereignPods HTTP ${resp.status}`);
+    return [];
+  }
+  const body = await resp.json() as {
+    data?: { myself?: { pods?: Array<{
+      id: string; name: string; desiredStatus: string;
+      runtime?: { uptimeInSeconds?: number };
+    }> } };
+  };
+  const allPods = body.data?.myself?.pods ?? [];
+  return allPods
+    .filter((p) => p.name.startsWith(SOVEREIGN_POD_PREFIX))
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      desiredStatus: p.desiredStatus,
+      uptimeSeconds: p.runtime?.uptimeInSeconds ?? 0,
+    }));
+}
+
+/**
+ * Kill any sovereign-worker pod older than `maxAgeS` seconds.
+ * Returns the list of pod IDs terminated.
+ *
+ * Safe to call from SIGTERM handlers, scheduled sweeps, or ad-hoc cleanup.
+ * Skips pods that match `excludePodId` (the currently active session pod).
+ */
+export async function sweepStalePods(options: {
+  maxAgeS?: number;
+  excludePodId?: string;
+} = {}): Promise<string[]> {
+  const maxAge = options.maxAgeS ?? DEFAULT_MAX_POD_AGE_S;
+  const pods = await listSovereignPods();
+  const stale = pods.filter(
+    (p) => p.uptimeSeconds > maxAge && p.id !== options.excludePodId,
+  );
+  if (stale.length === 0) return [];
+
+  console.log(
+    `\u{1F9F9} [RunPod] sweeping ${stale.length} stale pod(s): ${stale.map((p) => `${p.id} (${Math.round(p.uptimeSeconds / 60)}min)`).join(", ")}`,
+  );
+  const killed: string[] = [];
+  for (const pod of stale) {
+    await stopPod(pod.id);
+    killed.push(pod.id);
+  }
+  return killed;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Internal: pod HTTP (worker Bearer auth)
 // ─────────────────────────────────────────────────────────────────────────────
 

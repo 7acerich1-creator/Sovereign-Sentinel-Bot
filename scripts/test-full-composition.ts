@@ -26,9 +26,19 @@
 
 import "dotenv/config";
 
-import { fetchHealth, produceVideo } from "../src/pod/runpod-client";
+import { fetchHealth, produceVideo, sweepStalePods } from "../src/pod/runpod-client";
 import { shutdownPodSession, withPodSession } from "../src/pod/session";
 import type { ArtifactUrls, Brand, JobSpec, PodHandle } from "../src/pod/types";
+
+// SESSION 75: Kill pod on Ctrl-C / terminal close so we never leak GPU charges.
+const emergencyShutdown = async () => {
+  console.log("\n[full-composition] SIGTERM/SIGINT — killing pod...");
+  await shutdownPodSession().catch(() => {});
+  await sweepStalePods().catch(() => {});
+  process.exit(1);
+};
+process.on("SIGINT", emergencyShutdown);
+process.on("SIGTERM", emergencyShutdown);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Config

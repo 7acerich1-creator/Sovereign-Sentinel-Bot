@@ -57,6 +57,8 @@ import { ImageGeneratorTool } from "./tools/image-generator";
 import { produceFacelessBatch } from "./engine/faceless-factory";
 import { extractWhisperIntel } from "./engine/whisper-extract";
 import { executeFullPipeline, formatPipelineReport, type PipelineOptions } from "./engine/vidrush-orchestrator";
+import { shutdownPodSession } from "./pod/session";
+import { sweepStalePods } from "./pod/runpod-client";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { ProposeTaskTool, SaveContentDraftTool, FileBriefingTool, CheckApprovedTasksTool } from "./tools/action-surface";
@@ -3909,6 +3911,13 @@ async function main() {
     await webhookServer.shutdown();
     await mcpBridge.shutdown();
     await router.shutdownAll();
+
+    // SESSION 75: Kill any warm GPU pod to prevent orphan charges.
+    await shutdownPodSession();
+    // Belt-and-suspenders: sweep any pod that somehow survived prior crashes.
+    await sweepStalePods().catch((err) =>
+      console.warn("⚠️ [Shutdown] sweepStalePods failed:", err instanceof Error ? err.message : err),
+    );
 
     // Shutdown agent channels
     for (const chan of agentChannels) {

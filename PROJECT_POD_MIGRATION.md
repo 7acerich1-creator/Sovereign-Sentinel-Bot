@@ -307,7 +307,10 @@ Channels to verify against:
   - Verification: short audit table in Phase 7 section
 - ☐ **Task 7.4 — Same audits for a TCF long-form + its curated shorts.** Triggered same day. Verify uploads land on `@TheContainmentField`.
   - Verification: matching audit tables
-- ☐ **Task 7.5 — Weekly metrics check-in (1 week after Phase 7 green).** Pull: per-video average view duration, retention drop-off timestamps, CTR, click-throughs to `/diagnostic` via Vercel Insights, `initiates` rows since cutover, short → channel-click rate.
+- ☐ **Task 7.5 — Batch production window mode.** Add a Telegram `/produce_batch` command (or scheduler entry) that keeps ONE warm GPU pod alive for a configurable window (default 30 min), queues N video jobs sequentially through it, then kills the pod. Uses `withPodSession` with `idleWindowMs: 5 * 60_000` so the pod stays warm between jobs. Target: 6-8 videos per batch window (~$1.50-2.00 total GPU cost for a full week of content). Includes a sweep-on-exit guarantee via the S75 signal handlers + `sweepStalePods()`.
+  - Files: `src/engine/faceless-factory.ts` (batch entry point), `src/pod/session.ts` (idle window tuning), new Telegram command handler
+  - Verification: batch of 3+ videos produced on a single pod session without cold-start between jobs; pod terminated within 5 min of last job completing
+- ☐ **Task 7.6 — Weekly metrics check-in (1 week after Phase 7 green).** Pull: per-video average view duration, retention drop-off timestamps, CTR, click-throughs to `/diagnostic` via Vercel Insights, `initiates` rows since cutover, short → channel-click rate.
   - Verification: numbers written to NORTH_STAR.md "S57 Funnel Measurement" section
 
 ---

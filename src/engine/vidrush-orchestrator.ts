@@ -40,19 +40,24 @@ import {
   type AudienceAngle,
 } from "../prompts/social-optimization-prompt";
 import type { LLMProvider } from "../types";
+import { isR2Configured, uploadToR2 } from "../tools/r2-upload";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
 const STORAGE_BUCKET = "public-assets";
+const R2_BUCKET_CLIPS = process.env.R2_BUCKET_VIDEOS || "sovereign-videos"; // clips/ prefix inside same bucket as long-form
 const ORCHESTRATOR_DIR = "/tmp/vidrush_orchestrator";
 
 // ── Cleanup: delete clips from Supabase Storage after Buffer scheduling ──
-// WHY: Clips served as publicUrl burn egress bandwidth. Buffer downloads each clip
-// once per channel. 9 channels × 7 clips × 4MB = 250MB egress per pipeline run.
-// Free tier is 5GB/month. Without cleanup, 20 pipeline runs = over limit.
-// Once Buffer has ingested the clip (createPost returned success), the storage copy
-// is dead weight. Delete it to stop egress accumulation.
+// Session 78: R2 has zero egress fees — cleanup only runs for Supabase fallback path.
+// If clips are on R2 (publicUrl contains r2.dev), skip cleanup entirely.
 async function cleanupSupabaseStorage(clips: ClipMeta[]): Promise<void> {
+  // R2 clips have zero egress cost — no cleanup needed
+  const hasR2Clips = clips.some(c => c.publicUrl?.includes("r2.dev"));
+  if (hasR2Clips) {
+    console.log(`♻️ [Orchestrator] Clips on R2 — zero egress, skipping cleanup`);
+    return;
+  }
   if (!SUPABASE_URL || !SUPABASE_KEY) return;
 
   let deleted = 0;
@@ -613,95 +618,103 @@ async function chopLongFormIntoClips(
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// STEP 5: UPLOAD CLIPS TO SUPABASE STORAGE
+// STEP 5: UPLOAD CLIPS TO R2 (formerly Supabase Storage)
+// Session 78: Migrated to Cloudflare R2 — zero egress fees.
+// Supabase Storage kept as fallback if R2 env vars missing.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async function uploadClipsToStorage(clips: ClipMeta[], jobId: string, meta?: { brand?: string; niche?: string; title?: string }): Promise<void> {
-  if (!SUPABASE_URL || !SUPABASE_KEY) return;
+  const useR2 = isR2Configured();
+  if (!useR2 && (!SUPABASE_URL || !SUPABASE_KEY)) return;
 
-  // Build a human-readable folder name: vidrush/ace_richie_quantum_firmware_update_1775430704664/
-  // so you can tell what's what when browsing Supabase Storage
+  // Build a human-readable folder name: clips/ace_richie_quantum_firmware_update_1775430704664/
   const slugParts = [
     meta?.brand || "unknown",
     meta?.niche || "general",
     (meta?.title || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 40).replace(/_+$/, ""),
   ].filter(Boolean);
-  const folderName = slugParts.join("_") + "_" + jobId.split("_").pop(); // keep timestamp for uniqueness
+  const folderName = slugParts.join("_") + "_" + jobId.split("_").pop();
 
-  const MAX_RETRIES = 3;
+  if (useR2) {
+    console.log(`☁️ [Orchestrator] Uploading ${clips.length} clips to R2 bucket "${R2_BUCKET_CLIPS}" (zero egress)`);
+  } else {
+    console.log(`📦 [Orchestrator] R2 not configured — falling back to Supabase Storage`);
+  }
 
   for (const clip of clips) {
     let uploaded = false;
 
-    for (let attempt = 1; attempt <= MAX_RETRIES && !uploaded; attempt++) {
-      try {
-        const fileBuffer = readFileSync(clip.localPath);
-        const storagePath = `vidrush/${folderName}/clip_${clip.index.toString().padStart(2, "0")}.mp4`;
+    try {
+      const fileBuffer = readFileSync(clip.localPath);
+      const clipKey = `clips/${folderName}/clip_${clip.index.toString().padStart(2, "0")}.mp4`;
 
+      if (useR2) {
+        // ── PRIMARY: Cloudflare R2 ──
+        const result = await uploadToR2(R2_BUCKET_CLIPS, clipKey, fileBuffer, "video/mp4");
+        clip.publicUrl = result.publicUrl;
+        console.log(`📤 [Orchestrator] Clip ${clip.index} → R2`);
+        uploaded = true;
+      } else {
+        // ── FALLBACK: Supabase Storage (legacy) ──
+        const storagePath = `vidrush/${folderName}/clip_${clip.index.toString().padStart(2, "0")}.mp4`;
         const resp = await fetch(
           `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
           {
             method: "POST",
             headers: {
-              apikey: SUPABASE_KEY,
+              apikey: SUPABASE_KEY!,
               Authorization: `Bearer ${SUPABASE_KEY}`,
               "Content-Type": "video/mp4",
               "x-upsert": "true",
             },
             body: fileBuffer,
-          }
+          },
         );
-
         if (resp.ok) {
           clip.publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${storagePath}`;
-          console.log(`📤 [Orchestrator] Clip ${clip.index} uploaded`);
+          console.log(`📤 [Orchestrator] Clip ${clip.index} → Supabase (fallback)`);
           uploaded = true;
-        } else if (resp.status === 503 && attempt < MAX_RETRIES) {
-          // Supabase overloaded — exponential backoff
-          const backoffMs = 5000 * Math.pow(2, attempt - 1); // 5s, 10s
-          console.warn(`⚠️ [Orchestrator] Clip ${clip.index} got 503 — retry ${attempt}/${MAX_RETRIES} in ${backoffMs / 1000}s`);
-          await new Promise(r => setTimeout(r, backoffMs));
         } else {
-          console.error(`[Orchestrator] Clip ${clip.index} upload failed: ${resp.status} (attempt ${attempt}/${MAX_RETRIES})`);
-        }
-      } catch (err: any) {
-        console.error(`[Orchestrator] Clip ${clip.index} upload error (attempt ${attempt}/${MAX_RETRIES}): ${err.message?.slice(0, 200)}`);
-        if (attempt < MAX_RETRIES) {
-          await new Promise(r => setTimeout(r, 3000 * attempt));
+          console.error(`[Orchestrator] Clip ${clip.index} Supabase upload failed: ${resp.status}`);
         }
       }
+    } catch (err: any) {
+      console.error(`[Orchestrator] Clip ${clip.index} upload error: ${err.message?.slice(0, 200)}`);
     }
 
-    // ── Session 39: Upload clip thumbnail alongside video ──
+    // ── Upload clip thumbnail alongside video ──
     if (uploaded && clip.thumbnailPath && existsSync(clip.thumbnailPath)) {
       try {
         const thumbBuf = readFileSync(clip.thumbnailPath);
-        const thumbStoragePath = `vidrush/${folderName}/thumb_${clip.index.toString().padStart(2, "0")}.jpg`;
-        const thumbResp = await fetch(
-          `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${thumbStoragePath}`,
-          {
-            method: "POST",
-            headers: {
-              apikey: SUPABASE_KEY,
-              Authorization: `Bearer ${SUPABASE_KEY}`,
-              "Content-Type": "image/jpeg",
-              "x-upsert": "true",
+        const thumbKey = `clips/${folderName}/thumb_${clip.index.toString().padStart(2, "0")}.jpg`;
+
+        if (useR2) {
+          const thumbResult = await uploadToR2(R2_BUCKET_CLIPS, thumbKey, thumbBuf, "image/jpeg");
+          clip.thumbnailUrl = thumbResult.publicUrl;
+          console.log(`🖼️ [Orchestrator] Thumb ${clip.index} → R2`);
+        } else {
+          const thumbStoragePath = `vidrush/${folderName}/thumb_${clip.index.toString().padStart(2, "0")}.jpg`;
+          const thumbResp = await fetch(
+            `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${thumbStoragePath}`,
+            {
+              method: "POST",
+              headers: {
+                apikey: SUPABASE_KEY!,
+                Authorization: `Bearer ${SUPABASE_KEY}`,
+                "Content-Type": "image/jpeg",
+                "x-upsert": "true",
+              },
+              body: thumbBuf,
             },
-            body: thumbBuf,
+          );
+          if (thumbResp.ok) {
+            clip.thumbnailUrl = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${thumbStoragePath}`;
+            console.log(`🖼️ [Orchestrator] Thumb ${clip.index} → Supabase (fallback)`);
           }
-        );
-        if (thumbResp.ok) {
-          clip.thumbnailUrl = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${thumbStoragePath}`;
-          console.log(`🖼️ [Orchestrator] Thumb ${clip.index} uploaded → ${clip.thumbnailUrl}`);
         }
       } catch (err: any) {
         console.warn(`⚠️ [Orchestrator] Thumb ${clip.index} upload failed (non-fatal): ${err.message?.slice(0, 150)}`);
       }
-    }
-
-    // Small delay between clip uploads to avoid slamming Supabase
-    if (uploaded) {
-      await new Promise(r => setTimeout(r, 1500));
     }
   }
 }
@@ -956,6 +969,8 @@ Paragraph 4 — WHO THIS IS FOR (2-3 sentences)
 
 Then, in order, exactly these trailing lines (each on its own blank-separated line):
 
+🧬 Take the Diagnostic: https://sovereign-synthesis.com/diagnostic
+
 🔗 The Protocol: https://sovereign-synthesis.com
 
 Related topics: <5-7 comma-separated keyword seeds from the assigned angle, adapted to the video's actual content — no verbatim dump, no hashtags on this line>
@@ -1041,6 +1056,7 @@ No prose outside the JSON. No code fences.`;
     `This is for the version of you that noticed the pattern before you had words for it. ${angle.voice.split(".")[0]}.`,
     `What this video delivers: the exact ${angle.name.toLowerCase()} pattern named, the mechanism underneath it, and the next concrete move from here. No slogans, no motivational filler, no "just be present" cope.`,
     `If you're in the ${angle.demographic.split(",")[0].trim().toLowerCase()} slice of this, this is for you. ${brandLine}`,
+    "🧬 Take the Diagnostic: https://sovereign-synthesis.com/diagnostic",
     "🔗 The Protocol: https://sovereign-synthesis.com",
     `Related topics: ${seedsList}`,
     hashtagFooter,
@@ -1486,7 +1502,7 @@ export async function executeFullPipeline(
     const offset = hashStringToAngleOffset(whisperResult.videoId || facelessResult.title);
     const dryAngle = angleForClipIndex(1, offset);
     longFormCopy = {
-      description: `[DRY RUN] ${facelessResult.title}\n\n[DRY RUN] Angle: ${dryAngle.name}\n${dryAngle.emotionalEntry}\n\n🔗 The Protocol: https://sovereign-synthesis.com\n\nRelated topics: ${dryAngle.keywordSeeds.slice(0, 6).join(", ")}\n\n#DryRun #${dryAngle.id.replace(/_/g, "")}`,
+      description: `[DRY RUN] ${facelessResult.title}\n\n[DRY RUN] Angle: ${dryAngle.name}\n${dryAngle.emotionalEntry}\n\n🧬 Take the Diagnostic: https://sovereign-synthesis.com/diagnostic\n\n🔗 The Protocol: https://sovereign-synthesis.com\n\nRelated topics: ${dryAngle.keywordSeeds.slice(0, 6).join(", ")}\n\n#DryRun #${dryAngle.id.replace(/_/g, "")}`,
       tags: `dry run,${dryAngle.keywordSeeds.slice(0, 5).join(",")}`,
       angleId: dryAngle.id,
       angleName: dryAngle.name,
@@ -1508,7 +1524,7 @@ export async function executeFullPipeline(
       const emergencyAngle = angleForClipIndex(1, offset);
       const seeds = emergencyAngle.keywordSeeds.slice(0, 6).join(", ");
       longFormCopy = {
-        description: `${facelessResult.title}\n\n${emergencyAngle.emotionalEntry}\n\n🔗 The Protocol: https://sovereign-synthesis.com\n\nRelated topics: ${seeds}`,
+        description: `${facelessResult.title}\n\n${emergencyAngle.emotionalEntry}\n\n🧬 Take the Diagnostic: https://sovereign-synthesis.com/diagnostic\n\n🔗 The Protocol: https://sovereign-synthesis.com\n\nRelated topics: ${seeds}`,
         tags: `${emergencyAngle.keywordSeeds.slice(0, 5).join(",")},${whisperResult.niche.replace(/_/g, " ")}`,
         angleId: emergencyAngle.id,
         angleName: emergencyAngle.name,
@@ -1626,14 +1642,18 @@ export async function executeFullPipeline(
           const clipPath = `${clipDir}/clip_${i.toString().padStart(2, "0")}.mp4`;
 
           // Audio-aware padding: add breathing room so clips don't cut mid-word.
+          // CRITICAL: YouTube Shorts rejects videos >60s. Curator caps at 59s pre-padding,
+          // but PAD_BEFORE + PAD_AFTER can push over 60s. Final duration is hard-capped at 59s.
           const PAD_BEFORE = 0.3;
           const PAD_AFTER = 1.5;
+          const MAX_SHORT_DURATION = 59; // YouTube Shorts hard limit
           const paddedStart = Math.max(0, short.start_ts - PAD_BEFORE);
-          const paddedEnd = Math.min(
+          const rawPaddedEnd = Math.min(
             curatorResult.long_form_duration_s,
             short.end_ts + PAD_AFTER,
           );
-          const duration = paddedEnd - paddedStart;
+          // Cap total duration so padding never pushes past YouTube Shorts limit
+          const duration = Math.min(rawPaddedEnd - paddedStart, MAX_SHORT_DURATION);
 
           try {
             // Phase 5 Task 5.6: CTA overlay in last 2 seconds.
@@ -1669,14 +1689,14 @@ export async function executeFullPipeline(
               localPath: clipPath,
               publicUrl: null,
               startSec: paddedStart,
-              endSec: paddedEnd,
+              endSec: paddedStart + duration,
               captionText: `${short.hook_text} | ${short.why_this_moment}`,
               storyTitle: short.hook_text,
               storyHook: short.why_this_moment,
             });
             console.log(
               `  ✂️ Short ${i}: "${short.hook_text.slice(0, 50)}" ` +
-              `${paddedStart.toFixed(1)}s → ${paddedEnd.toFixed(1)}s (${duration.toFixed(1)}s) ` +
+              `${paddedStart.toFixed(1)}s → ${(paddedStart + duration).toFixed(1)}s (${duration.toFixed(1)}s) ` +
               `conf=${short.confidence.toFixed(2)} CTA="${ctaText.slice(0, 40)}"`
             );
           } catch (err: any) {
@@ -1798,12 +1818,14 @@ export async function executeFullPipeline(
   const totalDuration = (Date.now() - startTime) / 1000;
 
   // ── EGRESS CONTROL: Delete clips from Supabase Storage ──
-  // Buffer has already downloaded each clip. Keeping them burns egress on every
-  // subsequent access (dashboard views, re-downloads, crawlers). Delete them now.
+  // Buffer's GraphQL accepts posts with media URLs, but media download may be async.
+  // Wait 60s after scheduling to give Buffer time to pull all clip files before deletion.
   // The faceless long-form video stays — it's referenced by YouTube upload and
   // only downloaded once. Clips are the egress multiplier (N clips × M channels).
   if (bufferScheduled > 0 && !dryRun) {
     try {
+      console.log(`⏳ [Orchestrator] Waiting 60s for Buffer to cache media before cleanup...`);
+      await new Promise(r => setTimeout(r, 60_000));
       await cleanupSupabaseStorage(clips);
     } catch (err: any) {
       console.warn(`⚠️ [Orchestrator] Storage cleanup non-critical error: ${err.message?.slice(0, 200)}`);

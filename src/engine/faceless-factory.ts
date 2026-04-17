@@ -193,6 +193,10 @@ interface FacelessResult {
   brand: Brand;
   duration: number;
   segmentCount: number;
+  /** Phase 5 Task 5.5: Pass the script to the orchestrator so shorts-curator can run. */
+  script?: FacelessScript;
+  /** Phase 5 Task 5.5: Per-segment durations (seconds) for shorts-curator timestamp calc. */
+  segmentDurations?: number[];
 }
 
 // ── Brand voice for script generation (reuses Anita's Protocol 77 voice) ──
@@ -3049,10 +3053,9 @@ export async function produceFacelessVideo(
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // STEP 4: Download R2 video to local temp for backward compat with the
-  // vidrush orchestrator's clip-chopping step (Phase 5 will remove this).
-  // The YouTube publisher can use the URL directly, but the clip-generator
-  // needs a local file path for ffmpeg operations.
+  // STEP 4: Download R2 video to local temp. The orchestrator needs this for
+  // shorts-curator ffmpeg extraction (Phase 5 Task 5.5) and the YouTube
+  // publisher for long-form upload. Kept intentionally.
   // ──────────────────────────────────────────────────────────────────────────
   let localVideoPath = "";
   try {
@@ -3064,7 +3067,7 @@ export async function produceFacelessVideo(
       writeFileSync(localVideoPath, buf);
       console.log(`✅ [FacelessFactory] Downloaded ${(buf.length / 1024 / 1024).toFixed(1)}MB → ${localVideoPath}`);
     } else {
-      console.warn(`⚠️ [FacelessFactory] R2 download failed: ${dlResp.status} — clip chopping will be skipped`);
+      console.warn(`⚠️ [FacelessFactory] R2 download failed: ${dlResp.status} — shorts extraction will be skipped`);
     }
   } catch (dlErr: any) {
     console.warn(`⚠️ [FacelessFactory] R2 download failed (non-fatal): ${dlErr.message?.slice(0, 200)}`);
@@ -3090,6 +3093,10 @@ export async function produceFacelessVideo(
   console.log(`   Video URL: ${videoUrl || "queue failed"}`);
   console.log(`   Thumbnail URL: ${artifacts.thumbnailUrl}`);
 
+  // Phase 5 Task 5.5: Pass script + per-segment duration hints so the
+  // orchestrator can call the shorts-curator without re-generating anything.
+  const segDurations = script.segments.map(s => s.duration_hint || 30);
+
   return {
     videoUrl,
     localPath: localVideoPath,
@@ -3099,6 +3106,8 @@ export async function produceFacelessVideo(
     brand,
     duration: artifacts.durationS,
     segmentCount: script.segments.length,
+    script,
+    segmentDurations: segDurations,
   };
 }
 

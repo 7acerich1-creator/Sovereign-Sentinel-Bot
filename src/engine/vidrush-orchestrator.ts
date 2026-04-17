@@ -5,9 +5,9 @@
 // 1. Whisper extraction (extract universal truths from source)
 // 2. Faceless Factory LONG (10-15 min video in Anita's Protocol 77 voice)
 // 3. YouTube long-form upload (to Ace Richie 77 channel)
-// 4. Chop long-form into ~30 clips (ffmpeg, niche color grades)
-// 5. Generate platform-specific copy per clip (LLM)
-// 6. Distribute clips to all platforms (TikTok, IG, YouTube Shorts)
+// 4. Curate 0-4 surgical shorts via shorts-curator (LLM + ffmpeg)
+// 5. Generate platform-specific copy per short (LLM)
+// 6. Distribute shorts to all platforms (TikTok, IG, YouTube Shorts)
 // 7. Schedule posts to ALL Buffer channels (a week of content across every platform)
 // 8. Report back to Architect
 //
@@ -27,7 +27,8 @@ const FFMPEG_CLIP_TIMEOUT_MS = parseInt(process.env.FFMPEG_CLIP_TIMEOUT_MS || "1
 const MAX_CLIPS_PER_RUN = parseInt(process.env.MAX_CLIPS_PER_RUN || "10", 10);
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync, rmSync } from "fs";
 import { extractWhisperIntel, detectNiche, type WhisperResult } from "./whisper-extract";
-import { produceFacelessVideo } from "./faceless-factory";
+import { produceFacelessVideo, type FacelessScript } from "./faceless-factory";
+import { curateShorts, type CuratedShort, type CuratorResult } from "./shorts-curator";
 import { YouTubeLongFormPublishTool } from "../tools/video-publisher";
 import {
   AUDIENCE_ANGLES,
@@ -202,14 +203,12 @@ const NICHE_FILTERS: Record<string, string> = {
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// STEP 4: SEMANTIC CLIP EXTRACTION
-// Session 24 UPGRADE: LLM-driven story moment identification.
-// Instead of cutting at silence boundaries (arbitrary chunks),
-// the LLM reads the Whisper transcript and identifies self-contained
-// "story moments" — complete ideas that work as standalone shorts.
-// Each clip gets a title + hook for downstream copy generation.
-//
-// Fallback chain: LLM semantic → silence boundaries → math division
+// @deprecated — Phase 5 Task 5.5 (S72): RETIRED.
+// The "chop everything into 4-30 clips" pipeline below is replaced by the
+// surgical shorts-curator (src/engine/shorts-curator.ts). The curator reads
+// the script + segment durations and LLM-identifies 0-4 stand-alone moments.
+// These dead functions (extractStoryMoments, chopLongFormIntoClips) are
+// preserved for reference but no longer called from executeFullPipeline.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 interface StoryMoment {
@@ -1353,7 +1352,7 @@ async function scheduleBufferWeek(
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MASTER PIPELINE: executeFullPipeline()
-// 1 URL → Whisper → Faceless LONG → YouTube → Chop → Distribute → Buffer
+// 1 URL → Whisper → Faceless LONG → YouTube → Curate Shorts → Distribute → Buffer
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export interface PipelineOptions {
@@ -1403,7 +1402,7 @@ export async function executeFullPipeline(
     whisperResult = {
       videoId: youtubeUrl, // Synthetic identifier from caller (e.g., raw_<sha1>)
       transcript: rawIdea!, // The thesis IS the source intelligence
-      segments: [], // Empty — chopLongFormIntoClips falls back to silence-boundary detection
+      segments: [], // Empty — shorts-curator uses script segments, not whisper segments
       sourcePath: "",
       audioPath: "",
       whisperPath: "",
@@ -1558,56 +1557,141 @@ export async function executeFullPipeline(
         : `⚠️ YouTube upload issue: ${ytResult.slice(0, 200)}`);
     } catch (err: any) {
       errors.push(`YouTube upload failed: ${err.message}`);
-      await progress("STEP 3/8", `⚠️ YouTube upload failed (continuing): ${err.message?.slice(0, 150)}`);
+      await progress("STEP 3/8", `❌ YouTube long-form upload FAILED — halting downstream (foundation gate)`);
+      // Phase 5 Task 5.7: Long-form = foundation gate.
+      // If the long-form upload fails, nothing downstream fires. Shorts, Buffer,
+      // TikTok, IG all depend on the long-form being live on YouTube first.
+      cleanupPipelineJob(jobId);
+      return {
+        youtubeVideoId, youtubeUrl: youtubeUrl2, longFormLocalPath: facelessResult.localPath,
+        longFormPublicUrl: facelessResult.videoUrl, clipCount: 0, clips: [],
+        bufferScheduled: 0, platformResults: [], errors, duration: (Date.now() - startTime) / 1000,
+      };
     }
   } else {
     errors.push("No video URL from Faceless Factory — skipping YouTube upload");
-    await progress("STEP 3/8", "⚠️ No video URL — skipping YouTube upload");
+    await progress("STEP 3/8", `❌ No video URL — halting downstream (foundation gate)`);
+    cleanupPipelineJob(jobId);
+    return {
+      youtubeVideoId, youtubeUrl: youtubeUrl2, longFormLocalPath: facelessResult.localPath,
+      longFormPublicUrl: facelessResult.videoUrl, clipCount: 0, clips: [],
+      bufferScheduled: 0, platformResults: [], errors, duration: (Date.now() - startTime) / 1000,
+    };
   }
 
-  // ── STEP 4: SEMANTIC CLIP EXTRACTION ──
+  // ── STEP 4: SURGICAL SHORTS CURATION (Phase 5 Task 5.5) ──
+  // Replaced the old "chop into 4-30 clips" with the shorts-curator.
+  // The curator reads the script + segment durations and LLM-identifies 0-4
+  // stand-alone moments worth clipping. Each clip drives the viewer to the
+  // long-form channel. Conservative > over-cutting.
   let clips: ClipMeta[];
   if (dryRun) {
-    await progress("STEP 4/8", "[DRY RUN] Simulating semantic clip extraction...");
-    // Simulate 8 clips with semantic metadata (title + hook) matching live pipeline output
-    const simClipCount = 8;
+    await progress("STEP 4/8", "[DRY RUN] Simulating shorts curation...");
+    const simClipCount = 3;
     clips = Array.from({ length: simClipCount }, (_, i) => ({
       index: i,
-      startSec: i * 30,
-      endSec: (i + 1) * 30,
+      startSec: i * 30 + 60,
+      endSec: i * 30 + 90,
       localPath: `${ORCHESTRATOR_DIR}/${jobId}/clip_${i.toString().padStart(2, "0")}.mp4`,
       publicUrl: null,
-      captionText: `Sovereign Moment ${i + 1}|The architecture of liberation reveals itself in segment ${i + 1}`,
+      captionText: `Curated Short ${i + 1}|Stand-alone moment from long-form`,
+      storyTitle: `Curated Short ${i + 1}`,
+      storyHook: `The architecture of liberation reveals itself`,
     }));
-    await progress("STEP 4/8", `✅ [DRY RUN] ${clips.length} clips simulated (semantic)`);
+    await progress("STEP 4/8", `✅ [DRY RUN] ${clips.length} curated shorts simulated`);
   } else {
-    await progress("STEP 4/8", "Extracting story moments from long-form video...");
+    await progress("STEP 4/8", "Running shorts curator on long-form script...");
     try {
-      // Dynamic clip params based on source video duration:
-      // - External YT rips (20-60min): 30 clips, 25s each (original defaults)
-      // - Faceless factory output (3-8min): fewer, shorter clips
-      //   e.g. 5min video → ~6-8 clips of 30-45s each (complete standalone moments)
-      const srcDuration = facelessResult.duration || 300;
-      const dynamicClipCount = srcDuration > 600
-        ? 30                                          // long external rips
-        : Math.max(4, Math.min(12, Math.round(srcDuration / 45))); // faceless: ~1 clip per 45s
-      const dynamicClipDuration = srcDuration > 600
-        ? 25                                          // long external rips
-        : Math.max(20, Math.min(55, Math.round(srcDuration / dynamicClipCount))); // sized to source
-      console.log(`📐 [Orchestrator] Dynamic clip params: ${dynamicClipCount} clips × ~${dynamicClipDuration}s (source: ${srcDuration.toFixed(0)}s)`);
+      // The shorts-curator needs the script + segment durations. These are passed
+      // through from produceFacelessVideo (Phase 5 Task 5.5 addition to FacelessResult).
+      const script = facelessResult.script;
+      const segDurations = facelessResult.segmentDurations;
 
-      clips = await chopLongFormIntoClips(
-        facelessResult.localPath,
-        whisperResult.niche,
-        jobId,
-        llm,
-        whisperResult.segments,
-        dynamicClipCount,
-        dynamicClipDuration
-      );
-      await progress("STEP 4/8", `✅ ${clips.length} clips extracted (${clips[0]?.captionText ? "semantic" : "silence-boundary"})`);
+      if (!script || !segDurations || !llm) {
+        console.warn(`⚠️ [Orchestrator] No script/durations available for shorts-curator — skipping shorts`);
+        clips = [];
+      } else {
+        const curatorResult: CuratorResult = await curateShorts(llm, script, segDurations);
+        console.log(`🎬 [Orchestrator] Curator returned ${curatorResult.shorts.length} shorts for ${brand}`);
+
+        // Extract each curated short as an ffmpeg clip from the local long-form video
+        const clipDir = `${ORCHESTRATOR_DIR}/${jobId}/clips`;
+        if (!existsSync(clipDir)) mkdirSync(clipDir, { recursive: true });
+
+        const nicheFilter = NICHE_FILTERS[whisperResult.niche] || NICHE_FILTERS.dark_psychology;
+        clips = [];
+
+        for (let i = 0; i < curatorResult.shorts.length; i++) {
+          const short = curatorResult.shorts[i];
+          const clipPath = `${clipDir}/clip_${i.toString().padStart(2, "0")}.mp4`;
+
+          // Audio-aware padding: add breathing room so clips don't cut mid-word.
+          const PAD_BEFORE = 0.3;
+          const PAD_AFTER = 1.5;
+          const paddedStart = Math.max(0, short.start_ts - PAD_BEFORE);
+          const paddedEnd = Math.min(
+            curatorResult.long_form_duration_s,
+            short.end_ts + PAD_AFTER,
+          );
+          const duration = paddedEnd - paddedStart;
+
+          try {
+            // Phase 5 Task 5.6: CTA overlay in last 2 seconds.
+            // Write CTA text to a temp file to avoid shell-quoting issues.
+            const ctaText = short.cta_overlay || "";
+            const ctaTextFile = `${clipDir}/cta_${i}.txt`;
+            if (ctaText) writeFileSync(ctaTextFile, ctaText);
+
+            // CTA drawtext: enabled only in the last 2 seconds, centered lower-third.
+            // Bebas Neue font for brand consistency (falls back to default if missing).
+            const brandAssetsDir = `${__dirname}/../../brand-assets`;
+            const fontPath = `${brandAssetsDir}/BebasNeue-Regular.ttf`;
+            const hasFont = existsSync(fontPath);
+            const fontFilter = hasFont ? `fontfile='${fontPath.replace(/\\/g, "/")}':` : "";
+            const ctaEnableStart = Math.max(0, duration - 2.0).toFixed(2);
+            const ctaDrawtext = ctaText
+              ? `,drawtext=${fontFilter}textfile='${ctaTextFile.replace(/\\/g, "/")}':fontsize=42:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h-180:enable='gte(t\\,${ctaEnableStart})'`
+              : "";
+
+            execSync(
+              `ffmpeg -ss ${paddedStart.toFixed(2)} -i "${facelessResult.localPath}" ` +
+                `-t ${duration.toFixed(2)} ` +
+                `-vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${nicheFilter}${ctaDrawtext}" ` +
+                `-c:v libx264 -preset fast -crf 23 ` +
+                `-c:a aac -b:a 128k ` +
+                `-af "afade=t=in:st=0:d=0.15,afade=t=out:st=${Math.max(0, duration - 0.5).toFixed(2)}:d=0.5" ` +
+                `-y "${clipPath}"`,
+              { timeout: FFMPEG_CLIP_TIMEOUT_MS, stdio: "ignore" }
+            );
+
+            clips.push({
+              index: i,
+              localPath: clipPath,
+              publicUrl: null,
+              startSec: paddedStart,
+              endSec: paddedEnd,
+              captionText: `${short.hook_text} | ${short.why_this_moment}`,
+              storyTitle: short.hook_text,
+              storyHook: short.why_this_moment,
+            });
+            console.log(
+              `  ✂️ Short ${i}: "${short.hook_text.slice(0, 50)}" ` +
+              `${paddedStart.toFixed(1)}s → ${paddedEnd.toFixed(1)}s (${duration.toFixed(1)}s) ` +
+              `conf=${short.confidence.toFixed(2)} CTA="${ctaText.slice(0, 40)}"`
+            );
+          } catch (err: any) {
+            console.error(`[Orchestrator] Short ${i} ffmpeg failed: ${err.message?.slice(0, 200)}`);
+          }
+        }
+
+        console.log(`✅ [Orchestrator] ${clips.length}/${curatorResult.shorts.length} curated shorts extracted`);
+      }
+
+      await progress("STEP 4/8", `✅ ${clips.length} curated shorts extracted (shorts-curator)`);
     } catch (err: any) {
-      throw new Error(`Clip chopping failed: ${err.message}`);
+      console.error(`[Orchestrator] Shorts curation failed: ${err.message}`);
+      clips = [];
+      await progress("STEP 4/8", `⚠️ Shorts curation failed (non-fatal): ${err.message?.slice(0, 150)}`);
     }
   }
 

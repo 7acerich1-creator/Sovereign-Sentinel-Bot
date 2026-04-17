@@ -79,6 +79,7 @@ const POD_ENV_FORWARD_KEYS: readonly string[] = [
   "SUPABASE_URL",
   "SUPABASE_SERVICE_ROLE_KEY",
   "HF_HOME",
+  "HF_TOKEN",
   "SPEAKERS_DIR",
 ] as const;
 

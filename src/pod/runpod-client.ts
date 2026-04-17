@@ -286,6 +286,7 @@ export async function waitUntilReady(
   const deadline = Date.now() + timeoutMs;
   const liveUrl = `${handle.workerUrl}/health/live`;
 
+  // Phase 1: Wait for /health/live (unauthenticated liveness probe)
   let attempt = 0;
   let lastError: string = "never attempted";
   while (Date.now() < deadline) {
@@ -302,7 +303,7 @@ export async function waitUntilReady(
         console.log(
           `\u{2705} [RunPod] pod ${handle.podId} ready after ${attempt} probe(s) (${Math.floor((Date.now() - handle.createdAt * 1000) / 1000)}s cold-start)`,
         );
-        return;
+        break;
       }
       lastError = `HTTP ${resp.status}`;
     } catch (err) {
@@ -310,8 +311,41 @@ export async function waitUntilReady(
     }
     await sleep(pollMs);
   }
-  throw new Error(
-    `waitUntilReady timeout after ${timeoutMs}ms (pod=${handle.podId}, attempts=${attempt}, last=${lastError})`,
+  if (Date.now() >= deadline) {
+    throw new Error(
+      `waitUntilReady timeout after ${timeoutMs}ms (pod=${handle.podId}, attempts=${attempt}, last=${lastError})`,
+    );
+  }
+
+  // Phase 2: Verify the RunPod proxy is fully routing by hitting the
+  // authenticated /health endpoint. The proxy sometimes returns 200 on
+  // /health/live before all paths are wired — a POST /produce fired at
+  // that moment gets a proxy-level 404 with an empty body.
+  const maxReadinessAttempts = 5;
+  for (let i = 1; i <= maxReadinessAttempts; i++) {
+    if (options.signal?.aborted) throw new Error("waitUntilReady aborted");
+    try {
+      const health = await podFetchJson<HealthReport>(handle, "GET", "/health", {
+        signal: AbortSignal.timeout(DEFAULT_FETCH_TIMEOUT_MS),
+      });
+      if (health.ok) {
+        console.log(
+          `🩺 [RunPod] pod ${handle.podId} proxy verified via /health (attempt ${i})`,
+        );
+        return;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(
+        `⏳ [RunPod] /health probe ${i}/${maxReadinessAttempts}: ${msg}`,
+      );
+    }
+    await sleep(pollMs);
+  }
+  // If authenticated /health never passed but /health/live did, proceed
+  // anyway — the worker is alive, auth might just need a moment.
+  console.log(
+    `⚠️ [RunPod] pod ${handle.podId} /health never confirmed but /health/live passed — proceeding`,
   );
 }
 

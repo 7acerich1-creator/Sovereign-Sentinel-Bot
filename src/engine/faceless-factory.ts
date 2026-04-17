@@ -381,12 +381,16 @@ const SCENE_VISUAL_STYLE: Record<string, Record<Brand, string>> = {
 
 // ── Universal NEGATIVE prompt appended to every Imagen 4 call ──
 // This is the ban list. Imagen 4 respects "no X" patterns well in practice.
+// S82: Flipped from negative bans to POSITIVE directives. Tell the model what TO produce.
+const IMAGEN_POSITIVE_DIRECTIVE =
+  "Photorealistic, tangible physical textures, real human skin with visible pores and imperfections, " +
+  "practical motivated light sources, deep natural shadows, high dynamic range, " +
+  "cinematic depth of field, film grain, raw documentary authenticity, " +
+  "extreme contrast between light and dark, bold dramatic lighting";
+
+// Legacy negative ban — kept minimal, only for things Imagen 4 actually produces incorrectly
 const IMAGEN_NEGATIVE_BAN =
-  "no silhouettes, no abstract representations, no symbolic figures, no sacred geometry, " +
-  "no wireframe holograms, no HUD overlays, no code rain, no glitch effects, no particle tendrils, " +
-  "no generic digital art, no AI-art gradient smoothness, no plastic skin, no symmetrical perfection, " +
-  "no neon cyberpunk, no cartoon, no illustration, no 3D render look, no Midjourney fever dream, " +
-  "no throne-room fantasy, no epic-cinematic gloss";
+  "no text, no words, no letters, no watermarks, no cartoon, no illustration, no 3D render";
 
 // ── Session 48: Brand Routing Matrix — aesthetic append injected per brand ──
 // This is appended to the style prefix on EVERY Imagen 4 scene call. Lexical,
@@ -408,10 +412,8 @@ const BRAND_AESTHETIC_APPEND: Record<Brand, string> = {
 // keeps the full ban. This guards the conflict between the aesthetic append
 // and the universal negative ban.
 function brandNegativeBan(brand: Brand): string {
-  if (brand === "ace_richie") {
-    return IMAGEN_NEGATIVE_BAN.replace(/no sacred geometry, ?/g, "");
-  }
-  return IMAGEN_NEGATIVE_BAN;
+  // S82: Positive directive + minimal negative. Both brands get the same now.
+  return `${IMAGEN_POSITIVE_DIRECTIVE}. ${IMAGEN_NEGATIVE_BAN}`;
 }
 
 // ── Niche color grades for ffmpeg (same as clip-generator.ts) ──
@@ -617,10 +619,10 @@ If you catch yourself reaching for any of these, REWRITE the sentence with a con
 
 Generate as JSON:
 {
-  "title": "UNIQUE CTR-optimized title (max 60 chars) — curiosity gap, emotional trigger, or bold claim. MUST be different from ALL previously used titles.${recentTitles.length > 0 ? " BANNED (already used): " + recentTitles.slice(0, 5).map(t => `'${t}'`).join(", ") : ""}",
+  "title": "CTR-optimized title (max 60 chars). FORMULA: [Bold Claim or Revelation] + [Specificity Anchor]. Specificity = numbers, time frames, or named mechanisms (e.g. 'In 48 Hours', 'The 3 Laws', 'Quantum Field Reset'). Good: 'Delete Your Old Self In 48 Hours — The Quantum Reset Protocol', 'Nobody Told You This About Your Subconscious Programming', 'The 3 Frequency Shifts That Collapse Old Timelines'. Bad: 'Wake Up Call', 'Beyond Right', 'Stuck In The Loop' (too vague, no curiosity gap). MUST be different from ALL previously used titles.${recentTitles.length > 0 ? " BANNED (already used): " + recentTitles.slice(0, 5).map(t => `'${t}'`).join(", ") : ""}",
   "hook": "${blueprint.hook}",
-  "thumbnail_text": "2-5 words ALL CAPS that STOP the scroll. This is the TEXT that goes ON the thumbnail image. Think: 'BREAK THE BLOCK', 'YOU WERE CHOSEN', 'SYSTEM FAILURE', 'THEY LIED TO YOU'. Must create instant curiosity or emotional reaction in under 1 second.",
-  "thumbnail_visual": "Thumbnail-specific visual: ONE real tangible human subject in ONE real specific room shot on ARRI Alexa 65 with 35mm prime, Kodak Vision3 500T, practical tungsten or window light, visible skin texture. HBO prestige drama still. HIGH CONTRAST. NO silhouettes, NO sacred geometry, NO AI-art gloss.",
+  "thumbnail_text": "2-5 words ALL CAPS for the thumbnail image. Must be readable at 120x68 pixels. Think: 'DELETE YOUR OLD SELF', 'THEY KNEW ALL ALONG', 'THE QUANTUM RESET', 'YOU CHOSE THIS', 'FREQUENCY SHIFT'. NOT a sentence. NOT the title. A punchy REACTION TRIGGER that creates instant curiosity.",
+  "thumbnail_visual": "Thumbnail-optimized visual (NOT a scene — a scroll-stopper). HIGH CONTRAST is mandatory. Options: (A) Extreme close-up of a face with intense expression — eyes sharp, dramatic single light source, rest of frame dark. (B) A single powerful object/symbol against a dark background with rim light or golden glow — e.g. a shattered clock, a burning document, an open door with blinding light. (C) Abstract energy/atmosphere — golden particles, electric blue field, volumetric light rays through darkness. REQUIREMENTS: 50% of the frame must be dark/simple enough for bold text overlay. NO busy scenes. NO multiple people. NO person-at-desk. NO muted colors. Think: movie poster, not movie still.",
   "segments": [
     {
       "voiceover": "The spoken text for this segment — conversational, measured, documentary cadence",
@@ -857,10 +859,10 @@ Write a ${durationRange} voiceover script for a ${niche.replace(/_/g, " ")} face
 
 Generate as JSON:
 {
-  "title": "UNIQUE CTR-optimized title (max 60 chars) — curiosity gap or bold claim. MUST be different from all previously used titles.${recentTitles.length > 0 ? " BANNED: " + recentTitles.slice(0, 5).map(t => `'${t}'`).join(", ") : ""}",
+  "title": "CTR-optimized title (max 60 chars). FORMULA: [Bold Claim] + [Specificity — numbers, time frames, or named mechanisms]. Good: 'The 3 Frequency Shifts That Change Everything'. Bad: 'Wake Up Call' (vague). MUST be different from all previously used titles.${recentTitles.length > 0 ? " BANNED: " + recentTitles.slice(0, 5).map(t => `'${t}'`).join(", ") : ""}",
   "hook": "Opening line that stops the scroll — a STATEMENT, not a question",
-  "thumbnail_text": "2-5 words ALL CAPS for thumbnail overlay — instant emotional hit at 120x68px",
-  "thumbnail_visual": "ONE real specific tangible subject in ONE real room. ARRI Alexa 65, 35mm, Kodak Vision3 500T, practical tungsten lighting, visible skin texture, HBO prestige drama still. NO silhouettes, NO sacred geometry, NO AI-art gloss.",
+  "thumbnail_text": "2-5 words ALL CAPS. Readable at 120x68px. A REACTION TRIGGER, not a description. Think: 'DELETE YOUR OLD SELF', 'THE QUANTUM RESET', 'THEY KNEW'.",
+  "thumbnail_visual": "HIGH CONTRAST thumbnail visual. Options: (A) Extreme face close-up with dramatic single light. (B) Single powerful symbol against dark background with rim light or glow. (C) Abstract energy — golden particles, electric field, volumetric light. 50% of frame must be dark/simple for text. NO busy scenes, NO person-at-desk, NO muted colors.",
   "segments": [
     { "voiceover": "2-4 spoken sentences (30-50 words)", "visual_direction": "REAL specific scene: who, what room, what props, what motivated practical light, what physical action", "duration_hint": ${durationHintExample} }
   ],
@@ -1299,7 +1301,7 @@ async function generateThumbnail(
   const thumbnailText = (script.thumbnail_text || script.title || "")
     .toUpperCase()
     .replace(/[^\w\s!?]/g, "")  // Strip special chars that break drawtext
-    .slice(0, 30);               // Hard cap
+    .slice(0, 35);               // S82: Hard cap 35 chars (2-5 words for readable thumbnail)
 
   if (!thumbnailText) {
     console.warn(`[FacelessFactory] No thumbnail text generated, skipping thumbnail`);
@@ -1308,12 +1310,14 @@ async function generateThumbnail(
 
   // ── Generate base image via Imagen 4 ──
   // Thumbnail-specific prompt: HIGH CONTRAST, single focal point, NO text in image
+  // S82: Kill HBO prestige directive. YouTube thumbnails need HIGH CONTRAST + SIMPLE + BOLD.
+  // Left 50% of frame must be dark/empty for text overlay. Think movie poster, not movie still.
   const thumbStyle = brand === "containment_field"
-    ? "Hyper-realistic documentary still from a prestige thriller, ARRI Alexa 65, 35mm prime, f/2.0, Kodak Vision3 500T film emulation, single cold practical light source (desk lamp, monitor, window) motivated in-frame, tangible real human subject with visible skin texture and imperfections, real cluttered interior with tangible props, shallow depth of field, 16:9 landscape, large empty dark area left or right third for text overlay"
-    : "Hyper-realistic documentary still from a prestige HBO drama, ARRI Alexa 65, 35mm prime, f/2.0, Kodak Vision3 500T film emulation, single warm practical tungsten source motivated in-frame, tangible real human subject with visible skin texture stubble and breath, real physical room with real props, amber/gold (#d4a843) warm key with deep natural shadow fall-off, shallow depth of field, 16:9 landscape, large empty dark area left or right third for text overlay";
+    ? "Cinematic thumbnail image, DEEP BLACK background filling at least 50% of the frame, single dramatic subject with cold blue or white rim light, extreme contrast between light and shadow, volumetric haze, 16:9 landscape. The LEFT HALF of the frame should be predominantly dark/empty for text placement"
+    : "Cinematic thumbnail image, DEEP BLACK background filling at least 50% of the frame, single dramatic subject with warm golden or amber rim light, extreme contrast, volumetric golden particles or atmospheric light rays, 16:9 landscape. The LEFT HALF of the frame should be predominantly dark/empty for text placement";
 
-  const thumbVisual = script.thumbnail_visual || "a weathered man in his late 30s sitting alone at a worn wooden table, single tungsten bulb overhead, hands wrapped around a chipped ceramic coffee mug, visible stubble, tangible skin texture";
-  const thumbPrompt = `${thumbStyle}. Scene: ${thumbVisual}. Absolutely NO text, NO words, NO letters, NO writing, NO watermarks.\n\nNEGATIVE: ${IMAGEN_NEGATIVE_BAN}`;
+  const thumbVisual = script.thumbnail_visual || "dramatic volumetric light rays cutting through darkness, golden atmospheric particles suspended in a single beam of light, deep black negative space";
+  const thumbPrompt = `${thumbStyle}. Subject: ${thumbVisual}. ${IMAGEN_POSITIVE_DIRECTIVE}. ${IMAGEN_NEGATIVE_BAN}.`;
 
   // SESSION 35: Use ONLY imagenKey — no fallback to apiKey (embedding key ≠ image gen key).
   const geminiKey = config.llm.providers.gemini?.imagenKey;
@@ -1381,16 +1385,19 @@ async function generateThumbnail(
 
   const escapeDT = (s: string) => s.replace(/'/g, "'\\''").replace(/:/g, "\\:");
 
-  // Gold text (#d4a843) with dark border, positioned right-of-center for maximum impact
-  // Font size 120 for line 1, 110 for line 2 (if exists)
-  let textFilters = `drawtext=${fontFilter}text='${escapeDT(line1)}':fontsize=120:fontcolor=0xd4a843:borderw=5:bordercolor=0x0a0a0f:x=(w*0.05):y=(h*0.35)`;
+  // S82: MASSIVE white text with thick black border — must be readable at 120x68px thumbnail size.
+  // Font size 180 for line 1, 160 for line 2. Centered on left half of frame.
+  // Semi-transparent dark gradient plate behind text for guaranteed readability.
+  const textPlate = `drawbox=x=0:y=ih*0.25:w=iw*0.65:h=ih*0.55:c=black@0.55:t=fill`;
+  let textFilters = `${textPlate},drawtext=${fontFilter}text='${escapeDT(line1)}':fontsize=180:fontcolor=0xFFFFFF:borderw=8:bordercolor=0x000000:x=(w*0.05):y=(h*0.32)`;
 
   if (line2) {
-    textFilters += `,drawtext=${fontFilter}text='${escapeDT(line2)}':fontsize=110:fontcolor=0xd4a843:borderw=5:bordercolor=0x0a0a0f:x=(w*0.05):y=(h*0.55)`;
+    textFilters += `,drawtext=${fontFilter}text='${escapeDT(line2)}':fontsize=160:fontcolor=0xFFFFFF:borderw=8:bordercolor=0x000000:x=(w*0.05):y=(h*0.55)`;
   }
 
-  // Add subtle teal accent line under the text
-  textFilters += `,drawbox=x=iw*0.05:y=${line2 ? "ih*0.72" : "ih*0.55"}:w=iw*0.35:h=4:c=0x00e5c7@0.8:t=fill`;
+  // Bold accent bar under text (brand-colored: teal for TCF, gold for Ace)
+  const accentColor = brand === "containment_field" ? "0x00e5c7" : "0xd4a843";
+  textFilters += `,drawbox=x=iw*0.05:y=${line2 ? "ih*0.73" : "ih*0.55"}:w=iw*0.40:h=8:c=${accentColor}@0.9:t=fill`;
 
   try {
     execSync(
@@ -1464,11 +1471,13 @@ export async function generateLongFormThumbnail(
 
   // Title text: prefer explicit thumbnail_text (scroll-stopper hook from script gen),
   // fall back to full title. Normalize (strip hostile punctuation that would break .ass).
+  // S82: Prefer thumbnail_text (2-5 word scroll-stopper) over full title.
+  // Cap at 35 chars — must be readable at 120x68px with large font.
   const rawTitle = (script.thumbnail_text || script.title || "").trim();
   const titleText = rawTitle
     .toUpperCase()
     .replace(/[^\w\s!?'-]/g, "")
-    .slice(0, 60);
+    .slice(0, 35);
 
   // Wrap into max 2 lines for readability at 1920x1080 thumbnail scale
   const words = titleText.split(/\s+/).filter(Boolean);
@@ -1497,9 +1506,10 @@ export async function generateLongFormThumbnail(
   //   - Black @ 60% opacity = the architect-spec text plate
   //   - Bebas Neue white + thick black border = guaranteed legibility on any keyframe
   //   - Fontsize scales down when we wrap to two lines so nothing clips the bar
-  const barY = "ih*0.62";
-  const barH = "ih*0.22";
-  const fontSize = line2 ? 88 : 120;
+  // S82: Bigger bar + bigger font. Must be readable at 120x68px YouTube thumbnail size.
+  const barY = "ih*0.50";
+  const barH = "ih*0.35";
+  const fontSize = line2 ? 130 : 170;
 
   // ── BUILD THE 1-LINE .ass FILE ─────────────────────────────────────────────
   // libass dialogue text uses `\N` for hard line breaks (caps N). The \ must be
@@ -1523,9 +1533,9 @@ export async function generateLongFormThumbnail(
   // on the dialogue line to anchor the text on the bar exactly.
   const playResX = 1920;
   const playResY = 1080;
-  // Bar center math: barY=0.62, barH=0.22 → bar vertical center = 0.62 + 0.11 = 0.73
+  // S82: Bar center math: barY=0.50, barH=0.35 → bar vertical center = 0.50 + 0.175 = 0.675
   const posX = Math.round(playResX / 2);          // 960
-  const posY = Math.round(playResY * 0.73);       // 788
+  const posY = Math.round(playResY * 0.675);      // 729
   const dialogueWithPos = `{\\pos(${posX},${posY})}${dialogueText}`;
 
   const thumbAssPath = resolvePath(`${FACELESS_DIR}/${jobId}_longform_thumb.ass`);
@@ -1540,9 +1550,9 @@ export async function generateLongFormThumbnail(
     `\n` +
     `[V4+ Styles]\n` +
     `Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n` +
-    // Session 48: Ace Richie = thinner outline + deeper drop-shadow (BorderStyle 1)
-    // with transparent back; TCF = thick outline (5) on top of the black drawbox.
-    `Style: Thumb,${assFontName},${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&HFF000000,1,0,0,0,100,100,0,0,1,${isAceThumb ? 2 : 5},${isAceThumb ? 4 : 0},5,40,40,40,1\n` +
+    // S82: Both brands get THICK outline for thumbnail readability at 120x68px.
+    // Ace = outline 6 + shadow 3 (was 2/4 — invisible). TCF = outline 7 + shadow 0.
+    `Style: Thumb,${assFontName},${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&HFF000000,1,0,0,0,100,100,0,0,1,${isAceThumb ? 6 : 7},${isAceThumb ? 3 : 0},5,40,40,40,1\n` +
     `\n` +
     `[Events]\n` +
     `Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n` +
@@ -1569,18 +1579,19 @@ export async function generateLongFormThumbnail(
   // was throwing `Invalid argument` on some ffmpeg builds. Replaced with the portable
   // `scale=-1:1080,crop=1920:1080` idiom — resize to height 1080 preserving aspect,
   // then crop to exact 1920×1080. Works on every libavfilter we've seen.
-  // Session 48: Brand Routing Matrix — Ace Richie thumbnails must keep the
-  // luminous quantum background visible. Strip the vignette and the black
-  // drawbox plate; let the ASS Style's Shadow=4 carry text legibility via
-  // drop shadow. TCF keeps the noir vignette + 60% black plate.
+  // S82: BOTH brands get a text plate. The S48 "no plate for Ace" directive produced
+  // unreadable thumbnails — text was invisible on complex FLUX scene backgrounds at
+  // 120x68px. Ace gets a slightly lighter plate (0.5) vs TCF (0.65) to preserve some
+  // background visibility while guaranteeing text readability.
   const vf = isAceThumb
     ? `scale=-1:1080,crop=1920:1080,` +
-      `eq=contrast=1.05:brightness=0.02:saturation=1.08` +
+      `eq=contrast=1.15:brightness=0.02:saturation=1.15,` +
+      `drawbox=x=0:y=${barY}:w=iw:h=${barH}:c=black@0.5:t=fill` +
       subsFilter
     : `scale=-1:1080,crop=1920:1080,` +
-      `eq=contrast=1.1:brightness=-0.02:saturation=1.05,` +
+      `eq=contrast=1.2:brightness=-0.02:saturation=1.1,` +
       `vignette=PI/4,` +
-      `drawbox=x=0:y=${barY}:w=iw:h=${barH}:c=black@0.6:t=fill` +
+      `drawbox=x=0:y=${barY}:w=iw:h=${barH}:c=black@0.65:t=fill` +
       subsFilter;
 
   try {

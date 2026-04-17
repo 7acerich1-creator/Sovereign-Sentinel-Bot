@@ -659,26 +659,23 @@ def _render_opening_sequence(
 
     Returns path to the opening clip, or None if brand card asset is missing.
     """
-    brand_card_path = BRAND_CARD_FILES.get(brand)
-    if not brand_card_path or not os.path.isfile(brand_card_path):
-        log.warning("opening_no_brand_card", brand=brand, expected=brand_card_path)
-        return None
-
     t0 = time.monotonic()
 
-    # ── Step 1: Extract last frame of brand card animation as a still image ──
+    # S82: Logo removal — skip brand card animation entirely.
+    # Generate a clean dark background frame instead.
+    # This removes the logo while keeping the typewriter hook overlay.
     last_frame_path = os.path.join(job_dir, "brand_card_last_frame.png")
-    extract_cmd = [
+    bg_color = "0x0a0a0f" if brand == "containment_field" else "0x080810"
+    gen_bg_cmd = [
         "ffmpeg", "-y",
-        "-sseof", "-0.05",       # seek to 50ms before end
-        "-i", brand_card_path,
+        "-f", "lavfi", "-i", f"color=c={bg_color}:s={OUT_WIDTH}x{OUT_HEIGHT}:d=1",
         "-frames:v", "1",
         "-q:v", "1",
         last_frame_path,
     ]
-    result = subprocess.run(extract_cmd, capture_output=True, text=True, timeout=15)
+    result = subprocess.run(gen_bg_cmd, capture_output=True, text=True, timeout=15)
     if result.returncode != 0 or not os.path.isfile(last_frame_path):
-        log.error("opening_frame_extract_failed", stderr=result.stderr[:300])
+        log.error("opening_bg_generate_failed", stderr=result.stderr[:300])
         return None
 
     # ── Step 2: Generate typewriter .ass subtitle ──
@@ -696,6 +693,8 @@ def _render_opening_sequence(
     # Escape ASS path for ffmpeg subtitles filter (colons and backslashes)
     ass_escaped = ass_path.replace("\\", "/").replace(":", "\\:")
 
+    # S82: Render typewriter for the FULL opening duration on dark background.
+    # No brand card animation = no logo. Clean, minimal opening.
     tw_cmd = [
         "ffmpeg", "-y",
         "-loop", "1",
@@ -708,9 +707,9 @@ def _render_opening_sequence(
         ),
         "-map", "[v]",
         "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
-        "-t", f"{TYPEWRITER_DUR:.3f}",
+        "-t", f"{OPENING_TOTAL_DUR:.3f}",
         "-r", str(OUT_FPS),
-        "-an",  # no audio for this segment (audio mixed later in Task 5.11)
+        "-an",
         typewriter_clip,
     ]
     result = subprocess.run(tw_cmd, capture_output=True, text=True, timeout=60)
@@ -718,48 +717,9 @@ def _render_opening_sequence(
         log.error("opening_typewriter_render_failed", stderr=result.stderr[:500])
         return None
 
-    # ── Step 4: Re-encode brand card animation to match output specs ──
-    card_clip = os.path.join(job_dir, "opening_card.mp4")
-    card_cmd = [
-        "ffmpeg", "-y",
-        "-i", brand_card_path,
-        "-vf", f"scale={OUT_WIDTH}:{OUT_HEIGHT}:flags=lanczos,format=yuv420p",
-        "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
-        "-r", str(OUT_FPS),
-        "-t", f"{BRAND_CARD_ANIM_DUR:.3f}",
-        "-an",
-        card_clip,
-    ]
-    result = subprocess.run(card_cmd, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        log.error("opening_card_reencode_failed", stderr=result.stderr[:300])
-        return None
-
-    # ── Step 5: Concat card animation + typewriter into one opening clip ──
-    # CRITICAL: The opening clip MUST have a silent audio track so that when
-    # it's prepended to scene clips in the main concat (Stage 2), ffmpeg's
-    # concat demuxer sees a consistent {video, audio} stream layout.
-    # Without this, the first file being video-only causes ALL audio from
-    # subsequent scene clips to be silently dropped.
-    opening_video_only = os.path.join(job_dir, "opening_video_only.mp4")
-    concat_list = os.path.join(job_dir, "opening_concat.txt")
-    with open(concat_list, "w") as f:
-        f.write(f"file '{card_clip}'\n")
-        f.write(f"file '{typewriter_clip}'\n")
-
-    concat_cmd = [
-        "ffmpeg", "-y",
-        "-f", "concat", "-safe", "0",
-        "-i", concat_list,
-        "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
-        "-movflags", "+faststart",
-        "-an",
-        opening_video_only,
-    ]
-    result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        log.error("opening_concat_failed", stderr=result.stderr[:300])
-        return None
+    # S82: Brand card animation REMOVED (logo removal). The typewriter clip
+    # IS the full opening now. Just add a silent audio track.
+    opening_video_only = typewriter_clip
 
     # Add silent audio track to opening clip (matches scene clip audio format)
     opening_path = os.path.join(job_dir, "opening_sequence.mp4")

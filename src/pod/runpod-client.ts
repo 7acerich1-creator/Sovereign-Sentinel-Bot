@@ -180,6 +180,13 @@ export async function startPod(options: StartPodOptions = {}): Promise<PodHandle
   const forwardedEnv = collectPodEnv(options.extraEnv ?? {});
   forwardedEnv["POD_WORKER_TOKEN"] = workerToken;
 
+  // S76: Volume-free pods have speaker WAVs baked into the Docker image at
+  // /app/brand-assets/. Override any stale SPEAKERS_DIR from Railway env that
+  // still points to the old /runpod-volume/speakers path.
+  if (noVolume) {
+    forwardedEnv["SPEAKERS_DIR"] = "/app/brand-assets";
+  }
+
   // S76: Retry protocol — try SECURE first, fall back to COMMUNITY, wait, retry.
   // Prevents single-attempt failures from killing the whole pipeline when a
   // datacenter is temporarily at capacity.

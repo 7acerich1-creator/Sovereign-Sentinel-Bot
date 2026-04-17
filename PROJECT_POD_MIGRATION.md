@@ -10,13 +10,13 @@
 
 | Field | Value |
 |---|---|
-| **Current phase** | **PHASE 5 IN PROGRESS — 2026-04-16 S74.** Tasks 5.1-5.11, 5.13, 5.14 done (13/14). Composite audio mixing shipped. |
-| **Current phase status** | **Phase 0-4: ALL done. Phase 5: 13/14 done (5.1 ☑, 5.2 ☑, 5.3 ☑, 5.4 ☑, 5.5 ☑, 5.6 ☑, 5.7 ☑, 5.8 ☑, 5.9 ☑, 5.10 ☑, 5.11 ☑, 5.13 ☑, 5.14 ☑, 5.12 ☐).** |
+| **Current phase** | **PHASE 5 IN PROGRESS — 2026-04-17 S75.** Tasks 5.1-5.11, 5.13, 5.14 done (13/14). Task 5.12 partially done: Docker image rebuilt + GH Actions green, test script committed, live pod test deferred (US-KS-2 SUPPLY_CONSTRAINT — all GPU types exhausted). |
+| **Current phase status** | **Phase 0-4: ALL done. Phase 5: 13/14 done (5.1 ☑, 5.2 ☑, 5.3 ☑, 5.4 ☑, 5.5 ☑, 5.6 ☑, 5.7 ☑, 5.8 ☑, 5.9 ☑, 5.10 ☑, 5.11 ☑, 5.13 ☑, 5.14 ☑, 5.12 ☐ partial).** |
 | **Total phases** | 8 (Phase 0 -> Phase 7) |
-| **Last session** | Session 74 -- 2026-04-16 -- Task 5.11 shipped: composite audio mixing in `compose.py` (+210 lines, 832->1042). `_mix_audio()` function: extracts narration from concatenated video, loops brand music bed (ace=music_sovereign, tcf=music_urgent) at -18dB, layers typing.mp3 during typewriter window at -12dB, intro sting at -8dB, outro sting positioned to end at video end at -6dB. ffmpeg complex filter with amix + volume compensation. Re-muxes mixed audio onto video. Wired as Stage 2.5 in `compose_video()` between concat (Stage 2) and captions (Stage 3). Graceful fallback on failure. Commit `b94b8be`. |
-| **Last commit touching this work** | `b94b8be` (origin/main) -- S74 Task 5.11 composite audio mixing. |
-| **Blocker** | **None.** |
-| **Next session's first action** | **Task 5.12** — Docker image rebuild + live pod test of full composition pipeline. Last task to close Phase 5. |
+| **Last session** | Session 75 -- 2026-04-17 -- Task 5.12 partial: Docker image rebuild confirmed (GH Actions green, `ghcr.io/7acerich1-creator/sovereign-sentinel-pod:latest`). Full composition test script `scripts/test-full-composition.ts` committed (3-scene FLUX+XTTS+Whisper+audio-mix e2e test, budget gate, health retry, proxy settle). 3 orphan pods discovered and terminated. Live pod test blocked by RunPod US-KS-2 SUPPLY_CONSTRAINT (tested H100 SXM/PCIe, A100 SXM/PCIe, L40S, RTX 6000 Ada, RTX A6000, RTX 4090 — all exhausted). Volume `gai851lcfw` pins to US-KS-2 so no datacenter workaround. Commit `e0ed7db`. |
+| **Last commit touching this work** | `e0ed7db` (origin/main) -- S75 Task 5.12 full-composition test script + package.json. |
+| **Blocker** | **RunPod US-KS-2 GPU supply exhausted.** Retry `POD_FULL_TEST_CONFIRM=1 npm run test:full-composition` next session. No code changes needed. |
+| **Next session's first action** | **Task 5.12 live test retry** — run full composition test when US-KS-2 has GPU capacity. One successful run closes Phase 5 (14/14). |
 
 **Rule:** if you are a future session and this STATUS block has not been updated in your current session before you close, the session failed regardless of what was built.
 
@@ -256,8 +256,9 @@ Each phase has bite-sized tasks. Every task lists the EXACT file path it touches
   - Files: `pod/pipelines/compose.py` (new `_mix_audio()` function), `pod/Dockerfile` (COPY audio assets)
   - Verification: `ffprobe -show_streams -select_streams a` on output shows exactly 1 audio stream; manual playback confirms music bed present underneath narration without drowning speech
 - ☐ **Task 5.12 — Docker image rebuild + live pod test of full composition.** Rebuild Docker image with all new assets (fonts, intro clips, music beds, stings, brand card animations) and the updated compose.py. Run one end-to-end pod job per brand. Verify: brand card animation → typewriter → scenes with kinetic captions → music bed throughout → final.mp4 is the FINISHED product.
-  - Files: `pod/Dockerfile`, `.github/workflows/pod-build.yml`
+  - Files: `pod/Dockerfile`, `.github/workflows/pod-build.yml`, `scripts/test-full-composition.ts`, `package.json`
   - Verification: GH Actions build succeeds; live pod job returns a video that requires ZERO post-processing from Railway
+  - **S75 partial 2026-04-17:** Docker image rebuilt (GH Actions green). Test script committed (`e0ed7db`). 3 orphan pods terminated. Live test blocked by RunPod US-KS-2 SUPPLY_CONSTRAINT (all 8 GPU types exhausted). Retry next session — no code changes needed.
 - ☐ **Task 5.13 — Dopamine Ladder anticipation mechanics in script writer prompt.** S70 addition. Add explicit Level 3 (Anticipation) instructions to the `generateScript` Pass 1 prompt in `faceless-factory.ts`. The current prompt says "forward momentum" but does NOT instruct misdirection, head-fakes, or curiosity loop resets. New instruction block teaches the LLM to: (1) plant a question early via the hook, (2) build toward the answer with specific details, (3) head-fake or redirect BEFORE delivering the answer to reset the curiosity loop, (4) deliver the non-obvious answer (validation) then immediately open a NEW question. This is the "edging of storytelling" pattern from Kallaway's Dopamine Ladder framework. Also add to the blueprint extraction prompt: `narrative_arc` should explicitly include misdirection beats in ACT 2.
   - Files: `src/engine/faceless-factory.ts` (Pass 1 prompt writing rules + blueprint prompt)
   - Verification: diff shows new anticipation block in prompt; existing `tsc --noEmit` still clean; no functional code change (prompt-only)

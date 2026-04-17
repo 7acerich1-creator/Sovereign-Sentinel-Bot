@@ -199,8 +199,14 @@ def _chunk_words_into_bursts(
 
 def _generate_caption_ass(
     bursts: list[dict], brand: str, skip_until_s: float, output_path: str,
+    audio_end_s: Optional[float] = None,
 ) -> str:
-    """Generate ASS subtitle file from caption bursts with brand-specific styling."""
+    """Generate ASS subtitle file from caption bursts with brand-specific styling.
+
+    Args:
+        audio_end_s: Hard ceiling -- no subtitle event may extend past this
+                     timestamp.  Prevents ghost captions in dead-air padding.
+    """
     style = CAPTION_STYLES.get(brand, CAPTION_STYLES["ace_richie"])
 
     def _ts(seconds: float) -> str:
@@ -239,8 +245,15 @@ def _generate_caption_ass(
     for burst in bursts:
         if burst["end"] <= skip_until_s:
             continue
+        # SESSION 83: Hard-cap to audio boundary -- zero ghost frames
+        if audio_end_s is not None and burst["start"] >= audio_end_s:
+            continue  # burst starts after audio ends -- Whisper hallucination
         start = max(burst["start"], skip_until_s)
         end = burst["end"] + CAPTION_GAP_S
+        if audio_end_s is not None:
+            end = min(end, audio_end_s)
+        if end <= start:
+            continue  # degenerate burst after capping
         text = burst["text"]
         if style.get("uppercase"):
             text = text.upper()
@@ -309,6 +322,7 @@ def _extract_audio_from_video(video_path: str, output_wav: str) -> str:
 def generate_and_burn_captions(
     video_path: str, brand: str, job_dir: str,
     skip_until_s: float = OPENING_TOTAL_DUR,
+    audio_duration_s: Optional[float] = None,
 ) -> str:
     """
     Full kinetic caption pipeline:
@@ -318,9 +332,14 @@ def generate_and_burn_captions(
         4. Generate brand-specific .ass file
         5. Burn captions onto video
     Returns path to the captioned video.
+
+    Args:
+        audio_duration_s: Total audio duration (opening + narration).
+                          Passed to ASS generator to kill ghost captions.
     """
     t0 = time.monotonic()
-    log.info("captions_pipeline_start", brand=brand, skip_until_s=skip_until_s)
+    log.info("captions_pipeline_start", brand=brand, skip_until_s=skip_until_s,
+             audio_ceiling_s=audio_duration_s)
 
     audio_wav = os.path.join(job_dir, "captions_audio.wav")
     _extract_audio_from_video(video_path, audio_wav)
@@ -336,7 +355,8 @@ def generate_and_burn_captions(
         return video_path
 
     ass_path = os.path.join(job_dir, "captions.ass")
-    _generate_caption_ass(bursts, brand, skip_until_s, ass_path)
+    _generate_caption_ass(bursts, brand, skip_until_s, ass_path,
+                          audio_end_s=audio_duration_s)
 
     captioned_path = os.path.join(job_dir, "final_captioned.mp4")
     _burn_captions(video_path, ass_path, captioned_path)
@@ -661,22 +681,58 @@ def _render_opening_sequence(
     """
     t0 = time.monotonic()
 
-    # S82: Logo removal — skip brand card animation entirely.
-    # Generate a clean dark background frame instead.
-    # This removes the logo while keeping the typewriter hook overlay.
-    last_frame_path = os.path.join(job_dir, "brand_card_last_frame.png")
-    bg_color = "0x0a0a0f" if brand == "containment_field" else "0x080810"
-    gen_bg_cmd = [
-        "ffmpeg", "-y",
-        "-f", "lavfi", "-i", f"color=c={bg_color}:s={OUT_WIDTH}x{OUT_HEIGHT}:d=1",
-        "-frames:v", "1",
-        "-q:v", "1",
-        last_frame_path,
-    ]
-    result = subprocess.run(gen_bg_cmd, capture_output=True, text=True, timeout=15)
-    if result.returncode != 0 or not os.path.isfile(last_frame_path):
-        log.error("opening_bg_generate_failed", stderr=result.stderr[:300])
-        return None
+    # ── Step 1: Play brand card animation (1.3s) ──
+    # SESSION 83: Restored brand card animation (S82 over-killed it).
+    # Brand card mp4s are baked into Docker at /app/brand-assets/.
+    brand_card_path = BRAND_CARD_FILES.get(brand)
+    if not brand_card_path or not os.path.isfile(brand_card_path):
+        log.warning("opening_brand_card_missing", brand=brand, path=brand_card_path)
+        # Fallback: generate dark background frame if brand card asset missing
+        last_frame_path = os.path.join(job_dir, "brand_card_last_frame.png")
+        bg_color = "0x0a0a0f" if brand == "containment_field" else "0x080810"
+        gen_bg_cmd = [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", f"color=c={bg_color}:s={OUT_WIDTH}x{OUT_HEIGHT}:d=1",
+            "-frames:v", "1", "-q:v", "1",
+            last_frame_path,
+        ]
+        result = subprocess.run(gen_bg_cmd, capture_output=True, text=True, timeout=15)
+        if result.returncode != 0 or not os.path.isfile(last_frame_path):
+            log.error("opening_bg_generate_failed", stderr=result.stderr[:300])
+            return None
+        brand_card_clip = None  # no brand card to concat
+    else:
+        # Extract last frame of brand card for typewriter background
+        last_frame_path = os.path.join(job_dir, "brand_card_last_frame.png")
+        extract_cmd = [
+            "ffmpeg", "-y",
+            "-sseof", "-0.05",  # seek to ~last frame
+            "-i", brand_card_path,
+            "-frames:v", "1",
+            "-q:v", "1",
+            last_frame_path,
+        ]
+        result = subprocess.run(extract_cmd, capture_output=True, text=True, timeout=15)
+        if result.returncode != 0 or not os.path.isfile(last_frame_path):
+            log.error("opening_last_frame_extract_failed", stderr=result.stderr[:300])
+            return None
+
+        # Normalize brand card to output dimensions + codec for clean concat
+        brand_card_clip = os.path.join(job_dir, "brand_card_normalized.mp4")
+        norm_cmd = [
+            "ffmpeg", "-y",
+            "-i", brand_card_path,
+            "-vf", f"scale={OUT_WIDTH}:{OUT_HEIGHT}:flags=lanczos,format=yuv420p",
+            "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
+            "-t", f"{BRAND_CARD_ANIM_DUR:.3f}",
+            "-r", str(OUT_FPS),
+            "-an",
+            brand_card_clip,
+        ]
+        result = subprocess.run(norm_cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            log.error("opening_brand_card_normalize_failed", stderr=result.stderr[:300])
+            brand_card_clip = None
 
     # ── Step 2: Generate typewriter .ass subtitle ──
     ass_path = os.path.join(job_dir, "typewriter.ass")
@@ -687,14 +743,10 @@ def _render_opening_sequence(
         output_path=ass_path,
     )
 
-    # ── Step 3: Render the typewriter segment (still frame + .ass overlay) ──
+    # ── Step 3: Render the typewriter segment (last frame + .ass overlay) ──
     typewriter_clip = os.path.join(job_dir, "opening_typewriter.mp4")
-
-    # Escape ASS path for ffmpeg subtitles filter (colons and backslashes)
     ass_escaped = ass_path.replace("\\", "/").replace(":", "\\:")
 
-    # S82: Render typewriter for the FULL opening duration on dark background.
-    # No brand card animation = no logo. Clean, minimal opening.
     tw_cmd = [
         "ffmpeg", "-y",
         "-loop", "1",
@@ -707,7 +759,7 @@ def _render_opening_sequence(
         ),
         "-map", "[v]",
         "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
-        "-t", f"{OPENING_TOTAL_DUR:.3f}",
+        "-t", f"{TYPEWRITER_DUR:.3f}",
         "-r", str(OUT_FPS),
         "-an",
         typewriter_clip,
@@ -717,9 +769,28 @@ def _render_opening_sequence(
         log.error("opening_typewriter_render_failed", stderr=result.stderr[:500])
         return None
 
-    # S82: Brand card animation REMOVED (logo removal). The typewriter clip
-    # IS the full opening now. Just add a silent audio track.
-    opening_video_only = typewriter_clip
+    # ── Step 4: Concat brand card + typewriter into one opening clip ──
+    if brand_card_clip and os.path.isfile(brand_card_clip):
+        opening_concat_list = os.path.join(job_dir, "opening_concat.txt")
+        with open(opening_concat_list, "w") as f:
+            f.write(f"file '{brand_card_clip}'\n")
+            f.write(f"file '{typewriter_clip}'\n")
+        opening_video_only = os.path.join(job_dir, "opening_video_only.mp4")
+        concat_cmd = [
+            "ffmpeg", "-y",
+            "-f", "concat", "-safe", "0",
+            "-i", opening_concat_list,
+            "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
+            "-an",
+            opening_video_only,
+        ]
+        result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            log.error("opening_concat_failed", stderr=result.stderr[:300])
+            opening_video_only = typewriter_clip  # fallback to typewriter only
+    else:
+        # No brand card available -- typewriter is the full opening
+        opening_video_only = typewriter_clip
 
     # Add silent audio track to opening clip (matches scene clip audio format)
     opening_path = os.path.join(job_dir, "opening_sequence.mp4")
@@ -955,6 +1026,38 @@ def compose_video(
             f"compose concat failed: {result.stderr[:500] if result.stderr else 'unknown error'}"
         )
 
+    # ── Stage 2.5: AUDIO MASTER DURATION ENFORCEMENT ────────────────
+    # SESSION 83: The TTS audio is the absolute temporal authority. The visual
+    # timeline must terminate the exact millisecond the primary audio ends.
+    video_dur = _probe_duration(final_path)
+    audio_master_dur = sum(durations_s) + (OPENING_TOTAL_DUR if opening_clip else 0.0)
+    drift_s = abs(video_dur - audio_master_dur)
+    if drift_s > 2.0:
+        log.warning(
+            "compose_duration_drift",
+            video_dur_s=round(video_dur, 2),
+            audio_master_s=round(audio_master_dur, 2),
+            drift_s=round(drift_s, 2),
+            msg="Video/audio duration mismatch -- trimming to audio master",
+        )
+        trimmed_path = os.path.join(job_dir, "final_trimmed.mp4")
+        trim_cmd = [
+            "ffmpeg", "-y",
+            "-i", final_path,
+            "-t", f"{audio_master_dur:.3f}",
+            "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
+            "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE,
+            "-movflags", "+faststart",
+            trimmed_path,
+        ]
+        trim_result = subprocess.run(trim_cmd, capture_output=True, text=True, timeout=600)
+        if trim_result.returncode == 0:
+            final_path = trimmed_path
+            video_dur = _probe_duration(final_path)
+            log.info("compose_trimmed_to_audio_master", final_dur_s=round(video_dur, 2))
+        else:
+            log.error("compose_trim_failed", stderr=trim_result.stderr[:300] if trim_result.stderr else "")
+
     # ── Stage 2.5: Composite audio mixing ─────────────────────────────
     try:
         video_dur = _probe_duration(final_path)
@@ -974,12 +1077,16 @@ def compose_video(
     # Captions skip the opening sequence (brand card + typewriter) and start
     # at OPENING_TOTAL_DUR. If the opening was skipped, captions start at 0.
     caption_skip_s = OPENING_TOTAL_DUR if opening_clip else 0.0
+    # SESSION 83: Pass the audio master duration as a hard ceiling so
+    # captions never bleed into dead-air / visual padding.
+    audio_ceiling_s = sum(durations_s) + (OPENING_TOTAL_DUR if opening_clip else 0.0)
     try:
         captioned = generate_and_burn_captions(
             video_path=final_path,
             brand=brand,
             job_dir=job_dir,
             skip_until_s=caption_skip_s,
+            audio_duration_s=audio_ceiling_s,
         )
         if captioned != final_path:
             final_path = captioned

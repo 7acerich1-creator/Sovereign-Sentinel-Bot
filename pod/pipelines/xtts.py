@@ -176,34 +176,46 @@ def synthesize_scenes(
         durations.append(duration)
         scene_wavs.append(out_path)
 
-        # SESSION 81: Audio sanity checks — detect silence/garbage BEFORE compose
+        # SESSION 83: PRE-FLIGHT TTS VALIDATION GATE
+        # If the script is a full segment read but the returned audio is
+        # drastically shorter, the TTS generation FAILED. FATAL abort —
+        # do NOT feed corrupted assets into the render pipeline.
         rms_energy = float(np.sqrt(np.mean(wav_data ** 2)))
         peak = float(np.max(np.abs(wav_data)))
         elapsed = time.monotonic() - t1
 
+        # Word count → expected duration estimate: ~2.5 words/sec for measured narration
+        word_count = len(text.split())
+        expected_dur_s = word_count / 2.5
+        # Ratio: if actual < 25% of expected, the TTS truncated/failed
+        dur_ratio = duration / max(expected_dur_s, 0.1)
+
         if rms_energy < 1e-4:
-            log.error(
-                "xtts_scene_SILENT",
-                index=idx,
-                rms=rms_energy,
-                peak=peak,
-                duration_s=round(duration, 2),
-                msg="XTTS produced near-silent audio — voice clone may have failed. "
-                "Check speaker WAV quality and text length.",
+            raise RuntimeError(
+                f"FATAL: XTTS scene {idx} produced SILENT audio "
+                f"(rms={rms_energy:.6f}, peak={peak:.4f}, dur={duration:.2f}s). "
+                f"Voice clone failed. Aborting pipeline — no corrupted assets."
+            )
+        elif dur_ratio < 0.25 and word_count > 8:
+            raise RuntimeError(
+                f"FATAL: XTTS scene {idx} audio critically truncated. "
+                f"Script has {word_count} words (expected ~{expected_dur_s:.1f}s) "
+                f"but audio is only {duration:.2f}s ({dur_ratio:.0%} of expected). "
+                f"TTS generation failed. Aborting pipeline."
             )
         elif duration < 1.0 and len(text) > 20:
-            log.error(
-                "xtts_scene_TOO_SHORT",
-                index=idx,
-                duration_s=round(duration, 2),
-                text_len=len(text),
-                msg="XTTS produced suspiciously short audio for text length.",
+            raise RuntimeError(
+                f"FATAL: XTTS scene {idx} produced {duration:.2f}s audio "
+                f"for {len(text)} chars of text. TTS failed. Aborting pipeline."
             )
         else:
             log.info(
                 "xtts_scene_done",
                 index=idx,
                 duration_s=round(duration, 2),
+                word_count=word_count,
+                expected_s=round(expected_dur_s, 1),
+                dur_ratio=f"{dur_ratio:.0%}",
                 rms=round(rms_energy, 6),
                 peak=round(peak, 4),
                 elapsed_s=round(elapsed, 2),

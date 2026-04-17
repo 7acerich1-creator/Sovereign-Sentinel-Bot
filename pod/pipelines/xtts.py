@@ -176,14 +176,39 @@ def synthesize_scenes(
         durations.append(duration)
         scene_wavs.append(out_path)
 
+        # SESSION 81: Audio sanity checks — detect silence/garbage BEFORE compose
+        rms_energy = float(np.sqrt(np.mean(wav_data ** 2)))
+        peak = float(np.max(np.abs(wav_data)))
         elapsed = time.monotonic() - t1
-        log.info(
-            "xtts_scene_done",
-            index=idx,
-            duration_s=round(duration, 2),
-            elapsed_s=round(elapsed, 2),
-            rtf=round(elapsed / max(duration, 0.1), 2),
-        )
+
+        if rms_energy < 1e-4:
+            log.error(
+                "xtts_scene_SILENT",
+                index=idx,
+                rms=rms_energy,
+                peak=peak,
+                duration_s=round(duration, 2),
+                msg="XTTS produced near-silent audio — voice clone may have failed. "
+                "Check speaker WAV quality and text length.",
+            )
+        elif duration < 1.0 and len(text) > 20:
+            log.error(
+                "xtts_scene_TOO_SHORT",
+                index=idx,
+                duration_s=round(duration, 2),
+                text_len=len(text),
+                msg="XTTS produced suspiciously short audio for text length.",
+            )
+        else:
+            log.info(
+                "xtts_scene_done",
+                index=idx,
+                duration_s=round(duration, 2),
+                rms=round(rms_energy, 6),
+                peak=round(peak, 4),
+                elapsed_s=round(elapsed, 2),
+                rtf=round(elapsed / max(duration, 0.1), 2),
+            )
 
     # Concatenate all scene WAVs into one file using ffmpeg
     concat_path = os.path.join(job_dir, "all_scenes.wav")

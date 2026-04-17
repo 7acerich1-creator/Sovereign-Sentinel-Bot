@@ -1656,14 +1656,16 @@ export async function executeFullPipeline(
           const duration = Math.min(rawPaddedEnd - paddedStart, MAX_SHORT_DURATION);
 
           try {
-            // Phase 5 Task 5.6: CTA overlay in last 2 seconds.
-            // Write CTA text to a temp file to avoid shell-quoting issues.
+            // SESSION 81: Two-pass ffmpeg extraction with drawtext fault-tolerance.
+            // Phase 5 Task 5.6 CTA drawtext was crashing ALL clip extractions in S80
+            // (static ffmpeg may not support drawtext, or filter syntax issue).
+            // Pass 1: try full filter (niche + CTA drawtext).
+            // Pass 2 (fallback): niche filter only, no drawtext.
+
             const ctaText = short.cta_overlay || "";
             const ctaTextFile = `${clipDir}/cta_${i}.txt`;
             if (ctaText) writeFileSync(ctaTextFile, ctaText);
 
-            // CTA drawtext: enabled only in the last 2 seconds, centered lower-third.
-            // Bebas Neue font for brand consistency (falls back to default if missing).
             const brandAssetsDir = `${__dirname}/../../brand-assets`;
             const fontPath = `${brandAssetsDir}/BebasNeue-Regular.ttf`;
             const hasFont = existsSync(fontPath);
@@ -1673,16 +1675,33 @@ export async function executeFullPipeline(
               ? `,drawtext=${fontFilter}textfile='${ctaTextFile.replace(/\\/g, "/")}':fontsize=42:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h-180:enable='gte(t\\,${ctaEnableStart})'`
               : "";
 
-            execSync(
-              `ffmpeg -ss ${paddedStart.toFixed(2)} -i "${facelessResult.localPath}" ` +
-                `-t ${duration.toFixed(2)} ` +
-                `-vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${nicheFilter}${ctaDrawtext}" ` +
-                `-c:v libx264 -preset fast -crf 23 ` +
-                `-c:a aac -b:a 128k ` +
-                `-af "afade=t=in:st=0:d=0.15,afade=t=out:st=${Math.max(0, duration - 0.5).toFixed(2)}:d=0.5" ` +
-                `-y "${clipPath}"`,
-              { timeout: FFMPEG_CLIP_TIMEOUT_MS, stdio: "ignore" }
-            );
+            const baseFilter = `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${nicheFilter}`;
+            const audioFilter = `afade=t=in:st=0:d=0.15,afade=t=out:st=${Math.max(0, duration - 0.5).toFixed(2)}:d=0.5`;
+            const baseCmd = `ffmpeg -ss ${paddedStart.toFixed(2)} -i "${facelessResult.localPath}" -t ${duration.toFixed(2)}`;
+            const encodeOpts = `-c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k`;
+
+            // Pass 1: full filter with CTA drawtext
+            let extracted = false;
+            if (ctaDrawtext) {
+              try {
+                execSync(
+                  `${baseCmd} -vf "${baseFilter}${ctaDrawtext}" ${encodeOpts} -af "${audioFilter}" -y "${clipPath}"`,
+                  { timeout: FFMPEG_CLIP_TIMEOUT_MS, stdio: "pipe" }
+                );
+                extracted = true;
+              } catch (drawErr: any) {
+                const stderr = drawErr.stderr?.toString?.()?.slice(0, 300) || "";
+                console.warn(`  ⚠️ Short ${i} drawtext failed (will retry without CTA): ${stderr.slice(0, 150)}`);
+              }
+            }
+
+            // Pass 2 (fallback): niche filter only, no drawtext
+            if (!extracted) {
+              execSync(
+                `${baseCmd} -vf "${baseFilter}" ${encodeOpts} -af "${audioFilter}" -y "${clipPath}"`,
+                { timeout: FFMPEG_CLIP_TIMEOUT_MS, stdio: "pipe" }
+              );
+            }
 
             clips.push({
               index: i,
@@ -1700,7 +1719,8 @@ export async function executeFullPipeline(
               `conf=${short.confidence.toFixed(2)} CTA="${ctaText.slice(0, 40)}"`
             );
           } catch (err: any) {
-            console.error(`[Orchestrator] Short ${i} ffmpeg failed: ${err.message?.slice(0, 200)}`);
+            const stderr = err.stderr?.toString?.()?.slice(0, 400) || "";
+            console.error(`[Orchestrator] Short ${i} ffmpeg FAILED:\n  cmd: ${err.message?.slice(0, 200)}\n  stderr: ${stderr}`);
           }
         }
 

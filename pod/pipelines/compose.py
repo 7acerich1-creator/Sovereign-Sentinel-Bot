@@ -365,7 +365,7 @@ MUSIC_BED_FILES = {
     "ace_richie": os.path.join(BRAND_ASSETS_DIR, "music_sovereign.mp3"),
     "containment_field": os.path.join(BRAND_ASSETS_DIR, "music_urgent.mp3"),
 }
-MUSIC_BED_DB = -18  # dB attenuation for music underneath narration
+MUSIC_BED_DB = -12  # dB attenuation for music underneath narration (S81: was -18, inaudible after amix)
 
 # Brand stings
 TYPING_SOUND = os.path.join(BRAND_ASSETS_DIR, "typing.mp3")
@@ -491,11 +491,14 @@ def _mix_audio(
         return video_path
 
     # amix: combine all layers
+    # SESSION 81 FIX: amix with default normalize divides each input by N,
+    # burying music at -27dB (inaudible). normalize=0 disables this —
+    # each layer keeps its intended volume (narration 0dB, music -18dB, etc.).
     n_layers = len(mix_inputs)
     mix_input_str = "".join(mix_inputs)
     filter_parts.append(
-        f"{mix_input_str}amix=inputs={n_layers}:duration=longest:dropout_transition=2,"
-        f"volume={n_layers}dB[mixed]"  # compensate amix volume normalization
+        f"{mix_input_str}amix=inputs={n_layers}:duration=longest"
+        f":dropout_transition=2:normalize=0[mixed]"
     )
 
     filter_graph = ";".join(filter_parts)

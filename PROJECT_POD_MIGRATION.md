@@ -10,13 +10,13 @@
 
 | Field | Value |
 |---|---|
-| **Current phase** | **PHASE 6 IN PROGRESS — 2026-04-17 S78.** Tasks 6.1-6.4 done. Task 6.5 remaining. |
-| **Current phase status** | **Phase 0-5: ALL done. Phase 6: 4/5 done.** |
+| **Current phase** | **PHASE 7 — 2026-04-17 S79.** Phase 6 COMPLETE. Task 7.1 (manual Ace Richie end-to-end test) is first action. |
+| **Current phase status** | **Phase 0-6: ALL COMPLETE. Phase 7: 0/6 done.** |
 | **Total phases** | 8 (Phase 0 -> Phase 7) |
-| **Last session** | Session 78 -- 2026-04-17 -- **PHASE 6 DISTRIBUTION AUDIT + FIXES.** (1) Full code audit of new shorts extraction path (Phase 5 curator) — audio re-encoding is clean (`-c:a aac -b:a 128k` + fades + padding). Old clip-generator retired. (2) Found + fixed shorts duration overflow: padding (0.3s+1.5s) could push 59s clip to 60.8s → YouTube Shorts rejection. Hard-capped at 59s. (3) Found + fixed Supabase Storage cleanup race: clips were deleted immediately after Buffer scheduling; Buffer may download async. Added 60s safety delay. (4) Added `sovereign-synthesis.com/diagnostic` link to ALL 4 YouTube description paths (LLM prompt, emergency fallback, angle-template fallback, dry-run template). (5) `tsc --noEmit` clean (0 errors). |
-| **Last commit touching this work** | *pending push this session* |
-| **Blocker** | **None.** |
-| **Next session's first action** | **Phase 6 Task 6.5** — Cross-platform asset matrix documentation. |
+| **Last session** | Session 79 -- 2026-04-17 -- **PHASE 6 CLOSED + PHASE 7 START.** Task 6.5 done: `CONTENT-PIPELINE-CLARITY.md` fully rewritten as cross-platform asset matrix covering YT long-form, YT Shorts, TikTok, IG Reels, Buffer text platforms, brand routing matrix, quality gates, and batch production mode. All 5 Phase 6 tasks ☑. |
+| **Last commit touching this work** | Pending — Task 6.5 is documentation only (no code change), commit with Phase 7 test. |
+| **Blocker** | **RunPod balance ~$1.** Phase 7 test needs at least one full pod run (~$0.50). Architect aware. |
+| **Next session's first action** | **Phase 7 Task 7.1** — Trigger manual Ace Richie end-to-end production run. |
 
 **Rule:** if you are a future session and this STATUS block has not been updated in your current session before you close, the session failed regardless of what was built.
 
@@ -285,7 +285,7 @@ Each phase has bite-sized tasks. Every task lists the EXACT file path it touches
 - ☑ **Task 6.4 — Description template with /diagnostic link.** DONE S78 2026-04-17. Added `🧬 Take the Diagnostic: https://sovereign-synthesis.com/diagnostic` to ALL 4 YouTube long-form description paths: (1) `generateLongFormDescription` LLM prompt (line ~959 — instructs Yuki to include it as a trailing line before the protocol link). (2) Emergency fallback template (exception path). (3) Angle-template fallback (when LLM returns invalid JSON). (4) Dry-run template. The link appears BEFORE the existing `🔗 The Protocol: https://sovereign-synthesis.com` line in all paths. Shorts do NOT include `/diagnostic` — the funnel flow is: short CTA overlay → viewer clicks channel → finds long-form → description has diagnostic link. Edit YouTube upload description builder to include `https://sovereign-synthesis.com/diagnostic` as the first line, followed by existing description copy. Apply to long-form AND curated shorts.
   - File: `src/tools/video-publisher.ts` or the YouTube-specific uploader file (grep for `description:` in upload calls)
   - Verification: next long-form upload has `/diagnostic` as line 1 of description on YouTube.com
-- ☐ **Task 6.5 — Cross-platform asset matrix.** Title, description, thumbnail, and hashtag strategy per platform. Documented in `CONTENT-PIPELINE-CLARITY.md` as a table covering long-form + curated-short variants.
+- ☑ **Task 6.5 — Cross-platform asset matrix.** DONE S79 2026-04-17. `CONTENT-PIPELINE-CLARITY.md` fully rewritten: covers YT long-form (16:9, category 27, LLM description with diagnostic link), YT Shorts (9:16, 15-59s hard cap, AAC re-encode, CTA overlay), TikTok (150 char cap, 5 hashtags), IG Reels (2200 chars, 8-12 hashtags), Buffer text platforms (X/Threads/LinkedIn/Facebook), brand routing matrix (niches, TTS, captions, music, Pinecone namespaces), quality gates (5 automated), batch production economics. Title, description, thumbnail, and hashtag strategy per platform. Documented in `CONTENT-PIPELINE-CLARITY.md` as a table covering long-form + curated-short variants.
   - File: `C:\Users\richi\Sovereign-Sentinel-Bot\CONTENT-PIPELINE-CLARITY.md`
   - Verification: the table covers YT long / YT Short / TikTok / IG Reel
 

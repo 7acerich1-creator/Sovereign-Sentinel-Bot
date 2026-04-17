@@ -347,6 +347,201 @@ def generate_and_burn_captions(
     return captioned_path
 
 
+
+# --------------------------------------------------------------------------
+# Composite Audio Mixing -- Phase 5 Task 5.11
+# --------------------------------------------------------------------------
+# Music bed + TTS narration + brand stings mixed as ONE audio composite.
+# Audio pipeline:
+#   1. Extract narration from concatenated video
+#   2. Loop music bed to video length, attenuate to -18dB
+#   3. Layer typing.mp3 during typewriter window (0s - OPENING_TOTAL_DUR)
+#   4. Layer brand intro sting at video start
+#   5. Mix all layers into single track
+#   6. Re-mux mixed audio onto video
+
+# Brand-specific music beds (baked into Docker at BRAND_ASSETS_DIR)
+MUSIC_BED_FILES = {
+    "ace_richie": os.path.join(BRAND_ASSETS_DIR, "music_sovereign.mp3"),
+    "containment_field": os.path.join(BRAND_ASSETS_DIR, "music_urgent.mp3"),
+}
+MUSIC_BED_DB = -18  # dB attenuation for music underneath narration
+
+# Brand stings
+TYPING_SOUND = os.path.join(BRAND_ASSETS_DIR, "typing.mp3")
+SIGNATURE_INTRO_FILES = {
+    "ace_richie": os.path.join(BRAND_ASSETS_DIR, "signature_long.mp3"),
+    "containment_field": os.path.join(BRAND_ASSETS_DIR, "signature_long_tcf.mp3"),
+}
+SIGNATURE_OUTRO_FILES = {
+    "ace_richie": os.path.join(BRAND_ASSETS_DIR, "signature_outro.mp3"),
+    "containment_field": os.path.join(BRAND_ASSETS_DIR, "signature_outro_tcf.mp3"),
+}
+STING_INTRO_DB = -8   # intro sting slightly louder than music bed
+STING_TYPING_DB = -12  # typing sound: audible but not dominant
+STING_OUTRO_DB = -6    # outro sting: prominent
+
+
+def _mix_audio(
+    video_path: str,
+    brand: str,
+    job_dir: str,
+    video_duration_s: float,
+    opening_dur_s: float = OPENING_TOTAL_DUR,
+) -> str:
+    """
+    Build a composite audio track and re-mux it onto the video.
+
+    Layers (bottom to top):
+        1. Narration (extracted from video) — full volume
+        2. Music bed — looped to video length, attenuated to MUSIC_BED_DB
+        3. Typing sound — positioned during typewriter window, STING_TYPING_DB
+        4. Intro sting — positioned at start, STING_INTRO_DB
+        5. Outro sting — positioned at end, STING_OUTRO_DB
+
+    Returns path to the video with mixed audio (or original if mixing fails).
+    """
+    t0 = time.monotonic()
+    log.info("audio_mix_start", brand=brand, video_duration_s=round(video_duration_s, 1))
+
+    # ── Step 1: Extract narration audio ──
+    narration_wav = os.path.join(job_dir, "narration_raw.wav")
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", video_path,
+             "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
+             narration_wav],
+            capture_output=True, text=True, timeout=120, check=True,
+        )
+    except Exception as exc:
+        log.error("audio_mix_extract_failed", error=str(exc)[:200])
+        return video_path
+
+    # ── Step 2: Build ffmpeg complex filter for mixing ──
+    inputs = ["-i", narration_wav]  # input 0: narration
+    filter_parts = []
+    input_idx = 1
+    mix_inputs = ["[narr]"]
+
+    # Narration: pad with silence at the start to cover the opening sequence
+    # (opening is video-only, no narration audio for first opening_dur_s)
+    filter_parts.append(f"[0:a]apad=whole_dur={video_duration_s:.3f}[narr]")
+
+    # Music bed: loop to video duration, attenuate
+    music_path = MUSIC_BED_FILES.get(brand)
+    if music_path and os.path.isfile(music_path):
+        inputs.extend(["-stream_loop", "-1", "-i", music_path])
+        filter_parts.append(
+            f"[{input_idx}:a]atrim=0:{video_duration_s:.3f},"
+            f"asetpts=PTS-STARTPTS,"
+            f"volume={MUSIC_BED_DB}dB[music]"
+        )
+        mix_inputs.append("[music]")
+        input_idx += 1
+    else:
+        log.warning("audio_mix_no_music_bed", brand=brand, path=music_path)
+
+    # Typing sound: position during typewriter window (BRAND_CARD_ANIM_DUR to OPENING_TOTAL_DUR)
+    if os.path.isfile(TYPING_SOUND):
+        inputs.extend(["-i", TYPING_SOUND])
+        typing_start_ms = int(BRAND_CARD_ANIM_DUR * 1000)
+        filter_parts.append(
+            f"[{input_idx}:a]volume={STING_TYPING_DB}dB,"
+            f"adelay={typing_start_ms}|{typing_start_ms},"
+            f"apad=whole_dur={video_duration_s:.3f}[typing]"
+        )
+        mix_inputs.append("[typing]")
+        input_idx += 1
+    else:
+        log.warning("audio_mix_no_typing", path=TYPING_SOUND)
+
+    # Intro sting: starts at t=0
+    intro_path = SIGNATURE_INTRO_FILES.get(brand)
+    if intro_path and os.path.isfile(intro_path):
+        inputs.extend(["-i", intro_path])
+        filter_parts.append(
+            f"[{input_idx}:a]volume={STING_INTRO_DB}dB,"
+            f"apad=whole_dur={video_duration_s:.3f}[intro]"
+        )
+        mix_inputs.append("[intro]")
+        input_idx += 1
+    else:
+        log.warning("audio_mix_no_intro_sting", brand=brand)
+
+    # Outro sting: positioned so it ends at video end
+    outro_path = SIGNATURE_OUTRO_FILES.get(brand)
+    if outro_path and os.path.isfile(outro_path):
+        # Probe outro duration to calculate start delay
+        outro_dur = _probe_duration(outro_path)
+        if outro_dur > 0:
+            outro_start_s = max(0, video_duration_s - outro_dur - 0.5)
+            outro_start_ms = int(outro_start_s * 1000)
+            inputs.extend(["-i", outro_path])
+            filter_parts.append(
+                f"[{input_idx}:a]volume={STING_OUTRO_DB}dB,"
+                f"adelay={outro_start_ms}|{outro_start_ms},"
+                f"apad=whole_dur={video_duration_s:.3f}[outro]"
+            )
+            mix_inputs.append("[outro]")
+            input_idx += 1
+
+    # If we only have narration (no music/stings found), skip mixing
+    if len(mix_inputs) <= 1:
+        log.warning("audio_mix_no_layers", reason="only narration available")
+        return video_path
+
+    # amix: combine all layers
+    n_layers = len(mix_inputs)
+    mix_input_str = "".join(mix_inputs)
+    filter_parts.append(
+        f"{mix_input_str}amix=inputs={n_layers}:duration=longest:dropout_transition=2,"
+        f"volume={n_layers}dB[mixed]"  # compensate amix volume normalization
+    )
+
+    filter_graph = ";".join(filter_parts)
+
+    # ── Step 3: Run the mix ──
+    mixed_audio = os.path.join(job_dir, "audio_mixed.wav")
+    mix_cmd = ["ffmpeg", "-y"] + inputs + [
+        "-filter_complex", filter_graph,
+        "-map", "[mixed]",
+        "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
+        mixed_audio,
+    ]
+
+    log.info("audio_mix_ffmpeg", layers=n_layers, filter_len=len(filter_graph))
+    result = subprocess.run(
+        mix_cmd, capture_output=True, text=True,
+        timeout=300,
+    )
+    if result.returncode != 0:
+        log.error("audio_mix_failed", stderr=result.stderr[:500] if result.stderr else "")
+        return video_path
+
+    # ── Step 4: Re-mux mixed audio onto video ──
+    output_path = os.path.join(job_dir, "final_mixed.mp4")
+    mux_cmd = [
+        "ffmpeg", "-y",
+        "-i", video_path,
+        "-i", mixed_audio,
+        "-map", "0:v",
+        "-map", "1:a",
+        "-c:v", "copy",
+        "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE,
+        "-movflags", "+faststart",
+        "-shortest",
+        output_path,
+    ]
+
+    result = subprocess.run(mux_cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+        log.error("audio_mux_failed", stderr=result.stderr[:500] if result.stderr else "")
+        return video_path
+
+    elapsed = time.monotonic() - t0
+    log.info("audio_mix_done", layers=n_layers, elapsed_s=round(elapsed, 1))
+    return output_path
+
 def _extract_hook_text(hook_text: Optional[str], script: str, max_words: int = 9) -> str:
     """
     Get the opening typewriter text. Prefer explicit hook_text from the job spec;
@@ -772,6 +967,21 @@ def compose_video(
         raise RuntimeError(
             f"compose concat failed: {result.stderr[:500] if result.stderr else 'unknown error'}"
         )
+
+    # ── Stage 2.5: Composite audio mixing ─────────────────────────────
+    try:
+        video_dur = _probe_duration(final_path)
+        mixed = _mix_audio(
+            video_path=final_path,
+            brand=brand,
+            job_dir=job_dir,
+            video_duration_s=video_dur,
+            opening_dur_s=OPENING_TOTAL_DUR if opening_clip else 0.0,
+        )
+        if mixed != final_path:
+            final_path = mixed
+    except Exception as exc:
+        log.error("compose_audio_mix_failed", error=str(exc)[:300])
 
     # ── Stage 3: Kinetic captions (GPU Whisper → ASS → burn) ────────────
     # Captions skip the opening sequence (brand card + typewriter) and start

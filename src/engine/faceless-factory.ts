@@ -457,7 +457,7 @@ URGENCY CONTEXT (weave into every blueprint):
 We are in an active evolutionary moment. AI and exponential technological shifts are widening the gap between the sovereign and the sleeping DAILY. The people who feel "stuck" or "behind" aren't imagining it — their internal operating system is outdated and the world around them is updating faster than they are. This channel exists to deliver the architectural codes for the upgrade. Every video must carry this urgency — not as fear, but as factual observation that demands action NOW.
 
 RAW SOURCE MATERIAL (use as INSPIRATION only — do NOT copy phrases or structure):
-${sourceIntelligence.slice(0, 2500)}
+${sourceIntelligence.slice(0, 8000)}
 
 NICHE: ${niche.replace(/_/g, " ")}
 ${titleBanList}
@@ -467,7 +467,7 @@ Extract a narrative blueprint as JSON:
   "thesis": "The ONE bold claim the entire video argues (1 sentence, provocative, specific — NOT generic like 'mindset matters'). Must connect to the urgency of NOW — why this matters TODAY, not someday.",
   "title": "A UNIQUE punchy video title (max 60 chars, pattern-interrupt energy). Must create curiosity gap or bold claim. MUST be completely different from any previously used titles listed above.",
   "hook": "The first 2 sentences spoken — must NAME A FEELING the viewer already has but can't articulate. Plain English, no jargon. A STATEMENT that makes them think 'how does this person know exactly what I'm experiencing?' Open loop energy.",
-  "narrative_arc": "3-act summary: ACT 1 (name the feeling — plain English, what they already sense is wrong) → ACT 2 (reveal the mechanism — the hidden architecture behind the feeling, why the old rules no longer work) → ACT 3 (deliver the exchange — give them one piece of sovereign architecture that replaces the old programming, tie to the urgency of acting NOW)",
+  "narrative_arc": "3-act summary: ACT 1 (name the feeling — plain English, what they already sense is wrong) → ACT 2 (reveal the mechanism — the hidden architecture behind the feeling, why the old rules no longer work. MUST include at least one HEAD FAKE — build toward an obvious answer, then redirect to a deeper non-obvious layer that resets curiosity) → ACT 3 (deliver the exchange — give them one piece of sovereign architecture that replaces the old programming, tie to the urgency of acting NOW)",
   "key_arguments": ["argument 1 that supports thesis", "argument 2...", "...up to 7 total, in narrative ORDER — each builds on the previous"],
   "emotional_journey": "How the viewer should FEEL: recognized ('someone finally named it') → unsettled (the mechanism is deeper than they thought) → urgent (this is happening NOW, not someday) → sovereign (they leave with one new piece of architecture)"
 }
@@ -591,6 +591,14 @@ CRITICAL WRITING RULES:
 6. Create organic transitions that flow from the previous thought — NOT formulaic bridges. Each transition should feel like a natural escalation, not a cue card.
 7. Each segment MUST be 100-150 words MINIMUM (6-10 sentences). Under 80 words = FAILURE.
 8. The video should feel like a REVELATION unfolding — not a list of tips.
+
+DOPAMINE LADDER — ANTICIPATION MECHANICS (critical for retention):
+The viewer's brain is a problem-solving machine. Your script must exploit this by running CURIOSITY LOOPS:
+- The HOOK (segment 1) must pop an open question in the viewer's mind — name a feeling they have but can't articulate. This is the curiosity trigger.
+- ACT 1 (segments 2-4) BUILDS ANTICIPATION: give details that get the viewer closer to the answer. Let them start guessing. Feed them specific clues.
+- At least ONCE in ACT 2 (segments 5-7), execute a HEAD FAKE: build toward what seems like the answer, then YANK IT AWAY and redirect to a deeper, non-obvious layer. This resets the curiosity loop and spikes dopamine. The viewer thought they knew — now they don't.
+- ACT 3 (segments 8-9) VALIDATES: deliver the non-obvious answer that closes the loop. The answer must be something they would NOT have guessed from the setup. Then immediately open ONE final micro-question that points to the CTA.
+- NEVER give the main answer early and then pad. The answer is the CLIMAX, not the midpoint.
 
 BANNED PHRASES (Session 38 — these are lexically stagnant and kill authenticity):
 - "Imagine..." or "Imagine this..." (overused opener — find a more vivid entry point)
@@ -839,7 +847,7 @@ Return ONLY valid JSON.`;
     const shortPrompt = `${voice}
 
 You have source material to draw INSPIRATION from (do NOT copy it):
-${sourceIntelligence.slice(0, 2500)}
+${sourceIntelligence.slice(0, 8000)}
 
 Write a ${durationRange} voiceover script for a ${niche.replace(/_/g, " ")} faceless short. ONE powerful idea, not a summary.
 

@@ -733,7 +733,12 @@ def _render_opening_sequence(
         return None
 
     # ── Step 5: Concat card animation + typewriter into one opening clip ──
-    opening_path = os.path.join(job_dir, "opening_sequence.mp4")
+    # CRITICAL: The opening clip MUST have a silent audio track so that when
+    # it's prepended to scene clips in the main concat (Stage 2), ffmpeg's
+    # concat demuxer sees a consistent {video, audio} stream layout.
+    # Without this, the first file being video-only causes ALL audio from
+    # subsequent scene clips to be silently dropped.
+    opening_video_only = os.path.join(job_dir, "opening_video_only.mp4")
     concat_list = os.path.join(job_dir, "opening_concat.txt")
     with open(concat_list, "w") as f:
         f.write(f"file '{card_clip}'\n")
@@ -746,12 +751,31 @@ def _render_opening_sequence(
         "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
         "-movflags", "+faststart",
         "-an",
-        opening_path,
+        opening_video_only,
     ]
     result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=30)
     if result.returncode != 0:
         log.error("opening_concat_failed", stderr=result.stderr[:300])
         return None
+
+    # Add silent audio track to opening clip (matches scene clip audio format)
+    opening_path = os.path.join(job_dir, "opening_sequence.mp4")
+    silent_cmd = [
+        "ffmpeg", "-y",
+        "-i", opening_video_only,
+        "-f", "lavfi", "-i", f"anullsrc=channel_layout=stereo:sample_rate=44100",
+        "-c:v", "copy",
+        "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE,
+        "-shortest",
+        "-movflags", "+faststart",
+        opening_path,
+    ]
+    result = subprocess.run(silent_cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        log.error("opening_silent_audio_failed", stderr=result.stderr[:300])
+        # Fall back to video-only — audio will still be lost but at least
+        # the video won't crash
+        opening_path = opening_video_only
 
     actual_dur = _probe_duration(opening_path)
     elapsed = time.monotonic() - t0

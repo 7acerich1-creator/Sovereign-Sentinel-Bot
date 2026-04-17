@@ -10,13 +10,13 @@
 
 | Field | Value |
 |---|---|
-| **Current phase** | **PHASE 5 IN PROGRESS — 2026-04-16 S70.** Tasks 5.1+5.2 done. S70 Dopamine Ladder review complete — 4 amendments approved by Architect. Executing: script prompt enhancement (anticipation mechanics), sourceIntelligence cap raise, brand card animations (programmatic), Task 5.8/5.9 redesign (animation-first stimulation layer). |
-| **Current phase status** | **Phase 0: ALL done. Phase 1: ALL done. Phase 2: 4/4 done. Phase 3: 7/7 done. Phase 4: 5/5 done. Phase 5: 2/14 done (5.1 ☑, 5.2 ☑, 5.3-5.14 ☐).** S70: Dopamine Ladder analysis (Kallaway "Storytelling Genius" video) identified 4 gaps in retention/conversion architecture. All 4 amendments approved. Tasks 5.13+5.14 added (script prompt anticipation mechanics + sourceIntelligence cap raise). Task 5.8 redefined (animated brand card replaces static intro). Task 5.9 redefined (typewriter overlays on settled brand card, not matte bg). |
+| **Current phase** | **PHASE 5 IN PROGRESS — 2026-04-16 S70.** Tasks 5.1, 5.2, 5.8, 5.13, 5.14 done (5/14). Brand card animations shipped. Script prompt has Dopamine Ladder mechanics. sourceIntelligence cap raised. |
+| **Current phase status** | **Phase 0-4: ALL done. Phase 5: 5/14 done (5.1 ☑, 5.2 ☑, 5.8 ☑, 5.13 ☑, 5.14 ☑, 5.3-5.7 ☐, 5.9-5.12 ☐).** |
 | **Total phases** | 8 (Phase 0 -> Phase 7) |
-| **Last session** | Session 70 -- 2026-04-16 -- Dopamine Ladder deep review. Analyzed Kallaway "How to Become a Storytelling Genius" (415K views, 6-level framework). Cross-referenced all 6 levels against pipeline. Identified: (1) Task 5.8/5.9 visual-first redesign needed — brand card animation as fixed visual anchor + typewriter overlay, (2) Script prompt needs anticipation/misdirection mechanics (Level 3 gap), (3) sourceIntelligence.slice(0,2500) is artificially conservative — 119K tokens of headroom available, (4) Prompt economy rule (1K tokens) was for agent prompts, NOT script gen — no constraint exists. All 4 amendments approved. Executing. |
-| **Last commit touching this work** | `48f7fb1` (origin/main) -- Phase 5 Tasks 5.1+5.2. |
-| **Blocker** | **None.** Executing approved amendments now. |
-| **Next session's first action** | Continue Phase 5 execution. If S70 completes 5.13+5.14+animations: proceed to Task 5.3 (shorts-curator). If not: resume where S70 left off. |
+| **Last session** | Session 70 -- 2026-04-16 -- Kallaway Dopamine Ladder analysis + execution. 4 amendments approved + shipped: (1) Task 5.13 Dopamine Ladder anticipation block in pass1Prompt (curiosity loops, head fakes, climax structure), (2) Task 5.14 sourceIntelligence slice 2500->8000 chars, (3) Task 5.8 TCF glitch animation (RGB split + scan lines + block displacement -> clean card, 1.3s), (4) Task 5.8 Ace pulse animation (gold bloom + sacred geometry flash -> clean card, 1.3s). narrative_arc blueprint updated with HEAD FAKE requirement. tsc clean. Commit d6d5634 pushed. |
+| **Last commit touching this work** | `d6d5634` (origin/main) -- S70 Dopamine Ladder + brand cards + sourceIntelligence. |
+| **Blocker** | **None.** |
+| **Next session's first action** | **Task 5.9** — Typewriter overlays ON the settled brand card (1.3s animation + 3.7s typewriter = 5.0s total opening). Then Task 5.3 (shorts-curator persona). |
 
 **Rule:** if you are a future session and this STATUS block has not been updated in your current session before you close, the session failed regardless of what was built.
 

@@ -932,40 +932,49 @@ async function generateLongFormDescription(
     { clipLabel: "LONG-FORM YOUTUBE DESCRIPTION", angle },
   ]);
 
+  // SESSION 83: Brand voice is the FLOOR, not the ceiling. The previous prompt
+  // banned Sovereign lexicon from Ace's own channel descriptions, producing
+  // generic LinkedIn self-help copy. Fixed: Sovereign voice is MANDATORY on
+  // the main channel. Demographic targeting is layered ON TOP, not instead of.
   const prompt = `${brandBlock}
 
-You are Yuki, an elite YouTube SEO copywriter for ${brandLabel}. Every rule in the FREQUENCY BIFURCATION PROTOCOL block above overrides any generic SEO advice that follows.
+You are the voice of ${brandLabel}. Every rule in the FREQUENCY BIFURCATION PROTOCOL block above is LAW. The channel voice is the foundation — demographic targeting layers on top of it, never replaces it.
 
-BRAND-CONTEXT RECONCILIATION (how FREQUENCY BIFURCATION and AUDIENCE ROTATION compose):
-The FREQUENCY BIFURCATION block locks the CHANNEL voice. The AUDIENCE ROTATION block locks the DEMOGRAPHIC angle. They compose; they do not collide. For ace_richie: translate the assigned demographic's pain into the quantum/monad/timeline/frequency vocabulary of the REQUIRED LEXICON above. For containment_field: translate it into the clinical extraction-loop/micro-compliance/behavioral-program vocabulary. The demographic changes WHO the description lands on; the frequency profile changes WHAT vocabulary it lands in. Both are non-negotiable, and the bifurcation wins any tie.
+You are writing the DESCRIPTION for a long-form YouTube video uploaded to the MAIN ${brandLabel} channel. This is the 10-15 minute anchor video — the flagship content.
 
-You are writing the DESCRIPTION for a long-form YouTube video that will be uploaded to the main channel. This is NOT a clip — it is the 10-15 minute anchor video.
-
-SOURCE VIDEO TITLE: "${sourceTitle}"
-GENERATED VIDEO TITLE: "${videoTitle}"
+VIDEO TITLE: "${videoTitle}"
 NICHE: ${niche.replace(/_/g, " ")}
 TRANSCRIPT EXCERPT: ${transcript.slice(0, 2000)}
 
 ${rotationBlock}
 
-LONG-FORM DESCRIPTION ARCHITECTURE (NON-NEGOTIABLE):
+VOICE HIERARCHY (SESSION 83 — NON-NEGOTIABLE):
+1. BRAND VOICE IS THE FLOOR. For ace_richie: write in the Sovereign Synthesis frequency — timelines, quantum resets, frequency shifts, the architecture of liberation. For containment_field: write in clinical dark psychology extraction vocabulary. The brand voice is NEVER diluted.
+2. DEMOGRAPHIC TARGETING IS THE LENS. Use the assigned angle to determine WHO you're speaking to and WHAT specific pain point you lead with. But the VOCABULARY stays in-brand.
+3. If it reads like a generic self-help blog post, a LinkedIn motivation post, or a corporate burnout article — you have FAILED. Rewrite until it sounds like nobody else on YouTube.
 
-Paragraph 1 — THESIS (2-3 sentences)
-  • Lead with the assigned angle's emotional entry point.
-  • Name the exact feeling the assigned demographic has but cannot articulate.
-  • NO Sovereign internal lexicon ("simulation", "firmware update", "sovereignty", "protocol 77", "escape velocity") unless it is the assigned angle.
+LONG-FORM DESCRIPTION ARCHITECTURE:
 
-Paragraph 2 — THE PIVOT (3-5 sentences)
-  • Name the pattern. Use the assigned demographic's vocabulary.
-  • Show you understand their world at the inside-baseball level.
+LINE 1 — THE GLITCH (1 sentence, max 15 words)
+  A pattern interrupt. A statement that makes the viewer's current reality logic stutter.
+  NOT an empathy opener. NOT "You know the feeling." A GLITCH.
+  Examples: "Your timeline forked 6 months ago. You just haven't caught up yet."
+  "The version of you reading this was supposed to be deleted by now."
 
-Paragraph 3 — WHAT THIS VIDEO ACTUALLY DELIVERS (3-4 sentences)
-  • Concrete description of what the viewer will walk away with.
-  • Use their metrics, their proof-points, their scoreboard.
+Paragraph 2 — THE MECHANISM (3-4 sentences)
+  Name the specific mechanism this video exposes. Use the assigned demographic's situation as the ENTRY POINT but describe it through the brand's lens.
+  For ace_richie: quantum resets, timeline collapses, frequency architecture, sovereign synthesis.
+  For containment_field: extraction loops, micro-compliance patterns, behavioral programs, dark psychology mechanics.
+  This paragraph must contain at least ONE concept the viewer has never heard framed this way before.
 
-Paragraph 4 — WHO THIS IS FOR (2-3 sentences)
-  • Explicitly name the assigned demographic ("If you're a [demographic descriptor]...").
-  • Invite them to subscribe / watch / engage in THEIR voice.
+Paragraph 3 — THE TRANSMISSION (2-3 sentences)
+  What the viewer walks away with. Be SPECIFIC — name the shift, the tool, the protocol element.
+  Not vague promises. Concrete architecture.
+
+Paragraph 4 — THE GATE (1-2 sentences)
+  Who this is for. Use the assigned demographic descriptor but frame it as a filter, not an invitation.
+  "If you're still optimizing inside the old operating system, this isn't for you yet."
+  NOT: "If you're feeling stuck, this video is for you." That's simulation energy.
 
 Then, in order, exactly these trailing lines (each on its own blank-separated line):
 
@@ -973,23 +982,25 @@ Then, in order, exactly these trailing lines (each on its own blank-separated li
 
 🔗 The Protocol: https://sovereign-synthesis.com
 
-Related topics: <5-7 comma-separated keyword seeds from the assigned angle, adapted to the video's actual content — no verbatim dump, no hashtags on this line>
+Related topics: <5-7 comma-separated keyword seeds from the assigned angle, adapted to the video's actual content>
 
 #<tag1> #<tag2> #<tag3> #<tag4> #<tag5> #<tag6> #<tag7>
-  • Tags must be pulled from the assigned angle's keyword seeds, converted to camelCase hashtags.
-  • Include ONE brand hashtag (#SovereignSynthesis OR #ContainmentField depending on brand context).
-  • NO generic #mindset, #motivation, #selfhelp. Every hashtag must be demographic-coded.
+  • Include ONE brand hashtag (#SovereignSynthesis OR #ContainmentField).
+  • NO generic #mindset, #motivation, #selfhelp. Demographic-coded only.
 
-FORBIDDEN STRINGS (immediate rejection — do not write):
-  • "Extracted intelligence from the simulation"
-  • "The Firmware Update continues"
-  • Any sentence that begins with "In this video"
-  • "Like and subscribe" as a standalone line
-  • "Don't forget to smash that bell"
+HARD BANS (immediate rejection):
+  • "You know the feeling" or any empathy-first opener
+  • "Sunday nights, dreading..." or any day-of-week cliche
+  • "You're not alone" — simulation comfort language
+  • "In this video" — dead energy
+  • "Like and subscribe" / "smash that bell"
+  • "Extracted intelligence from the simulation" / "The Firmware Update continues"
+  • Any sentence that could appear on a generic self-help channel unchanged
+  • Paragraphs longer than 4 sentences — brevity is authority
 
 Return ONLY valid JSON with this exact shape:
 {
-  "description": "<the full description string including all paragraphs, link, Related topics line, and hashtag footer, separated by \\n\\n>",
+  "description": "<the full description string including all paragraphs, links, Related topics line, and hashtag footer, separated by \\n\\n>",
   "tags": "<comma-separated flat list of 8-12 tags for the YouTube API tags field, pulled from the assigned angle's keyword seeds plus the niche, all lowercase, no hash symbols>"
 }
 

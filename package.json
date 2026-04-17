@@ -9,7 +9,8 @@
     "dev": "ts-node src/index.ts",
     "typecheck": "tsc --noEmit",
     "verify-state": "ts-node scripts/verify-state.ts",
-    "test:pod-contract": "ts-node scripts/test-pod-contract.ts"
+    "test:pod-contract": "ts-node scripts/test-pod-contract.ts",
+    "test:full-composition": "ts-node scripts/test-full-composition.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

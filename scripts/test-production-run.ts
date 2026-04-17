@@ -16,6 +16,7 @@
  *   POD_BRAND=ace_richie        (run only one brand instead of both)
  */
 
+import "dotenv/config";
 import { withPodSession, shutdownPodSession } from "../src/pod/session";
 import { produceVideo, sweepStalePods } from "../src/pod/runpod-client";
 import type { JobSpec } from "../src/pod/types";
@@ -43,7 +44,7 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 const ACE_RICHIE_JOB: JobSpec = {
   brand: "ace_richie",
   niche: "sovereignty",
-  seed: "Most people think freedom means having no boss. That is the first trap. Real sovereignty is architectural — you design the system that feeds you, protects you, and compounds while you sleep. The difference between a free man and a sovereign one is infrastructure.",
+  seed: "Real sovereignty is architectural — you design the system that feeds you, protects you, and compounds while you sleep. The difference between free and sovereign is infrastructure.",
   hook_text: "Freedom is the first trap they sell you.",
   script: [
     "Freedom is the first trap they sell you. They tell you to quit your job, follow your passion, be your own boss. And you believe it. Because it sounds like sovereignty. But it is not. It is a costume. A simulation of power draped over the same dependency you were running from.",
@@ -139,7 +140,7 @@ const ACE_RICHIE_JOB: JobSpec = {
 const TCF_JOB: JobSpec = {
   brand: "containment_field",
   niche: "dark-psychology",
-  seed: "The most dangerous manipulators do not raise their voice. They lower yours. They make you doubt yourself so gradually that by the time you realize what happened, you defend them to the people trying to help you. This is not influence. This is engineering.",
+  seed: "The most dangerous manipulators do not raise their voice. They lower yours until you defend them to the people trying to help you. This is not influence. This is engineering.",
   hook_text: "They did not raise their voice. They lowered yours.",
   script: [
     "They did not raise their voice. They lowered yours. That is the first thing you need to understand about the people who controlled you. They never needed to scream. They never needed to threaten. They just needed you to believe that your own perception was unreliable. And once they achieved that, everything else was automatic.",

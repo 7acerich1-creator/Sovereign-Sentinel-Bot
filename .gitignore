@@ -2,6 +2,9 @@ node_modules/
 dist/
 .env
 .env.local
+run-production-test.bat
+run-test.bat
+git-commit.bat
 test-out/
 .DS_Store
 npm-debug.log

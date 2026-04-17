@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import os
 import time
-from pathlib import Path
 from typing import Optional
 
 import structlog
@@ -56,55 +55,27 @@ def load_model() -> None:
     t0 = time.monotonic()
     log.info("xtts_loading", device="cuda" if torch.cuda.is_available() else "cpu")
 
-    from TTS.tts.configs.xtts_config import XttsConfig
-    from TTS.tts.models.xtts import Xtts
+    # Coqui TTS prompts for license agreement on stdin — skip in headless Docker.
+    os.environ["COQUI_TOS_AGREED"] = "1"
 
     cache_dir = os.environ.get("HF_HOME", "/app/cache/huggingface")
     model_name = "tts_models/multilingual/multi-dataset/xtts_v2"
 
-    # TTS library downloads to its own cache — we override to the volume
-    # so the model persists across pod restarts.
-    from TTS.utils.manage import ModelManager
-    manager = ModelManager(models_file=None)
+    # Use the high-level TTS API — it handles download, caching, and config
+    # resolution in one call. The COQUI_TOS_AGREED env var above prevents
+    # the interactive license prompt that causes EOFError in Docker.
+    from TTS.api import TTS as TTSApi
 
-    # Check if already downloaded
-    model_path = Path(cache_dir) / "tts" / "tts_models--multilingual--multi-dataset--xtts_v2"
-    if not model_path.exists():
-        log.info("xtts_downloading", cache_dir=cache_dir)
-        # Use the TTS library's download mechanism
-        from TTS.api import TTS as TTSApi
-        tts_api = TTSApi(model_name=model_name, progress_bar=True)
-        # Get model path from the API
-        model_path = Path(tts_api.synthesizer.tts_model.config.model_dir) if hasattr(tts_api, 'synthesizer') else model_path
-        del tts_api
+    log.info("xtts_loading_via_api", model=model_name, cache_dir=cache_dir)
+    tts_api = TTSApi(model_name=model_name, progress_bar=True, gpu=torch.cuda.is_available())
 
-    # Load config + model directly for maximum control
-    config = XttsConfig()
-    config_path = model_path / "config.json"
-    if config_path.exists():
-        config.load_json(str(config_path))
-    else:
-        # Fallback: use TTS API to handle download + config resolution
-        from TTS.api import TTS as TTSApi
-        tts_api = TTSApi(model_name=model_name, progress_bar=True, gpu=torch.cuda.is_available())
-        # Extract model from API
-        _model = tts_api.synthesizer.tts_model
-        _model.eval()
-        if torch.cuda.is_available():
-            _model = _model.cuda()
-        _model_config = _model.config
-        elapsed = time.monotonic() - t0
-        log.info("xtts_loaded_via_api", elapsed_s=round(elapsed, 1))
-        return
-
-    model = Xtts.init_from_config(config)
-    model.load_checkpoint(config, checkpoint_dir=str(model_path))
-    model.eval()
+    # Extract the raw model for direct inference (speaker latent control)
+    _model = tts_api.synthesizer.tts_model
+    _model.eval()
     if torch.cuda.is_available():
-        model = model.cuda()
+        _model = _model.cuda()
+    _model_config = _model.config
 
-    _model = model
-    _model_config = config
     elapsed = time.monotonic() - t0
     log.info("xtts_loaded", elapsed_s=round(elapsed, 1))
 

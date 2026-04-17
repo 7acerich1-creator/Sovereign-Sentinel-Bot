@@ -35,6 +35,11 @@ supabase==2.8.0
 boto3==1.35.31
 botocore==1.35.31
 
+# --- GPU Whisper for kinetic captions (Phase 5 Task 5.10) ---
+# CTranslate2-based Whisper — 4-8x faster than openai-whisper on GPU,
+# produces word-level timestamps for subtitle generation.
+faster-whisper==1.0.3
+
 # --- Video composition helpers ---
 # ffmpeg itself is apt-installed in the Dockerfile. These are the Python
 # helpers the pipelines use on top of it.

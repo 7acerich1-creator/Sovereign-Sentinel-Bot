@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Optional
 
 import structlog
+import tempfile
 
 log = structlog.get_logger("pipeline.compose")
 
@@ -95,6 +96,255 @@ TYPEWRITER_STYLES = {
         "bold": 1,
     },
 }
+
+
+
+# --------------------------------------------------------------------------
+# Kinetic Captions -- Phase 5 Task 5.10
+# --------------------------------------------------------------------------
+# GPU Whisper word-level transcription -> 2-4 word bursts -> .ass -> ffmpeg burn.
+# Green opaque-box captions are DEAD. New style: premium editorial, no box plate.
+#
+# TCF:  Bebas Neue uppercase, thin dark outline only, crisp white/silver.
+# Ace:  Montserrat SemiBold mixed-case, warm outline, soft shadow.
+
+CAPTION_WORDS_PER_BURST = (2, 4)
+CAPTION_MIN_DURATION_S = 0.25
+CAPTION_GAP_S = 0.02
+
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "large-v3")
+
+CAPTION_STYLES = {
+    "containment_field": {
+        "font": "Bebas Neue",
+        "fontsize": 72,
+        "primary_color": "&H00F0F0F0",
+        "outline_color": "&H00101010",
+        "outline_width": 2.0,
+        "shadow_depth": 0,
+        "bold": 0,
+        "uppercase": True,
+        "border_style": 1,
+        "anim_in_ms": 120,
+        "anim_scale_start": 95,
+    },
+    "ace_richie": {
+        "font": "Montserrat SemiBold",
+        "fontsize": 68,
+        "primary_color": "&H0080CFFF",
+        "outline_color": "&H00102040",
+        "outline_width": 2.5,
+        "shadow_depth": 2,
+        "bold": 1,
+        "uppercase": False,
+        "border_style": 1,
+        "anim_in_ms": 180,
+        "anim_scale_start": 90,
+    },
+}
+
+
+def _transcribe_word_timestamps(audio_path: str) -> list[dict]:
+    """Run faster-whisper on GPU to get word-level timestamps."""
+    from faster_whisper import WhisperModel
+
+    log.info("whisper_start", model=WHISPER_MODEL, audio=audio_path)
+    t0 = time.monotonic()
+
+    model = WhisperModel(WHISPER_MODEL, device="cuda", compute_type="float16")
+    segments, info = model.transcribe(
+        audio_path, beam_size=5, word_timestamps=True, language="en",
+    )
+
+    words: list[dict] = []
+    for segment in segments:
+        if segment.words:
+            for w in segment.words:
+                words.append({"word": w.word.strip(), "start": w.start, "end": w.end})
+
+    elapsed = time.monotonic() - t0
+    log.info("whisper_done", word_count=len(words),
+             audio_duration_s=round(info.duration, 1), elapsed_s=round(elapsed, 1))
+    return words
+
+
+def _chunk_words_into_bursts(
+    words: list[dict],
+    min_words: int = CAPTION_WORDS_PER_BURST[0],
+    max_words: int = CAPTION_WORDS_PER_BURST[1],
+) -> list[dict]:
+    """Group word-level timestamps into 2-4 word caption bursts."""
+    bursts: list[dict] = []
+    buf_words: list[dict] = []
+
+    def _flush():
+        if not buf_words:
+            return
+        text = " ".join(w["word"] for w in buf_words)
+        start = buf_words[0]["start"]
+        end = buf_words[-1]["end"]
+        dur = max(CAPTION_MIN_DURATION_S, end - start)
+        bursts.append({"text": text, "start": start, "end": start + dur})
+        buf_words.clear()
+
+    for w in words:
+        buf_words.append(w)
+        is_end = w["word"].rstrip().endswith((".", "?", "!"))
+        if len(buf_words) >= max_words or (len(buf_words) >= min_words and is_end):
+            _flush()
+
+    _flush()
+    return bursts
+
+
+def _generate_caption_ass(
+    bursts: list[dict], brand: str, skip_until_s: float, output_path: str,
+) -> str:
+    """Generate ASS subtitle file from caption bursts with brand-specific styling."""
+    style = CAPTION_STYLES.get(brand, CAPTION_STYLES["ace_richie"])
+
+    def _ts(seconds: float) -> str:
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        s = seconds % 60
+        cs = int((s - int(s)) * 100)
+        return f"{h}:{m:02d}:{int(s):02d}.{cs:02d}"
+
+    ass_lines = []
+    ass_lines.append("[Script Info]")
+    ass_lines.append("Title: Kinetic Captions")
+    ass_lines.append("ScriptType: v4.00+")
+    ass_lines.append("WrapStyle: 0")
+    ass_lines.append("ScaledBorderAndShadow: yes")
+    ass_lines.append("YCbCr Matrix: TV.709")
+    ass_lines.append(f"PlayResX: {OUT_WIDTH}")
+    ass_lines.append(f"PlayResY: {OUT_HEIGHT}")
+    ass_lines.append("")
+    ass_lines.append("[V4+ Styles]")
+    ass_lines.append("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding")
+    ass_lines.append(
+        f"Style: Caption,{style['font']},{style['fontsize']},{style['primary_color']},"
+        f"&H000000FF,{style['outline_color']},&H00000000,{style['bold']},"
+        f"0,0,0,100,100,2.0,0,{style['border_style']},{style['outline_width']},"
+        f"{style['shadow_depth']},2,80,80,100,1"
+    )
+    ass_lines.append("")
+    ass_lines.append("[Events]")
+    ass_lines.append("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text")
+
+    anim_ms = style.get("anim_in_ms", 150)
+    scale_start = style.get("anim_scale_start", 90)
+
+    dialogue_lines: list[str] = []
+    for burst in bursts:
+        if burst["end"] <= skip_until_s:
+            continue
+        start = max(burst["start"], skip_until_s)
+        end = burst["end"] + CAPTION_GAP_S
+        text = burst["text"]
+        if style.get("uppercase"):
+            text = text.upper()
+        text = text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+        anim_tag = (
+            "{\\" + f"fscx{scale_start}" + "\\" + f"fscy{scale_start}"
+            + "\\" + f"t(0,{anim_ms}," + "\\" + "fscx100" + "\\" + "fscy100)}"
+        )
+        start_ts = _ts(start)
+        end_ts = _ts(end)
+        dialogue_lines.append(
+            f"Dialogue: 0,{start_ts},{end_ts},Caption,,0,0,0,,{anim_tag}{text}"
+        )
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        for line in ass_lines:
+            f.write(line + "\n")
+        for line in dialogue_lines:
+            f.write(line + "\n")
+
+    log.info("caption_ass_generated", path=output_path, burst_count=len(dialogue_lines),
+             brand=brand, skipped_before_s=skip_until_s)
+    return output_path
+
+
+def _burn_captions(video_path: str, ass_path: str, output_path: str) -> str:
+    """Burn ASS captions onto a video using ffmpeg subtitles filter."""
+    ass_escaped = ass_path.replace("\\", "/").replace(":", "\\:")
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", video_path,
+        "-vf", f"subtitles='{ass_escaped}'",
+        "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
+        "-c:a", "copy",
+        "-movflags", "+faststart",
+        output_path,
+    ]
+    log.info("caption_burn_start", video=video_path, ass=ass_path)
+    t0 = time.monotonic()
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    if result.returncode != 0:
+        log.error("caption_burn_failed", stderr=result.stderr[:500] if result.stderr else "")
+        raise RuntimeError(
+            f"Caption burn failed: {result.stderr[:300] if result.stderr else 'unknown'}"
+        )
+    elapsed = time.monotonic() - t0
+    log.info("caption_burn_done", output=output_path, elapsed_s=round(elapsed, 1))
+    return output_path
+
+
+def _extract_audio_from_video(video_path: str, output_wav: str) -> str:
+    """Extract audio track from video as WAV for Whisper processing."""
+    cmd = [
+        "ffmpeg", "-y", "-i", video_path,
+        "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+        output_wav,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Audio extraction failed: {result.stderr[:300] if result.stderr else 'unknown'}"
+        )
+    return output_wav
+
+
+def generate_and_burn_captions(
+    video_path: str, brand: str, job_dir: str,
+    skip_until_s: float = OPENING_TOTAL_DUR,
+) -> str:
+    """
+    Full kinetic caption pipeline:
+        1. Extract audio from concatenated video
+        2. Run GPU Whisper for word-level timestamps
+        3. Chunk into 2-4 word kinetic bursts
+        4. Generate brand-specific .ass file
+        5. Burn captions onto video
+    Returns path to the captioned video.
+    """
+    t0 = time.monotonic()
+    log.info("captions_pipeline_start", brand=brand, skip_until_s=skip_until_s)
+
+    audio_wav = os.path.join(job_dir, "captions_audio.wav")
+    _extract_audio_from_video(video_path, audio_wav)
+
+    words = _transcribe_word_timestamps(audio_wav)
+    if not words:
+        log.warning("captions_no_words", reason="Whisper returned zero words")
+        return video_path
+
+    bursts = _chunk_words_into_bursts(words)
+    if not bursts:
+        log.warning("captions_no_bursts", reason="chunking produced zero bursts")
+        return video_path
+
+    ass_path = os.path.join(job_dir, "captions.ass")
+    _generate_caption_ass(bursts, brand, skip_until_s, ass_path)
+
+    captioned_path = os.path.join(job_dir, "final_captioned.mp4")
+    _burn_captions(video_path, ass_path, captioned_path)
+
+    elapsed = time.monotonic() - t0
+    log.info("captions_pipeline_done", brand=brand,
+             burst_count=len(bursts), elapsed_s=round(elapsed, 1))
+    return captioned_path
 
 
 def _extract_hook_text(hook_text: Optional[str], script: str, max_words: int = 9) -> str:
@@ -523,11 +773,27 @@ def compose_video(
             f"compose concat failed: {result.stderr[:500] if result.stderr else 'unknown error'}"
         )
 
-    # ── Stage 3: Probe final duration ────────────────────────────────────
+    # ── Stage 3: Kinetic captions (GPU Whisper → ASS → burn) ────────────
+    # Captions skip the opening sequence (brand card + typewriter) and start
+    # at OPENING_TOTAL_DUR. If the opening was skipped, captions start at 0.
+    caption_skip_s = OPENING_TOTAL_DUR if opening_clip else 0.0
+    try:
+        captioned = generate_and_burn_captions(
+            video_path=final_path,
+            brand=brand,
+            job_dir=job_dir,
+            skip_until_s=caption_skip_s,
+        )
+        if captioned != final_path:
+            final_path = captioned
+    except Exception as exc:
+        log.error("compose_captions_failed", error=str(exc)[:300])
+
+    # ── Stage 4: Probe final duration ─
     total_duration = _probe_duration(final_path)
     log.info("compose_final_duration", duration_s=round(total_duration, 2))
 
-    # ── Stage 4: Generate thumbnail ──────────────────────────────────────
+    # ── Stage 5: Generate thumbnail ──────────────────────────────────────
     thumb_path = os.path.join(job_dir, "thumbnail.jpg")
     thumb_idx = min(thumbnail_scene_idx, n_scenes - 1)
     thumb_src = scene_images[thumb_idx] if thumb_idx < len(scene_images) else scene_images[0]

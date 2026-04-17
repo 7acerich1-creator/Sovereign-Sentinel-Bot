@@ -181,10 +181,13 @@ export async function startPod(options: StartPodOptions = {}): Promise<PodHandle
   forwardedEnv["POD_WORKER_TOKEN"] = workerToken;
 
   // S76: Volume-free pods have speaker WAVs baked into the Docker image at
-  // /app/brand-assets/. Override any stale SPEAKERS_DIR from Railway env that
-  // still points to the old /runpod-volume/speakers path.
+  // /app/brand-assets/. Override ALL speaker path env vars — Railway still has
+  // the old /runpod-volume/speakers paths from the volume-based setup, and
+  // xtts.py checks XTTS_SPEAKER_WAV_ACE/TCF before falling back to SPEAKERS_DIR.
   if (noVolume) {
     forwardedEnv["SPEAKERS_DIR"] = "/app/brand-assets";
+    forwardedEnv["XTTS_SPEAKER_WAV_ACE"] = "/app/brand-assets/ace_ref.wav";
+    forwardedEnv["XTTS_SPEAKER_WAV_TCF"] = "/app/brand-assets/tcf_ref.wav";
   }
 
   // S76: Retry protocol — try SECURE first, fall back to COMMUNITY, wait, retry.

@@ -422,18 +422,65 @@ export async function produceVideo(
   );
 
   // Poll /jobs/{jobId} until terminal.
+  // SESSION 80 FIX: Tolerate transient 404s from the worker. If the pod
+  // OOM-kills during model loading (FLUX ~24GB bf16), uvicorn restarts with
+  // an empty _JOBS dict and every poll returns 404. We retry up to
+  // MAX_404_RETRIES times before concluding the job is truly lost. The
+  // worker now also persists job state to disk (see worker.py file-backed
+  // persistence) so recovered jobs appear as "failed" rather than 404.
+  const MAX_404_RETRIES = 8;
+  const BACKOFF_404_MS = 5_000; // 5s between 404 retries (total ~40s grace)
+  let consecutive404s = 0;
+
   const deadline = Date.now() + timeoutMs;
   let lastStatus: JobStatus = "queued";
   while (Date.now() < deadline) {
     if (options.signal?.aborted) {
       throw new PodJobFailedError("produceVideo aborted", jobId, lastStatus);
     }
-    const result = await podFetchJson<JobResult>(
-      handle,
-      "GET",
-      `/jobs/${encodeURIComponent(jobId)}`,
-      { signal: options.signal },
-    );
+
+    let result: JobResult;
+    try {
+      result = await podFetchJson<JobResult>(
+        handle,
+        "GET",
+        `/jobs/${encodeURIComponent(jobId)}`,
+        { signal: options.signal },
+      );
+      consecutive404s = 0; // Reset on any successful response
+    } catch (err) {
+      // 404 = job not found. Could be: (a) proxy routing delay on cold start,
+      // (b) worker restarted and _JOBS dict was wiped (OOM kill). Retry a few
+      // times before giving up with a clear diagnostic message.
+      if (err instanceof PodContractError && err.httpStatus === 404) {
+        consecutive404s++;
+        if (consecutive404s <= MAX_404_RETRIES) {
+          console.warn(
+            `\u{26A0}\u{FE0F} [RunPod] job ${jobId} poll got 404 (${consecutive404s}/${MAX_404_RETRIES}) — worker may have restarted, retrying in ${BACKOFF_404_MS / 1000}s...`,
+          );
+          await sleep(BACKOFF_404_MS);
+          continue;
+        }
+        throw new PodJobFailedError(
+          `Worker lost job ${jobId} after ${MAX_404_RETRIES} consecutive 404s. ` +
+          `The pod worker likely crashed (OOM during model loading?) and restarted ` +
+          `with empty state. Check RunPod pod logs for SIGKILL / OOM events. ` +
+          `Original error: ${err.message}`,
+          jobId,
+          lastStatus,
+        );
+      }
+      // 5xx = worker error but still alive — retry within normal timeout
+      if (err instanceof PodContractError && err.httpStatus !== undefined && err.httpStatus >= 500) {
+        console.warn(
+          `\u{26A0}\u{FE0F} [RunPod] job ${jobId} poll got ${err.httpStatus} — retrying...`,
+        );
+        await sleep(pollMs);
+        continue;
+      }
+      throw err; // Unknown error — propagate
+    }
+
     lastStatus = result.status;
     if (result.status === "done") {
       if (!result.video_url || !result.thumbnail_url || result.duration_s == null) {

@@ -3005,11 +3005,13 @@ async function main() {
                 `The clip ripper is running in background. Original message: ${message.content}`;
             }
 
-            // ── /dryrun and /pipeline commands are handled by Veritas handleCommand() ──
+            // ── /dryrun, /pipeline, /alfred commands are handled by Veritas handleCommand() ──
             // Crew bots should NOT run pipeline commands — redirect to Veritas
-            else if (/^\/dryrun\b/i.test(message.content) || /^\/pipeline\b/i.test(message.content)) {
+            // SESSION 80: Added /alfred — was being swallowed by crew bots instead of routing
+            // to Veritas for Alfred's daily_trend_scan dispatch.
+            else if (/^\/dryrun\b/i.test(message.content) || /^\/pipeline\b/i.test(message.content) || /^\/alfred\b/i.test(message.content)) {
               await agentChannel.sendMessage(message.chatId,
-                `Pipeline commands (/dryrun, /pipeline) run through Veritas. Send there instead.`
+                `Pipeline commands (/dryrun, /pipeline, /alfred) run through Veritas. Send there instead.`
               );
               return; // Don't pass to agent loop
             }

@@ -44,7 +44,25 @@ def load_model() -> None:
 
     t0 = time.monotonic()
     cache_dir = os.environ.get("HF_HOME", "/app/cache/huggingface")
-    log.info("flux_loading", model=FLUX_MODEL_ID, dtype="bf16", cache_dir=cache_dir)
+    hf_token = os.environ.get("HF_TOKEN", "").strip() or None
+
+    # SESSION 80: FLUX.1 [dev] is a GATED model on HuggingFace. Without a
+    # valid HF_TOKEN + accepted license, from_pretrained will fail with a
+    # cryptic 403. Surface this explicitly BEFORE the slow download starts.
+    if not hf_token:
+        log.error(
+            "flux_hf_token_missing",
+            msg="HF_TOKEN env var not set. FLUX.1 [dev] is a gated model — "
+            "download WILL fail with 403. Set HF_TOKEN and accept the license "
+            "at https://huggingface.co/black-forest-labs/FLUX.1-dev",
+        )
+        raise RuntimeError(
+            "HF_TOKEN not set — cannot download gated model FLUX.1 [dev]. "
+            "Set HF_TOKEN env var and accept license at "
+            "https://huggingface.co/black-forest-labs/FLUX.1-dev"
+        )
+
+    log.info("flux_loading", model=FLUX_MODEL_ID, dtype="bf16", cache_dir=cache_dir, hf_token_set=True)
 
     from diffusers import FluxPipeline
 
@@ -52,6 +70,7 @@ def load_model() -> None:
         FLUX_MODEL_ID,
         torch_dtype=FLUX_DTYPE,
         cache_dir=cache_dir,
+        token=hf_token,  # Explicit token pass — don't rely on env auto-detection
     )
 
     if torch.cuda.is_available():

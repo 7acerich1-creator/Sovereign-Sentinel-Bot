@@ -159,9 +159,70 @@ class HealthReport(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# In-memory job registry
+# In-memory job registry + file-backed persistence (SESSION 80 FIX)
+#
+# The _JOBS dict is the hot path. On every state change we also flush to a
+# JSON file on disk so that if the worker process crashes (OOM kill → SIGKILL
+# bypasses Python exception handlers), the next startup can recover job
+# records as "failed" with a clear error instead of returning 404.
 # ---------------------------------------------------------------------------
 _JOBS: dict[str, ProduceResult] = {}
+_JOBS_STATE_FILE = os.path.join(
+    os.environ.get("JOB_WORK_DIR", "/tmp/sovereign-jobs"),
+    ".jobs_state.json",
+)
+
+
+def _persist_jobs() -> None:
+    """Flush _JOBS to disk. Best-effort — never raises."""
+    try:
+        os.makedirs(os.path.dirname(_JOBS_STATE_FILE), exist_ok=True)
+        payload = {jid: j.model_dump() for jid, j in _JOBS.items()}
+        # Atomic write via temp file + rename
+        tmp = _JOBS_STATE_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            import json
+            json.dump(payload, f)
+        os.replace(tmp, _JOBS_STATE_FILE)
+    except Exception as exc:
+        log.warning("jobs_persist_failed", error=str(exc))
+
+
+def _recover_jobs_on_startup() -> None:
+    """On boot, recover any non-terminal jobs from a prior crash as 'failed'."""
+    try:
+        if not os.path.isfile(_JOBS_STATE_FILE):
+            return
+        import json
+        with open(_JOBS_STATE_FILE) as f:
+            raw = json.load(f)
+        recovered = 0
+        for jid, data in raw.items():
+            if data.get("status") in ("queued", "running"):
+                _JOBS[jid] = ProduceResult(
+                    job_id=jid,
+                    status="failed",
+                    error=(
+                        "Worker restarted unexpectedly (likely OOM kill during model loading). "
+                        f"Original status was '{data.get('status')}'. "
+                        "Check pod logs for SIGKILL / OOM events."
+                    ),
+                )
+                recovered += 1
+            elif data.get("status") in ("done", "failed"):
+                # Preserve terminal jobs so Railway poller can read them
+                _JOBS[jid] = ProduceResult(**data)
+        if recovered:
+            log.warning("jobs_recovered_from_crash", count=recovered)
+            _persist_jobs()  # Write the updated "failed" statuses back
+    except Exception as exc:
+        log.warning("jobs_recovery_failed", error=str(exc))
+
+
+def _update_job(job_id: str, result: ProduceResult) -> None:
+    """Update a job in memory AND flush to disk."""
+    _JOBS[job_id] = result
+    _persist_jobs()
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +235,9 @@ app = FastAPI(
 )
 
 _BOOT_TS = time.monotonic()
+
+# SESSION 80: Recover any in-flight jobs from a prior crash on startup.
+_recover_jobs_on_startup()
 
 
 @app.get("/health/live", tags=["health"])
@@ -217,6 +281,13 @@ def readiness(_: None = Depends(require_bearer)) -> HealthReport:
     except Exception:
         pass
 
+    # SESSION 80: Surface HF_TOKEN status so Railway can diagnose gated model
+    # access issues BEFORE a job is submitted. FLUX.1 [dev] is gated — without
+    # a valid token + accepted license, model download returns 403.
+    hf_token_set = bool(os.environ.get("HF_TOKEN", "").strip())
+    if not hf_token_set:
+        log.warning("hf_token_missing", msg="HF_TOKEN not set — FLUX.1 [dev] download will fail (gated model)")
+
     return HealthReport(
         ok=True,
         cuda_available=cuda_available,
@@ -243,7 +314,7 @@ def produce(
     """Accept a long-form video production job."""
     job_id = req.client_job_id or f"job_{uuid.uuid4().hex[:16]}"
     now = time.time()
-    _JOBS[job_id] = ProduceResult(job_id=job_id, status="queued")
+    _update_job(job_id, ProduceResult(job_id=job_id, status="queued"))
     log.info(
         "produce_accepted",
         job_id=job_id,
@@ -271,7 +342,7 @@ def _run_pipeline(job_id: str, req: ProduceRequest) -> None:
     job_dir = os.path.join(JOB_WORK_DIR, job_id)
 
     try:
-        _JOBS[job_id] = ProduceResult(job_id=job_id, status="running")
+        _update_job(job_id, ProduceResult(job_id=job_id, status="running"))
         log.info("pipeline_start", job_id=job_id, brand=req.brand.value)
 
         os.makedirs(job_dir, exist_ok=True)
@@ -349,13 +420,13 @@ def _run_pipeline(job_id: str, req: ProduceRequest) -> None:
 
         # Done — update job result
         elapsed = time.monotonic() - t0
-        _JOBS[job_id] = ProduceResult(
+        _update_job(job_id, ProduceResult(
             job_id=job_id,
             status="done",
             video_url=video_url,
             thumbnail_url=thumbnail_url,
             duration_s=duration_s,
-        )
+        ))
         log.info(
             "pipeline_done",
             job_id=job_id,
@@ -368,11 +439,11 @@ def _run_pipeline(job_id: str, req: ProduceRequest) -> None:
         elapsed = time.monotonic() - t0
         error_msg = f"{type(exc).__name__}: {str(exc)[:500]}"
         log.exception("pipeline_failed", job_id=job_id, elapsed_s=round(elapsed, 1))
-        _JOBS[job_id] = ProduceResult(
+        _update_job(job_id, ProduceResult(
             job_id=job_id,
             status="failed",
             error=error_msg,
-        )
+        ))
 
     finally:
         # Cleanup job directory — artifacts are on R2 now

@@ -1,7 +1,27 @@
-# Pod image build context = repo root. Only pod/ and brand-assets/ are needed.
-# Exclude everything, then whitelist.
-*
-!pod/
-!pod/**
-!brand-assets/
-!brand-assets/**
+# Shared .dockerignore for BOTH builds:
+#   - Dockerfile.bot (Railway bot — needs src/, package.json, brand-assets/, etc.)
+#   - pod/Dockerfile (GH Actions pod image — needs pod/, brand-assets/)
+# Only exclude things neither build needs.
+node_modules
+dist
+.env
+.env.*
+!.env.example
+.git
+__pycache__
+*.pyc
+.venv
+.claude
+# Non-essential docs
+README.md
+CHANGELOG.md
+progress.md
+findings.md
+task_plan.md
+# Test/script files not needed in production images
+tests/
+scripts/
+*.test.ts
+# Large files that aren't runtime dependencies
+*.zip
+*.tar.gz

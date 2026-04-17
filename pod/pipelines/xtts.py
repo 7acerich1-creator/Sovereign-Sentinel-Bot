@@ -4,9 +4,9 @@ pod/pipelines/xtts.py — XTTSv2 TTS inference pipeline.
 Loads XTTSv2 once at module level (lazy, first call), then synthesizes speech
 for each scene's tts_text using the brand-appropriate speaker reference WAV.
 
-Speaker WAVs live on the network volume:
-    /runpod-volume/speakers/ace_ref.wav
-    /runpod-volume/speakers/tcf_ref.wav
+Speaker WAVs are baked into the Docker image at:
+    /app/brand-assets/ace_ref.wav
+    /app/brand-assets/tcf_ref.wav
 
 Returns a list of per-scene WAV paths + a concatenated final audio WAV.
 """
@@ -31,7 +31,7 @@ _model_config = None
 
 def _speaker_wav(brand: str) -> str:
     """Resolve speaker reference WAV path for a brand."""
-    speakers_dir = os.environ.get("SPEAKERS_DIR", "/runpod-volume/speakers")
+    speakers_dir = os.environ.get("SPEAKERS_DIR", "/app/brand-assets")
     if brand == "containment_field":
         env_key = "XTTS_SPEAKER_WAV_TCF"
         default = f"{speakers_dir}/tcf_ref.wav"
@@ -42,7 +42,7 @@ def _speaker_wav(brand: str) -> str:
     if not os.path.isfile(path):
         raise FileNotFoundError(
             f"Speaker WAV not found: {path} (brand={brand}, env={env_key}). "
-            "Ensure the network volume is mounted at /runpod-volume."
+            "Ensure speaker WAVs are baked into the Docker image at /app/brand-assets/."
         )
     return path
 
@@ -59,7 +59,7 @@ def load_model() -> None:
     from TTS.tts.configs.xtts_config import XttsConfig
     from TTS.tts.models.xtts import Xtts
 
-    cache_dir = os.environ.get("HF_HOME", "/runpod-volume/huggingface")
+    cache_dir = os.environ.get("HF_HOME", "/app/cache/huggingface")
     model_name = "tts_models/multilingual/multi-dataset/xtts_v2"
 
     # TTS library downloads to its own cache — we override to the volume

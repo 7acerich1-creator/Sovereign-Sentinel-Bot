@@ -43,7 +43,7 @@ def load_model() -> None:
         return
 
     t0 = time.monotonic()
-    cache_dir = os.environ.get("HF_HOME", "/runpod-volume/huggingface")
+    cache_dir = os.environ.get("HF_HOME", "/app/cache/huggingface")
     log.info("flux_loading", model=FLUX_MODEL_ID, dtype="bf16", cache_dir=cache_dir)
 
     from diffusers import FluxPipeline

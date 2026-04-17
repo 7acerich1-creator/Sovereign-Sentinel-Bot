@@ -45,9 +45,12 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 const RUNPOD_API_BASE = "https://rest.runpod.io/v1";
 const DEFAULT_IMAGE = "ghcr.io/7acerich1-creator/sovereign-sentinel-pod:latest";
-const DEFAULT_NETWORK_VOLUME_ID = "gai851lcfw"; // S62-seeded speaker WAVs
+// S76: Volume dependency removed — speaker WAVs baked into Docker image,
+// model weights download to container disk on cold start. Pod can now
+// schedule in ANY datacenter worldwide instead of being pinned to US-KS-2.
+const DEFAULT_NETWORK_VOLUME_ID = "gai851lcfw"; // Legacy — only used if explicitly requested
 const DEFAULT_VOLUME_MOUNT_PATH = "/runpod-volume";
-const DEFAULT_CONTAINER_DISK_GB = 50;
+const DEFAULT_CONTAINER_DISK_GB = 75; // Bumped from 50 — models cache on container disk now
 const DEFAULT_WORKER_PORT = 8000;
 
 // D1 locked: H100 80GB SXM primary, A100 80GB SXM fallback, both PCIe variants
@@ -157,10 +160,6 @@ export async function startPod(options: StartPodOptions = {}): Promise<PodHandle
   const workerToken = requireEnv("POD_WORKER_TOKEN");
 
   const image = options.image ?? process.env.RUNPOD_POD_IMAGE ?? DEFAULT_IMAGE;
-  const networkVolumeId =
-    options.networkVolumeId ??
-    process.env.RUNPOD_NETWORK_VOLUME_ID ??
-    DEFAULT_NETWORK_VOLUME_ID;
   const gpuTypeIds = options.gpuTypeIds ?? parseCsvEnv("RUNPOD_GPU_TYPE_IDS") ?? DEFAULT_GPU_TYPE_IDS;
   const containerDiskInGb =
     options.containerDiskInGb ??
@@ -169,62 +168,109 @@ export async function startPod(options: StartPodOptions = {}): Promise<PodHandle
   const dataCenterId = options.dataCenterId ?? process.env.RUNPOD_DATACENTER_ID;
   const namePrefix = options.namePrefix ?? "sovereign-worker";
 
+  // S76: Default to volume-free. Speaker WAVs are baked into the Docker image,
+  // model weights cache to container disk. No datacenter pin = global scheduling.
+  // Set noVolume=false explicitly to re-attach the legacy volume if needed.
+  const noVolume = options.noVolume ?? true;
+  const networkVolumeId =
+    options.networkVolumeId ??
+    process.env.RUNPOD_NETWORK_VOLUME_ID ??
+    DEFAULT_NETWORK_VOLUME_ID;
+
   const forwardedEnv = collectPodEnv(options.extraEnv ?? {});
-  // POD_WORKER_TOKEN must be set on the pod so /health and /produce can
-  // authenticate. collectPodEnv already covers it if Railway has it, but we
-  // enforce presence here because the worker fails closed without it.
   forwardedEnv["POD_WORKER_TOKEN"] = workerToken;
 
-  const cloudType = options.cloudType ?? "SECURE";
-  const createBody: Record<string, unknown> = {
-    name: `${namePrefix}-${shortTimestamp()}`,
-    imageName: image,
-    cloudType,
-    gpuTypeIds: Array.from(gpuTypeIds),
-    gpuCount: 1,
-    containerDiskInGb,
-    volumeInGb: 0,
-    ports: [`${DEFAULT_WORKER_PORT}/http`],
-    env: forwardedEnv,
-    supportPublicIp: false,
-  };
-  // Network volume is optional — Phase 2 contract test runs without it to
-  // avoid being pinned to a single datacenter (volume region ⇒ scheduler
-  // constraint). Production pipelines always attach the volume to reach the
-  // seeded speaker WAVs + model cache.
-  if (!options.noVolume) {
-    createBody["networkVolumeId"] = networkVolumeId;
-    createBody["volumeMountPath"] = DEFAULT_VOLUME_MOUNT_PATH;
+  // S76: Retry protocol — try SECURE first, fall back to COMMUNITY, wait, retry.
+  // Prevents single-attempt failures from killing the whole pipeline when a
+  // datacenter is temporarily at capacity.
+  const cloudTypeOrder: Array<"SECURE" | "COMMUNITY"> =
+    options.cloudType
+      ? [options.cloudType] // Caller pinned a specific cloud type — respect it
+      : ["SECURE", "COMMUNITY"]; // Default: SECURE first, COMMUNITY fallback
+
+  const MAX_SUPPLY_RETRIES = 3;
+  const SUPPLY_RETRY_DELAY_MS = 120_000; // 2 min between retry rounds
+  let lastErr: unknown;
+
+  for (let round = 0; round < MAX_SUPPLY_RETRIES; round++) {
+    for (const cloudType of cloudTypeOrder) {
+      const createBody: Record<string, unknown> = {
+        name: `${namePrefix}-${shortTimestamp()}`,
+        imageName: image,
+        cloudType,
+        gpuTypeIds: Array.from(gpuTypeIds),
+        gpuCount: 1,
+        containerDiskInGb,
+        volumeInGb: 0,
+        ports: [`${DEFAULT_WORKER_PORT}/http`],
+        env: forwardedEnv,
+        supportPublicIp: false,
+      };
+
+      if (!noVolume) {
+        createBody["networkVolumeId"] = networkVolumeId;
+        createBody["volumeMountPath"] = DEFAULT_VOLUME_MOUNT_PATH;
+      }
+      if (dataCenterId) createBody["dataCenterIds"] = [dataCenterId];
+
+      try {
+        const created = await runpodApi<RunPodPod>("POST", "/pods", apiKey, {
+          body: createBody,
+          signal: options.signal,
+        });
+
+        const podId = created.id ?? created.podId;
+        if (!podId) {
+          throw new RunPodApiError(
+            "RunPod create returned no pod id",
+            500,
+            JSON.stringify(created).slice(0, 400),
+          );
+        }
+
+        const handle: PodHandle = {
+          podId,
+          workerUrl: `https://${podId}-${DEFAULT_WORKER_PORT}.proxy.runpod.net`,
+          workerToken,
+          createdAt: Math.floor(Date.now() / 1000),
+        };
+
+        console.log(
+          `\u{1F680} [RunPod] pod ${podId} created — image=${image} gpu=${gpuTypeIds[0]} cloud=${cloudType} volume=${noVolume ? "<none>" : networkVolumeId}`,
+        );
+        return handle;
+      } catch (err) {
+        lastErr = err;
+        // Supply constraint (500) or rate limit (429) — try next cloud type
+        if (err instanceof RunPodApiError && (err.httpStatus === 500 || err.httpStatus === 429)) {
+          console.log(
+            `⚠️ [RunPod] ${cloudType} failed (HTTP ${err.httpStatus}) — ${
+              cloudTypeOrder.indexOf(cloudType) < cloudTypeOrder.length - 1
+                ? "trying next cloud type..."
+                : `round ${round + 1}/${MAX_SUPPLY_RETRIES} exhausted`
+            }`,
+          );
+          continue;
+        }
+        // Non-retryable error — bail immediately
+        throw err;
+      }
+    }
+    // All cloud types exhausted for this round — wait before next round
+    if (round < MAX_SUPPLY_RETRIES - 1) {
+      console.log(
+        `⏳ [RunPod] All cloud types exhausted. Waiting ${SUPPLY_RETRY_DELAY_MS / 1000}s before retry round ${round + 2}/${MAX_SUPPLY_RETRIES}...`,
+      );
+      await sleep(SUPPLY_RETRY_DELAY_MS);
+    }
   }
-  // RunPod REST expects `dataCenterIds` (plural array), not `dataCenterId`.
-  // This was a pre-existing bug surfaced by the S65 contract-test probe.
-  if (dataCenterId) createBody["dataCenterIds"] = [dataCenterId];
-
-  const created = await runpodApi<RunPodPod>("POST", "/pods", apiKey, {
-    body: createBody,
-    signal: options.signal,
-  });
-
-  const podId = created.id ?? created.podId;
-  if (!podId) {
-    throw new RunPodApiError(
-      "RunPod create returned no pod id",
-      500,
-      JSON.stringify(created).slice(0, 400),
-    );
-  }
-
-  const handle: PodHandle = {
-    podId,
-    workerUrl: `https://${podId}-${DEFAULT_WORKER_PORT}.proxy.runpod.net`,
-    workerToken,
-    createdAt: Math.floor(Date.now() / 1000),
-  };
-
-  console.log(
-    `\u{1F680} [RunPod] pod ${podId} created — image=${image} gpu=${gpuTypeIds[0]} cloud=${cloudType} volume=${options.noVolume ? "<none>" : networkVolumeId}`,
-  );
-  return handle;
+  // All retries exhausted
+  throw lastErr instanceof Error
+    ? lastErr
+    : new RunPodApiError(
+        `RunPod pod creation failed after ${MAX_SUPPLY_RETRIES} retry rounds across ${cloudTypeOrder.join("+")} cloud types`,
+        0,
+      );
 }
 
 /**

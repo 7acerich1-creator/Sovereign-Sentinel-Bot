@@ -20,10 +20,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    HF_HOME=/runpod-volume/huggingface \
-    TORCH_HOME=/runpod-volume/torch \
-    TRANSFORMERS_CACHE=/runpod-volume/huggingface/transformers \
-    XDG_CACHE_HOME=/runpod-volume/cache
+    HF_HOME=/app/cache/huggingface \
+    TORCH_HOME=/app/cache/torch \
+    TRANSFORMERS_CACHE=/app/cache/huggingface/transformers \
+    XDG_CACHE_HOME=/app/cache \
+    SPEAKERS_DIR=/app/brand-assets
 
 # System deps: Python 3.11, ffmpeg (video composition + silencedetect),
 # git (HF model pull), curl (health checks), build-essential (wheel compiles)
@@ -80,14 +81,16 @@ COPY pod/pipelines/ ./pipelines/
 # Phase 5 Tasks 5.8-5.11. Worker reads via BRAND_ASSETS_DIR (default /app/brand-assets).
 COPY brand-assets/ ./brand-assets/
 
-# Speaker reference WAVs live on /runpod-volume (Task 1.5), not baked in.
-# Model weights (FLUX.1 [dev], XTTSv2) download to $HF_HOME on first /health
-# hit, cached on the attached volume across pod restarts.
+# Speaker reference WAVs are baked into brand-assets/ (S76 volume-free migration).
+# Model weights (FLUX.1 [dev], XTTSv2) download to $HF_HOME=/app/cache on first
+# /health hit. Cached on container disk for the pod's lifetime. Cold start adds
+# ~2-5 min for model pull, but eliminates the datacenter-pinned volume dependency
+# and lets RunPod schedule across ALL regions globally.
 
 # Non-root user for the worker process (RunPod pods run as root by default;
 # we still drop privileges for the server itself where possible).
 RUN useradd -m -u 1000 sovereign \
-    && mkdir -p /runpod-volume \
+    && mkdir -p /app/cache \
     && chown -R sovereign:sovereign /app
 
 EXPOSE 8000

@@ -51,8 +51,8 @@ log = structlog.get_logger("sovereign-pod")
 # Config
 # ---------------------------------------------------------------------------
 POD_WORKER_TOKEN = os.environ.get("POD_WORKER_TOKEN", "").strip()
-SPEAKERS_DIR = os.environ.get("SPEAKERS_DIR", "/runpod-volume/speakers")
-MODEL_CACHE_DIR = os.environ.get("HF_HOME", "/runpod-volume/huggingface")
+SPEAKERS_DIR = os.environ.get("SPEAKERS_DIR", "/app/brand-assets")
+MODEL_CACHE_DIR = os.environ.get("HF_HOME", "/app/cache/huggingface")
 JOB_WORK_DIR = os.environ.get("JOB_WORK_DIR", "/tmp/sovereign-jobs")
 
 R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID", "")

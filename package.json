@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "verify-state": "ts-node scripts/verify-state.ts",
     "test:pod-contract": "ts-node scripts/test-pod-contract.ts",
-    "test:full-composition": "ts-node scripts/test-full-composition.ts"
+    "test:full-composition": "ts-node scripts/test-full-composition.ts",
+    "test:production": "ts-node scripts/test-production-run.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

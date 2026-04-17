@@ -10,13 +10,13 @@
 
 | Field | Value |
 |---|---|
-| **Current phase** | **PHASE 7 — 2026-04-17 S79.** Phase 6 COMPLETE. Task 7.1 (manual Ace Richie end-to-end test) is first action. |
-| **Current phase status** | **Phase 0-6: ALL COMPLETE. Phase 7: 0/6 done.** |
+| **Current phase** | **PHASE 7 — 2026-04-17 S80.** Phase 6 COMPLETE. Task 7.1 BLOCKED on RunPod balance ($0). |
+| **Current phase status** | **Phase 0-6: ALL COMPLETE. Phase 7: 0/6 done. BLOCKED.** |
 | **Total phases** | 8 (Phase 0 -> Phase 7) |
-| **Last session** | Session 79 -- 2026-04-17 -- **PHASE 6 CLOSED + PHASE 7 START.** Task 6.5 done: `CONTENT-PIPELINE-CLARITY.md` fully rewritten as cross-platform asset matrix covering YT long-form, YT Shorts, TikTok, IG Reels, Buffer text platforms, brand routing matrix, quality gates, and batch production mode. All 5 Phase 6 tasks ☑. |
-| **Last commit touching this work** | Pending — Task 6.5 is documentation only (no code change), commit with Phase 7 test. |
-| **Blocker** | **RunPod balance ~$1.** Phase 7 test needs at least one full pod run (~$0.50). Architect aware. |
-| **Next session's first action** | **Phase 7 Task 7.1** — Trigger manual Ace Richie end-to-end production run. |
+| **Last session** | Session 80 -- 2026-04-17 -- Volume `gai851lcfw` RE-ENABLED for model caching (TEMPORARY through testing + initial batches). `noVolume` default flipped `true→false` in `runpod-client.ts`. HF_HOME/TORCH_HOME/XDG_CACHE_HOME pointed to `/runpod-volume/cache/` when volume attached. Datacenter auto-pins to US-KS-2. Speaker WAVs still from Docker image (S76 preserved). Funnel audit: landing page + diagnostic both live and serving. Diagnostic is the conversion instrument (quiz → email capture → Protocol 77 CTA). |
+| **Last commit touching this work** | `S80 pending push` — volume re-enable for model caching. Prior: `20ba978` (S79). |
+| **Blocker** | **RunPod balance = $0.** Architect must top up $5-10 at runpod.io before Task 7.1 can proceed. Volume is now configured — first run downloads models TO the volume, every run after loads from cache (~1-2 min vs ~8 min). |
+| **Next session's first action** | **After top-up:** Run `run-full-test.bat` from Sentinel root. Volume will cache models on first run. Subsequent runs start fast. |
 
 **Rule:** if you are a future session and this STATUS block has not been updated in your current session before you close, the session failed regardless of what was built.
 

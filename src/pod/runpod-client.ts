@@ -169,10 +169,24 @@ export async function startPod(options: StartPodOptions = {}): Promise<PodHandle
   const dataCenterId = options.dataCenterId ?? process.env.RUNPOD_DATACENTER_ID;
   const namePrefix = options.namePrefix ?? "sovereign-worker";
 
-  // S76: Default to volume-free. Speaker WAVs are baked into the Docker image,
-  // model weights cache to container disk. No datacenter pin = global scheduling.
-  // Set noVolume=false explicitly to re-attach the legacy volume if needed.
-  const noVolume = options.noVolume ?? true;
+  // S80: Volume RE-ENABLED for model caching (FLUX ~12GB + XTTS ~2GB).
+  // Without the volume, every pod create redownloads all models from HuggingFace
+  // at full GPU billing rates (~$0.25-0.40 per cold start). With the volume,
+  // models persist across pod creates and cold start drops from ~8min to ~1-2min.
+  //
+  // Trade-off: volume pins scheduling to its datacenter (US-KS-2). Accepted
+  // because (a) the volume is already paid for, (b) COMMUNITY cloud has good
+  // availability in US-KS-2, (c) testing burns multiple pod creates and the
+  // savings are significant.
+  //
+  // Speaker WAVs are STILL baked into the Docker image (S76 change preserved).
+  // The volume is used ONLY as a model weight cache via HF_HOME.
+  //
+  // This is TEMPORARY through testing and initial production batches. Evaluate
+  // monthly: if batches are stable and infrequent (1-2x/week), volume-free
+  // may be cheaper ($0.25/batch download vs $3.50/mo volume). If batches are
+  // frequent or testing continues, volume saves money.
+  const noVolume = options.noVolume ?? false;
   const networkVolumeId =
     options.networkVolumeId ??
     process.env.RUNPOD_NETWORK_VOLUME_ID ??
@@ -181,14 +195,20 @@ export async function startPod(options: StartPodOptions = {}): Promise<PodHandle
   const forwardedEnv = collectPodEnv(options.extraEnv ?? {});
   forwardedEnv["POD_WORKER_TOKEN"] = workerToken;
 
-  // S76: Volume-free pods have speaker WAVs baked into the Docker image at
-  // /app/brand-assets/. Override ALL speaker path env vars — Railway still has
-  // the old /runpod-volume/speakers paths from the volume-based setup, and
-  // xtts.py checks XTTS_SPEAKER_WAV_ACE/TCF before falling back to SPEAKERS_DIR.
-  if (noVolume) {
-    forwardedEnv["SPEAKERS_DIR"] = "/app/brand-assets";
-    forwardedEnv["XTTS_SPEAKER_WAV_ACE"] = "/app/brand-assets/ace_ref.wav";
-    forwardedEnv["XTTS_SPEAKER_WAV_TCF"] = "/app/brand-assets/tcf_ref.wav";
+  // Speaker WAVs are ALWAYS from the Docker image (S76 bake-in preserved).
+  // Override speaker path env vars regardless of volume status — Railway still
+  // has the old /runpod-volume/speakers paths from the pre-S76 setup.
+  forwardedEnv["SPEAKERS_DIR"] = "/app/brand-assets";
+  forwardedEnv["XTTS_SPEAKER_WAV_ACE"] = "/app/brand-assets/ace_ref.wav";
+  forwardedEnv["XTTS_SPEAKER_WAV_TCF"] = "/app/brand-assets/tcf_ref.wav";
+
+  // S80: When volume is attached, point model caches to the persistent volume
+  // so FLUX + XTTS weights survive across pod creates. When volume-free,
+  // models cache to container disk (lost on pod termination).
+  if (!noVolume) {
+    forwardedEnv["HF_HOME"] = "/runpod-volume/cache/huggingface";
+    forwardedEnv["TORCH_HOME"] = "/runpod-volume/cache/torch";
+    forwardedEnv["XDG_CACHE_HOME"] = "/runpod-volume/cache";
   }
 
   // S76: Retry protocol — try SECURE first, fall back to COMMUNITY, wait, retry.
@@ -221,6 +241,11 @@ export async function startPod(options: StartPodOptions = {}): Promise<PodHandle
       if (!noVolume) {
         createBody["networkVolumeId"] = networkVolumeId;
         createBody["volumeMountPath"] = DEFAULT_VOLUME_MOUNT_PATH;
+        // S80: Volume is in US-KS-2 — pin datacenter so RunPod doesn't try to
+        // schedule in a region where the volume doesn't exist.
+        if (!dataCenterId) {
+          createBody["dataCenterIds"] = ["US-KS-2"];
+        }
       }
       if (dataCenterId) createBody["dataCenterIds"] = [dataCenterId];
 

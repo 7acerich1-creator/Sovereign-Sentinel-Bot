@@ -1,0 +1,506 @@
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PROJECT_POD_MIGRATION Phase 7 Task 7.5 — Batch Producer
+//
+// Produces up to 6 videos (3 Ace Richie + 3 TCF) in a single GPU session.
+//
+// Architecture:
+//   1. PRE-POD: Generate all scripts on Railway (LLM calls only, 10s pacing).
+//      Validate every script before waking the pod.
+//   2. WARM-POD: One withPodSession call, idleWindowMs = 5 min between jobs.
+//      Feed validated scripts sequentially — job N finishes, job N+1 starts.
+//   3. PER-VIDEO DISTRIBUTION: After each video returns from pod, run
+//      executeFullPipeline's Steps 3-8 inline (YouTube upload, shorts curation,
+//      Buffer scheduling). Distribution interleaves with next video's pod run
+//      naturally — distribution is I/O bound, pod is GPU bound.
+//
+// Rate limits (verified S85):
+//   - Anthropic: 50 RPM, 30K input tokens/min. 6 videos × 4 calls = 24 pre-pod
+//     calls at 10s spacing = 4 min. Safe.
+//   - Buffer: 100 req/15min. Shared limiter enforces 10s interval. Safe.
+//   - YouTube Data API: 100 units/upload. 6 uploads = 600 units / 10K daily. Safe.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+import type { LLMProvider } from "../types";
+import type { Brand } from "../pod/types";
+import {
+  generateScript,
+  type FacelessScript,
+  type FacelessResult,
+} from "./faceless-factory";
+import { assertScriptUnique, ScriptTooSimilarError } from "../tools/script-uniqueness-guard";
+import {
+  getAllowedNiches,
+  normalizeNiche,
+  isAllowedNiche,
+} from "../data/shared-context";
+import {
+  getNicheCooldownSnapshot,
+  recordNicheRun,
+} from "../tools/niche-cooldown";
+import { withPodSession } from "../pod/session";
+import { produceVideo } from "../pod/runpod-client";
+import type { JobSpec, Scene as PodScene } from "../pod/types";
+import { executeFullPipeline } from "./vidrush-orchestrator";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Config
+// ─────────────────────────────────────────────────────────────────────────────
+const BATCH_SIZE_PER_BRAND = 3;
+const SCRIPT_PACING_MS = 10_000; // 10s between LLM calls (Anthropic RPM safety)
+const MAX_UNIQUENESS_RETRIES = 2;
+const INTER_JOB_DELAY_MS = 5_000; // 5s between pod jobs (let GPU VRAM settle)
+const BATCH_IDLE_WINDOW_MS = 5 * 60 * 1000; // 5 min pod warm between jobs
+
+export interface BatchConfig {
+  /** Videos per brand. Default 3 (= 6 total). */
+  perBrand?: number;
+  /** Brands to produce. Default both. */
+  brands?: Brand[];
+  /** Dry run — generate scripts but skip pod + distribution. */
+  dryRun?: boolean;
+  /** Progress callback for Telegram status updates. */
+  onProgress?: (msg: string) => Promise<void>;
+}
+
+export interface BatchResult {
+  totalScriptsGenerated: number;
+  totalScriptsValid: number;
+  totalVideosProduced: number;
+  totalVideosDistributed: number;
+  errors: string[];
+  /** Per-video timing for diagnostics. */
+  timings: { brand: Brand; niche: string; title: string; podMs: number; distMs: number }[];
+}
+
+interface ValidatedScript {
+  brand: Brand;
+  niche: string;
+  sourceIntelligence: string;
+  script: FacelessScript;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 1: Niche selection — pick N unique niches per brand from cooldown ledger
+// ─────────────────────────────────────────────────────────────────────────────
+async function selectNichesForBrand(brand: Brand, count: number): Promise<string[]> {
+  const snapshot = await getNicheCooldownSnapshot(brand);
+  const permitted = snapshot.permitted;
+
+  if (permitted.length >= count) {
+    // Shuffle permitted and take `count`
+    const shuffled = [...permitted].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, count);
+  }
+
+  // Not enough fresh/relax niches — fall back to full allowlist with shuffle
+  // (the cooldown guard will still soft-warn, but won't hard-block)
+  const allNiches = [...getAllowedNiches(brand)];
+  const shuffled = allNiches.sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 2: Script pre-generation with pacing + uniqueness validation
+// ─────────────────────────────────────────────────────────────────────────────
+async function preGenerateScripts(
+  llm: LLMProvider,
+  brands: Brand[],
+  perBrand: number,
+  onProgress?: (msg: string) => Promise<void>,
+): Promise<{ valid: ValidatedScript[]; errors: string[] }> {
+  const valid: ValidatedScript[] = [];
+  const errors: string[] = [];
+
+  for (const brand of brands) {
+    const niches = await selectNichesForBrand(brand, perBrand);
+    const brandLabel = brand === "ace_richie" ? "Ace Richie" : "TCF";
+
+    await onProgress?.(`📝 ${brandLabel}: generating ${niches.length} scripts [${niches.join(", ")}]`);
+
+    for (let i = 0; i < niches.length; i++) {
+      const niche = niches[i];
+      const sourceIntelligence = buildSourceIntelligence(brand, niche);
+
+      try {
+        let script: FacelessScript | null = null;
+
+        for (let attempt = 0; attempt <= MAX_UNIQUENESS_RETRIES; attempt++) {
+          // Pacing: 10s between every LLM call
+          if (valid.length > 0 || attempt > 0) {
+            await new Promise(r => setTimeout(r, SCRIPT_PACING_MS));
+          }
+
+          const candidate = await generateScript(llm, sourceIntelligence, niche, brand, "long", "horizontal");
+
+          // Uniqueness check
+          const corpus = [
+            candidate.title,
+            ...candidate.segments.map((s: any) => String(s.voiceover || s.text || "")),
+          ].join("\n\n");
+
+          try {
+            await assertScriptUnique(brand, corpus);
+            script = candidate;
+            break;
+          } catch (err: any) {
+            if (err instanceof ScriptTooSimilarError) {
+              console.warn(
+                `⚠️ [BatchProducer] ${brandLabel}/${niche} attempt ${attempt + 1}: ` +
+                `cosine=${err.score.toFixed(4)} → retrying`,
+              );
+              if (attempt === MAX_UNIQUENESS_RETRIES) {
+                errors.push(`${brandLabel}/${niche}: ${MAX_UNIQUENESS_RETRIES + 1} consecutive duplicates — skipped`);
+              }
+              continue;
+            }
+            throw err;
+          }
+        }
+
+        if (script) {
+          // Validate script structure
+          if (!script.segments || script.segments.length < 8) {
+            errors.push(`${brandLabel}/${niche}: script has ${script.segments?.length ?? 0} segments (need ≥8) — skipped`);
+            continue;
+          }
+          if (script.segments.length > 20) {
+            errors.push(`${brandLabel}/${niche}: script has ${script.segments.length} segments (max 20) — skipped`);
+            continue;
+          }
+
+          valid.push({ brand, niche, sourceIntelligence, script });
+          await onProgress?.(
+            `✅ ${brandLabel}/${niche}: "${script.title.slice(0, 60)}" ` +
+            `(${script.segments.length} segments) [${valid.length}/${brands.length * perBrand}]`,
+          );
+        }
+      } catch (err: any) {
+        errors.push(`${brandLabel}/${niche}: ${err.message?.slice(0, 200)}`);
+        await onProgress?.(`❌ ${brandLabel}/${niche}: script gen failed — ${err.message?.slice(0, 100)}`);
+      }
+    }
+  }
+
+  return { valid, errors };
+}
+
+/**
+ * Build synthetic source intelligence for Alfred-less batch mode.
+ * In batch mode we don't run Alfred — the niche itself drives the LLM's
+ * blueprint extraction. This generates a rich thesis seed.
+ */
+function buildSourceIntelligence(brand: Brand, niche: string): string {
+  const brandName = brand === "ace_richie" ? "Ace Richie / Sovereign Synthesis" : "The Containment Field";
+  return (
+    `Generate a powerful ${niche} thesis for the ${brandName} brand. ` +
+    `The video must explore a specific, non-obvious angle within ${niche} — ` +
+    `not a general overview. Find the hidden mechanism, the counterintuitive truth, ` +
+    `the thing the viewer has felt but never had words for. ` +
+    `Make it concrete and actionable, not abstract philosophy.`
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 3: Pod production — one warm session, sequential jobs
+// ─────────────────────────────────────────────────────────────────────────────
+async function produceBatchOnPod(
+  llm: LLMProvider,
+  scripts: ValidatedScript[],
+  onProgress?: (msg: string) => Promise<void>,
+): Promise<{ produced: ProducedVideo[]; errors: string[] }> {
+  const produced: ProducedVideo[] = [];
+  const errors: string[] = [];
+
+  await onProgress?.(`🔥 Waking pod for ${scripts.length}-video batch...`);
+
+  await withPodSession(async (handle) => {
+    for (let i = 0; i < scripts.length; i++) {
+      const { brand, niche, script } = scripts[i];
+      const label = `${brand === "ace_richie" ? "ACE" : "TCF"}/${niche}`;
+
+      try {
+        await onProgress?.(`🎬 [${i + 1}/${scripts.length}] Producing ${label}: "${script.title.slice(0, 50)}"`);
+
+        const t0 = Date.now();
+
+        // Build pod job spec
+        const scenes: PodScene[] = script.segments.map((seg, idx) => ({
+          index: idx,
+          image_prompt: seg.visual_direction,
+          tts_text: seg.voiceover,
+          duration_hint_s: seg.duration_hint || undefined,
+        }));
+
+        const hookText = script.hook?.slice(0, 60) || script.segments[0]?.voiceover?.split(" ").slice(0, 9).join(" ");
+
+        const jobSpec: JobSpec = {
+          brand,
+          niche,
+          seed: script.title,
+          script: script.segments.map(s => s.voiceover).join("\n\n"),
+          scenes,
+          hook_text: hookText,
+        };
+
+        const artifacts = await produceVideo(handle, jobSpec);
+        const podMs = Date.now() - t0;
+
+        produced.push({
+          brand,
+          niche,
+          script,
+          videoUrl: artifacts.videoUrl,
+          thumbnailUrl: artifacts.thumbnailUrl,
+          durationS: artifacts.durationS ?? 0,
+          podMs,
+        });
+
+        await onProgress?.(
+          `✅ [${i + 1}/${scripts.length}] ${label} produced in ${Math.round(podMs / 1000)}s ` +
+          `(${Math.round((artifacts.durationS ?? 0))}s video)`,
+        );
+
+        // Record niche cooldown
+        try {
+          await recordNicheRun({ brand, niche, thesis: script.title });
+        } catch { /* non-fatal */ }
+
+        // Inter-job delay (let VRAM settle)
+        if (i < scripts.length - 1) {
+          await new Promise(r => setTimeout(r, INTER_JOB_DELAY_MS));
+        }
+      } catch (err: any) {
+        errors.push(`${label}: pod production failed — ${err.message?.slice(0, 200)}`);
+        await onProgress?.(`❌ [${i + 1}/${scripts.length}] ${label} FAILED: ${err.message?.slice(0, 100)}`);
+        // Continue to next video — don't kill the batch for one failure
+      }
+    }
+  }, {
+    idleWindowMs: BATCH_IDLE_WINDOW_MS,
+  });
+
+  return { produced, errors };
+}
+
+interface ProducedVideo {
+  brand: Brand;
+  niche: string;
+  script: FacelessScript;
+  videoUrl: string | null;
+  thumbnailUrl: string | null;
+  durationS: number;
+  podMs: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 4: Distribution — per-video, interleaved
+// Downloads R2 assets to local, builds FacelessResult, feeds into orchestrator
+// via preProduced path (skips Steps 1+2, runs Steps 3-8).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const BATCH_TEMP_DIR = join(process.cwd(), "tmp", "sovereign_batch");
+
+async function downloadR2Asset(url: string, localPath: string): Promise<boolean> {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return false;
+    const buf = Buffer.from(await resp.arrayBuffer());
+    writeFileSync(localPath, buf);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function distributeVideo(
+  llm: LLMProvider,
+  video: ProducedVideo,
+  onProgress?: (msg: string) => Promise<void>,
+): Promise<{ success: boolean; error?: string; distMs: number }> {
+  const label = `${video.brand === "ace_richie" ? "ACE" : "TCF"}/${video.niche}`;
+  const t0 = Date.now();
+
+  try {
+    if (!video.videoUrl) {
+      return { success: false, error: `${label}: no video URL from pod`, distMs: 0 };
+    }
+
+    await onProgress?.(`📡 Distributing ${label}: "${video.script.title.slice(0, 50)}"`);
+
+    // Download R2 video + thumbnail to local temp
+    if (!existsSync(BATCH_TEMP_DIR)) mkdirSync(BATCH_TEMP_DIR, { recursive: true });
+    const jobId = `batch_${video.brand}_${Date.now()}`;
+    const localVideoPath = join(BATCH_TEMP_DIR, `${jobId}_final.mp4`);
+    const localThumbPath = join(BATCH_TEMP_DIR, `${jobId}_longform_thumb.jpg`);
+
+    const videoOk = await downloadR2Asset(video.videoUrl, localVideoPath);
+    if (!videoOk) {
+      return { success: false, error: `${label}: R2 video download failed`, distMs: Date.now() - t0 };
+    }
+
+    let thumbPath: string | null = null;
+    if (video.thumbnailUrl) {
+      const thumbOk = await downloadR2Asset(video.thumbnailUrl, localThumbPath);
+      if (thumbOk) thumbPath = localThumbPath;
+    }
+
+    // Build a FacelessResult for the preProduced orchestrator path
+    const preProduced: FacelessResult = {
+      videoUrl: video.videoUrl,
+      thumbnailUrl: video.thumbnailUrl,
+      thumbnailPath: thumbPath,
+      localPath: localVideoPath,
+      title: video.script.title,
+      niche: video.niche,
+      brand: video.brand,
+      duration: video.durationS,
+      segmentCount: video.script.segments.length,
+      script: video.script,
+      segmentDurations: video.script.segments.map(s => s.duration_hint || 30),
+    };
+
+    // Feed into orchestrator Steps 3-8 via preProduced bypass
+    const result = await executeFullPipeline(
+      `batch_${jobId}`, // synthetic video ID
+      llm,
+      video.brand,
+      async (step, detail) => {
+        // Only forward major steps to Telegram
+        if (step.includes("3/8") || step.includes("4/8") || step.includes("8/8")) {
+          await onProgress?.(`  ${label} ${step}: ${detail.slice(0, 100)}`);
+        }
+      },
+      {
+        niche: video.niche,
+        preProduced,
+      },
+    );
+
+    const distMs = Date.now() - t0;
+    await onProgress?.(
+      `✅ ${label} distributed in ${Math.round(distMs / 1000)}s ` +
+      `(${result.clipCount} shorts, ${result.bufferScheduled} Buffer posts)`,
+    );
+
+    // Cleanup local temp files
+    try {
+      const { unlinkSync } = await import("fs");
+      if (existsSync(localVideoPath)) unlinkSync(localVideoPath);
+      if (thumbPath && existsSync(thumbPath)) unlinkSync(thumbPath);
+    } catch { /* non-critical */ }
+
+    return { success: true, distMs };
+  } catch (err: any) {
+    const distMs = Date.now() - t0;
+    return { success: false, error: `${label}: ${err.message?.slice(0, 200)}`, distMs };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main entry point
+// ─────────────────────────────────────────────────────────────────────────────
+export async function produceBatch(
+  llm: LLMProvider,
+  config: BatchConfig = {},
+): Promise<BatchResult> {
+  const perBrand = config.perBrand ?? BATCH_SIZE_PER_BRAND;
+  const brands = config.brands ?? ["ace_richie", "containment_field"];
+  const dryRun = config.dryRun ?? false;
+  const onProgress = config.onProgress;
+  const batchStart = Date.now();
+
+  const result: BatchResult = {
+    totalScriptsGenerated: 0,
+    totalScriptsValid: 0,
+    totalVideosProduced: 0,
+    totalVideosDistributed: 0,
+    errors: [],
+    timings: [],
+  };
+
+  await onProgress?.(
+    `🔥 BATCH PRODUCER ACTIVATED\n` +
+    `${brands.length} brands × ${perBrand} videos = ${brands.length * perBrand} total\n` +
+    `${dryRun ? "🏜️ DRY RUN — scripts only, no pod" : "🎯 LIVE — full production + distribution"}\n` +
+    `────────────────────────────`,
+  );
+
+  // ── Phase 1: Pre-generate all scripts ──
+  await onProgress?.(`\n📝 PHASE 1: Script pre-generation (${brands.length * perBrand} scripts, ~${Math.round(brands.length * perBrand * 4 * 10 / 60)} min)...`);
+
+  const { valid, errors: scriptErrors } = await preGenerateScripts(llm, brands, perBrand, onProgress);
+  result.totalScriptsGenerated = brands.length * perBrand;
+  result.totalScriptsValid = valid.length;
+  result.errors.push(...scriptErrors);
+
+  if (valid.length === 0) {
+    result.errors.push("No valid scripts generated — batch aborted before pod wake");
+    await onProgress?.(`❌ No valid scripts. Batch aborted.\n${scriptErrors.join("\n")}`);
+    return result;
+  }
+
+  await onProgress?.(
+    `\n✅ SCRIPTS READY: ${valid.length}/${brands.length * perBrand} passed validation\n` +
+    valid.map((s, i) => `  ${i + 1}. [${s.brand === "ace_richie" ? "ACE" : "TCF"}] ${s.niche}: "${s.script.title.slice(0, 60)}"`).join("\n"),
+  );
+
+  if (dryRun) {
+    await onProgress?.(`\n🏜️ DRY RUN complete. ${valid.length} scripts ready. Pod not woken.`);
+    return result;
+  }
+
+  // ── Phase 2: Produce on pod ──
+  await onProgress?.(`\n🔥 PHASE 2: Pod production (${valid.length} videos, one warm GPU session)...`);
+
+  const { produced, errors: podErrors } = await produceBatchOnPod(llm, valid, onProgress);
+  result.totalVideosProduced = produced.length;
+  result.errors.push(...podErrors);
+
+  if (produced.length === 0) {
+    result.errors.push("No videos produced — batch aborted before distribution");
+    await onProgress?.(`❌ No videos produced. Pod errors:\n${podErrors.join("\n")}`);
+    return result;
+  }
+
+  // ── Phase 3: Distribute each video ──
+  await onProgress?.(`\n📡 PHASE 3: Distribution (${produced.length} videos → YouTube + shorts + Buffer)...`);
+
+  for (const video of produced) {
+    const { success, error, distMs } = await distributeVideo(llm, video, onProgress);
+    if (success) {
+      result.totalVideosDistributed++;
+    } else if (error) {
+      result.errors.push(error);
+    }
+    result.timings.push({
+      brand: video.brand,
+      niche: video.niche,
+      title: video.script.title,
+      podMs: video.podMs,
+      distMs,
+    });
+  }
+
+  // ── Summary ──
+  const elapsed = Math.round((Date.now() - batchStart) / 1000);
+  const totalPodMin = Math.round(result.timings.reduce((s, t) => s + t.podMs, 0) / 60_000);
+  const avgPodSec = result.timings.length > 0
+    ? Math.round(result.timings.reduce((s, t) => s + t.podMs, 0) / result.timings.length / 1000)
+    : 0;
+
+  await onProgress?.(
+    `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `✅ BATCH COMPLETE in ${Math.round(elapsed / 60)}m ${elapsed % 60}s\n` +
+    `Scripts: ${result.totalScriptsValid}/${result.totalScriptsGenerated} valid\n` +
+    `Videos: ${result.totalVideosProduced} produced, ${result.totalVideosDistributed} distributed\n` +
+    `GPU time: ~${totalPodMin} min total, ~${avgPodSec}s avg/video\n` +
+    (result.errors.length > 0
+      ? `Errors (${result.errors.length}):\n${result.errors.map(e => `  • ${e}`).join("\n")}\n`
+      : "") +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+  );
+
+  return result;
+}

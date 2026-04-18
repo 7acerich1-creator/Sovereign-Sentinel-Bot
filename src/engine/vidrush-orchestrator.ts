@@ -185,7 +185,7 @@ interface PlatformCopy {
   facebook: string;
 }
 
-interface OrchestratorResult {
+export interface OrchestratorResult {
   youtubeVideoId: string | null;
   youtubeUrl: string | null;
   longFormLocalPath: string;
@@ -1392,6 +1392,11 @@ export interface PipelineOptions {
   // from the rawIdea text via detectNiche(); pass `niche` to override.
   rawIdea?: string;
   niche?: string; // Optional override; otherwise inferred from rawIdea via detectNiche()
+  // Phase 7 Task 7.5a — BATCH PRODUCER PRE-PRODUCED VIDEO.
+  // When set, Steps 1+2 are SKIPPED entirely. The orchestrator uses this FacelessResult
+  // directly and proceeds to Steps 3-8 (YouTube upload, shorts, Buffer distribution).
+  // Used by batch-producer.ts to feed pod-produced videos into the distribution pipeline.
+  preProduced?: import("./faceless-factory").FacelessResult;
 }
 
 export async function executeFullPipeline(
@@ -1403,6 +1408,7 @@ export async function executeFullPipeline(
 ): Promise<OrchestratorResult> {
   const dryRun = options?.dryRun ?? false;
   const rawIdea = options?.rawIdea?.trim() || null;
+  const preProduced = options?.preProduced ?? null;
   const isRawIdeaMode = rawIdea !== null && rawIdea.length > 0;
   const startTime = Date.now();
   const jobId = `vr_${brand}_${Date.now()}`;
@@ -1418,12 +1424,27 @@ export async function executeFullPipeline(
     }
   };
 
-  // ── STEP 1: WHISPER EXTRACTION (or RAW IDEA BYPASS) ──
-  // SESSION 47b — when rawIdea is set, we skip yt-dlp + Whisper entirely and synthesize
-  // a WhisperResult shell where transcript = the raw thesis text. The Faceless Factory
-  // already takes its sourceIntelligence as a free-form string, so this drops in cleanly.
+  // ── Phase 7 Task 7.5a: PRE-PRODUCED VIDEO BYPASS ──
+  // When batch-producer passes a pre-produced FacelessResult, skip Steps 1+2 entirely.
+  // The variables `whisperResult` and `facelessResult` are set from the pre-produced data,
+  // then control falls through to Step 2.5 (description gen) → Steps 3-8 (distribution).
+  const isPreProducedMode = preProduced !== null;
+
+  // ── STEP 1: WHISPER EXTRACTION (or RAW IDEA / PRE-PRODUCED BYPASS) ──
   let whisperResult: WhisperResult;
-  if (isRawIdeaMode) {
+  if (isPreProducedMode) {
+    // Phase 7 Task 7.5a: batch mode — video already produced, just need a whisper shell
+    await progress("STEP 1/8", `⚡ BATCH MODE — pre-produced video, skipping Whisper`);
+    whisperResult = {
+      videoId: youtubeUrl,
+      transcript: preProduced!.script?.segments.map((s: { voiceover: string }) => s.voiceover).join("\n\n") || preProduced!.title,
+      segments: [],
+      sourcePath: "",
+      audioPath: "",
+      whisperPath: "",
+      niche: options?.niche || preProduced!.niche,
+    };
+  } else if (isRawIdeaMode) {
     await progress("STEP 1/8", `🌱 RAW IDEA mode — bypassing yt-dlp + Whisper. Seed: "${rawIdea!.slice(0, 100)}${rawIdea!.length > 100 ? "…" : ""}"`);
     const inferredNiche = options?.niche || detectNiche(rawIdea!);
     whisperResult = {
@@ -1463,10 +1484,14 @@ export async function executeFullPipeline(
   }
   } // ← end of isRawIdeaMode else (Session 47b — Native Seed Generator)
 
-  // ── STEP 2: FACELESS FACTORY — LONG MODE (ANITA'S VOICE) ──
-  await progress("STEP 2/8", dryRun ? "[DRY RUN] Simulating Faceless Factory..." : "Generating 10-15 minute faceless video in Anita's Protocol 77 voice...");
+  // ── STEP 2: FACELESS FACTORY — LONG MODE (ANITA'S VOICE) or PRE-PRODUCED ──
   let facelessResult: Awaited<ReturnType<typeof produceFacelessVideo>>;
-  if (dryRun) {
+  if (isPreProducedMode) {
+    // Phase 7 Task 7.5a: batch mode — video already produced on pod
+    facelessResult = preProduced!;
+    await progress("STEP 2/8", `⚡ BATCH MODE — using pre-produced: "${facelessResult.title.slice(0, 60)}" (${facelessResult.duration.toFixed(0)}s, ${facelessResult.segmentCount} scenes)`);
+  } else if (dryRun) {
+    await progress("STEP 2/8", "[DRY RUN] Simulating Faceless Factory...");
     // Create a small dummy video file so Steps 3-4 can operate on a real file path
     const dummyVideoPath = `${ORCHESTRATOR_DIR}/${jobId}/dryrun_longform.mp4`;
     try {

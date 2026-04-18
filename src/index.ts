@@ -1247,6 +1247,71 @@ async function main() {
         return true;
       }
 
+      // ── Phase 7 Task 7.5a: BATCH PRODUCER ──
+      // /batch           → 6 videos (3 Ace + 3 TCF), full production + distribution
+      // /batch ace       → 3 Ace Richie videos only
+      // /batch tcf       → 3 TCF videos only
+      // /batch dry       → Script generation only, no pod
+      // /batch 2         → 2 videos per brand (4 total)
+      // /batch ace 2 dry → 2 Ace videos, dry run
+      case "/batch": {
+        try {
+          const { produceBatch } = await import("./engine/batch-producer");
+
+          // Parse args: brand filter, count, dry flag
+          const argLower = arg.toLowerCase();
+          const isDry = argLower.includes("dry");
+          const aceOnly = /\bace\b/.test(argLower);
+          const tcfOnly = /\btcf\b/.test(argLower);
+          const countMatch = argLower.match(/\b(\d+)\b/);
+          const perBrand = countMatch ? Math.min(parseInt(countMatch[1], 10), 5) : 3;
+
+          let brands: Array<"ace_richie" | "containment_field">;
+          if (aceOnly) brands = ["ace_richie"];
+          else if (tcfOnly) brands = ["containment_field"];
+          else brands = ["ace_richie", "containment_field"];
+
+          const total = brands.length * perBrand;
+          await telegram.sendMessage(message.chatId,
+            `🔥 BATCH PRODUCER — ${total} videos\n` +
+            `Brands: ${brands.map(b => b === "ace_richie" ? "Ace Richie" : "TCF").join(" + ")}\n` +
+            `Per brand: ${perBrand}\n` +
+            `Mode: ${isDry ? "DRY RUN (scripts only)" : "LIVE (full production)"}\n` +
+            `\nStarting...`
+          );
+
+          // Enqueue via pipeline queue — serializes with other pipeline runs
+          const enqueue = (globalThis as any).__enqueuePipeline;
+          if (enqueue) {
+            enqueue(`batch-${brands.join("+")}-${perBrand}`, async () => {
+              await produceBatch(pipelineLLM, {
+                perBrand,
+                brands,
+                dryRun: isDry,
+                onProgress: async (msg) => {
+                  try { await telegram.sendMessage(message.chatId, msg); } catch { /* non-critical */ }
+                },
+              });
+            });
+          } else {
+            // No pipeline queue available — run directly
+            await produceBatch(pipelineLLM, {
+              perBrand,
+              brands,
+              dryRun: isDry,
+              onProgress: async (msg) => {
+                try { await telegram.sendMessage(message.chatId, msg); } catch { /* non-critical */ }
+              },
+            });
+          }
+        } catch (err: any) {
+          await telegram.sendMessage(message.chatId,
+            `❌ /batch failed: ${err.message?.slice(0, 400)}`
+          );
+        }
+        return true;
+      }
+
       case "/mesh":
         if (!arg) {
           await telegram.sendMessage(message.chatId, "Usage: /mesh <goal>");

@@ -183,7 +183,7 @@ export interface FacelessScript {
   thumbnail_visual?: string;    // Cinematographer direction for the thumbnail base image
 }
 
-interface FacelessResult {
+export interface FacelessResult {
   videoUrl: string | null;
   thumbnailUrl?: string | null;
   thumbnailPath?: string | null;  // Deployment 3: local path to long-form keyframe thumbnail for YouTube thumbnails.set

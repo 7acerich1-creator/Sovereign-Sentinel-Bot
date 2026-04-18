@@ -132,7 +132,7 @@ export async function pollYouTubeComments(
     let threads: any[] = [];
     try {
       const resp = await fetch(
-        `https://www.googleapis.com/youtube/v3/commentThreads?part=snippet&allThreadsRelatedToChannel=${cfg.channelId}&order=time&maxResults=20&textFormat=plainText`,
+        `https://www.googleapis.com/youtube/v3/commentThreads?part=snippet&allThreadsRelatedToChannelId=${cfg.channelId}&order=time&maxResults=20&textFormat=plainText`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!resp.ok) {

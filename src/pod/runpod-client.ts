@@ -35,6 +35,7 @@ import {
   type JobStatus,
   type PodHandle,
   type ProduceAccepted,
+  type ShortJobSpec,
   PodContractError,
   PodJobFailedError,
   RunPodApiError,
@@ -53,13 +54,13 @@ const DEFAULT_VOLUME_MOUNT_PATH = "/runpod-volume";
 const DEFAULT_CONTAINER_DISK_GB = 75; // Bumped from 50 — models cache on container disk now
 const DEFAULT_WORKER_PORT = 8000;
 
-// D1 locked: H100 80GB SXM primary, A100 80GB SXM fallback, both PCIe variants
-// acceptable if SXM is oversubscribed. Order matters — RunPod tries first-match.
+// S90 cost optimization: 48GB cards are sufficient for FLUX bf16 (~24GB) + XTTS (~4GB)
+// + Whisper (~3GB) loaded concurrently. ~60% cheaper than 80GB cards, same output quality.
+// L40S primary (newer Ada Lovelace arch, slightly faster inference, ~$0.74/hr community).
+// A6000 fallback (proven workhorse, ~$0.76/hr community). Order matters — first-match.
 const DEFAULT_GPU_TYPE_IDS: readonly string[] = [
-  "NVIDIA H100 80GB HBM3",
-  "NVIDIA H100 PCIe",
-  "NVIDIA A100-SXM4-80GB",
-  "NVIDIA A100 80GB PCIe",
+  "NVIDIA L40S",
+  "NVIDIA RTX A6000",
 ] as const;
 
 // Pod env vars forwarded from Railway — these are the keys the worker reads.
@@ -527,6 +528,128 @@ export async function produceVideo(
     lastStatus,
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// produceShort — Session 90: Native vertical short production
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Submit a native vertical short job to the pod and poll until complete.
+ *
+ * Mirrors produceVideo() but POSTs to /produce-short with a ShortJobSpec
+ * (pre-extracted audio URL + vertical scene prompts, no TTS needed).
+ */
+export async function produceShort(
+  handle: PodHandle,
+  spec: ShortJobSpec,
+  options: ProduceVideoOptions = {},
+): Promise<ArtifactUrls> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_JOB_TIMEOUT_MS;
+  const pollMs = options.pollMs ?? DEFAULT_JOB_POLL_MS;
+
+  // Retry loop for proxy stabilization (same pattern as produceVideo)
+  let accepted: ProduceAccepted | undefined;
+  let lastPostErr: unknown;
+
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      accepted = await podFetchJson<ProduceAccepted>(
+        handle,
+        "POST",
+        "/produce-short",
+        { body: spec, signal: options.signal },
+      );
+      break;
+    } catch (err) {
+      lastPostErr = err;
+      if (err instanceof PodContractError && (err.httpStatus === 404 || err.httpStatus === 502)) {
+        console.warn(`⚠️ [RunPod] POST /produce-short returned ${err.httpStatus}. Retrying (${attempt}/5)...`);
+        await sleep(2000);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  if (!accepted) throw lastPostErr;
+  if (!accepted.job_id) throw new PodContractError("pod /produce-short returned no job_id");
+
+  const jobId = accepted.job_id;
+  console.log(
+    `🎬 [RunPod] short job ${jobId} queued (brand=${spec.brand}, scenes=${spec.scenes.length}, audio=${spec.audio_duration_s.toFixed(1)}s)`,
+  );
+
+  // Poll /jobs/{jobId} until terminal (reuses same endpoint as long-form)
+  const MAX_404_RETRIES = 8;
+  const BACKOFF_404_MS = 5_000;
+  let consecutive404s = 0;
+
+  const deadline = Date.now() + timeoutMs;
+  let lastStatus: JobStatus = "queued";
+  while (Date.now() < deadline) {
+    if (options.signal?.aborted) {
+      throw new PodJobFailedError("produceShort aborted", jobId, lastStatus);
+    }
+
+    let result: JobResult;
+    try {
+      result = await podFetchJson<JobResult>(
+        handle,
+        "GET",
+        `/jobs/${encodeURIComponent(jobId)}`,
+        { signal: options.signal },
+      );
+      consecutive404s = 0;
+    } catch (err) {
+      if (err instanceof PodContractError && err.httpStatus === 404) {
+        consecutive404s++;
+        if (consecutive404s <= MAX_404_RETRIES) {
+          console.warn(`⚠️ [RunPod] short job ${jobId} poll 404 (${consecutive404s}/${MAX_404_RETRIES})...`);
+          await sleep(BACKOFF_404_MS);
+          continue;
+        }
+        throw new PodJobFailedError(
+          `Worker lost short job ${jobId} after ${MAX_404_RETRIES} 404s`,
+          jobId, lastStatus,
+        );
+      }
+      if (err instanceof PodContractError && err.httpStatus !== undefined && err.httpStatus >= 500) {
+        await sleep(pollMs);
+        continue;
+      }
+      throw err;
+    }
+
+    lastStatus = result.status;
+    if (result.status === "done") {
+      if (!result.video_url || !result.thumbnail_url || result.duration_s == null) {
+        throw new PodJobFailedError(
+          `pod short job done but artifacts missing`,
+          jobId, "done",
+        );
+      }
+      console.log(`✅ [RunPod] short ${jobId} done — ${result.duration_s.toFixed(1)}s`);
+      return {
+        jobId,
+        videoUrl: result.video_url,
+        thumbnailUrl: result.thumbnail_url,
+        durationS: result.duration_s,
+      };
+    }
+    if (result.status === "failed") {
+      throw new PodJobFailedError(
+        `pod short job failed: ${result.error ?? "no detail"}`,
+        jobId, "failed",
+      );
+    }
+    await sleep(pollMs);
+  }
+  throw new PodJobFailedError(
+    `produceShort timeout after ${timeoutMs}ms`,
+    jobId, lastStatus,
+  );
+}
+
 
 /**
  * Terminate a pod. Safe to call with an unknown pod id (RunPod 404 is

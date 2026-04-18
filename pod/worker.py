@@ -133,6 +133,32 @@ class ProduceRequest(BaseModel):
         return v
 
 
+class ShortScene(BaseModel):
+    """One scene of a vertical short: image prompt only (audio is pre-extracted)."""
+    index: int = Field(ge=0)
+    image_prompt: str = Field(min_length=1, max_length=2000)
+    duration_s: float = Field(gt=0, le=180)
+
+
+class ProduceShortRequest(BaseModel):
+    """Railway -> pod short job spec (POST /produce-short)."""
+    brand: Brand
+    audio_url: str = Field(min_length=1, max_length=2000,
+                           description="R2 URL of the pre-extracted audio segment.")
+    audio_duration_s: float = Field(gt=0, le=180)
+    scenes: list[ShortScene] = Field(min_length=1, max_length=12)
+    hook_text: Optional[str] = Field(default=None, max_length=200)
+    client_job_id: Optional[str] = Field(default=None, max_length=64)
+
+    @field_validator("scenes")
+    @classmethod
+    def _scene_indexes_contiguous(cls, v: list[ShortScene]) -> list[ShortScene]:
+        indexes = [s.index for s in v]
+        if sorted(indexes) != list(range(len(v))):
+            raise ValueError("scene indexes must be contiguous 0..N-1")
+        return v
+
+
 class ProduceAccepted(BaseModel):
     job_id: str
     status: str = "queued"
@@ -332,6 +358,130 @@ def job_status(job_id: str, _: None = Depends(require_bearer)) -> ProduceResult:
     if job_id not in _JOBS:
         raise HTTPException(status_code=404, detail="unknown job_id")
     return _JOBS[job_id]
+
+
+@app.post(
+    "/produce-short",
+    response_model=ProduceAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["pipeline"],
+)
+def produce_short(
+    req: ProduceShortRequest,
+    background: BackgroundTasks,
+    _: None = Depends(require_bearer),
+) -> ProduceAccepted:
+    """Accept a native vertical short production job (Session 90)."""
+    job_id = req.client_job_id or f"short_{uuid.uuid4().hex[:16]}"
+    now = time.time()
+    _update_job(job_id, ProduceResult(job_id=job_id, status="queued"))
+    log.info(
+        "produce_short_accepted",
+        job_id=job_id,
+        brand=req.brand.value,
+        scene_count=len(req.scenes),
+        audio_duration_s=round(req.audio_duration_s, 1),
+    )
+    background.add_task(_run_short_pipeline, job_id, req)
+    return ProduceAccepted(job_id=job_id, queued_at=now)
+
+
+# ---------------------------------------------------------------------------
+# Short pipeline orchestration — Session 90
+# ---------------------------------------------------------------------------
+def _run_short_pipeline(job_id: str, req: ProduceShortRequest) -> None:
+    """Vertical short production: download audio -> FLUX (9:16) -> compose_short -> R2."""
+    t0 = time.monotonic()
+    job_dir = os.path.join(JOB_WORK_DIR, job_id)
+
+    try:
+        _update_job(job_id, ProduceResult(job_id=job_id, status="running"))
+        log.info("short_pipeline_start", job_id=job_id, brand=req.brand.value)
+
+        os.makedirs(job_dir, exist_ok=True)
+        brand = req.brand.value
+
+        # Stage 1: Download pre-extracted audio from R2
+        log.info("short_pipeline_audio_download", job_id=job_id, url=req.audio_url[:100])
+        audio_path = os.path.join(job_dir, "short_audio.wav")
+        import urllib.request
+        urllib.request.urlretrieve(req.audio_url, audio_path)
+        if not os.path.isfile(audio_path) or os.path.getsize(audio_path) < 1000:
+            raise RuntimeError(f"Audio download failed or too small: {req.audio_url[:100]}")
+
+        # Stage 2: FLUX — generate vertical scene images (9:16)
+        scenes_data = [
+            {"index": s.index, "image_prompt": s.image_prompt}
+            for s in sorted(req.scenes, key=lambda s: s.index)
+        ]
+        log.info("short_pipeline_flux_start", job_id=job_id, scene_count=len(scenes_data))
+        from pipelines.flux import generate_scene_images
+        img_result = generate_scene_images(
+            scenes=scenes_data,
+            job_dir=job_dir,
+            width=768,    # 9:16 native — FLUX works best at multiples of 128
+            height=1344,  # 768:1344 ≈ 9:16
+        )
+        scene_images = img_result["scene_images"]
+        log.info("short_pipeline_flux_done", job_id=job_id, count=img_result["count"])
+
+        # Stage 3: Compose — vertical Ken Burns + captions
+        scene_durations = [s.duration_s for s in sorted(req.scenes, key=lambda s: s.index)]
+        log.info("short_pipeline_compose_start", job_id=job_id)
+        from pipelines.compose import compose_short
+        compose_result = compose_short(
+            scene_images=scene_images,
+            audio_path=audio_path,
+            audio_duration_s=req.audio_duration_s,
+            scene_durations_s=scene_durations,
+            job_dir=job_dir,
+            brand=brand,
+            hook_text=req.hook_text,
+        )
+        video_path = compose_result["video_path"]
+        thumb_path = compose_result["thumbnail_path"]
+        duration_s = compose_result["duration_s"]
+        log.info("short_pipeline_compose_done", job_id=job_id, dur_s=round(duration_s, 2))
+
+        # Stage 4: R2 upload
+        log.info("short_pipeline_r2_start", job_id=job_id)
+        from pipelines.r2 import upload_artifacts, is_configured
+        if is_configured():
+            r2_result = upload_artifacts(
+                video_path=video_path,
+                thumbnail_path=thumb_path,
+                job_id=job_id,
+                brand=brand,
+            )
+            video_url = r2_result["video_url"]
+            thumbnail_url = r2_result["thumbnail_url"]
+        else:
+            log.warning("short_pipeline_r2_not_configured", job_id=job_id)
+            video_url = f"file://{video_path}"
+            thumbnail_url = f"file://{thumb_path}"
+
+        elapsed = time.monotonic() - t0
+        _update_job(job_id, ProduceResult(
+            job_id=job_id, status="done",
+            video_url=video_url, thumbnail_url=thumbnail_url,
+            duration_s=duration_s,
+        ))
+        log.info("short_pipeline_done", job_id=job_id,
+                 video_url=video_url, dur_s=round(duration_s, 2),
+                 elapsed_s=round(elapsed, 1))
+
+    except Exception as exc:
+        elapsed = time.monotonic() - t0
+        error_msg = f"{type(exc).__name__}: {str(exc)[:500]}"
+        log.exception("short_pipeline_failed", job_id=job_id, elapsed_s=round(elapsed, 1))
+        _update_job(job_id, ProduceResult(job_id=job_id, status="failed", error=error_msg))
+
+    finally:
+        try:
+            if os.path.isdir(job_dir):
+                shutil.rmtree(job_dir, ignore_errors=True)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------

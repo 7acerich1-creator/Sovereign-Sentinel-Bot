@@ -28,7 +28,10 @@ const MAX_CLIPS_PER_RUN = parseInt(process.env.MAX_CLIPS_PER_RUN || "10", 10);
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync, rmSync } from "fs";
 import { extractWhisperIntel, detectNiche, type WhisperResult } from "./whisper-extract";
 import { produceFacelessVideo, type FacelessScript } from "./faceless-factory";
-import { curateShorts, type CuratedShort, type CuratorResult } from "./shorts-curator";
+import { curateShorts, type CuratedShort, type CuratorResult, type VerticalScene } from "./shorts-curator";
+import { withPodSession } from "../pod/session";
+import { produceShort } from "../pod/runpod-client";
+import type { ShortJobSpec, ShortScene } from "../pod/types";
 import { YouTubeLongFormPublishTool } from "../tools/video-publisher";
 import {
   AUDIENCE_ANGLES,
@@ -1688,89 +1691,113 @@ export async function executeFullPipeline(
         const curatorResult: CuratorResult = await curateShorts(llm, script, segDurations);
         console.log(`🎬 [Orchestrator] Curator returned ${curatorResult.shorts.length} shorts for ${brand}`);
 
-        // Extract each curated short as an ffmpeg clip from the local long-form video
+        // ── SESSION 90: Native vertical render via pod ────────────────────
+        // Instead of brute-force cropping the horizontal video, each short is
+        // rendered natively at 9:16 on the GPU pod: extract audio segment →
+        // upload to R2 → pod generates FLUX images at 9:16 → Ken Burns compose
+        // → Whisper captions → R2 upload → Railway gets back the URL.
         const clipDir = `${ORCHESTRATOR_DIR}/${jobId}/clips`;
         if (!existsSync(clipDir)) mkdirSync(clipDir, { recursive: true });
 
-        const nicheFilter = NICHE_FILTERS[whisperResult.niche] || NICHE_FILTERS.dark_psychology;
         clips = [];
 
         for (let i = 0; i < curatorResult.shorts.length; i++) {
           const short = curatorResult.shorts[i];
-          const clipPath = `${clipDir}/clip_${i.toString().padStart(2, "0")}.mp4`;
 
-          // Audio-aware padding: add breathing room so clips don't cut mid-word.
-          // SESSION 86: YouTube Shorts expanded to 3 minutes (180s). Hard cap updated.
+          // ── Step A: Extract audio segment with clean sentence-boundary fades ──
           const PAD_BEFORE = 0.3;
           const PAD_AFTER = 1.5;
-          const MAX_SHORT_DURATION = 179; // YouTube Shorts 3-minute limit (180s) minus 1s safety
+          const MAX_SHORT_DURATION = 179;
           const paddedStart = Math.max(0, short.start_ts - PAD_BEFORE);
           const rawPaddedEnd = Math.min(
             curatorResult.long_form_duration_s,
             short.end_ts + PAD_AFTER,
           );
-          // Cap total duration so padding never pushes past YouTube Shorts limit
           const duration = Math.min(rawPaddedEnd - paddedStart, MAX_SHORT_DURATION);
 
+          const audioPath = `${clipDir}/audio_${i.toString().padStart(2, "0")}.wav`;
+          const audioFilter = `afade=t=in:st=0:d=0.3,afade=t=out:st=${Math.max(0, duration - 0.5).toFixed(2)}:d=0.5`;
+
           try {
-            // SESSION 81: Two-pass ffmpeg extraction with drawtext fault-tolerance.
-            // Phase 5 Task 5.6 CTA drawtext was crashing ALL clip extractions in S80
-            // (static ffmpeg may not support drawtext, or filter syntax issue).
-            // Pass 1: try full filter (niche + CTA drawtext).
-            // Pass 2 (fallback): niche filter only, no drawtext.
+            execSync(
+              `ffmpeg -ss ${paddedStart.toFixed(2)} -i "${facelessResult.localPath}" -t ${duration.toFixed(2)} ` +
+              `-vn -acodec pcm_s16le -ar 48000 -ac 2 -af "${audioFilter}" -y "${audioPath}"`,
+              { timeout: FFMPEG_CLIP_TIMEOUT_MS, stdio: "pipe" },
+            );
+          } catch (audioErr: any) {
+            console.error(`[Orchestrator] Short ${i} audio extraction FAILED: ${audioErr.message?.slice(0, 200)}`);
+            continue;
+          }
 
-            const ctaText = short.cta_overlay || "";
-
-            // SESSION 88: Switched from textfile= to text= for Railway compatibility.
-            // Previous approach used fontfile= (BebasNeue only exists in pod Docker image)
-            // and textfile= (file path escaping issues across platforms).
-            // Inline text= with ffmpeg escaping is more portable.
-            const ctaEnableStart = Math.max(0, duration - 2.0).toFixed(2);
-            let ctaDrawtext = "";
-            if (ctaText) {
-              // ffmpeg drawtext escaping: ' → \\', : → \\:, \ → \\\\
-              const escaped = ctaText
-                .replace(/\\/g, "\\\\\\\\")
-                .replace(/'/g, "\\\\'")
-                .replace(/:/g, "\\\\:");
-              ctaDrawtext = `,drawtext=text='${escaped}':fontsize=42:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h-180:enable='gte(t\\,${ctaEnableStart})'`;
+          // ── Step B: Upload audio to R2 (temporary, pod downloads it) ──
+          let audioUrl: string | null = null;
+          try {
+            if (isR2Configured()) {
+              const r2Key = `shorts-audio/${jobId}/audio_${i.toString().padStart(2, "0")}.wav`;
+              const audioBuffer = readFileSync(audioPath);
+              const r2Result = await uploadToR2(R2_BUCKET_CLIPS, r2Key, audioBuffer, "audio/wav");
+              audioUrl = r2Result.publicUrl;
+              console.log(`  📤 Short ${i} audio uploaded to R2: ${audioUrl?.slice(0, 80)}`);
             }
+          } catch (r2Err: any) {
+            console.error(`[Orchestrator] Short ${i} R2 audio upload failed: ${r2Err.message?.slice(0, 200)}`);
+          }
 
-            const baseFilter = `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${nicheFilter}`;
-            const audioFilter = `afade=t=in:st=0:d=0.15,afade=t=out:st=${Math.max(0, duration - 0.5).toFixed(2)}:d=0.5`;
-            const baseCmd = `ffmpeg -ss ${paddedStart.toFixed(2)} -i "${facelessResult.localPath}" -t ${duration.toFixed(2)}`;
-            const encodeOpts = `-c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k`;
-
-            // Pass 1: full filter with CTA drawtext
-            let extracted = false;
-            if (ctaDrawtext) {
-              try {
-                execSync(
-                  `${baseCmd} -vf "${baseFilter}${ctaDrawtext}" ${encodeOpts} -af "${audioFilter}" -y "${clipPath}"`,
-                  { timeout: FFMPEG_CLIP_TIMEOUT_MS, stdio: "pipe" }
-                );
-                extracted = true;
-              } catch (drawErr: any) {
-                const stderr = drawErr.stderr?.toString?.() || "";
-                // Skip the ffmpeg version banner to get the actual error
-                const errorLines = stderr.split("\n").filter((l: string) => /error|cannot|no such|invalid/i.test(l));
-                const errorMsg = errorLines.length > 0 ? errorLines.join(" | ").slice(0, 300) : stderr.slice(-300);
-                console.warn(`  ⚠️ Short ${i} drawtext failed (will retry without CTA): ${errorMsg}`);
-              }
-            }
-
-            // Pass 2 (fallback): niche filter only, no drawtext
-            if (!extracted) {
+          if (!audioUrl) {
+            console.warn(`  ⚠️ Short ${i}: no R2 audio URL, falling back to legacy crop`);
+            // Legacy fallback: brute-force crop (keeps pipeline working without R2)
+            const clipPath = `${clipDir}/clip_${i.toString().padStart(2, "0")}.mp4`;
+            const nicheFilter = NICHE_FILTERS[whisperResult.niche] || NICHE_FILTERS.dark_psychology;
+            try {
               execSync(
-                `${baseCmd} -vf "${baseFilter}" ${encodeOpts} -af "${audioFilter}" -y "${clipPath}"`,
-                { timeout: FFMPEG_CLIP_TIMEOUT_MS, stdio: "pipe" }
+                `ffmpeg -ss ${paddedStart.toFixed(2)} -i "${facelessResult.localPath}" -t ${duration.toFixed(2)} ` +
+                `-vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${nicheFilter}" ` +
+                `-c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k -af "${audioFilter}" -y "${clipPath}"`,
+                { timeout: FFMPEG_CLIP_TIMEOUT_MS, stdio: "pipe" },
               );
-            }
+              clips.push({
+                index: i, localPath: clipPath, publicUrl: null,
+                startSec: paddedStart, endSec: paddedStart + duration,
+                captionText: `${short.hook_text} | ${short.why_this_moment}`,
+                storyTitle: short.hook_text, storyHook: short.why_this_moment,
+              });
+              console.log(`  ✂️ Short ${i} (legacy crop fallback): ${duration.toFixed(1)}s`);
+            } catch { /* non-fatal */ }
+            continue;
+          }
+
+          // ── Step C: Build pod job spec with vertical scenes ──
+          const vScenes: ShortScene[] = short.vertical_scenes.map((vs: VerticalScene) => ({
+            index: vs.index,
+            image_prompt: vs.image_prompt,
+            duration_s: vs.duration_s,
+          }));
+
+          const shortSpec: ShortJobSpec = {
+            brand: brand as "ace_richie" | "containment_field",
+            audio_url: audioUrl,
+            audio_duration_s: duration,
+            scenes: vScenes,
+            hook_text: short.hook_text?.slice(0, 200),
+            client_job_id: `${jobId}_short_${i}`,
+          };
+
+          // ── Step D: Submit to pod and poll for result ──
+          try {
+            const artifacts = await withPodSession(async (handle) => {
+              return produceShort(handle, shortSpec);
+            });
+
+            // Download the rendered short from R2 to local disk for distribution
+            const clipPath = `${clipDir}/clip_${i.toString().padStart(2, "0")}.mp4`;
+            execSync(`curl -sL -o "${clipPath}" "${artifacts.videoUrl}"`, {
+              timeout: 60_000, stdio: "pipe",
+            });
 
             clips.push({
               index: i,
               localPath: clipPath,
-              publicUrl: null,
+              publicUrl: artifacts.videoUrl,
               startSec: paddedStart,
               endSec: paddedStart + duration,
               captionText: `${short.hook_text} | ${short.why_this_moment}`,
@@ -1778,17 +1805,17 @@ export async function executeFullPipeline(
               storyHook: short.why_this_moment,
             });
             console.log(
-              `  ✂️ Short ${i}: "${short.hook_text.slice(0, 50)}" ` +
-              `${paddedStart.toFixed(1)}s → ${(paddedStart + duration).toFixed(1)}s (${duration.toFixed(1)}s) ` +
-              `conf=${short.confidence.toFixed(2)} CTA="${ctaText.slice(0, 40)}"`
+              `  🎬 Short ${i} (native vertical): "${short.hook_text.slice(0, 50)}" ` +
+              `${duration.toFixed(1)}s conf=${short.confidence.toFixed(2)} ` +
+              `vScenes=${vScenes.length} → ${artifacts.videoUrl.slice(0, 60)}`
             );
-          } catch (err: any) {
-            const stderr = err.stderr?.toString?.()?.slice(0, 400) || "";
-            console.error(`[Orchestrator] Short ${i} ffmpeg FAILED:\n  cmd: ${err.message?.slice(0, 200)}\n  stderr: ${stderr}`);
+          } catch (podErr: any) {
+            console.error(`[Orchestrator] Short ${i} pod render FAILED: ${podErr.message?.slice(0, 300)}`);
+            // Non-fatal — skip this short, continue with the rest
           }
         }
 
-        console.log(`✅ [Orchestrator] ${clips.length}/${curatorResult.shorts.length} curated shorts extracted`);
+        console.log(`✅ [Orchestrator] ${clips.length}/${curatorResult.shorts.length} curated shorts rendered (native vertical)`);
       }
 
       await progress("STEP 4/8", `✅ ${clips.length} curated shorts extracted (shorts-curator)`);

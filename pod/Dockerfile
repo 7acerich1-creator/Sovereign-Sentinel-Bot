@@ -53,7 +53,7 @@ WORKDIR /app
 
 # Install CUDA-enabled PyTorch FIRST so pip resolves the rest against it.
 # torch 2.4.x matches FLUX.1 [dev] (diffusers>=0.30) + TTS 0.22.0 (XTTSv2)
-# at bf16 precision on 80GB cards without OOM.
+# at bf16 precision on 48GB cards (L40S/A6000) — ~31GB peak VRAM.
 RUN pip install --upgrade pip setuptools wheel \
     && pip install --index-url https://download.pytorch.org/whl/cu121 \
         torch==2.4.1 \

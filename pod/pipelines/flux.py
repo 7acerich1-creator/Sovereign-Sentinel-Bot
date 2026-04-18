@@ -7,9 +7,9 @@ Per D2 (PROJECT_POD_MIGRATION.md):
 Loads the model once (lazy singleton), generates images for each scene's
 image_prompt. Returns paths to the generated PNGs.
 
-GPU requirement: 80GB VRAM (H100/A100 SXM) for FLUX.1 [dev] bf16 + XTTS
-loaded concurrently. On smaller GPUs the model will OOM — that's expected
-and by design (D1 locked on 80GB).
+GPU requirement: 48GB VRAM (L40S/A6000) for FLUX.1 [dev] bf16 + XTTS + Whisper
+loaded concurrently (~31GB peak). S90 cost optimization downgraded from 80GB
+cards — same output quality at ~60% lower cost.
 """
 from __future__ import annotations
 

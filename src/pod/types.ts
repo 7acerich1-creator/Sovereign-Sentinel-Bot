@@ -40,6 +40,31 @@ export interface JobSpec {
   client_job_id?: string;
 }
 
+/** One scene of a vertical short: image prompt + duration (no TTS — audio pre-extracted). */
+export interface ShortScene {
+  /** 0-indexed, contiguous. */
+  index: number;
+  /** FLUX image prompt for 9:16 vertical composition — 1..2000 chars. */
+  image_prompt: string;
+  /** Scene duration in seconds (matches audio pacing). */
+  duration_s: number;
+}
+
+/** POST /produce-short body — short job spec Railway sends to the pod. */
+export interface ShortJobSpec {
+  brand: Brand;
+  /** R2 URL of the pre-extracted audio segment. */
+  audio_url: string;
+  /** Total audio duration in seconds. */
+  audio_duration_s: number;
+  /** Vertical scene breakdown. */
+  scenes: ShortScene[];
+  /** Hook text for thumbnail overlay. */
+  hook_text?: string;
+  /** Optional idempotency key. */
+  client_job_id?: string;
+}
+
 /** Immediate response from POST /produce (HTTP 202). */
 export interface ProduceAccepted {
   job_id: string;

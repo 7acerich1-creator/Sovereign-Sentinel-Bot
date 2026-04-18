@@ -18,6 +18,16 @@ import type { FacelessScript, ScriptSegment, Brand } from "./faceless-factory";
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** A vertical scene for native 9:16 short rendering (Session 90). */
+export interface VerticalScene {
+  /** Scene index within this short (0-based). */
+  index: number;
+  /** FLUX image prompt composed for 9:16 portrait — NOT a crop of the horizontal prompt. */
+  image_prompt: string;
+  /** How long this scene should last in seconds. */
+  duration_s: number;
+}
+
 /** A curated short candidate identified by the LLM curator. */
 export interface CuratedShort {
   /** 0-indexed start segment (inclusive). */
@@ -36,6 +46,8 @@ export interface CuratedShort {
   cta_overlay: string;
   /** LLM's self-assessed confidence (0.0 - 1.0). */
   confidence: number;
+  /** Vertical scene prompts for native 9:16 rendering (Session 90). */
+  vertical_scenes: VerticalScene[];
 }
 
 /** Output of the curator: curated clips ready for extraction. */
@@ -83,6 +95,11 @@ function buildCuratorPrompt(
   const totalDur = cumulativeTs;
   const channelHandle = CHANNEL_HANDLES[script.brand] || "@ace_richie77";
 
+  // Build visual direction map so LLM can re-imagine scenes for vertical
+  const visualMap = script.segments.map((seg, i) => {
+    return `[${i}] "${seg.visual_direction?.slice(0, 200) || "no visual direction"}"`;
+  }).join("\n");
+
   return `You are a YouTube Shorts curator for a faceless documentary channel. Your job is to identify the 5-6 STRONGEST standalone moments from a long-form script that would make viewers click through to the full video on the channel.
 
 RULES:
@@ -95,6 +112,16 @@ RULES:
 7. CTA overlay for every short: "Full video on the channel — ${channelHandle}"
 8. Mix durations — some shorts should be punchy (1-2 segments, under 30s), others can be deeper dives (3-4 segments, 60-120s). Variety in pacing keeps the channel from feeling algorithmic.
 
+VERTICAL SCENE GENERATION (CRITICAL):
+Each short will be rendered as a NATIVE 9:16 vertical video, NOT cropped from horizontal. You must generate "vertical_scenes" for each short — these are NEW image prompts composed for PORTRAIT framing.
+
+Rules for vertical_scenes:
+- Each scene in the short's segment range gets ONE vertical_scene entry.
+- The image_prompt must describe the scene composed for 9:16 PORTRAIT (tall, narrow frame). Think: subjects centered vertically, close-up faces filling the frame, tall architecture, figures standing, looking up/down.
+- Do NOT just copy the horizontal prompt. RE-IMAGINE the composition for portrait: tighter framing, more vertical emphasis, subjects filling the tall narrow space.
+- Include cinematic quality tags: "shot on 35mm kodak portra, shallow depth of field, chiaroscuro lighting, f/2.8 bokeh" etc.
+- duration_s for each scene = that segment's audio duration (provided in the segment map).
+
 SCRIPT (${script.segments.length} segments, ${totalDur.toFixed(0)}s total):
 Title: "${script.title}"
 Brand: ${script.brand}
@@ -103,13 +130,20 @@ Hook: "${script.hook}"
 SEGMENTS (with timestamps):
 ${segmentMap}
 
+HORIZONTAL VISUAL DIRECTIONS (for reference — re-imagine these for 9:16):
+${visualMap}
+
 Return ONLY a JSON array (no markdown, no explanation). Each element:
 {
   "start_segment": <0-indexed inclusive>,
   "end_segment": <0-indexed inclusive>,
   "hook_text": "<first spoken line of this short — the scroll-stopper>",
   "why_this_moment": "<one sentence explaining the standalone hook value>",
-  "confidence": <0.0 to 1.0>
+  "confidence": <0.0 to 1.0>,
+  "vertical_scenes": [
+    {"index": 0, "image_prompt": "<9:16 portrait-composed FLUX prompt>", "duration_s": <seconds>},
+    ...
+  ]
 }
 
 Return between 1 and 6 objects. Highest confidence first.`;
@@ -224,6 +258,32 @@ export async function curateShorts(
       continue;
     }
 
+    // Parse vertical_scenes from LLM response (Session 90)
+    const rawVScenes: VerticalScene[] = [];
+    if (Array.isArray(c.vertical_scenes)) {
+      for (let vi = 0; vi < c.vertical_scenes.length; vi++) {
+        const vs = c.vertical_scenes[vi];
+        const segIdx = startSeg + vi;
+        const segDur = segmentDurations[segIdx] || script.segments[segIdx]?.duration_hint || 15;
+        rawVScenes.push({
+          index: vi,
+          image_prompt: String(vs.image_prompt || script.segments[segIdx]?.visual_direction || "dark cinematic portrait, 9:16"),
+          duration_s: Number(vs.duration_s) > 0 ? Number(vs.duration_s) : segDur,
+        });
+      }
+    }
+    // Fallback: if LLM didn't generate vertical_scenes, create from horizontal prompts
+    if (rawVScenes.length === 0) {
+      for (let segI = startSeg; segI <= endSeg; segI++) {
+        const segDur = segmentDurations[segI] || script.segments[segI]?.duration_hint || 15;
+        rawVScenes.push({
+          index: segI - startSeg,
+          image_prompt: `9:16 portrait cinematic composition. ${script.segments[segI]?.visual_direction || "dark atmospheric scene"}. Shot on 35mm kodak portra 400, f/2.8 shallow depth of field, chiaroscuro lighting`,
+          duration_s: segDur,
+        });
+      }
+    }
+
     validShorts.push({
       start_segment: startSeg,
       end_segment: endSeg,
@@ -233,6 +293,7 @@ export async function curateShorts(
       why_this_moment: String(c.why_this_moment || ""),
       cta_overlay: `Full video on the channel — ${channelHandle}`,
       confidence: Math.max(0, Math.min(1, Number(c.confidence) || 0.5)),
+      vertical_scenes: rawVScenes,
     });
   }
 

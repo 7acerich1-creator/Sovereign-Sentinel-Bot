@@ -1218,3 +1218,441 @@ def compose_video(
         "thumbnail_path": thumb_path,
         "duration_s": total_duration,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Native Vertical Short Composition — Session 90
+# ═══════════════════════════════════════════════════════════════════════════════
+# Renders a native 9:16 vertical short from pre-extracted audio + scene images.
+# No opening sequence, no brand card. Clean Ken Burns + kinetic captions sized
+# for vertical viewing. Audio comes pre-extracted from the long-form with
+# sentence-boundary fades already applied.
+#
+# Pipeline: FLUX images (9:16) → Ken Burns (1080x1920) → concat → audio mix
+#           → Whisper captions → vertical thumbnail → R2 upload
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Vertical output specs — 9:16 portrait for Shorts/Reels/TikTok
+SHORT_WIDTH = 1080
+SHORT_HEIGHT = 1920
+SHORT_FPS = 30
+SHORT_CRF = "20"
+
+# Vertical caption styles — larger font, centered for thumb-scrolling viewers
+SHORT_CAPTION_STYLES = {
+    "containment_field": {
+        "font": "Bebas Neue",
+        "fontsize": 96,
+        "primary_color": "&H00F0F0F0",
+        "outline_color": "&H00101010",
+        "outline_width": 3.0,
+        "shadow_depth": 0,
+        "bold": 0,
+        "uppercase": True,
+        "border_style": 1,
+        "anim_in_ms": 100,
+        "anim_scale_start": 92,
+    },
+    "ace_richie": {
+        "font": "Montserrat SemiBold",
+        "fontsize": 88,
+        "primary_color": "&H0080CFFF",
+        "outline_color": "&H00102040",
+        "outline_width": 3.5,
+        "shadow_depth": 3,
+        "bold": 1,
+        "uppercase": False,
+        "border_style": 1,
+        "anim_in_ms": 150,
+        "anim_scale_start": 88,
+    },
+}
+
+# Vertical Ken Burns — same zoom range, tuned pan for portrait framing
+SHORT_KB_ZOOM_MIN = 1.00
+SHORT_KB_ZOOM_MAX = 1.10  # slightly less zoom than horizontal — portrait is tighter
+SHORT_KB_PAN_MAX_FRAC = 0.03  # less horizontal drift — narrow frame
+
+
+def _ken_burns_filter_vertical(duration_s: float, scene_idx: int) -> str:
+    """Ken Burns zoompan for 9:16 vertical output."""
+    total_frames = max(1, int(duration_s * SHORT_FPS))
+    zoom_range = SHORT_KB_ZOOM_MAX - SHORT_KB_ZOOM_MIN
+
+    if scene_idx % 2 == 0:
+        zoom_expr = f"min({SHORT_KB_ZOOM_MIN}+(on/{total_frames})*{zoom_range},{SHORT_KB_ZOOM_MAX})"
+    else:
+        zoom_expr = f"max({SHORT_KB_ZOOM_MAX}-(on/{total_frames})*{zoom_range},{SHORT_KB_ZOOM_MIN})"
+
+    rng = random.Random(scene_idx * 77)  # different seed than horizontal
+    pan_x_frac = rng.uniform(-SHORT_KB_PAN_MAX_FRAC, SHORT_KB_PAN_MAX_FRAC)
+    pan_y_frac = rng.uniform(-SHORT_KB_PAN_MAX_FRAC, SHORT_KB_PAN_MAX_FRAC)
+
+    x_expr = f"iw/2-(iw/zoom/2)+({pan_x_frac}*iw*on/{total_frames})"
+    y_expr = f"ih/2-(ih/zoom/2)+({pan_y_frac}*ih*on/{total_frames})"
+
+    return (
+        f"zoompan=z='{zoom_expr}':x='{x_expr}':y='{y_expr}'"
+        f":d={total_frames}:s={SHORT_WIDTH}x{SHORT_HEIGHT}:fps={SHORT_FPS}"
+    )
+
+
+def _generate_caption_ass_vertical(
+    bursts: list[dict], brand: str, output_path: str,
+    audio_end_s: Optional[float] = None,
+) -> str:
+    """Generate ASS subtitle file for vertical shorts — larger text, no skip offset."""
+    style = SHORT_CAPTION_STYLES.get(brand, SHORT_CAPTION_STYLES["ace_richie"])
+
+    def _ts(seconds: float) -> str:
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        s = seconds % 60
+        cs = int((s - int(s)) * 100)
+        return f"{h}:{m:02d}:{int(s):02d}.{cs:02d}"
+
+    ass_lines = [
+        "[Script Info]",
+        "Title: Vertical Short Captions",
+        "ScriptType: v4.00+",
+        "WrapStyle: 0",
+        "ScaledBorderAndShadow: yes",
+        "YCbCr Matrix: TV.709",
+        f"PlayResX: {SHORT_WIDTH}",
+        f"PlayResY: {SHORT_HEIGHT}",
+        "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, "
+        "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
+        "MarginL, MarginR, MarginV, Encoding",
+        f"Style: Caption,{style['font']},{style['fontsize']},{style['primary_color']},"
+        f"&HFF000000,{style['outline_color']},&H00000000,{style['bold']},"
+        f"0,0,0,100,100,2.0,0,{style['border_style']},{style['outline_width']},"
+        f"{style['shadow_depth']},2,60,60,200,1",
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+
+    anim_ms = style.get("anim_in_ms", 120)
+    scale_start = style.get("anim_scale_start", 90)
+
+    for burst in bursts:
+        if audio_end_s is not None and burst["start"] >= audio_end_s:
+            continue
+        start = burst["start"]
+        end = burst["end"] + CAPTION_GAP_S
+        if audio_end_s is not None:
+            end = min(end, audio_end_s)
+        if end <= start:
+            continue
+        text = burst["text"]
+        if style.get("uppercase"):
+            text = text.upper()
+        text = text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+        anim_tag = (
+            "{\\" + f"fscx{scale_start}" + "\\" + f"fscy{scale_start}"
+            + "\\" + f"t(0,{anim_ms}," + "\\" + "fscx100" + "\\" + "fscy100)}"
+        )
+        start_ts = _ts(start)
+        end_ts = _ts(end)
+        ass_lines.append(
+            f"Dialogue: 0,{start_ts},{end_ts},Caption,,0,0,0,,{anim_tag}{text}"
+        )
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        for line in ass_lines:
+            f.write(line + "\n")
+
+    log.info("caption_ass_vertical_generated", path=output_path,
+             burst_count=len([b for b in bursts if not (audio_end_s and b["start"] >= audio_end_s)]),
+             brand=brand)
+    return output_path
+
+
+def compose_short(
+    scene_images: list[str],
+    audio_path: str,
+    audio_duration_s: float,
+    scene_durations_s: list[float],
+    job_dir: str,
+    brand: str,
+    hook_text: Optional[str] = None,
+) -> dict:
+    """
+    Assemble a native 9:16 vertical short from scene images + pre-extracted audio.
+
+    Unlike compose_video(), this function:
+      - Renders at 1080x1920 (9:16 vertical)
+      - Takes a SINGLE audio file (pre-extracted from long-form with fades)
+      - Has NO opening sequence (no brand card, no typewriter)
+      - Burns kinetic captions sized for vertical viewing
+      - Generates a vertical thumbnail (1080x1920)
+
+    Args:
+        scene_images: FLUX-generated images at 9:16 aspect ratio.
+        audio_path: Pre-extracted audio WAV for this short.
+        audio_duration_s: Total audio duration in seconds.
+        scene_durations_s: How long each scene should last (matches audio pacing).
+        job_dir: Working directory for intermediate files.
+        brand: 'ace_richie' or 'containment_field'.
+        hook_text: Short hook for thumbnail overlay.
+
+    Returns:
+        {
+            "video_path": "/path/to/short.mp4",
+            "thumbnail_path": "/path/to/thumb_short.jpg",
+            "duration_s": 42.5,
+        }
+    """
+    t0 = time.monotonic()
+    n_scenes = min(len(scene_images), len(scene_durations_s))
+    log.info("compose_short_start", scene_count=n_scenes, brand=brand,
+             audio_duration_s=round(audio_duration_s, 2))
+
+    # ── Stage 1: Per-scene Ken Burns clips (vertical) ──────────────────────
+    CLIP_WORKERS = min(4, n_scenes)
+    scene_clips: list[str] = []
+
+    def _build_vertical_clip(i: int) -> Optional[str]:
+        """Build one vertical Ken Burns scene clip."""
+        img = scene_images[i]
+        dur = scene_durations_s[i]
+        clip_path = os.path.join(job_dir, f"short_clip_{i:03d}.mkv")
+
+        if dur <= 0:
+            log.warning("compose_short_skip_zero_dur", index=i)
+            return None
+        if not os.path.isfile(img):
+            log.warning("compose_short_missing_image", index=i, path=img)
+            return None
+
+        kb_filter = _ken_burns_filter_vertical(dur, i)
+
+        # 2x upscale for zoompan headroom (same trick as horizontal)
+        cmd = [
+            "ffmpeg", "-y",
+            "-loop", "1", "-i", img,
+            "-f", "lavfi", "-i", f"anullsrc=channel_layout=mono:sample_rate=24000",
+            "-filter_complex",
+            f"[0:v]scale={SHORT_WIDTH * 2}:{SHORT_HEIGHT * 2}:flags=lanczos,"
+            f"{kb_filter},format=yuv420p[v]",
+            "-map", "[v]", "-map", "1:a",
+            "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", SHORT_CRF,
+            "-c:a", INTERMEDIATE_AUDIO_CODEC,
+            "-t", f"{dur:.3f}",
+            "-shortest",
+            clip_path,
+        ]
+
+        log.info("compose_short_scene", index=i, duration_s=round(dur, 2))
+        result = subprocess.run(
+            cmd, capture_output=True, text=True,
+            timeout=max(120, int(dur * 10)),
+        )
+        if result.returncode != 0:
+            log.error("compose_short_scene_failed", index=i,
+                      stderr=result.stderr[:500] if result.stderr else "")
+            # Fallback: 1x scale without Ken Burns
+            fallback_cmd = [
+                "ffmpeg", "-y",
+                "-loop", "1", "-i", img,
+                "-f", "lavfi", "-i", f"anullsrc=channel_layout=mono:sample_rate=24000",
+                "-filter_complex",
+                f"[0:v]scale={SHORT_WIDTH}:{SHORT_HEIGHT}:flags=lanczos,format=yuv420p[v]",
+                "-map", "[v]", "-map", "1:a",
+                "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", SHORT_CRF,
+                "-c:a", INTERMEDIATE_AUDIO_CODEC,
+                "-t", f"{dur:.3f}",
+                "-shortest",
+                clip_path,
+            ]
+            fb_result = subprocess.run(
+                fallback_cmd, capture_output=True, text=True,
+                timeout=max(120, int(dur * 10)),
+            )
+            if fb_result.returncode != 0:
+                log.error("compose_short_fallback_failed", index=i)
+                return None
+
+        return clip_path
+
+    t_clips = time.monotonic()
+    parallel_results: list[tuple[int, str]] = []
+    with ThreadPoolExecutor(max_workers=CLIP_WORKERS) as pool:
+        futures = {pool.submit(_build_vertical_clip, i): i for i in range(n_scenes)}
+        for future in as_completed(futures):
+            idx = futures[future]
+            try:
+                clip = future.result()
+                if clip is not None:
+                    parallel_results.append((idx, clip))
+            except Exception as exc:
+                log.error("compose_short_clip_error", index=idx, error=str(exc)[:300])
+
+    parallel_results.sort(key=lambda x: x[0])
+    scene_clips = [clip for _, clip in parallel_results]
+
+    clip_elapsed = time.monotonic() - t_clips
+    log.info("compose_short_clips_done", count=len(scene_clips),
+             elapsed_s=round(clip_elapsed, 1))
+
+    if not scene_clips:
+        raise RuntimeError("compose_short: zero scene clips — cannot assemble")
+
+    # ── Stage 2: Concat scene clips ────────────────────────────────────────
+    concat_list = os.path.join(job_dir, "short_concat.txt")
+    with open(concat_list, "w") as f:
+        for clip in scene_clips:
+            f.write(f"file '{clip}'\n")
+
+    concat_path = os.path.join(job_dir, "short_concat.mkv")
+    concat_cmd = [
+        "ffmpeg", "-y",
+        "-f", "concat", "-safe", "0",
+        "-i", concat_list,
+        "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", SHORT_CRF,
+        "-c:a", INTERMEDIATE_AUDIO_CODEC,
+        concat_path,
+    ]
+    result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+        raise RuntimeError(f"compose_short concat failed: {result.stderr[:500] if result.stderr else ''}")
+
+    # ── Stage 2.5: Re-mux with real audio ──────────────────────────────────
+    # Scene clips have silent placeholder audio. Now swap in the real extracted audio.
+    muxed_path = os.path.join(job_dir, "short_muxed.mp4")
+
+    # Shorts get a lighter audio mix: narration + music bed only (no stings/typing)
+    music_path = MUSIC_BED_FILES.get(brand)
+    if music_path and os.path.isfile(music_path):
+        # Mix narration + attenuated music bed
+        mix_filter = (
+            f"[0:a]apad=whole_dur={audio_duration_s:.3f}[narr];"
+            f"[1:a]atrim=0:{audio_duration_s:.3f},asetpts=PTS-STARTPTS,"
+            f"volume={MUSIC_BED_DB}dB[music];"
+            f"[narr][music]amix=inputs=2:duration=first:normalize=0[mixed]"
+        )
+        mix_cmd = [
+            "ffmpeg", "-y",
+            "-i", audio_path,
+            "-stream_loop", "-1", "-i", music_path,
+            "-i", concat_path,
+            "-filter_complex", mix_filter,
+            "-map", "2:v",
+            "-map", "[mixed]",
+            "-c:v", "copy",
+            "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE, "-ar", "48000",
+            "-movflags", "+faststart",
+            "-t", f"{audio_duration_s:.3f}",
+            "-shortest",
+            muxed_path,
+        ]
+    else:
+        # No music bed — just mux narration directly
+        mix_cmd = [
+            "ffmpeg", "-y",
+            "-i", concat_path,
+            "-i", audio_path,
+            "-map", "0:v",
+            "-map", "1:a",
+            "-c:v", "copy",
+            "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE, "-ar", "48000",
+            "-movflags", "+faststart",
+            "-t", f"{audio_duration_s:.3f}",
+            "-shortest",
+            muxed_path,
+        ]
+
+    result = subprocess.run(mix_cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+        log.error("compose_short_mux_failed", stderr=result.stderr[:500] if result.stderr else "")
+        # Fallback: simple audio mux without music
+        fb_mux_cmd = [
+            "ffmpeg", "-y",
+            "-i", concat_path, "-i", audio_path,
+            "-map", "0:v", "-map", "1:a",
+            "-c:v", "copy",
+            "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE, "-ar", "48000",
+            "-movflags", "+faststart",
+            "-t", f"{audio_duration_s:.3f}",
+            "-shortest",
+            muxed_path,
+        ]
+        result = subprocess.run(fb_mux_cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            raise RuntimeError(f"compose_short mux failed: {result.stderr[:300] if result.stderr else ''}")
+
+    final_path = muxed_path
+
+    # ── Stage 3: Kinetic captions (GPU Whisper → vertical ASS → burn) ──────
+    try:
+        cap_wav = os.path.join(job_dir, "short_captions_audio.wav")
+        _extract_audio_from_video(final_path, cap_wav)
+        words = _transcribe_word_timestamps(cap_wav)
+
+        if words:
+            bursts = _chunk_words_into_bursts(words)
+            if bursts:
+                ass_path = os.path.join(job_dir, "short_captions.ass")
+                _generate_caption_ass_vertical(
+                    bursts, brand, ass_path,
+                    audio_end_s=audio_duration_s,
+                )
+                captioned = os.path.join(job_dir, "short_captioned.mp4")
+                _burn_captions(final_path, ass_path, captioned)
+                if os.path.isfile(captioned):
+                    final_path = captioned
+    except Exception as exc:
+        log.error("compose_short_captions_failed", error=str(exc)[:300])
+
+    # ── Stage 4: Probe final duration ──────────────────────────────────────
+    total_duration = _probe_duration(final_path)
+
+    # ── Stage 5: Vertical thumbnail ────────────────────────────────────────
+    thumb_path = os.path.join(job_dir, "thumbnail_short.jpg")
+    # Use the first scene image (most visually impactful for shorts)
+    thumb_src = scene_images[0] if scene_images else ""
+
+    _thumb_hook = ""
+    if hook_text:
+        _words = hook_text.upper().split()
+        _thumb_hook = " ".join(_words[:3])
+
+    try:
+        _vf_parts = [f"scale={SHORT_WIDTH}:{SHORT_HEIGHT}:flags=lanczos", "vignette=PI/3"]
+        if _thumb_hook:
+            _safe_hook = _thumb_hook.replace("'", "'").replace(":", "\\:")
+            _vf_parts.append(
+                f"drawtext=fontfile='{FONT_BEBAS}'"
+                f":text='{_safe_hook}'"
+                f":fontsize=140"
+                f":fontcolor=white"
+                f":borderw=6"
+                f":bordercolor=black"
+                f":x=(w-text_w)/2"
+                f":y=(h-text_h)/2"
+            )
+        _vf_chain = ",".join(_vf_parts)
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", thumb_src, "-vf", _vf_chain, "-q:v", "2", thumb_path],
+            capture_output=True, text=True, timeout=30, check=True,
+        )
+    except Exception as exc:
+        log.warning("compose_short_thumbnail_failed", error=str(exc)[:300])
+        if thumb_src and os.path.isfile(thumb_src):
+            import shutil
+            shutil.copy2(thumb_src, thumb_path)
+
+    elapsed = time.monotonic() - t0
+    log.info("compose_short_done",
+             duration_s=round(total_duration, 2),
+             elapsed_s=round(elapsed, 1),
+             scene_count=n_scenes, brand=brand)
+
+    return {
+        "video_path": final_path,
+        "thumbnail_path": thumb_path,
+        "duration_s": total_duration,
+    }

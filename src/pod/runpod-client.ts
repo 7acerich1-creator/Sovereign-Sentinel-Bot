@@ -55,22 +55,17 @@ const DEFAULT_VOLUME_MOUNT_PATH = "/runpod-volume";
 const DEFAULT_CONTAINER_DISK_GB = 75; // Bumped from 50 — models cache on container disk now
 const DEFAULT_WORKER_PORT = 8000;
 
-// S91 GPU ordering: 48GB cards first (cheapest), 80GB cards LAST RESORT.
-// FLUX bf16 (~24GB) + XTTS (~4GB) + Whisper (~3GB) = ~31GB peak. 48GB is plenty.
-// 80GB only fires if every 48GB option is sold out across all datacenters.
+// S93 GPU ordering: 48GB cards ONLY. Peak VRAM ~31GB (FLUX+XTTS+Whisper).
+// 80GB cards removed — 5-10x more expensive, zero quality benefit.
+// Retry protocol (3 rounds × SECURE+COMMUNITY) + no volume (all datacenters)
+// means 5 cards × 14+ datacenters × 2 cloud types = massive scheduling pool.
 // IDs verified against RunPod POST /pods gpuTypeIds enum (docs.runpod.io/references/gpu-types).
 const DEFAULT_GPU_TYPE_IDS: readonly string[] = [
-  // — 48GB tier (target) —
   "NVIDIA RTX A6000",              // 48GB, ~$0.33/hr — cheapest, high availability
   "NVIDIA A40",                    // 48GB, ~$0.35/hr — older but plentiful
   "NVIDIA L40",                    // 48GB, ~$0.69/hr
   "NVIDIA RTX 6000 Ada Generation", // 48GB, ~$0.74/hr
   "NVIDIA L40S",                   // 48GB, ~$0.79/hr
-  // — 80GB tier (last resort) —
-  "NVIDIA A100 80GB PCIe",         // 80GB, ~$1.64/hr
-  "NVIDIA A100-SXM4-80GB",         // 80GB, ~$1.64/hr
-  "NVIDIA H100 PCIe",              // 80GB, ~$2.49/hr
-  "NVIDIA H100 80GB HBM3",         // 80GB, ~$3.49/hr
 ] as const;
 
 // Pod env vars forwarded from Railway — these are the keys the worker reads.
@@ -180,24 +175,14 @@ export async function startPod(options: StartPodOptions = {}): Promise<PodHandle
   const dataCenterId = options.dataCenterId ?? process.env.RUNPOD_DATACENTER_ID;
   const namePrefix = options.namePrefix ?? "sovereign-worker";
 
-  // S80: Volume RE-ENABLED for model caching (FLUX ~12GB + XTTS ~2GB).
-  // Without the volume, every pod create redownloads all models from HuggingFace
-  // at full GPU billing rates (~$0.25-0.40 per cold start). With the volume,
-  // models persist across pod creates and cold start drops from ~8min to ~1-2min.
-  //
-  // Trade-off: volume pins scheduling to its datacenter (US-KS-2). Accepted
-  // because (a) the volume is already paid for, (b) COMMUNITY cloud has good
-  // availability in US-KS-2, (c) testing burns multiple pod creates and the
-  // savings are significant.
-  //
-  // Speaker WAVs are STILL baked into the Docker image (S76 change preserved).
-  // The volume is used ONLY as a model weight cache via HF_HOME.
-  //
-  // This is TEMPORARY through testing and initial production batches. Evaluate
-  // monthly: if batches are stable and infrequent (1-2x/week), volume-free
-  // may be cheaper ($0.25/batch download vs $3.50/mo volume). If batches are
-  // frequent or testing continues, volume saves money.
-  const noVolume = options.noVolume ?? false;
+  // S93: Volume DROPPED. Trade-off analysis:
+  //   With volume: ~$0.55/batch, pinned to US-KS-2 only → GPU timeout failures.
+  //   Without volume: ~$0.58/batch (+$0.03), schedules across ALL 14+ datacenters.
+  // $0.03/batch penalty is negligible. Scheduling across all datacenters eliminates
+  // the "no GPU available" failures that killed 50% of the last batch run.
+  // Speaker WAVs baked into Docker image (S76). Models download to container disk.
+  // Cold start ~8min (model download) vs ~2min (cached) — acceptable for 96min batch.
+  const noVolume = options.noVolume ?? true;
   const networkVolumeId =
     options.networkVolumeId ??
     process.env.RUNPOD_NETWORK_VOLUME_ID ??
@@ -220,6 +205,13 @@ export async function startPod(options: StartPodOptions = {}): Promise<PodHandle
     forwardedEnv["HF_HOME"] = "/runpod-volume/cache/huggingface";
     forwardedEnv["TORCH_HOME"] = "/runpod-volume/cache/torch";
     forwardedEnv["XDG_CACHE_HOME"] = "/runpod-volume/cache";
+  } else {
+    // S93: Safety — if Railway has stale HF_HOME pointing to /runpod-volume/,
+    // the worker would try to write models to a non-existent mount and crash.
+    // Force container-disk paths so the worker's defaults take over cleanly.
+    delete forwardedEnv["HF_HOME"];
+    delete forwardedEnv["TORCH_HOME"];
+    delete forwardedEnv["XDG_CACHE_HOME"];
   }
 
   // S76: Retry protocol — try SECURE first, fall back to COMMUNITY, wait, retry.

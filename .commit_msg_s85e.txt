@@ -1,0 +1,12 @@
+S85: Rewrite Task 7.5 with verified facts — correct stale assumptions
+
+CORRECTIONS:
+- YouTube videos.insert = 100 units (was 1600, changed Dec 2025).
+  6 uploads = 600 units = 6% of 10K daily quota. NOT a bottleneck.
+- Buffer = YouTube Shorts ONLY. No long-form. Pipeline already correct:
+  Step 3 uploads long-form DIRECT to YouTube API, Step 8 schedules
+  shorts+social through Buffer.
+- Anthropic Tier 1: 50 RPM, 30K ITPM. 10s call spacing keeps us safe.
+- Batch capped at 6 videos (3 Ace + 3 TCF) per Architect directive.
+- 42 total LLM calls per batch, ~$0.06-0.12 cost, ~4 min pre-gen time.
+- Full distribution math verified against vidrush-orchestrator.ts code.

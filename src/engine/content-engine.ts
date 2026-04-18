@@ -7,7 +7,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { LLMProvider } from "../types";
-import { bufferGraphQL, BUFFER_ORG_ID, isBufferQuotaExhausted, BufferQuotaExhaustedError } from "./buffer-graphql";
+import { bufferGraphQL, BUFFER_ORG_ID, isBufferQuotaExhausted, BufferQuotaExhaustedError, getBufferChannels } from "./buffer-graphql";
 
 // ── Constants ──
 
@@ -376,33 +376,25 @@ async function generateContentImage(
 // Single rate limiter across all Buffer consumers.
 
 // ── Channel Discovery & Caching ──
+// SESSION 89: Now backed by shared cache in buffer-graphql.ts (4h TTL).
+// This function categorizes the shared channel list into brand buckets.
+// The local brandMapCache avoids re-categorizing on every call but
+// the actual API call is handled once by getBufferChannels().
 
 let cachedChannelMap: BrandChannelMap | null = null;
 let channelCacheTimestamp = 0;
-const CHANNEL_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour — channels don't change mid-run
+const CHANNEL_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // Match shared cache TTL
 
 /**
  * Fetch all Buffer channels and categorize by brand.
- * Uses known account names to sort channels into Ace Richie vs Containment Field.
+ * SESSION 89: Delegates to shared getBufferChannels() — zero redundant API calls.
  */
 export async function discoverChannels(): Promise<BrandChannelMap> {
   if (cachedChannelMap && Date.now() - channelCacheTimestamp < CHANNEL_CACHE_TTL_MS) return cachedChannelMap;
 
-  const orgId = BUFFER_ORG_ID;
-  const query = `
-    query GetChannels {
-      channels(input: { organizationId: "${orgId}" }) {
-        id
-        name
-        displayName
-        service
-      }
-    }
-  `;
-
   try {
-    const data = await bufferGraphQL(query);
-    const channels: BufferChannel[] = data?.channels || [];
+    // SESSION 89: Use shared channel cache from buffer-graphql.ts
+    const channels = await getBufferChannels();
 
     if (channels.length === 0) {
       throw new Error("No Buffer channels found. Check BUFFER_API_KEY and Buffer account.");
@@ -419,11 +411,11 @@ export async function discoverChannels(): Promise<BrandChannelMap> {
     for (const ch of channels) {
       const nameCheck = `${ch.name} ${ch.displayName || ""}`;
       if (cfPatterns.test(nameCheck)) {
-        map.containment_field.push(ch);
+        map.containment_field.push(ch as BufferChannel);
       } else if (acePatterns.test(nameCheck)) {
-        map.ace_richie.push(ch);
+        map.ace_richie.push(ch as BufferChannel);
       } else {
-        map.ace_richie.push(ch);
+        map.ace_richie.push(ch as BufferChannel);
       }
     }
 

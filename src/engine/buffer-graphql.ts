@@ -4,8 +4,15 @@
 // SESSION 87: Adaptive pacing via RateLimit-Remaining/Reset headers.
 //             Quota-exhaustion is now a typed error so consumers can
 //             degrade gracefully instead of crashing entire sweeps.
+// SESSION 89: Daily budget tracker (250 calls/24h on Essentials plan).
+//             Shared channel cache — all consumers use getChannelServiceMap()
+//             instead of making redundant channel discovery API calls.
 //
-// Buffer GraphQL limits (third-party): 100 requests / 15 minutes.
+// Buffer API limits (Essentials plan):
+//   100 requests / 15 minutes (rate limit)
+//   250 requests / 24 hours   (daily budget — the real constraint)
+//   7,500 requests / 30 days  (monthly cap)
+//
 // Base pace = 1 request every 10s (6/min, 90/15min with headroom).
 // Adaptive: when RateLimit-Remaining < 15, pace widens to 15s.
 //           when RateLimit-Remaining < 5, pace widens to 30s.
@@ -26,6 +33,45 @@ let adaptiveIntervalMs = BASE_INTERVAL_MS;
 let quotaExhaustedUntil = 0;          // Unix ms — if Date.now() < this, quota is blown
 let lastRateLimitRemaining = -1;      // -1 = unknown
 let lastRateLimitReset = "";          // ISO 8601
+
+// ── SESSION 89: Daily budget tracker ──
+// Buffer Essentials = 250 calls / 24 hours. We track locally to avoid burning the budget blind.
+const DAILY_BUDGET = 250;
+const DAILY_BUDGET_WARN = 200;        // Start warning at 200
+const DAILY_BUDGET_HARD_STOP = 240;   // Reserve 10 for emergencies (discovery, analytics)
+const dailyCallLog: number[] = [];    // Timestamps of API calls in last 24h
+
+function recordDailyCall(): void {
+  const now = Date.now();
+  dailyCallLog.push(now);
+  // Prune entries older than 24h
+  const cutoff = now - 24 * 60 * 60 * 1000;
+  while (dailyCallLog.length > 0 && dailyCallLog[0] < cutoff) {
+    dailyCallLog.shift();
+  }
+}
+
+/** How many Buffer API calls have been made in the last 24 hours */
+export function getDailyCallCount(): number {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  while (dailyCallLog.length > 0 && dailyCallLog[0] < cutoff) {
+    dailyCallLog.shift();
+  }
+  return dailyCallLog.length;
+}
+
+/** Check if daily budget is approaching exhaustion */
+export function isDailyBudgetExhausted(): boolean {
+  return getDailyCallCount() >= DAILY_BUDGET_HARD_STOP;
+}
+
+// ── SESSION 89: Shared channel cache ──
+// Single cache for ALL consumers — eliminates redundant discovery API calls.
+// social-scheduler, content-engine, buffer-analytics all use getChannelServiceMap().
+interface ChannelInfo { id: string; service: string; name: string; displayName?: string; }
+let channelCache: ChannelInfo[] | null = null;
+let channelCacheTimestamp = 0;
+const CHANNEL_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours — channels barely ever change
 
 /**
  * Typed error for quota exhaustion — consumers can catch this specifically
@@ -126,6 +172,21 @@ export async function bufferGraphQL(
     );
   }
 
+  // SESSION 89: Daily budget check — stop before hitting Buffer's 250/day hard cap
+  const dailyCount = getDailyCallCount();
+  if (dailyCount >= DAILY_BUDGET_HARD_STOP) {
+    console.warn(
+      `🛑 [BufferGQL] Daily budget exhausted (${dailyCount}/${DAILY_BUDGET} calls in 24h). ` +
+      `Reserving ${DAILY_BUDGET - DAILY_BUDGET_HARD_STOP} calls for emergencies. Blocking until budget resets.`
+    );
+    throw new BufferQuotaExhaustedError(
+      Math.max(3600, Math.ceil((dailyCallLog[0] + 24 * 60 * 60 * 1000 - Date.now()) / 1000))
+    );
+  }
+  if (dailyCount >= DAILY_BUDGET_WARN && dailyCount % 10 === 0) {
+    console.warn(`⚠️ [BufferGQL] Daily budget warning: ${dailyCount}/${DAILY_BUDGET} calls used in last 24h`);
+  }
+
   const token = getBufferToken();
 
   const body: Record<string, unknown> = { query };
@@ -150,6 +211,9 @@ export async function bufferGraphQL(
       },
       body: JSON.stringify(body),
     });
+
+    // SESSION 89: Track this call against daily budget
+    recordDailyCall();
 
     // SESSION 87: Always read rate limit headers for adaptive pacing
     updateRateLimitState(resp);
@@ -231,3 +295,61 @@ export async function bufferGraphQL(
 
 // Re-export constants for consumers that need org ID
 export const BUFFER_ORG_ID = process.env.BUFFER_ORG_ID || "69c613a244dbc563b3e05050";
+
+// ── SESSION 89: Shared Channel Discovery ──
+// Single cached discovery for ALL Buffer consumers. Eliminates redundant API calls
+// from social-scheduler, content-engine, and buffer-analytics each doing their own lookups.
+
+/**
+ * Get all Buffer channels (cached, shared across all consumers).
+ * Returns raw channel array — consumers can filter by brand/service as needed.
+ * Cache TTL: 4 hours. Only makes 1 API call per TTL period.
+ */
+export async function getBufferChannels(): Promise<ChannelInfo[]> {
+  if (channelCache && Date.now() - channelCacheTimestamp < CHANNEL_CACHE_TTL_MS) {
+    return channelCache;
+  }
+
+  const orgId = BUFFER_ORG_ID;
+  const data = await bufferGraphQL(`
+    query GetChannels {
+      channels(input: { organizationId: "${orgId}" }) {
+        id
+        name
+        displayName
+        service
+      }
+    }
+  `);
+
+  const channels: ChannelInfo[] = data?.channels || [];
+  if (channels.length > 0) {
+    channelCache = channels;
+    channelCacheTimestamp = Date.now();
+    console.log(`📡 [BufferGQL] Channel cache refreshed: ${channels.length} channels (TTL: ${CHANNEL_CACHE_TTL_MS / 3600000}h)`);
+  }
+  return channels;
+}
+
+/**
+ * Get a Map of channelId → service type (e.g., "youtube", "instagram", "facebook").
+ * Used by social-scheduler for smart routing (YouTube image filter, etc.)
+ * Uses shared channel cache — zero extra API calls in most cases.
+ */
+export async function getChannelServiceMap(): Promise<Map<string, string>> {
+  const channels = await getBufferChannels();
+  const map = new Map<string, string>();
+  for (const ch of channels) {
+    map.set(ch.id, (ch.service || "").toLowerCase());
+  }
+  return map;
+}
+
+/** Warm the channel cache at boot — call once during init. Not fatal if it fails. */
+export async function warmChannelCache(): Promise<void> {
+  try {
+    await getBufferChannels();
+  } catch (err: any) {
+    console.warn(`[BufferGQL] Boot channel cache warm failed (will retry): ${err.message}`);
+  }
+}

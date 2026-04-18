@@ -78,6 +78,7 @@ import { pollYouTubeComments } from "./proactive/youtube-comment-watcher";
 
 // ── Content Engine ──
 import { dailyContentProduction, distributionSweep, contentEngineStatus, discoverChannels, nukeBufferQueue } from "./engine/content-engine";
+import { warmChannelCache } from "./engine/buffer-graphql";
 
 // ── Brand Niche Allowlist (Phase 3 Task 3.2) ──
 // Intake-layer guard: Alfred's seeds and the pipeline entry both consume these
@@ -1633,10 +1634,8 @@ async function main() {
 
   const contentEngineFiredDate = { production: "" };
 
-  // Pre-warm channel cache at boot
-  discoverChannels().catch((err: any) =>
-    console.warn(`[ContentEngine] Boot channel discovery failed (will retry): ${err.message}`)
-  );
+  // SESSION 89: Pre-warm shared channel cache at boot (1 API call, shared by all consumers)
+  warmChannelCache();
 
   // Daily Content Production (1:30 PM CDT = 18:30 UTC — after Vector sweep + Veritas clear)
   scheduler.add({

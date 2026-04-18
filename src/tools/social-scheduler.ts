@@ -4,7 +4,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { Tool, ToolDefinition } from "../types";
-import { bufferGraphQL, BUFFER_ORG_ID } from "../engine/buffer-graphql";
+import { bufferGraphQL, BUFFER_ORG_ID, getChannelServiceMap, getBufferChannels } from "../engine/buffer-graphql";
 
 
 // ── content_transmissions payload sanitizer ──
@@ -84,23 +84,10 @@ export class SocialSchedulerListProfilesTool implements Tool {
 
   async execute(): Promise<string> {
     try {
-      const query = `
-        query GetChannels {
-          channels(input: { organizationId: "${BUFFER_ORG_ID}" }) {
-            id
-            name
-            displayName
-            service
-            avatar
-            isQueuePaused
-          }
-        }
-      `;
+      // SESSION 89: Use shared channel cache — zero extra API calls
+      const channels = await getBufferChannels();
 
-      const data = await bufferGraphQL(query);
-      const channels = data?.channels;
-
-      if (!Array.isArray(channels) || channels.length === 0) {
+      if (channels.length === 0) {
         return "No Buffer channels found. Connect social accounts at buffer.com/manage.";
       }
 
@@ -109,7 +96,6 @@ export class SocialSchedulerListProfilesTool implements Tool {
         service: c.service,
         name: c.name,
         displayName: c.displayName,
-        queuePaused: c.isQueuePaused,
       }));
 
       return JSON.stringify(summary, null, 2);
@@ -198,23 +184,11 @@ export class SocialSchedulerPostTool implements Tool {
       const results: string[] = [];
 
       // ── PRE-FLIGHT: Resolve channel service types for smart routing ──
+      // SESSION 89: Uses shared channel cache — zero extra API calls.
       // YouTube rejects image-only payloads (requires video). Facebook requires type: "post".
       let channelServiceMap: Map<string, string> = new Map();
       try {
-        const chanQuery = `
-          query GetChannels {
-            channels(input: { organizationId: "${BUFFER_ORG_ID}" }) {
-              id
-              service
-            }
-          }
-        `;
-        const chanData = await bufferGraphQL(chanQuery);
-        if (Array.isArray(chanData?.channels)) {
-          for (const ch of chanData.channels) {
-            channelServiceMap.set(ch.id, (ch.service || "").toLowerCase());
-          }
-        }
+        channelServiceMap = await getChannelServiceMap();
       } catch (chanErr: any) {
         console.warn(`[SocialScheduler] Channel lookup failed — posting blind: ${chanErr.message}`);
       }

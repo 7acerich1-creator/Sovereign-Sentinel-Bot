@@ -1296,7 +1296,8 @@ async function generateThumbnail(
   niche: string
 ): Promise<string | null> {
   const thumbBasePath = `${FACELESS_DIR}/${jobId}_thumb_base.png`;
-  const thumbFinalPath = `${FACELESS_DIR}/${jobId}_thumbnail.jpg`;
+  // SESSION 85: Must be _longform_thumb.jpg to survive cleanupJobFiles
+  const thumbFinalPath = `${FACELESS_DIR}/${jobId}_longform_thumb.jpg`;
 
   const thumbnailText = (script.thumbnail_text || script.title || "")
     .toUpperCase()
@@ -3093,7 +3094,9 @@ export async function produceFacelessVideo(
       const thumbResp = await fetch(artifacts.thumbnailUrl);
       if (thumbResp.ok) {
         const thumbBuf = Buffer.from(await thumbResp.arrayBuffer());
-        localThumbPath = `${FACELESS_DIR}/${jobId}_thumbnail.jpg`;
+        // SESSION 85: Was _thumbnail.jpg — cleanupJobFiles only preserves _longform_thumb.jpg.
+        // Old name got deleted before YouTube upload could consume it → gray placeholder.
+        localThumbPath = `${FACELESS_DIR}/${jobId}_longform_thumb.jpg`;
         writeFileSync(localThumbPath, thumbBuf);
         console.log(`🖼️ [FacelessFactory] Thumbnail downloaded (${(thumbBuf.length / 1024).toFixed(0)}KB) → ${localThumbPath}`);
       } else {

@@ -43,6 +43,9 @@ VIDEO_PRESET = "medium"   # quality/speed balance — "slow" is better but 3x ti
 VIDEO_CRF = "20"          # near-lossless, ~5-8 MB/min
 AUDIO_CODEC = "aac"
 AUDIO_BITRATE = "192k"
+# SESSION 85: Intermediate audio stays lossless PCM to prevent generation loss.
+# AAC encode happens ONCE at the final mux only.
+INTERMEDIATE_AUDIO_CODEC = "pcm_s16le"
 
 # Ken Burns parameters
 KB_ZOOM_MIN = 1.00  # start scale
@@ -425,11 +428,14 @@ def _mix_audio(
     log.info("audio_mix_start", brand=brand, video_duration_s=round(video_duration_s, 1))
 
     # ── Step 1: Extract narration audio ──
+    # SESSION 85: Video now carries lossless PCM (not AAC), so extraction is
+    # a format conversion only (24kHz mono → 48kHz stereo), no lossy decode.
+    # 48kHz is optimal for the single AAC encode that happens at final mux.
     narration_wav = os.path.join(job_dir, "narration_raw.wav")
     try:
         subprocess.run(
             ["ffmpeg", "-y", "-i", video_path,
-             "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
+             "-vn", "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "2",
              narration_wav],
             capture_output=True, text=True, timeout=120, check=True,
         )
@@ -527,11 +533,12 @@ def _mix_audio(
     filter_graph = ";".join(filter_parts)
 
     # ── Step 3: Run the mix ──
+    # SESSION 85: 48kHz throughout mixing — optimal for the single AAC encode at final mux.
     mixed_audio = os.path.join(job_dir, "audio_mixed.wav")
     mix_cmd = ["ffmpeg", "-y"] + inputs + [
         "-filter_complex", filter_graph,
         "-map", "[mixed]",
-        "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
+        "-acodec", "pcm_s16le", "-ar", "48000", "-ac", "2",
         mixed_audio,
     ]
 
@@ -545,6 +552,8 @@ def _mix_audio(
         return video_path
 
     # ── Step 4: Re-mux mixed audio onto video ──
+    # SESSION 85: This is the ONE AND ONLY lossy audio encode in the entire pipeline.
+    # All upstream audio was lossless PCM. Final AAC at 48kHz/192k = broadcast quality.
     output_path = os.path.join(job_dir, "final_mixed.mp4")
     mux_cmd = [
         "ffmpeg", "-y",
@@ -553,7 +562,7 @@ def _mix_audio(
         "-map", "0:v",
         "-map", "1:a",
         "-c:v", "copy",
-        "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE,
+        "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE, "-ar", "48000",
         "-movflags", "+faststart",
         "-shortest",
         output_path,
@@ -795,16 +804,16 @@ def _render_opening_sequence(
         # No brand card available -- typewriter is the full opening
         opening_video_only = typewriter_clip
 
-    # Add silent audio track to opening clip (matches scene clip audio format)
-    opening_path = os.path.join(job_dir, "opening_sequence.mp4")
+    # Add silent audio track to opening clip (matches scene clip PCM format)
+    # SESSION 85: MKV + PCM to match scene clips. Mono 24kHz matches XTTS output.
+    opening_path = os.path.join(job_dir, "opening_sequence.mkv")
     silent_cmd = [
         "ffmpeg", "-y",
         "-i", opening_video_only,
-        "-f", "lavfi", "-i", f"anullsrc=channel_layout=stereo:sample_rate=44100",
+        "-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=24000",
         "-c:v", "copy",
-        "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE,
+        "-c:a", INTERMEDIATE_AUDIO_CODEC,
         "-shortest",
-        "-movflags", "+faststart",
         opening_path,
     ]
     result = subprocess.run(silent_cmd, capture_output=True, text=True, timeout=30)
@@ -933,7 +942,8 @@ def compose_video(
         img = scene_images[i]
         wav = scene_wavs[i]
         dur = durations_s[i]
-        clip_path = os.path.join(job_dir, f"clip_{i:03d}.mp4")
+        # SESSION 85: MKV container for lossless PCM audio. AAC encode only at final output.
+        clip_path = os.path.join(job_dir, f"clip_{i:03d}.mkv")
 
         if dur <= 0:
             log.warning("compose_skip_zero_dur", index=i)
@@ -946,6 +956,8 @@ def compose_video(
         kb_filter = _ken_burns_filter(dur, i)
 
         # Build the scene clip: Ken Burns on image, muxed with its audio
+        # SESSION 85: Audio stays lossless PCM — no AAC until final output.
+        # Eliminates 4x generation-loss re-encoding that made speech robotic.
         cmd = [
             "ffmpeg", "-y",
             "-loop", "1", "-i", img,        # image input (looped)
@@ -957,7 +969,7 @@ def compose_video(
             f"{kb_filter},format=yuv420p[v]",
             "-map", "[v]", "-map", "1:a",
             "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
-            "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE,
+            "-c:a", INTERMEDIATE_AUDIO_CODEC,
             "-t", f"{dur:.3f}",
             "-shortest",
             clip_path,
@@ -983,7 +995,7 @@ def compose_video(
                 f"[0:v]scale={OUT_WIDTH}:{OUT_HEIGHT}:flags=lanczos,format=yuv420p[v]",
                 "-map", "[v]", "-map", "1:a",
                 "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
-                "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE,
+                "-c:a", INTERMEDIATE_AUDIO_CODEC,
                 "-t", f"{dur:.3f}",
                 "-shortest",
                 clip_path,
@@ -1007,15 +1019,15 @@ def compose_video(
         for clip in scene_clips:
             f.write(f"file '{clip}'\n")
 
-    final_path = os.path.join(job_dir, "final.mp4")
+    # SESSION 85: Concat stays MKV+PCM — no lossy audio encode yet.
+    final_path = os.path.join(job_dir, "final.mkv")
 
     concat_cmd = [
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0",
         "-i", concat_list_path,
         "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
-        "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE,
-        "-movflags", "+faststart",  # web-optimized — allows streaming before full download
+        "-c:a", INTERMEDIATE_AUDIO_CODEC,
         final_path,
     ]
 
@@ -1043,14 +1055,14 @@ def compose_video(
             drift_s=round(drift_s, 2),
             msg="Video/audio duration mismatch -- trimming to audio master",
         )
-        trimmed_path = os.path.join(job_dir, "final_trimmed.mp4")
+        # SESSION 85: Trim stays MKV+PCM — no lossy audio encode yet.
+        trimmed_path = os.path.join(job_dir, "final_trimmed.mkv")
         trim_cmd = [
             "ffmpeg", "-y",
             "-i", final_path,
             "-t", f"{audio_master_dur:.3f}",
             "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
-            "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE,
-            "-movflags", "+faststart",
+            "-c:a", INTERMEDIATE_AUDIO_CODEC,
             trimmed_path,
         ]
         trim_result = subprocess.run(trim_cmd, capture_output=True, text=True, timeout=600)

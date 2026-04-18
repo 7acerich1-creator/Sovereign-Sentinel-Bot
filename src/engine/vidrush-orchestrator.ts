@@ -1397,6 +1397,9 @@ export interface PipelineOptions {
   // directly and proceeds to Steps 3-8 (YouTube upload, shorts, Buffer distribution).
   // Used by batch-producer.ts to feed pod-produced videos into the distribution pipeline.
   preProduced?: import("./faceless-factory").FacelessResult;
+  // SESSION 86: Scheduled YouTube publish time. ISO 8601. When set, video uploads
+  // as PRIVATE and auto-publishes at this time. Used by batch producer for 3-hour stagger.
+  scheduledPublishAt?: string;
 }
 
 export async function executeFullPipeline(
@@ -1585,7 +1588,7 @@ export async function executeFullPipeline(
       // hardcoded string. Tags field is still sent to the YouTube Data API (Buffer
       // strips it but the direct publisher path preserves it), and is ALSO smuggled
       // into the description via the "Related topics:" line for defense-in-depth.
-      const ytResult = await ytTool.execute({
+      const ytArgs: Record<string, unknown> = {
         local_path: facelessResult.localPath,
         video_url: facelessResult.videoUrl || "",
         title: facelessResult.title,
@@ -1596,7 +1599,13 @@ export async function executeFullPipeline(
         // Session 47 FIX 2: custom long-form pre-caption thumbnail (vignette + 60% bar + Bebas Neue title).
         // Empty string if the factory couldn't produce one — YouTube will fall back to auto-frame.
         thumbnail_path: facelessResult.thumbnailPath || "",
-      });
+      };
+      // SESSION 86: Batch scheduled publishing — stagger long-forms across the day
+      if (options?.scheduledPublishAt) {
+        ytArgs.scheduled_publish_at = options.scheduledPublishAt;
+        await progress("STEP 3/8", `📅 Scheduling publish at ${options.scheduledPublishAt}`);
+      }
+      const ytResult = await ytTool.execute(ytArgs);
 
       // Extract video ID from result
       const vidIdMatch = ytResult.match(/Video ID: ([\w-]+)/);
@@ -1678,11 +1687,10 @@ export async function executeFullPipeline(
           const clipPath = `${clipDir}/clip_${i.toString().padStart(2, "0")}.mp4`;
 
           // Audio-aware padding: add breathing room so clips don't cut mid-word.
-          // CRITICAL: YouTube Shorts rejects videos >60s. Curator caps at 59s pre-padding,
-          // but PAD_BEFORE + PAD_AFTER can push over 60s. Final duration is hard-capped at 59s.
+          // SESSION 86: YouTube Shorts expanded to 3 minutes (180s). Hard cap updated.
           const PAD_BEFORE = 0.3;
           const PAD_AFTER = 1.5;
-          const MAX_SHORT_DURATION = 59; // YouTube Shorts hard limit
+          const MAX_SHORT_DURATION = 179; // YouTube Shorts 3-minute limit (180s) minus 1s safety
           const paddedStart = Math.max(0, short.start_ts - PAD_BEFORE);
           const rawPaddedEnd = Math.min(
             curatorResult.long_form_duration_s,

@@ -524,6 +524,10 @@ export class YouTubeLongFormPublishTool implements Tool {
         type: "string",
         description: "Optional local path to a custom JPG/PNG thumbnail. Uploaded via YouTube thumbnails.set after the video upload succeeds. Skipping this lets YouTube auto-pick a frame (CTR killer).",
       },
+      scheduled_publish_at: {
+        type: "string",
+        description: "Optional ISO 8601 timestamp for scheduled publishing. When set, video uploads as PRIVATE and auto-publishes at this time. Format: 2026-04-19T15:00:00Z",
+      },
     },
     required: ["title", "description"],
   };
@@ -577,6 +581,7 @@ export class YouTubeLongFormPublishTool implements Tool {
     const tags = args.tags ? String(args.tags).split(",").map((t) => t.trim()) : [];
     const niche = args.niche ? String(args.niche) : "unknown";
     const thumbnailPath = args.thumbnail_path ? String(args.thumbnail_path) : null;
+    const scheduledPublishAt = args.scheduled_publish_at ? String(args.scheduled_publish_at) : null;
 
     if (!localPath && !videoUrl) {
       return "❌ Either local_path or video_url is required.";
@@ -611,6 +616,18 @@ export class YouTubeLongFormPublishTool implements Tool {
       }
 
       // Initialize resumable upload — NO #Shorts, category 27 (Education) for long-form
+      // SESSION 86: publishAt support for batch scheduling. When set, video uploads as
+      // PRIVATE and YouTube auto-publishes at the specified time. Standard YouTube API
+      // feature used by every creator tool — no AI flags, no ban risk.
+      const statusBlock: Record<string, unknown> = {
+        privacyStatus: scheduledPublishAt ? "private" : "public",
+        selfDeclaredMadeForKids: false,
+      };
+      if (scheduledPublishAt) {
+        statusBlock.publishAt = scheduledPublishAt;
+        console.log(`📅 [YouTubeLongForm] Scheduled publish: ${scheduledPublishAt} (uploading as private)`);
+      }
+
       const metadata = {
         snippet: {
           title,  // Clean title, no #Shorts injected
@@ -618,10 +635,7 @@ export class YouTubeLongFormPublishTool implements Tool {
           tags,
           categoryId: "27", // Education — better for long-form sovereign content
         },
-        status: {
-          privacyStatus: "public",
-          selfDeclaredMadeForKids: false,
-        },
+        status: statusBlock,
       };
 
       const initResp = await fetch(

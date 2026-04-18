@@ -51,10 +51,12 @@ export interface CuratorResult {
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const MAX_SHORTS = 4;
+const MAX_SHORTS = 6;
 const MIN_SHORTS = 0; // If curator returns fewer than 2, that's acceptable
-const MAX_SHORT_DURATION_S = 56; // SESSION 84: Was 59 — PAD_AFTER (1.5s) + PAD_BEFORE (0.3s) overflow to 60s+ causing ffmpeg hard-truncation mid-word. 56 + 1.8 padding = 57.8s max, safely under YouTube's 60s limit.
-const MIN_SHORT_DURATION_S = 15; // Below this is too short to hook
+// SESSION 86: YouTube Shorts expanded to 3 minutes (180s) in late 2024.
+// No arbitrary floor — a 5-second value-bomb is valid content. Quality decides, not duration.
+const MAX_SHORT_DURATION_S = 175; // 175 + padding = ~177s, safely under 180s YouTube limit
+const MIN_SHORT_DURATION_S = 3; // Only reject true glitches (sub-3s = something broke)
 
 const CHANNEL_HANDLES: Record<string, string> = {
   ace_richie: "@ace_richie77",
@@ -81,16 +83,17 @@ function buildCuratorPrompt(
   const totalDur = cumulativeTs;
   const channelHandle = CHANNEL_HANDLES[script.brand] || "@ace_richie77";
 
-  return `You are a YouTube Shorts curator for a faceless documentary channel. Your job is to identify the 3-4 STRONGEST standalone moments from a long-form script that would make viewers click through to the full video on the channel.
+  return `You are a YouTube Shorts curator for a faceless documentary channel. Your job is to identify the 5-6 STRONGEST standalone moments from a long-form script that would make viewers click through to the full video on the channel.
 
 RULES:
 1. Each short MUST stand alone — a viewer who has never seen the long-form should understand and be hooked.
-2. Each short must be 15-59 seconds (YouTube Shorts limit).
+2. YouTube Shorts supports up to 3 minutes. A short can be 5 seconds or 2 minutes — duration does NOT matter. What matters is that the moment DELIVERS VALUE as a standalone piece. A 5-second insight that hits hard is better than a padded 45-second clip.
 3. Shorts must NOT overlap in segment ranges.
-4. Prioritize CLIMAX moments, HEAD FAKES (where the narrative misdirects then corrects), and EMOTIONAL PEAKS over introductions or transitions.
+4. Prioritize: CLIMAX moments, HEAD FAKES (narrative misdirection then correction), EMOTIONAL PEAKS, SINGLE-LINE TRUTH BOMBS (even if only one segment), and ACTIONABLE INSIGHTS (itemized lists, frameworks, techniques).
 5. The hook_text is the first thing spoken — it must be a scroll-stopping statement or question, NOT "In this video" or "Let me explain."
-6. Conservative > over-cutting. If only 2 moments are genuinely strong, return 2. If only 1, return 1. Never pad with weak clips.
+6. Quality > quantity. If only 3 moments are genuinely strong, return 3. Never pad with weak clips. But a typical 12-16 segment long-form should yield 5-6 strong moments — look harder before settling for fewer.
 7. CTA overlay for every short: "Full video on the channel — ${channelHandle}"
+8. Mix durations — some shorts should be punchy (1-2 segments, under 30s), others can be deeper dives (3-4 segments, 60-120s). Variety in pacing keeps the channel from feeling algorithmic.
 
 SCRIPT (${script.segments.length} segments, ${totalDur.toFixed(0)}s total):
 Title: "${script.title}"
@@ -109,7 +112,7 @@ Return ONLY a JSON array (no markdown, no explanation). Each element:
   "confidence": <0.0 to 1.0>
 }
 
-Return between 1 and 4 objects. Highest confidence first.`;
+Return between 1 and 6 objects. Highest confidence first.`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

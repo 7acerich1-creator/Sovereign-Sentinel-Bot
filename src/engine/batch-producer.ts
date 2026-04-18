@@ -318,6 +318,7 @@ async function distributeVideo(
   llm: LLMProvider,
   video: ProducedVideo,
   onProgress?: (msg: string) => Promise<void>,
+  scheduledPublishAt?: string,
 ): Promise<{ success: boolean; error?: string; distMs: number }> {
   const label = `${video.brand === "ace_richie" ? "ACE" : "TCF"}/${video.niche}`;
   const t0 = Date.now();
@@ -375,6 +376,7 @@ async function distributeVideo(
       {
         niche: video.niche,
         preProduced,
+        scheduledPublishAt,
       },
     );
 
@@ -465,10 +467,27 @@ export async function produceBatch(
   }
 
   // ── Phase 3: Distribute each video ──
-  await onProgress?.(`\n📡 PHASE 3: Distribution (${produced.length} videos → YouTube + shorts + Buffer)...`);
+  // SESSION 86: Stagger YouTube publish times 3 hours apart. Videos upload as
+  // PRIVATE with publishAt, then YouTube auto-publishes at the scheduled time.
+  // First video publishes 1 hour from now (gives upload time to complete),
+  // then every 3 hours after. 6 videos = 16 hours of staggered content.
+  const PUBLISH_STAGGER_MS = 3 * 60 * 60 * 1000; // 3 hours
+  const FIRST_PUBLISH_OFFSET_MS = 60 * 60 * 1000; // 1 hour from now
+  const publishBaseTime = Date.now() + FIRST_PUBLISH_OFFSET_MS;
 
-  for (const video of produced) {
-    const { success, error, distMs } = await distributeVideo(llm, video, onProgress);
+  await onProgress?.(`\n📡 PHASE 3: Distribution (${produced.length} videos → YouTube + shorts + Buffer)...`);
+  await onProgress?.(
+    `📅 YouTube publish schedule (3h stagger):\n` +
+    produced.map((v, i) => {
+      const t = new Date(publishBaseTime + i * PUBLISH_STAGGER_MS);
+      return `  ${i + 1}. ${v.brand === "ace_richie" ? "ACE" : "TCF"}/${v.niche} → ${t.toISOString().slice(0, 16)}Z`;
+    }).join("\n"),
+  );
+
+  for (let vi = 0; vi < produced.length; vi++) {
+    const video = produced[vi];
+    const publishAt = new Date(publishBaseTime + vi * PUBLISH_STAGGER_MS).toISOString();
+    const { success, error, distMs } = await distributeVideo(llm, video, onProgress, publishAt);
     if (success) {
       result.totalVideosDistributed++;
     } else if (error) {

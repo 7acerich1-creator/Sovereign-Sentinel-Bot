@@ -22,6 +22,7 @@ import random
 import re
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 
@@ -937,34 +938,34 @@ def compose_video(
     else:
         log.warning("compose_opening_skipped", reason="no hook text available")
 
-    # ── Stage 1: Per-scene Ken Burns clips ────────────────────────────────
-    for i in range(n_scenes):
+    # ── Stage 1: Per-scene Ken Burns clips (PARALLEL — Task 7.5b) ───────
+    # Each ffmpeg clip is CPU-bound (x264 + zoompan). Scenes are independent.
+    # Parallel assembly cuts wall-clock by ~3-4x on multi-core pods (H100 has
+    # many CPU cores alongside the GPU). Workers capped at 4 to avoid I/O
+    # thrashing on pod's NVMe.
+    CLIP_WORKERS = min(4, n_scenes)
+
+    def _build_scene_clip(i: int) -> Optional[str]:
+        """Build one Ken Burns scene clip. Returns clip path or None on failure."""
         img = scene_images[i]
         wav = scene_wavs[i]
         dur = durations_s[i]
-        # SESSION 85: MKV container for lossless PCM audio. AAC encode only at final output.
         clip_path = os.path.join(job_dir, f"clip_{i:03d}.mkv")
 
         if dur <= 0:
             log.warning("compose_skip_zero_dur", index=i)
-            continue
-
+            return None
         if not os.path.isfile(img):
             log.warning("compose_missing_image", index=i, path=img)
-            continue
+            return None
 
         kb_filter = _ken_burns_filter(dur, i)
 
-        # Build the scene clip: Ken Burns on image, muxed with its audio
-        # SESSION 85: Audio stays lossless PCM — no AAC until final output.
-        # Eliminates 4x generation-loss re-encoding that made speech robotic.
         cmd = [
             "ffmpeg", "-y",
-            "-loop", "1", "-i", img,        # image input (looped)
-            "-i", wav,                        # audio input
+            "-loop", "1", "-i", img,
+            "-i", wav,
             "-filter_complex",
-            # Scale image to 2x output res first (gives zoompan room to pan/zoom
-            # without hitting edges), then apply Ken Burns, then ensure pixel format
             f"[0:v]scale={OUT_WIDTH * 2}:{OUT_HEIGHT * 2}:flags=lanczos,"
             f"{kb_filter},format=yuv420p[v]",
             "-map", "[v]", "-map", "1:a",
@@ -978,15 +979,13 @@ def compose_video(
         log.info("compose_scene", index=i, duration_s=round(dur, 2))
         result = subprocess.run(
             cmd, capture_output=True, text=True,
-            timeout=max(120, int(dur * 10)),  # generous timeout
+            timeout=max(120, int(dur * 10)),
         )
         if result.returncode != 0:
             log.error(
-                "compose_scene_failed",
-                index=i,
+                "compose_scene_failed", index=i,
                 stderr=result.stderr[:500] if result.stderr else "",
             )
-            # Try a simpler fallback: static image + audio, no Ken Burns
             fallback_cmd = [
                 "ffmpeg", "-y",
                 "-loop", "1", "-i", img,
@@ -1006,9 +1005,34 @@ def compose_video(
             )
             if fallback_result.returncode != 0:
                 log.error("compose_fallback_failed", index=i)
-                continue
+                return None
 
-        scene_clips.append(clip_path)
+        return clip_path
+
+    t_clips = time.monotonic()
+    parallel_results: list[tuple[int, str]] = []
+    with ThreadPoolExecutor(max_workers=CLIP_WORKERS) as pool:
+        futures = {pool.submit(_build_scene_clip, i): i for i in range(n_scenes)}
+        for future in as_completed(futures):
+            idx = futures[future]
+            try:
+                clip = future.result()
+                if clip is not None:
+                    parallel_results.append((idx, clip))
+            except Exception as exc:
+                log.error("compose_clip_thread_error", index=idx, error=str(exc)[:300])
+
+    # Sort by index to restore scene order (as_completed returns in finish order)
+    parallel_results.sort(key=lambda x: x[0])
+    scene_clips.extend(clip for _, clip in parallel_results)
+
+    clip_elapsed = time.monotonic() - t_clips
+    log.info(
+        "compose_clips_parallel_done",
+        count=len(parallel_results),
+        workers=CLIP_WORKERS,
+        elapsed_s=round(clip_elapsed, 1),
+    )
 
     if not scene_clips:
         raise RuntimeError("compose: zero scene clips produced — cannot assemble video")

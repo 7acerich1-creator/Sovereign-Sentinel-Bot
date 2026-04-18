@@ -145,6 +145,11 @@ def generate_scene_images(
         prompt = scene["image_prompt"]
         out_path = os.path.join(job_dir, f"scene_{idx:03d}.png")
 
+        # SESSION 84: CLIP text encoder hard-caps at 77 tokens. LLM prompts
+        # routinely exceed this, causing silent array truncation → generation
+        # failures. Force-compress to 70 words (safely below 77 token boundary).
+        prompt = " ".join(prompt.split()[:70])
+
         t1 = time.monotonic()
         log.info("flux_scene_start", index=idx, prompt_len=len(prompt))
 

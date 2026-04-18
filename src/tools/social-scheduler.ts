@@ -399,8 +399,27 @@ export class SocialSchedulerPostTool implements Tool {
             }
           `;
 
-          const data = await bufferGraphQL(query);
-          const result = data?.createPost;
+          // SESSION 84: 3-tier exponential backoff on 429 at the per-post level.
+          // bufferGraphQL already retries internally, but carpet-bombing across
+          // channels can still trigger rate limits between calls. This outer
+          // retry catches any 429-sourced error that escapes the inner loop.
+          let postData: any;
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              postData = await bufferGraphQL(query);
+              break; // success — exit retry loop
+            } catch (retryErr: any) {
+              if (retryErr.message?.includes("RATE_LIMIT") || retryErr.message?.includes("429")) {
+                const sleepMs = Math.pow(2, attempt) * 2000;
+                console.warn(`⚠️ [SocialScheduler] 429 on ${channelId} — retry ${attempt + 1}/3 in ${sleepMs / 1000}s`);
+                await new Promise((r) => setTimeout(r, sleepMs));
+                if (attempt === 2) throw retryErr; // exhausted — rethrow
+                continue;
+              }
+              throw retryErr; // non-429 error — don't retry
+            }
+          }
+          const result = postData?.createPost;
 
           if (result?.post) {
             results.push(`✅ ${channelId}: Post created (ID: ${result.post.id})`);

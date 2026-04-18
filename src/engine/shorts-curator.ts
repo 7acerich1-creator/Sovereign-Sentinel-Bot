@@ -53,7 +53,7 @@ export interface CuratorResult {
 
 const MAX_SHORTS = 4;
 const MIN_SHORTS = 0; // If curator returns fewer than 2, that's acceptable
-const MAX_SHORT_DURATION_S = 59; // YouTube Shorts limit
+const MAX_SHORT_DURATION_S = 56; // SESSION 84: Was 59 — PAD_AFTER (1.5s) + PAD_BEFORE (0.3s) overflow to 60s+ causing ffmpeg hard-truncation mid-word. 56 + 1.8 padding = 57.8s max, safely under YouTube's 60s limit.
 const MIN_SHORT_DURATION_S = 15; // Below this is too short to hook
 
 const CHANNEL_HANDLES: Record<string, string> = {

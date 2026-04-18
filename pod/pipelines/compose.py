@@ -516,8 +516,11 @@ def _mix_audio(
     # each layer keeps its intended volume (narration 0dB, music -18dB, etc.).
     n_layers = len(mix_inputs)
     mix_input_str = "".join(mix_inputs)
+    # SESSION 84: duration=first forces the mix to terminate when the narration
+    # (first input) ends. Was 'longest' — music/typing/outro layers could extend
+    # past narration death, generating dead-air frames that ghost the final subtitle.
     filter_parts.append(
-        f"{mix_input_str}amix=inputs={n_layers}:duration=longest"
+        f"{mix_input_str}amix=inputs={n_layers}:duration=first"
         f":dropout_transition=2:normalize=0[mixed]"
     )
 

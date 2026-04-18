@@ -1274,7 +1274,7 @@ async function scheduleBufferWeek(
       }
 
       globalSlotIndex++;
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 3500));
     }
 
     // ── MEDIA-REQUIRED CHANNELS (TikTok, Instagram, YouTube) ──
@@ -1364,7 +1364,7 @@ async function scheduleBufferWeek(
         }
 
         globalSlotIndex++;
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 3500));
       }
     } else {
       console.warn(`  ⚠️ Clip ${clipIdx} has no public URL — skipping media-required channels (TikTok/IG/YouTube)`);

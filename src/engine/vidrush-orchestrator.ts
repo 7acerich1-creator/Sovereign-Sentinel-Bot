@@ -741,7 +741,7 @@ async function generatePlatformCopy(
   // Track assigned angle per clip so fallback + downstream tag-smuggling can reuse it.
   const clipAngleMap = new Map<number, AudienceAngle>();
   for (const clip of clips) {
-    clipAngleMap.set(clip.index, angleForClipIndex(clip.index, contentOffset));
+    clipAngleMap.set(clip.index, angleForClipIndex(clip.index, contentOffset, brand));
   }
 
   // Process in batches of 5 to avoid LLM overload
@@ -756,11 +756,11 @@ async function generatePlatformCopy(
     const usedInBatch = new Set<string>();
     const batchAssignments: Array<{ clipLabel: string; angle: AudienceAngle; clip: ClipMeta }> = [];
     for (const clip of batch) {
-      let angle = clipAngleMap.get(clip.index) || angleForClipIndex(clip.index, contentOffset);
+      let angle = clipAngleMap.get(clip.index) || angleForClipIndex(clip.index, contentOffset, brand);
       // If somehow duplicated in-batch, walk forward through the pool.
       let walk = 0;
       while (usedInBatch.has(angle.id) && walk < AUDIENCE_ANGLES.length) {
-        angle = angleForClipIndex(clip.index + (++walk), contentOffset);
+        angle = angleForClipIndex(clip.index + (++walk), contentOffset, brand);
       }
       usedInBatch.add(angle.id);
       clipAngleMap.set(clip.index, angle);
@@ -923,7 +923,7 @@ async function generateLongFormDescription(
   // Offset by +1 vs clip rotation so the long-form description does NOT duplicate
   // clip #1's angle (clips use hash + 0, long-form uses hash + 1 as its "slot").
   const offset = hashStringToAngleOffset(sourceTitle || niche || "sovereign");
-  const angle = angleForClipIndex(1, offset);
+  const angle = angleForClipIndex(1, offset, brand);
 
   const brandBlock = buildBrandFrequencyBlock(brand);
   const brandLabel = BRAND_FREQUENCY_PROFILES[brand].brandLabel;
@@ -1511,7 +1511,7 @@ export async function executeFullPipeline(
   let longFormCopy: LongFormDescriptionResult;
   if (dryRun) {
     const offset = hashStringToAngleOffset(whisperResult.videoId || facelessResult.title);
-    const dryAngle = angleForClipIndex(1, offset);
+    const dryAngle = angleForClipIndex(1, offset, brand);
     longFormCopy = {
       description: `[DRY RUN] ${facelessResult.title}\n\n[DRY RUN] Angle: ${dryAngle.name}\n${dryAngle.emotionalEntry}\n\n🧬 Take the Diagnostic: https://sovereign-synthesis.com/diagnostic\n\n🔗 The Protocol: https://sovereign-synthesis.com\n\nRelated topics: ${dryAngle.keywordSeeds.slice(0, 6).join(", ")}\n\n#DryRun #${dryAngle.id.replace(/_/g, "")}`,
       tags: `dry run,${dryAngle.keywordSeeds.slice(0, 5).join(",")}`,
@@ -1532,7 +1532,7 @@ export async function executeFullPipeline(
     } catch (err: any) {
       // Hard guardrail: even exception path must NOT fall back to the banned boilerplate.
       const offset = hashStringToAngleOffset(whisperResult.videoId || facelessResult.title);
-      const emergencyAngle = angleForClipIndex(1, offset);
+      const emergencyAngle = angleForClipIndex(1, offset, brand);
       const seeds = emergencyAngle.keywordSeeds.slice(0, 6).join(", ");
       longFormCopy = {
         description: `${facelessResult.title}\n\n${emergencyAngle.emotionalEntry}\n\n🧬 Take the Diagnostic: https://sovereign-synthesis.com/diagnostic\n\n🔗 The Protocol: https://sovereign-synthesis.com\n\nRelated topics: ${seeds}`,

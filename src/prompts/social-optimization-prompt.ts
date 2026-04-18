@@ -340,13 +340,49 @@ export const AUDIENCE_ANGLES: readonly AudienceAngle[] = [
 ] as const;
 
 /**
+ * SESSION 86: Brand-filtered angle pools.
+ * Ace Richie = sovereignty, liberation, architecture, consciousness.
+ * TCF = dark psychology, extraction patterns, clinical trauma mechanics.
+ * Prevents Ace videos from getting TCF-coded descriptions (e.g. narcissistic
+ * abuse / fawn response keywords on a sovereignty-themed video).
+ */
+const ACE_ANGLE_IDS: ReadonlySet<string> = new Set([
+  "corporate_burnout",     // escaping the system — sovereignty-aligned
+  "spiritual_awakening",   // consciousness shifts — frequency-aligned
+  "tech_ai_realism",       // system architecture — builder-aligned
+  "parent_millennial",     // protecting sovereignty over family
+  "late_diagnosed_nd",     // self-discovery, identity reclamation
+  "deconstruction",        // liberation from imposed systems
+  "financial_prisoner",    // escaping financial cages
+]);
+
+const TCF_ANGLE_IDS: ReadonlySet<string> = new Set([
+  "relationship_trauma",   // dark psychology extraction, narcissistic patterns
+  "corporate_burnout",     // systemic manipulation, golden handcuffs
+  "late_diagnosed_nd",     // masking, systemic misdiagnosis
+  "deconstruction",        // institutional control mechanics
+  "financial_prisoner",    // systemic financial traps
+]);
+
+function getAnglesForBrand(brand?: string): readonly AudienceAngle[] {
+  if (brand === "containment_field") {
+    return AUDIENCE_ANGLES.filter(a => TCF_ANGLE_IDS.has(a.id));
+  }
+  // Default: Ace Richie pool (excludes relationship_trauma)
+  return AUDIENCE_ANGLES.filter(a => ACE_ANGLE_IDS.has(a.id));
+}
+
+/**
  * Deterministic angle assignment: given a clip's global index and a content offset
  * (typically a hash of the source title), return the AudienceAngle that clip MUST target.
- * Rotates through AUDIENCE_ANGLES modulo its length so no two clips in the same batch
+ * Rotates through the brand-filtered pool so no two clips in the same batch
  * collide and different source videos start from different angles.
+ *
+ * SESSION 86: Now brand-aware. Pass brand to filter angles appropriately.
+ * Without brand param, defaults to Ace pool for backward compatibility.
  */
-export function angleForClipIndex(globalIndex: number, offset = 0): AudienceAngle {
-  const pool = AUDIENCE_ANGLES;
+export function angleForClipIndex(globalIndex: number, offset = 0, brand?: string): AudienceAngle {
+  const pool = getAnglesForBrand(brand);
   const idx = ((globalIndex + offset) % pool.length + pool.length) % pool.length;
   return pool[idx];
 }

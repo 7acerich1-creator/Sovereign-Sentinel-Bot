@@ -1720,17 +1720,21 @@ export async function executeFullPipeline(
             // Pass 2 (fallback): niche filter only, no drawtext.
 
             const ctaText = short.cta_overlay || "";
-            const ctaTextFile = `${clipDir}/cta_${i}.txt`;
-            if (ctaText) writeFileSync(ctaTextFile, ctaText);
 
-            const brandAssetsDir = `${__dirname}/../../brand-assets`;
-            const fontPath = `${brandAssetsDir}/BebasNeue-Regular.ttf`;
-            const hasFont = existsSync(fontPath);
-            const fontFilter = hasFont ? `fontfile='${fontPath.replace(/\\/g, "/")}':` : "";
+            // SESSION 88: Switched from textfile= to text= for Railway compatibility.
+            // Previous approach used fontfile= (BebasNeue only exists in pod Docker image)
+            // and textfile= (file path escaping issues across platforms).
+            // Inline text= with ffmpeg escaping is more portable.
             const ctaEnableStart = Math.max(0, duration - 2.0).toFixed(2);
-            const ctaDrawtext = ctaText
-              ? `,drawtext=${fontFilter}textfile='${ctaTextFile.replace(/\\/g, "/")}':fontsize=42:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h-180:enable='gte(t\\,${ctaEnableStart})'`
-              : "";
+            let ctaDrawtext = "";
+            if (ctaText) {
+              // ffmpeg drawtext escaping: ' → \\', : → \\:, \ → \\\\
+              const escaped = ctaText
+                .replace(/\\/g, "\\\\\\\\")
+                .replace(/'/g, "\\\\'")
+                .replace(/:/g, "\\\\:");
+              ctaDrawtext = `,drawtext=text='${escaped}':fontsize=42:fontcolor=white:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h-180:enable='gte(t\\,${ctaEnableStart})'`;
+            }
 
             const baseFilter = `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${nicheFilter}`;
             const audioFilter = `afade=t=in:st=0:d=0.15,afade=t=out:st=${Math.max(0, duration - 0.5).toFixed(2)}:d=0.5`;
@@ -1747,8 +1751,11 @@ export async function executeFullPipeline(
                 );
                 extracted = true;
               } catch (drawErr: any) {
-                const stderr = drawErr.stderr?.toString?.()?.slice(0, 300) || "";
-                console.warn(`  ⚠️ Short ${i} drawtext failed (will retry without CTA): ${stderr.slice(0, 150)}`);
+                const stderr = drawErr.stderr?.toString?.() || "";
+                // Skip the ffmpeg version banner to get the actual error
+                const errorLines = stderr.split("\n").filter((l: string) => /error|cannot|no such|invalid/i.test(l));
+                const errorMsg = errorLines.length > 0 ? errorLines.join(" | ").slice(0, 300) : stderr.slice(-300);
+                console.warn(`  ⚠️ Short ${i} drawtext failed (will retry without CTA): ${errorMsg}`);
               }
             }
 

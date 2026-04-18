@@ -41,6 +41,7 @@ structlog.configure(
     processors=[
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.format_exc_info,  # SESSION 88: serialize tracebacks into JSON
         structlog.processors.JSONRenderer(),
     ],
 )

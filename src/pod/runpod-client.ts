@@ -402,34 +402,50 @@ export async function produceVideo(
   const timeoutMs = options.timeoutMs ?? DEFAULT_JOB_TIMEOUT_MS;
   const pollMs = options.pollMs ?? DEFAULT_JOB_POLL_MS;
 
-  // POST /produce → 202 { job_id }
-  const accepted = await podFetchJson<ProduceAccepted>(
-    handle,
-    "POST",
-    "/produce",
-    {
-      body: spec,
-      signal: options.signal,
-    },
-  );
+  // SESSION 81 FIX: Wrap POST /produce in a retry loop.
+  // RunPod's NGINX proxy frequently returns empty 404s or 502s for the first
+  // few seconds after a cold boot, even after GET /health returns 200.
+  let accepted: ProduceAccepted | undefined;
+  let lastPostErr: unknown;
+
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      accepted = await podFetchJson<ProduceAccepted>(
+        handle,
+        "POST",
+        "/produce",
+        {
+          body: spec,
+          signal: options.signal,
+        },
+      );
+      break; // Success, exit retry loop
+    } catch (err) {
+      lastPostErr = err;
+      if (err instanceof PodContractError && (err.httpStatus === 404 || err.httpStatus === 502)) {
+        console.warn(`⚠️ [RunPod] POST /produce returned ${err.httpStatus} (proxy stabilization). Retrying in 2s (attempt ${attempt}/5)...`);
+        await sleep(2000);
+        continue;
+      }
+      throw err; // Non-transient error, fail immediately
+    }
+  }
+
+  if (!accepted) {
+    throw lastPostErr; // All attempts exhausted
+  }
 
   if (!accepted.job_id) {
     throw new PodContractError("pod /produce returned no job_id");
   }
   const jobId = accepted.job_id;
   console.log(
-    `\u{1F3AC} [RunPod] job ${jobId} queued (brand=${spec.brand}, scenes=${spec.scenes.length})`,
+    `🎬 [RunPod] job ${jobId} queued (brand=${spec.brand}, scenes=${spec.scenes.length})`,
   );
 
   // Poll /jobs/{jobId} until terminal.
-  // SESSION 80 FIX: Tolerate transient 404s from the worker. If the pod
-  // OOM-kills during model loading (FLUX ~24GB bf16), uvicorn restarts with
-  // an empty _JOBS dict and every poll returns 404. We retry up to
-  // MAX_404_RETRIES times before concluding the job is truly lost. The
-  // worker now also persists job state to disk (see worker.py file-backed
-  // persistence) so recovered jobs appear as "failed" rather than 404.
   const MAX_404_RETRIES = 8;
-  const BACKOFF_404_MS = 5_000; // 5s between 404 retries (total ~40s grace)
+  const BACKOFF_404_MS = 5_000;
   let consecutive404s = 0;
 
   const deadline = Date.now() + timeoutMs;
@@ -447,16 +463,13 @@ export async function produceVideo(
         `/jobs/${encodeURIComponent(jobId)}`,
         { signal: options.signal },
       );
-      consecutive404s = 0; // Reset on any successful response
+      consecutive404s = 0;
     } catch (err) {
-      // 404 = job not found. Could be: (a) proxy routing delay on cold start,
-      // (b) worker restarted and _JOBS dict was wiped (OOM kill). Retry a few
-      // times before giving up with a clear diagnostic message.
       if (err instanceof PodContractError && err.httpStatus === 404) {
         consecutive404s++;
         if (consecutive404s <= MAX_404_RETRIES) {
           console.warn(
-            `\u{26A0}\u{FE0F} [RunPod] job ${jobId} poll got 404 (${consecutive404s}/${MAX_404_RETRIES}) — worker may have restarted, retrying in ${BACKOFF_404_MS / 1000}s...`,
+            `⚠️ [RunPod] job ${jobId} poll got 404 (${consecutive404s}/${MAX_404_RETRIES}) — worker may have restarted, retrying in ${BACKOFF_404_MS / 1000}s...`,
           );
           await sleep(BACKOFF_404_MS);
           continue;
@@ -470,15 +483,14 @@ export async function produceVideo(
           lastStatus,
         );
       }
-      // 5xx = worker error but still alive — retry within normal timeout
       if (err instanceof PodContractError && err.httpStatus !== undefined && err.httpStatus >= 500) {
         console.warn(
-          `\u{26A0}\u{FE0F} [RunPod] job ${jobId} poll got ${err.httpStatus} — retrying...`,
+          `⚠️ [RunPod] job ${jobId} poll got ${err.httpStatus} — retrying...`,
         );
         await sleep(pollMs);
         continue;
       }
-      throw err; // Unknown error — propagate
+      throw err;
     }
 
     lastStatus = result.status;
@@ -491,7 +503,7 @@ export async function produceVideo(
         );
       }
       console.log(
-        `\u{2705} [RunPod] job ${jobId} done — ${result.duration_s.toFixed(1)}s video`,
+        `✅ [RunPod] job ${jobId} done — ${result.duration_s.toFixed(1)}s video`,
       );
       return {
         jobId,

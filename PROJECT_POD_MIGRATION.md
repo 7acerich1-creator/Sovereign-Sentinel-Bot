@@ -10,13 +10,13 @@
 
 | Field | Value |
 |---|---|
-| **Current phase** | **PHASE 7 — 2026-04-17 S80.** Phase 6 COMPLETE. Task 7.1 BLOCKED on RunPod balance ($0). |
-| **Current phase status** | **Phase 0-6: ALL COMPLETE. Phase 7: 0/6 done. BLOCKED.** |
+| **Current phase** | **PHASE 7 — 2026-04-18 S86.** Tasks 7.5a+7.5b+7.5c+7.5d SHIPPED. Tasks 7.1-7.4 BLOCKED on RunPod balance ($0). |
+| **Current phase status** | **Phase 0-6: ALL COMPLETE. Phase 7: 7.5a-d done (code), 7.1-7.4 BLOCKED on RunPod $$.** |
 | **Total phases** | 8 (Phase 0 -> Phase 7) |
-| **Last session** | Session 80 -- 2026-04-17 -- Volume `gai851lcfw` RE-ENABLED for model caching (TEMPORARY through testing + initial batches). `noVolume` default flipped `true→false` in `runpod-client.ts`. HF_HOME/TORCH_HOME/XDG_CACHE_HOME pointed to `/runpod-volume/cache/` when volume attached. Datacenter auto-pins to US-KS-2. Speaker WAVs still from Docker image (S76 preserved). Funnel audit: landing page + diagnostic both live and serving. Diagnostic is the conversion instrument (quiz → email capture → Protocol 77 CTA). |
-| **Last commit touching this work** | `81c6e5b` — S80 volume re-enable for model caching. Prior: `20ba978` (S79). |
-| **Blocker** | **RunPod balance = $0.** Architect must top up $5-10 at runpod.io before Task 7.1 can proceed. Volume is now configured — first run downloads models TO the volume, every run after loads from cache (~1-2 min vs ~8 min). |
-| **Next session's first action** | **After top-up:** Run `run-full-test.bat` from Sentinel root. Volume will cache models on first run. Subsequent runs start fast. |
+| **Last session** | Session 86 -- 2026-04-18 -- Batch producer shipped: `batch-producer.ts` (506 lines), `/batch` Telegram command, `preProduced` bypass in vidrush-orchestrator, parallel FFmpeg clip assembly (ThreadPoolExecutor 4 workers) in compose.py. Two commits: `445a3b4` (7.5a batch orchestrator) + `eab3dc8` (7.5b parallel clips). tsc clean. |
+| **Last commit touching this work** | `eab3dc8` — S86 parallel FFmpeg clips. Prior: `445a3b4` (S86 batch producer). |
+| **Blocker** | **RunPod balance = $0.** Architect must top up $5-10 at runpod.io before Tasks 7.1-7.4 test runs can proceed. All CODE for batch production is written and type-checked — just needs a live pod to run. |
+| **Next session's first action** | **After top-up:** `/batch dry` in Telegram to verify script pre-gen. Then `/batch ace 1` for a single-video smoke test. |
 
 **Rule:** if you are a future session and this STATUS block has not been updated in your current session before you close, the session failed regardless of what was built.
 

@@ -152,30 +152,13 @@ export interface AudienceAngle {
   bannedOpeners: string[];
 }
 
-export const AUDIENCE_ANGLES: readonly AudienceAngle[] = [
-  {
-    id: "corporate_burnout",
-    name: "Corporate Burnout",
-    demographic: "Knowledge workers 28-45, high-performing, salaried, sensing the career ladder is a trap. Middle managers, senior ICs, former 'high potential' hires who hit the ceiling.",
-    voice: "Authoritative, tactical, inside-baseball. 'I see what you see.' No woo, no mysticism, no slogans.",
-    emotionalEntry: "The quiet Sunday-night dread. The performance review that felt like gaslighting. The promotion that turned into a heavier leash.",
-    keywordSeeds: [
-      "corporate burnout recovery",
-      "quiet quitting 2026",
-      "escape 9 to 5 corporate",
-      "middle management trap",
-      "salary golden handcuffs",
-      "LinkedIn hustle fatigue",
-      "career ladder broken"
-    ],
-    titlePatterns: [
-      "Your 'Promotion' Was A Leash Upgrade",
-      "The 6-Figure Cage Nobody Names",
-      "Why Your Best Employees Leave At 34",
-      "The Review That Broke Me"
-    ],
-    bannedOpeners: ["matrix", "dark psychology", "simulation", "sovereign", "they don't want you"]
-  },
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ACE RICHIE ANGLES — Quantum / Ascension / Sovereignty frequency.
+// Written from the ARCHITECT position, not the pain-point.
+// These people aren't broken — they're remembering.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export const ACE_ANGLES: readonly AudienceAngle[] = [
   {
     id: "spiritual_awakening",
     name: "Spiritual Awakening / Consciousness Shift",
@@ -197,31 +180,155 @@ export const AUDIENCE_ANGLES: readonly AudienceAngle[] = [
       "The Integration Phase They Never Talk About",
       "When Your Awakening Isolates You"
     ],
-    bannedOpeners: ["matrix", "simulation", "dark psychology", "sovereign"]
+    bannedOpeners: ["matrix", "simulation", "dark psychology", "they don't want you"]
   },
   {
-    id: "tech_ai_realism",
-    name: "Tech / AI Realism",
-    demographic: "22-40, software engineers, PMs, designers, knowledge workers watching AI compress their field. Pragmatic, not doomer, not hype-bro. They read Hacker News and track release notes.",
-    voice: "Data-forward, blunt, slightly cynical. Numbers in the hook. Name specific models and dates. No 'future of work' platitudes.",
-    emotionalEntry: "The release note that quietly deprecated their skill. The junior dev that got laid off first. The sinking feeling that '3-5 years safe' just became '18 months'.",
+    id: "timeline_architect",
+    name: "Timeline Architecture",
+    demographic: "28-45, high-agency individuals who sense they're living a default timeline. Entrepreneurs, creatives, ex-corporate who quit but haven't built the replacement yet. They feel the gap between who they ARE and what their life currently looks like.",
+    voice: "Sovereign, precise, architectural. Speaks like a systems engineer describing reality mechanics. No motivational-poster energy. No hustle-bro. Blueprint language.",
+    emotionalEntry: "The moment they realized they were building someone else's timeline. The 3-year plan that was actually a 3-year delay. The vision they can see clearly but haven't materialized.",
     keywordSeeds: [
-      "AI job displacement 2026",
-      "software engineer AI layoffs",
-      "claude sonnet jobs replaced",
-      "knowledge worker obsolescence",
-      "post AI career pivot",
-      "AI proof skills 2026",
-      "GPT-5 career impact"
+      "reality architecture",
+      "quantum timeline shifting",
+      "manifestation mechanics not affirmations",
+      "parallel reality selection",
+      "intention vs action gap",
+      "designing your reality",
+      "timeline jumping explained"
     ],
     titlePatterns: [
-      "Claude Sonnet 4.6 Just Made This Skill Worthless",
-      "The 3 Jobs GPT-5 Can't Touch Yet (Data)",
-      "Why Senior Engineers Are Quietly Panicking",
-      "The Layoff Math Nobody Is Doing Publicly"
+      "You're Building The Wrong Timeline",
+      "The Architecture Behind Every Reality Shift",
+      "Why Your 3-Year Plan Is A 3-Year Delay",
+      "The Blueprint You Keep Ignoring"
     ],
-    bannedOpeners: ["matrix", "simulation", "dark psychology", "sovereign"]
+    bannedOpeners: ["dark psychology", "narcissist", "trauma", "abuse", "they don't want you"]
   },
+  {
+    id: "frequency_calibration",
+    name: "Frequency Calibration",
+    demographic: "25-42, energy-sensitive, tracking their own states, noticing how environments/people/media shift their baseline. Past the 'good vibes only' phase. Now doing the math on what actually raises or collapses their frequency.",
+    voice: "Technical but embodied. Treats frequency like an engineering parameter, not a metaphor. Precise about the mechanics of state shifts. Calm authority.",
+    emotionalEntry: "The realization that certain people literally drain them — measurably. The morning routine that changed everything vs the doom-scroll that collapsed it. The first time they held a high state for 72 hours straight.",
+    keywordSeeds: [
+      "raise your frequency 2026",
+      "vibrational alignment science",
+      "energy management daily",
+      "nervous system regulation sovereign",
+      "high frequency living",
+      "quantum coherence personal",
+      "electromagnetic field body"
+    ],
+    titlePatterns: [
+      "The Frequency You Emit Determines What You Attract",
+      "Why Your Morning Routine Isn't Working (Frequency Math)",
+      "72 Hours At Peak State Changed Everything",
+      "The Calibration Most People Never Do"
+    ],
+    bannedOpeners: ["dark psychology", "narcissist", "trauma", "simulation", "they don't want you"]
+  },
+  {
+    id: "system_designer",
+    name: "System Designer / Builder",
+    demographic: "27-45, entrepreneurs, solopreneurs, creators who think in systems. Building income streams, content engines, AI-augmented workflows. They don't want a job — they want an architecture that produces without them.",
+    voice: "Builder-to-builder. Technical respect. Shows the schematic, not the motivation. Assumes intelligence. Names tools, stacks, specific leverage points.",
+    emotionalEntry: "The first system that ran while they slept. The realization that trading time for money has a ceiling. The automation that replaced 40 hours of manual work.",
+    keywordSeeds: [
+      "build income systems 2026",
+      "AI automation solopreneur",
+      "passive income architecture",
+      "one person business systems",
+      "leverage not hustle",
+      "autonomous business design",
+      "creator economy systems"
+    ],
+    titlePatterns: [
+      "The System That Runs While You Sleep",
+      "Why Builders Don't Have Jobs",
+      "One Architecture Replaced 40 Hours Of Work",
+      "The Leverage Point Nobody Talks About"
+    ],
+    bannedOpeners: ["matrix", "dark psychology", "narcissist", "trauma", "they don't want you"]
+  },
+  {
+    id: "consciousness_engineer",
+    name: "Consciousness Engineering",
+    demographic: "28-45, meditators who outgrew meditation apps, readers of Neville Goddard / Joe Dispenza / Robert Monroe, practicing lucid dreaming or astral projection, interested in consciousness as technology rather than religion.",
+    voice: "Lab-report meets mystic. Treats consciousness like a technology to be understood and operated. References specific techniques, measurable results, altered states with precision. No guru energy.",
+    emotionalEntry: "The meditation where they left their body. The manifestation that worked and scared them. The lucid dream that felt more real than waking life. The moment they realized consciousness is programmable.",
+    keywordSeeds: [
+      "consciousness engineering 2026",
+      "neville goddard techniques modern",
+      "joe dispenza meditation results",
+      "lucid dreaming reality",
+      "astral projection guide",
+      "quantum consciousness science",
+      "reality programming mental"
+    ],
+    titlePatterns: [
+      "Consciousness Is Technology — Here's The Manual",
+      "The Meditation That Broke My Reality Model",
+      "Why Manifestation Worked Once And Scared You",
+      "Your Mind Is Programmable — Nobody Gave You The IDE"
+    ],
+    bannedOpeners: ["dark psychology", "narcissist", "trauma", "abuse", "simulation"]
+  },
+  {
+    id: "sovereign_exit",
+    name: "Sovereign Exit / System Liberation",
+    demographic: "26-42, people actively leaving — the career, the religion, the relationship, the city, the identity. Not bitter, not victimized. Deliberately walking away from structures that no longer serve them. The 'I'm done pretending' crowd.",
+    voice: "Calm, post-decision. The exhale after the leap. No anger at the old system — just clear-eyed about why they left. Speaks from the other side.",
+    emotionalEntry: "The resignation letter that felt like oxygen. The lease they didn't renew. The identity they stopped performing. The morning they woke up with nothing on the calendar and felt free, not afraid.",
+    keywordSeeds: [
+      "quit corporate freedom",
+      "leaving everything behind reset",
+      "identity death rebirth",
+      "sovereign lifestyle design",
+      "minimalism freedom 2026",
+      "digital nomad sovereign",
+      "escape velocity life"
+    ],
+    titlePatterns: [
+      "The Day I Stopped Performing My Own Life",
+      "Why The Exit Felt Like Oxygen",
+      "The Identity You're Afraid To Kill",
+      "What Nobody Tells You About The Other Side"
+    ],
+    bannedOpeners: ["dark psychology", "narcissist", "trauma bond", "abuse", "they don't want you"]
+  },
+  {
+    id: "quantum_wealth",
+    name: "Quantum Wealth / Sovereign Economics",
+    demographic: "25-45, people who see money as energy, not a scorecard. Past the Dave Ramsey / penny-pinching phase. Interested in how consciousness, positioning, and leverage create financial reality. Not crypto bros — consciousness-aware builders.",
+    voice: "Precise about money mechanics, zero scarcity language. Treats wealth as an engineering outcome of alignment + leverage + systems, not hustle or luck. Names real numbers.",
+    emotionalEntry: "The first month they earned without working. The realization that salary is the least efficient way to build wealth. The moment they stopped budgeting and started architecting.",
+    keywordSeeds: [
+      "wealth consciousness 2026",
+      "money energy alignment",
+      "sovereign income streams",
+      "financial sovereignty",
+      "abundance mindset real",
+      "passive income consciousness",
+      "wealth architecture design"
+    ],
+    titlePatterns: [
+      "Why Budgeting Keeps You Broke (Wealth Architecture)",
+      "The Month I Earned Without Working",
+      "Salary Is The Least Efficient Wealth Vehicle",
+      "The Wealth Frequency Most People Can't Hold"
+    ],
+    bannedOpeners: ["dark psychology", "narcissist", "trauma", "simulation", "they don't want you"]
+  }
+] as const;
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TCF ANGLES — The Containment Field. Matrix trap energy.
+// Dark psychology, extraction patterns, systemic control mechanics.
+// These people are waking up to HOW they were programmed.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export const TCF_ANGLES: readonly AudienceAngle[] = [
   {
     id: "relationship_trauma",
     name: "Relationship Trauma Recovery",
@@ -243,30 +350,30 @@ export const AUDIENCE_ANGLES: readonly AudienceAngle[] = [
       "The Avoidant's 3-Month Discard Pattern",
       "The Closure You're Not Going To Get"
     ],
-    bannedOpeners: ["matrix", "simulation", "dark psychology", "sovereign"]
+    bannedOpeners: ["sovereign", "frequency", "quantum", "architect"]
   },
   {
-    id: "parent_millennial",
-    name: "Millennial Parent",
-    demographic: "30-42, raising 0-10 year olds, screen-time anxious, questioning public school, gentle-parenting fatigued. Reading Janet Lansbury AND Jonathan Haidt. Exhausted but not checked out.",
-    voice: "Raw, solidarity, 'you're not failing'. Admits hard things. No guilt stacks.",
-    emotionalEntry: "The iPad handoff they said they'd never do. The tantrum in Target that broke them. The realization their 4-year-old can't self-regulate after three years of 'gentle'.",
+    id: "corporate_burnout",
+    name: "Corporate Burnout",
+    demographic: "Knowledge workers 28-45, high-performing, salaried, sensing the career ladder is a trap. Middle managers, senior ICs, former 'high potential' hires who hit the ceiling.",
+    voice: "Authoritative, tactical, inside-baseball. 'I see what you see.' No woo, no mysticism, no slogans.",
+    emotionalEntry: "The quiet Sunday-night dread. The performance review that felt like gaslighting. The promotion that turned into a heavier leash.",
     keywordSeeds: [
-      "gentle parenting burnout",
-      "screen time limits toddler",
-      "homeschool vs public 2026",
-      "millennial parent exhausted",
-      "phone free childhood",
-      "iPad kid generation",
-      "raising kids in 2026"
+      "corporate burnout recovery",
+      "quiet quitting 2026",
+      "escape 9 to 5 corporate",
+      "middle management trap",
+      "salary golden handcuffs",
+      "LinkedIn hustle fatigue",
+      "career ladder broken"
     ],
     titlePatterns: [
-      "The Gentle Parenting Lie Nobody Admits",
-      "Why Your 4-Year-Old Can't Self-Regulate",
-      "Phone-Free Childhood: 90-Day Result",
-      "The Target Tantrum That Broke Me"
+      "Your 'Promotion' Was A Leash Upgrade",
+      "The 6-Figure Cage Nobody Names",
+      "Why Your Best Employees Leave At 34",
+      "The Review That Broke Me"
     ],
-    bannedOpeners: ["matrix", "simulation", "dark psychology", "sovereign"]
+    bannedOpeners: ["sovereign", "frequency", "quantum", "architect", "they don't want you"]
   },
   {
     id: "late_diagnosed_nd",
@@ -289,7 +396,7 @@ export const AUDIENCE_ANGLES: readonly AudienceAngle[] = [
       "The Masking Tax: 34 Years, 1 Collapse",
       "The Diagnosis That Rewrote My Whole Childhood"
     ],
-    bannedOpeners: ["matrix", "dark psychology", "simulation", "sovereign"]
+    bannedOpeners: ["sovereign", "frequency", "quantum", "architect"]
   },
   {
     id: "deconstruction",
@@ -312,7 +419,7 @@ export const AUDIENCE_ANGLES: readonly AudienceAngle[] = [
       "Rebuilding Morality Without Hell",
       "The First Christmas After Leaving"
     ],
-    bannedOpeners: ["matrix", "dark psychology", "simulation", "sovereign"]
+    bannedOpeners: ["sovereign", "frequency", "quantum", "architect"]
   },
   {
     id: "financial_prisoner",
@@ -335,41 +442,68 @@ export const AUDIENCE_ANGLES: readonly AudienceAngle[] = [
       "The 'Middle Class' Bracket That Doesn't Exist Anymore",
       "The Raise That Erased Itself In 4 Months"
     ],
-    bannedOpeners: ["matrix", "dark psychology", "simulation", "sovereign"]
+    bannedOpeners: ["sovereign", "frequency", "quantum", "architect"]
+  },
+  {
+    id: "tech_ai_realism",
+    name: "Tech / AI Realism",
+    demographic: "22-40, software engineers, PMs, designers, knowledge workers watching AI compress their field. Pragmatic, not doomer, not hype-bro. They read Hacker News and track release notes.",
+    voice: "Data-forward, blunt, slightly cynical. Numbers in the hook. Name specific models and dates. No 'future of work' platitudes.",
+    emotionalEntry: "The release note that quietly deprecated their skill. The junior dev that got laid off first. The sinking feeling that '3-5 years safe' just became '18 months'.",
+    keywordSeeds: [
+      "AI job displacement 2026",
+      "software engineer AI layoffs",
+      "claude sonnet jobs replaced",
+      "knowledge worker obsolescence",
+      "post AI career pivot",
+      "AI proof skills 2026",
+      "GPT-5 career impact"
+    ],
+    titlePatterns: [
+      "Claude Sonnet 4.6 Just Made This Skill Worthless",
+      "The 3 Jobs GPT-5 Can't Touch Yet (Data)",
+      "Why Senior Engineers Are Quietly Panicking",
+      "The Layoff Math Nobody Is Doing Publicly"
+    ],
+    bannedOpeners: ["sovereign", "frequency", "quantum", "architect"]
+  },
+  {
+    id: "parent_millennial",
+    name: "Millennial Parent",
+    demographic: "30-42, raising 0-10 year olds, screen-time anxious, questioning public school, gentle-parenting fatigued. Reading Janet Lansbury AND Jonathan Haidt. Exhausted but not checked out.",
+    voice: "Raw, solidarity, 'you're not failing'. Admits hard things. No guilt stacks.",
+    emotionalEntry: "The iPad handoff they said they'd never do. The tantrum in Target that broke them. The realization their 4-year-old can't self-regulate after three years of 'gentle'.",
+    keywordSeeds: [
+      "gentle parenting burnout",
+      "screen time limits toddler",
+      "homeschool vs public 2026",
+      "millennial parent exhausted",
+      "phone free childhood",
+      "iPad kid generation",
+      "raising kids in 2026"
+    ],
+    titlePatterns: [
+      "The Gentle Parenting Lie Nobody Admits",
+      "Why Your 4-Year-Old Can't Self-Regulate",
+      "Phone-Free Childhood: 90-Day Result",
+      "The Target Tantrum That Broke Me"
+    ],
+    bannedOpeners: ["sovereign", "frequency", "quantum", "architect"]
   }
 ] as const;
 
+// Legacy compat: flat array for any code still referencing AUDIENCE_ANGLES
+export const AUDIENCE_ANGLES: readonly AudienceAngle[] = [...ACE_ANGLES, ...TCF_ANGLES] as const;
+
 /**
- * SESSION 86: Brand-filtered angle pools.
- * Ace Richie = sovereignty, liberation, architecture, consciousness.
- * TCF = dark psychology, extraction patterns, clinical trauma mechanics.
- * Prevents Ace videos from getting TCF-coded descriptions (e.g. narcissistic
- * abuse / fawn response keywords on a sovereignty-themed video).
+ * SESSION 86: Brand-separated angle pools.
+ * Ace Richie angles = quantum, ascension, sovereignty, builder frequency.
+ * TCF angles = dark psychology, extraction patterns, matrix trap mechanics.
+ * Each brand now has its OWN dedicated angle array — no cross-contamination.
  */
-const ACE_ANGLE_IDS: ReadonlySet<string> = new Set([
-  "corporate_burnout",     // escaping the system — sovereignty-aligned
-  "spiritual_awakening",   // consciousness shifts — frequency-aligned
-  "tech_ai_realism",       // system architecture — builder-aligned
-  "parent_millennial",     // protecting sovereignty over family
-  "late_diagnosed_nd",     // self-discovery, identity reclamation
-  "deconstruction",        // liberation from imposed systems
-  "financial_prisoner",    // escaping financial cages
-]);
-
-const TCF_ANGLE_IDS: ReadonlySet<string> = new Set([
-  "relationship_trauma",   // dark psychology extraction, narcissistic patterns
-  "corporate_burnout",     // systemic manipulation, golden handcuffs
-  "late_diagnosed_nd",     // masking, systemic misdiagnosis
-  "deconstruction",        // institutional control mechanics
-  "financial_prisoner",    // systemic financial traps
-]);
-
 function getAnglesForBrand(brand?: string): readonly AudienceAngle[] {
-  if (brand === "containment_field") {
-    return AUDIENCE_ANGLES.filter(a => TCF_ANGLE_IDS.has(a.id));
-  }
-  // Default: Ace Richie pool (excludes relationship_trauma)
-  return AUDIENCE_ANGLES.filter(a => ACE_ANGLE_IDS.has(a.id));
+  if (brand === "containment_field") return TCF_ANGLES;
+  return ACE_ANGLES;
 }
 
 /**

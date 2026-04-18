@@ -312,6 +312,10 @@ export class SocialSchedulerPostTool implements Tool {
                 ... on MutationError {
                   message
                 }
+                ... on LimitReachedError {
+                  message
+                  limit
+                }
               }
             }
           `;
@@ -322,6 +326,10 @@ export class SocialSchedulerPostTool implements Tool {
 
           if (result?.post) {
             results.push(`✅ ${channelId}: Post created (ID: ${result.post.id})`);
+          } else if (result?.limit !== undefined) {
+            // SESSION 87: Plan-level post limit hit — stop trying more channels
+            results.push(`⏸️ ${channelId}: Plan limit reached (${result.limit} posts) — ${result.message}`);
+            break; // No point trying more channels, they'll all hit the same limit
           } else if (result?.message) {
             results.push(`❌ ${channelId}: ${result.message}`);
           } else {

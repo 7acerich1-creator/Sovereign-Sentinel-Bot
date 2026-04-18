@@ -7,7 +7,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { LLMProvider } from "../types";
-import { bufferGraphQL, BUFFER_ORG_ID } from "./buffer-graphql";
+import { bufferGraphQL, BUFFER_ORG_ID, isBufferQuotaExhausted, BufferQuotaExhaustedError } from "./buffer-graphql";
 
 // ── Constants ──
 
@@ -400,42 +400,58 @@ export async function discoverChannels(): Promise<BrandChannelMap> {
     }
   `;
 
-  const data = await bufferGraphQL(query);
-  const channels: BufferChannel[] = data?.channels || [];
+  try {
+    const data = await bufferGraphQL(query);
+    const channels: BufferChannel[] = data?.channels || [];
 
-  if (channels.length === 0) {
-    throw new Error("No Buffer channels found. Check BUFFER_API_KEY and Buffer account.");
-  }
-  // Categorize by brand using known naming patterns
-  const acePatterns = /ace|richie|77/i;
-  const cfPatterns = /containment/i;
-
-  const map: BrandChannelMap = {
-    ace_richie: [],
-    containment_field: [],
-  };
-
-  for (const ch of channels) {
-    const nameCheck = `${ch.name} ${ch.displayName || ""}`;
-    if (cfPatterns.test(nameCheck)) {
-      map.containment_field.push(ch);
-    } else if (acePatterns.test(nameCheck)) {
-      map.ace_richie.push(ch);
-    } else {
-      map.ace_richie.push(ch);
+    if (channels.length === 0) {
+      throw new Error("No Buffer channels found. Check BUFFER_API_KEY and Buffer account.");
     }
+    // Categorize by brand using known naming patterns
+    const acePatterns = /ace|richie|77/i;
+    const cfPatterns = /containment/i;
+
+    const map: BrandChannelMap = {
+      ace_richie: [],
+      containment_field: [],
+    };
+
+    for (const ch of channels) {
+      const nameCheck = `${ch.name} ${ch.displayName || ""}`;
+      if (cfPatterns.test(nameCheck)) {
+        map.containment_field.push(ch);
+      } else if (acePatterns.test(nameCheck)) {
+        map.ace_richie.push(ch);
+      } else {
+        map.ace_richie.push(ch);
+      }
+    }
+
+    cachedChannelMap = map;
+    channelCacheTimestamp = Date.now();
+    console.log(
+      `📡 [ContentEngine] Channel map cached: Ace Richie=${map.ace_richie.length} channels, ` +
+      `Containment Field=${map.containment_field.length} channels`
+    );
+    console.log(`   Ace: ${map.ace_richie.map(c => `${c.service}(${c.id})`).join(", ")}`);
+    console.log(`   CF:  ${map.containment_field.map(c => `${c.service}(${c.id})`).join(", ")}`);
+
+    return map;
+  } catch (err: any) {
+    // SESSION 87: If quota is exhausted but we have a cached channel map, use it.
+    // This prevents VidRush's shorts distribution from killing ContentEngine's
+    // entire distribution sweep. Stale channels (hours old) are better than zero posts.
+    if (cachedChannelMap) {
+      const ageMin = Math.round((Date.now() - channelCacheTimestamp) / 60_000);
+      console.warn(
+        `⚠️ [ContentEngine] Channel discovery failed (${err.message?.slice(0, 120)}) — ` +
+        `using cached map (${ageMin}min old, Ace=${cachedChannelMap.ace_richie.length} CF=${cachedChannelMap.containment_field.length})`
+      );
+      return cachedChannelMap;
+    }
+    // No cache at all — first run of the day and quota is already blown. Re-throw.
+    throw err;
   }
-
-  cachedChannelMap = map;
-  channelCacheTimestamp = Date.now();
-  console.log(
-    `📡 [ContentEngine] Channel map cached: Ace Richie=${map.ace_richie.length} channels, ` +
-    `Containment Field=${map.containment_field.length} channels`
-  );
-  console.log(`   Ace: ${map.ace_richie.map(c => `${c.service}(${c.id})`).join(", ")}`);
-  console.log(`   CF:  ${map.containment_field.map(c => `${c.service}(${c.id})`).join(", ")}`);
-
-  return map;
 }
 /** Force refresh channel cache (call if channels change) */
 export function invalidateChannelCache(): void {
@@ -785,6 +801,13 @@ export async function dailyContentProduction(llm: LLMProvider): Promise<number> 
  * Also retries "partial" items (some channels succeeded, others failed).
  */
 export async function distributionSweep(): Promise<number> {
+  // SESSION 87: Pre-flight — if Buffer quota is known-blown, skip the entire sweep.
+  // This prevents hammering a dead API and burning retries. Next 5-min cycle will re-check.
+  if (isBufferQuotaExhausted()) {
+    console.warn(`⏸️ [ContentEngine] Distribution skipped — Buffer quota exhausted, waiting for reset`);
+    return 0;
+  }
+
   const now = new Date().toISOString();
 
   // Fetch ready drafts whose time has come
@@ -902,7 +925,8 @@ export async function distributionSweep(): Promise<number> {
 
           // CE-2 FIX: schedulingType enum is "automatic" or "notification" (NOT "scheduled")
           // "automatic" = Buffer picks the optimal time from its queue
-          const query = `
+          // SESSION 87: Added LimitReachedError to union — plan-level post cap detection
+          const postQuery = `
             mutation CreatePost {
               createPost(input: {
                 text: ${JSON.stringify(postText)},
@@ -919,21 +943,36 @@ export async function distributionSweep(): Promise<number> {
                 ... on MutationError {
                   message
                 }
+                ... on LimitReachedError {
+                  message
+                  limit
+                }
               }
             }
           `;
 
-          const data = await bufferGraphQL(query);
+          const data = await bufferGraphQL(postQuery);
           const result = data?.createPost;
 
           if (result?.post) {
             postResults.push(`✅ ${channel.service}(${channel.id}): ${result.post.id}`);
+          } else if (result?.limit !== undefined) {
+            // Plan-level post limit hit — stop posting, mark as partial for retry later
+            postResults.push(`⏸️ ${channel.service}(${channel.id}): Plan limit reached (${result.limit} posts) — ${result.message}`);
+            break; // No point trying more channels — they'll all hit the same limit
           } else if (result?.message) {
             postResults.push(`❌ ${channel.service}(${channel.id}): ${result.message}`);
           } else {
             postResults.push(`⚠️ ${channel.service}(${channel.id}): Unknown response`);
           }
         } catch (err: any) {
+          // SESSION 87: Quota exhausted mid-sweep — stop posting remaining channels,
+          // mark draft as partial so the next sweep (when quota resets) picks it up.
+          if (err instanceof BufferQuotaExhaustedError) {
+            postResults.push(`⏸️ ${channel.service}(${channel.id}): Buffer quota exhausted — deferring`);
+            // Short-circuit remaining channels for this draft
+            break;
+          }
           // Circuit breaker: 400/schema errors are permanent — mark with 🚫 so retries skip this channel
           const isNonRetryable = err.message?.includes("not defined by type") ||
             err.message?.includes("400") ||

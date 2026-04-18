@@ -41,6 +41,7 @@ import {
 } from "../prompts/social-optimization-prompt";
 import type { LLMProvider } from "../types";
 import { isR2Configured, uploadToR2 } from "../tools/r2-upload";
+import { isBufferQuotaExhausted } from "./buffer-graphql";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
@@ -1169,6 +1170,12 @@ async function scheduleBufferWeek(
   copyMap: Map<number, PlatformCopy>,
   niche: string
 ): Promise<number> {
+  // SESSION 87: Pre-flight — don't attempt scheduling if quota is already blown
+  if (isBufferQuotaExhausted()) {
+    console.warn(`⏸️ [Orchestrator] Buffer quota exhausted — skipping shorts distribution. ContentEngine will pick up when quota resets.`);
+    return 0;
+  }
+
   const { SocialSchedulerListProfilesTool, SocialSchedulerPostTool } = await import("../tools/social-scheduler");
 
   // Get ALL available Buffer channels — no filtering, no exclusions
@@ -1235,6 +1242,12 @@ async function scheduleBufferWeek(
   };
 
   for (let clipIdx = 0; clipIdx < clips.length; clipIdx++) {
+    // SESSION 87: Bail out mid-loop if quota gets blown during scheduling
+    if (isBufferQuotaExhausted()) {
+      console.warn(`⏸️ [Orchestrator] Buffer quota hit mid-scheduling at clip ${clipIdx}/${clips.length} — stopping. ${scheduledCount} posts already queued.`);
+      break;
+    }
+
     const clip = clips[clipIdx];
     const copy = copyMap.get(clip.index);
     if (!copy) continue;

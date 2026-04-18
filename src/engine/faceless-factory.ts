@@ -3084,16 +3084,27 @@ export async function produceFacelessVideo(
     console.warn(`⚠️ [FacelessFactory] R2 download failed (non-fatal): ${dlErr.message?.slice(0, 200)}`);
   }
 
-  // Download thumbnail for YouTube custom thumbnail upload
+  // SESSION 83: Download R2 thumbnail for YouTube custom thumbnail upload.
+  // Previously swallowed errors silently — thumbnail was abandoned every run.
   let localThumbPath: string | null = null;
-  try {
-    const thumbResp = await fetch(artifacts.thumbnailUrl);
-    if (thumbResp.ok) {
-      const thumbBuf = Buffer.from(await thumbResp.arrayBuffer());
-      localThumbPath = `${FACELESS_DIR}/${jobId}_thumbnail.jpg`;
-      writeFileSync(localThumbPath, thumbBuf);
+  if (artifacts.thumbnailUrl) {
+    try {
+      console.log(`⬇️ [FacelessFactory] Downloading R2 thumbnail...`);
+      const thumbResp = await fetch(artifacts.thumbnailUrl);
+      if (thumbResp.ok) {
+        const thumbBuf = Buffer.from(await thumbResp.arrayBuffer());
+        localThumbPath = `${FACELESS_DIR}/${jobId}_thumbnail.jpg`;
+        writeFileSync(localThumbPath, thumbBuf);
+        console.log(`🖼️ [FacelessFactory] Thumbnail downloaded (${(thumbBuf.length / 1024).toFixed(0)}KB) → ${localThumbPath}`);
+      } else {
+        console.warn(`⚠️ [FacelessFactory] R2 thumbnail download failed: ${thumbResp.status}`);
+      }
+    } catch (thumbErr: any) {
+      console.error(`⚠️ [FacelessFactory] R2 thumbnail download error: ${thumbErr.message?.slice(0, 200)}`);
     }
-  } catch { /* non-fatal */ }
+  } else {
+    console.warn(`⚠️ [FacelessFactory] No thumbnail URL in artifacts — YouTube will use auto-frame`);
+  }
 
   cleanupJobFiles(jobId, true);
 

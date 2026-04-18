@@ -1097,26 +1097,52 @@ def compose_video(
     total_duration = _probe_duration(final_path)
     log.info("compose_final_duration", duration_s=round(total_duration, 2))
 
-    # ── Stage 5: Generate thumbnail ──────────────────────────────────────
+    # ── Stage 5: Generate thumbnail (aesthetic override) ─────────────────
     thumb_path = os.path.join(job_dir, "thumbnail.jpg")
     thumb_idx = min(thumbnail_scene_idx, n_scenes - 1)
     thumb_src = scene_images[thumb_idx] if thumb_idx < len(scene_images) else scene_images[0]
 
+    # Extract 2-3 word uppercase hook for drawtext overlay
+    _thumb_hook = ""
+    if hook_text:
+        _words = hook_text.upper().split()
+        _thumb_hook = " ".join(_words[:3])
+    elif script:
+        _words = script.split("\n")[0].upper().split()
+        _thumb_hook = " ".join(_words[:3])
+
     try:
-        # Scale to 1280x720 (YouTube recommended thumbnail size) + high quality JPEG
+        # Build vf chain: scale + vignette + optional drawtext
+        _vf_parts = ["scale=1280:720:flags=lanczos", "vignette=PI/3"]
+        if _thumb_hook:
+            # Escape special chars for ffmpeg drawtext
+            _safe_hook = _thumb_hook.replace("'", "’").replace(":", "\\:")
+            _vf_parts.append(
+                f"drawtext=fontfile='{FONT_BEBAS}'"
+                f":text='{_safe_hook}'"
+                f":fontsize=120"
+                f":fontcolor=white"
+                f":borderw=5"
+                f":bordercolor=black"
+                f":x=(w-text_w)/2"
+                f":y=(h-text_h)/2"
+            )
+        _vf_chain = ",".join(_vf_parts)
+
         subprocess.run(
             [
                 "ffmpeg", "-y",
                 "-i", thumb_src,
-                "-vf", f"scale=1280:720:flags=lanczos",
-                "-q:v", "2",  # high quality JPEG
+                "-vf", _vf_chain,
+                "-q:v", "2",
                 thumb_path,
             ],
             capture_output=True, text=True, timeout=30,
             check=True,
         )
+        log.info("compose_thumbnail_ok", hook=_thumb_hook or "(none)")
     except Exception as exc:
-        log.warning("compose_thumbnail_failed", error=str(exc))
+        log.warning("compose_thumbnail_failed", error=str(exc)[:300])
         # Fallback: copy the raw image as thumbnail
         import shutil
         shutil.copy2(thumb_src, thumb_path)

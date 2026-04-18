@@ -38,7 +38,7 @@ import {
   recordNicheRun,
 } from "../tools/niche-cooldown";
 import { withPodSession } from "../pod/session";
-import { produceVideo } from "../pod/runpod-client";
+import { produceVideo, splitOversizedScenes } from "../pod/runpod-client";
 import type { JobSpec, Scene as PodScene } from "../pod/types";
 import { executeFullPipeline } from "./vidrush-orchestrator";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
@@ -225,13 +225,14 @@ async function produceBatchOnPod(
 
         const t0 = Date.now();
 
-        // Build pod job spec
-        const scenes: PodScene[] = script.segments.map((seg, idx) => ({
+        // Build pod job spec — auto-split oversized TTS scenes (S91)
+        const rawScenes: PodScene[] = script.segments.map((seg, idx) => ({
           index: idx,
           image_prompt: seg.visual_direction,
           tts_text: seg.voiceover,
           duration_hint_s: seg.duration_hint || undefined,
         }));
+        const scenes = splitOversizedScenes(rawScenes);
 
         const hookText = script.hook?.slice(0, 60) || script.segments[0]?.voiceover?.split(" ").slice(0, 9).join(" ");
 
@@ -348,6 +349,10 @@ async function distributeVideo(
     }
 
     // Build a FacelessResult for the preProduced orchestrator path
+    // SESSION 91 FIX: Use actual video duration / segment count instead of
+    // duration_hint guesses — inflated hints were causing shorts curator to
+    // reject every clip as >175s, resulting in 0 shorts + 0 Buffer posts.
+    const actualPerSeg = video.durationS / video.script.segments.length;
     const preProduced: FacelessResult = {
       videoUrl: video.videoUrl,
       thumbnailUrl: video.thumbnailUrl,
@@ -359,7 +364,7 @@ async function distributeVideo(
       duration: video.durationS,
       segmentCount: video.script.segments.length,
       script: video.script,
-      segmentDurations: video.script.segments.map(s => s.duration_hint || 30),
+      segmentDurations: video.script.segments.map(() => actualPerSeg),
     };
 
     // Feed into orchestrator Steps 3-8 via preProduced bypass

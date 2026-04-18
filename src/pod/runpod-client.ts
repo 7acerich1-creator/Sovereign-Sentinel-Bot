@@ -35,6 +35,7 @@ import {
   type JobStatus,
   type PodHandle,
   type ProduceAccepted,
+  type Scene,
   type ShortJobSpec,
   PodContractError,
   PodJobFailedError,
@@ -969,6 +970,77 @@ function backoffMs(attempt: number): number {
   const base = 1_000 * Math.pow(2, attempt - 1);
   const jitter = Math.floor(Math.random() * 500);
   return base + jitter;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SESSION 91 FIX: Split oversized TTS scenes before pod submission.
+// LLM occasionally writes segments >4000 chars. Instead of crashing the
+// entire production, split at the nearest sentence boundary under the cap.
+// ─────────────────────────────────────────────────────────────────────────────
+const TTS_MAX_CHARS = 4000;
+const TTS_SPLIT_TARGET = 3500; // split target leaves headroom
+
+/**
+ * Split any scene whose tts_text exceeds 4000 chars into multiple contiguous
+ * scenes sharing the same image_prompt. Returns a new array with re-indexed
+ * scenes. Safe to call on scenes already under the limit (no-op).
+ */
+export function splitOversizedScenes(scenes: Scene[]): Scene[] {
+  const out: Scene[] = [];
+  for (const scene of scenes) {
+    if (scene.tts_text.length <= TTS_MAX_CHARS) {
+      out.push({ ...scene, index: out.length });
+      continue;
+    }
+    // Split at sentence boundaries
+    const chunks = splitTextAtSentences(scene.tts_text, TTS_SPLIT_TARGET);
+    for (const chunk of chunks) {
+      out.push({
+        index: out.length,
+        image_prompt: scene.image_prompt,
+        tts_text: chunk,
+        duration_hint_s: scene.duration_hint_s
+          ? Math.round(scene.duration_hint_s / chunks.length)
+          : undefined,
+      });
+    }
+    console.log(
+      `📐 [RunPod] Scene split: ${scene.tts_text.length} chars → ${chunks.length} scenes ` +
+      `(${chunks.map(c => c.length).join(", ")} chars)`,
+    );
+  }
+  return out;
+}
+
+/** Split text into chunks at sentence boundaries, each ≤ targetLen chars. */
+function splitTextAtSentences(text: string, targetLen: number): string[] {
+  // Split on sentence-ending punctuation followed by a space
+  const sentences = text.match(/[^.!?]+[.!?]+[\s]*/g) || [text];
+  const chunks: string[] = [];
+  let current = "";
+  for (const sentence of sentences) {
+    if (current.length + sentence.length > targetLen && current.length > 0) {
+      chunks.push(current.trim());
+      current = sentence;
+    } else {
+      current += sentence;
+    }
+  }
+  if (current.trim().length > 0) {
+    chunks.push(current.trim());
+  }
+  // Safety: if any chunk still exceeds TTS_MAX_CHARS, hard-split at char boundary
+  const safe: string[] = [];
+  for (const chunk of chunks) {
+    if (chunk.length <= TTS_MAX_CHARS) {
+      safe.push(chunk);
+    } else {
+      for (let i = 0; i < chunk.length; i += TTS_MAX_CHARS) {
+        safe.push(chunk.slice(i, i + TTS_MAX_CHARS).trim());
+      }
+    }
+  }
+  return safe.filter(s => s.length > 0);
 }
 
 function validateJobSpec(spec: JobSpec): void {

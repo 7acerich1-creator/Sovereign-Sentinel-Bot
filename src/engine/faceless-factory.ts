@@ -37,7 +37,7 @@ import {
 // Phase 4 — Pod delegation imports. Railway generates the script; the pod
 // handles TTS, image generation, video composition, and R2 upload.
 import { withPodSession } from "../pod/session";
-import { produceVideo } from "../pod/runpod-client";
+import { produceVideo, splitOversizedScenes } from "../pod/runpod-client";
 import type { JobSpec, Scene as PodScene, ArtifactUrls } from "../pod/types";
 
 export const FACELESS_DIR = "/tmp/faceless_factory";
@@ -2959,13 +2959,14 @@ export async function produceFacelessVideo(
   // ──────────────────────────────────────────────────────────────────────────
   console.log(`🚀 [FacelessFactory] Delegating compute to pod (XTTS + FLUX + compose + R2)...`);
 
-  // Map script segments to pod scene format
-  const podScenes: PodScene[] = script.segments.map((seg, i) => ({
+  // Map script segments to pod scene format, auto-splitting any >4000 char scenes (S91)
+  const rawScenes: PodScene[] = script.segments.map((seg, i) => ({
     index: i,
     image_prompt: seg.visual_direction,
     tts_text: seg.voiceover,
     duration_hint_s: seg.duration_hint || undefined,
   }));
+  const podScenes = splitOversizedScenes(rawScenes);
 
   // Extract hook text for the pod's opening typewriter overlay (Task 5.9).
   // Prefer the script's explicit hook; fall back to first segment's voiceover.
@@ -3118,9 +3119,13 @@ export async function produceFacelessVideo(
   console.log(`   Video URL: ${videoUrl || "queue failed"}`);
   console.log(`   Thumbnail URL: ${artifacts.thumbnailUrl}`);
 
-  // Phase 5 Task 5.5: Pass script + per-segment duration hints so the
-  // orchestrator can call the shorts-curator without re-generating anything.
-  const segDurations = script.segments.map(s => s.duration_hint || 30);
+  // SESSION 91 FIX: Use ACTUAL video duration divided evenly across segments
+  // instead of LLM duration_hint guesses. The hints were 25-45s/segment while
+  // real TTS audio is often 10-20s — inflated estimates caused the shorts
+  // curator to reject every clip as "too long" (>175s cap). Pod only returns
+  // total duration, not per-scene, so even distribution is the best estimate.
+  const actualPerSeg = artifacts.durationS / script.segments.length;
+  const segDurations = script.segments.map(() => actualPerSeg);
 
   return {
     videoUrl,

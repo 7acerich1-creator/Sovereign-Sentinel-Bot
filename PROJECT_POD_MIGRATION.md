@@ -14,7 +14,7 @@
 | **Current phase status** | **Phase 0-6: ALL COMPLETE. Phase 7: 0/6 done. BLOCKED.** |
 | **Total phases** | 8 (Phase 0 -> Phase 7) |
 | **Last session** | Session 80 -- 2026-04-17 -- Volume `gai851lcfw` RE-ENABLED for model caching (TEMPORARY through testing + initial batches). `noVolume` default flipped `true→false` in `runpod-client.ts`. HF_HOME/TORCH_HOME/XDG_CACHE_HOME pointed to `/runpod-volume/cache/` when volume attached. Datacenter auto-pins to US-KS-2. Speaker WAVs still from Docker image (S76 preserved). Funnel audit: landing page + diagnostic both live and serving. Diagnostic is the conversion instrument (quiz → email capture → Protocol 77 CTA). |
-| **Last commit touching this work** | `S80 pending push` — volume re-enable for model caching. Prior: `20ba978` (S79). |
+| **Last commit touching this work** | `81c6e5b` — S80 volume re-enable for model caching. Prior: `20ba978` (S79). |
 | **Blocker** | **RunPod balance = $0.** Architect must top up $5-10 at runpod.io before Task 7.1 can proceed. Volume is now configured — first run downloads models TO the volume, every run after loads from cache (~1-2 min vs ~8 min). |
 | **Next session's first action** | **After top-up:** Run `run-full-test.bat` from Sentinel root. Volume will cache models on first run. Subsequent runs start fast. |
 
@@ -307,9 +307,55 @@ Channels to verify against:
   - Verification: short audit table in Phase 7 section
 - ☐ **Task 7.4 — Same audits for a TCF long-form + its curated shorts.** Triggered same day. Verify uploads land on `@TheContainmentField`.
   - Verification: matching audit tables
-- ☐ **Task 7.5 — Batch production window mode.** Add a Telegram `/produce_batch` command (or scheduler entry) that keeps ONE warm GPU pod alive for a configurable window (default 30 min), queues N video jobs sequentially through it, then kills the pod. Uses `withPodSession` with `idleWindowMs: 5 * 60_000` so the pod stays warm between jobs. Target: 6-8 videos per batch window (~$1.50-2.00 total GPU cost for a full week of content). Includes a sweep-on-exit guarantee via the S75 signal handlers + `sweepStalePods()`.
-  - Files: `src/engine/faceless-factory.ts` (batch entry point), `src/pod/session.ts` (idle window tuning), new Telegram command handler
-  - Verification: batch of 3+ videos produced on a single pod session without cold-start between jobs; pod terminated within 5 min of last job completing
+- ☐ **Task 7.5 — Batch production window mode + intra-job parallelism.** Full batch production system that maximizes GPU dollar efficiency. Three layers of work:
+
+  **7.5a — Batch orchestration (Telegram + warm-pod session).**
+  Add `/produce_batch` Telegram command (and/or scheduler entry). Keeps ONE warm GPU pod alive for a configurable window (default 45 min). Queues N video jobs through it sequentially (job 1 finishes → job 2 starts). Uses `withPodSession` with `idleWindowMs: 5 * 60_000` so the pod stays warm between jobs — no cold-start penalty between videos. Target: 6-8 videos per batch window. Pod terminated within 5 min of last job completing via S75 signal handlers + `sweepStalePods()`.
+
+  **7.5b — Intra-job parallelism (GPU throughput maximization).**
+  Currently each video job runs 3 sequential bottlenecks that are independently parallelizable:
+  1. **XTTS narration** — 12-16 sequential HTTP calls to pod. Each scene's TTS is independent. Batch endpoint: accept all scene texts in one request, return all WAVs. Or parallel-fire individual requests to the pod's FastAPI (uvicorn can handle concurrent requests to the same GPU if properly queued).
+  2. **FLUX image generation** — 12-16 sequential GPU inference calls. Each scene's image prompt is independent. Same options: batch endpoint or concurrent requests. THIS IS THE BIGGEST TIME SINK — GPU inference per image is the slowest single operation in the pipeline. Parallelizing here yields the largest wall-clock reduction.
+  3. **FFmpeg clip assembly** — 12-16 sequential Ken Burns renders. Each clip only needs its own WAV + image. CPU-bound, no GPU contention. Can run all clips in parallel via `Promise.all` / `asyncio.gather` (pod-side) or subprocess pool.
+
+  Architecture choice: XTTS and FLUX share the GPU. True simultaneous GPU batching requires careful VRAM management (FLUX.1 [dev] bf16 on 80GB leaves ~10-15GB headroom). Safest approach: run ALL FLUX images first (GPU-bound), then ALL XTTS narrations (GPU-bound but lighter), then ALL clip assemblies in parallel (CPU-only). This avoids VRAM contention while still eliminating per-scene round-trip overhead.
+
+  Pod-side changes needed:
+  - `pod/worker.py` — new `/produce` flow: receives full scene list, runs FLUX batch → XTTS batch → parallel FFmpeg clips → compose → R2 upload. Currently processes scenes one at a time inside `compose.py`.
+  - `pod/pipelines/flux.py` — batch entry: accept list of prompts, return list of image paths. Model stays loaded in VRAM between calls (already true for sequential, but verify no reload per call).
+  - `pod/pipelines/xtts.py` — batch entry: accept list of `{text, speaker_wav}`, return list of WAV paths. Model stays loaded between calls.
+  - `pod/pipelines/compose.py` — accept pre-generated WAVs + images, skip per-scene generation, go straight to Ken Burns + concat + mix + captions.
+
+  Expected wall-clock improvement: current sequential 12-scene video ≈ 8-12 min on pod. With intra-job parallelism: FLUX batch ≈ 3-4 min (model loaded once, 12 inferences back-to-back), XTTS batch ≈ 1-2 min (fast per-scene), FFmpeg parallel ≈ 1 min (all clips at once), compose ≈ 1-2 min. Total ≈ 6-9 min per video. For an 8-video batch: sequential = 64-96 min GPU time; parallel = 48-72 min. Same hourly rate, more videos per dollar.
+
+  **7.5c — LLM rate limit planning for batch script generation.**
+  Before the pod even wakes up, Railway must generate scripts for ALL batch videos. Per-video LLM calls (Anthropic claude-sonnet-4, currently primary):
+  1. Blueprint extraction (1 call, ~2K tokens out)
+  2. Script Pass 1 — ACT 1 + ACT 2, 9 segments (1 call, ~4K tokens out)
+  3. Script Pass 2 — ACT 3, 3-4 segments (1 call, ~2K tokens out)
+  4. Frequency Activation CTAs (1 call, ~512 tokens out)
+  5. Shorts curation — after long-form (1 call, ~4K tokens out via shorts-curator)
+  6. Platform copy generation — per-clip social captions (1 call, ~4K tokens out)
+  7. Long-form description + tags (1 call, ~2K tokens out)
+  Total per video: **7 LLM calls**, ~18K output tokens, ~8-12K input tokens.
+  For 8-video batch: **56 LLM calls**, ~144K output tokens, ~80K input tokens.
+
+  Anthropic rate limits (Tier 1, claude-sonnet-4): 50 RPM, 40K input TPM, 8K output TPM. At 56 calls across a batch, we WILL hit rate limits if we fire all scripts in parallel. Plan:
+  - **Pre-generate all scripts BEFORE waking the pod.** Scripts don't need GPU. Generate them sequentially with 3-5s gaps between calls (well under 50 RPM). 56 calls × 5s gap = ~5 min total script generation time. This happens on Railway while the pod is still cold — zero GPU cost.
+  - **Store all generated scripts in memory** (or temp files on Railway). Each script includes all scene texts + image prompts + metadata.
+  - **Then wake the pod ONCE** and feed it pre-generated scripts one video at a time.
+  - **Groq fallback**: If Anthropic 429s persist during batch script gen, the existing failover chain catches it. But with 5s pacing, Anthropic should never 429 on 56 calls.
+  - **Batch script validation gate**: After all scripts are generated but BEFORE waking the pod, validate: (a) every script has valid JSON with segments array, (b) no duplicate titles (Pinecone similarity check), (c) brand routing is correct (Ace niches ≠ TCF niches), (d) scene count is within bounds. If any script fails validation, regenerate that one script — don't burn GPU time on a bad input.
+
+  **7.5d — Distribution rate limit planning for batch output.**
+  After the pod delivers 8 videos, distribution must handle:
+  - 8 YouTube long-form uploads (YouTube API quota: 10K units/day, each upload = 1600 units = max ~6 uploads/day). **CRITICAL: YouTube daily upload quota may cap us at 6 videos/day.** Plan: upload 6 today, queue remaining 2 for tomorrow. Or split batch across brands (3 Ace + 3 TCF = 6 uploads across 2 channels, both under quota).
+  - 24-32 curated shorts (3-4 per video × 8 videos). YouTube Shorts uploads also consume quota units.
+  - Buffer scheduling for all social platforms. Shared `bufferGraphQL` (S85) handles 10s pacing. 8 videos × ~10 Buffer calls each = 80 calls × 10s = ~13 min of Buffer scheduling time. Well within the 100 req/15min limit if spaced properly.
+  - **Scheduling strategy**: Don't publish all 8 videos simultaneously. Stagger: 1-2 videos/day across the week. Buffer already handles future-dated scheduling. The batch PRODUCES all 8 in one GPU session but DISTRIBUTES them over 7 days.
+
+  - Files: `src/engine/faceless-factory.ts` (batch entry point + script pre-generation), `src/engine/vidrush-orchestrator.ts` (distribution pacing), `src/pod/session.ts` (idle window tuning), `pod/worker.py` (batch scene processing), `pod/pipelines/flux.py` (batch image gen), `pod/pipelines/xtts.py` (batch TTS), `pod/pipelines/compose.py` (accept pre-generated assets), new Telegram command handler
+  - Verification: (1) batch of 3+ videos produced on a single pod session without cold-start between jobs, (2) pod terminated within 5 min of last job completing, (3) no Anthropic 429 during script generation phase, (4) YouTube upload quota not exceeded, (5) all videos distributed across the week via Buffer scheduling, (6) wall-clock time per video measurably lower than sequential baseline
 - ☐ **Task 7.6 — Weekly metrics check-in (1 week after Phase 7 green).** Pull: per-video average view duration, retention drop-off timestamps, CTR, click-throughs to `/diagnostic` via Vercel Insights, `initiates` rows since cutover, short → channel-click rate.
   - Verification: numbers written to NORTH_STAR.md "S57 Funnel Measurement" section
 

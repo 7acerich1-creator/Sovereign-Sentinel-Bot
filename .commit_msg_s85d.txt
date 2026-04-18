@@ -1,0 +1,7 @@
+S85: Expand Task 7.5 with batch parallelism + LLM and distribution rate planning
+
+Task 7.5 now covers 4 sub-tasks:
+  7.5a - Batch orchestration (warm-pod session, /produce_batch command)
+  7.5b - Intra-job parallelism (FLUX batch, XTTS batch, parallel FFmpeg)
+  7.5c - LLM rate limit planning (56 calls for 8-video batch, 5s pacing)
+  7.5d - Distribution rate limits (YouTube 6/day quota, Buffer 10s pacing, weekly stagger)

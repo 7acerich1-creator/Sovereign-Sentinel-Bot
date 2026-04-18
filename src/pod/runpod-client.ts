@@ -57,15 +57,11 @@ const DEFAULT_WORKER_PORT = 8000;
 // S90 cost optimization: 48GB cards are sufficient for FLUX bf16 (~24GB) + XTTS (~4GB)
 // + Whisper (~3GB) loaded concurrently. ~60% cheaper than 80GB cards, same output quality.
 // L40S primary (newer Ada Lovelace arch, slightly faster inference, ~$0.74/hr community).
-// A6000 fallback (proven workhorse, ~$0.76/hr community).
-// H100/A100 80GB last resort — more expensive but always available in US-KS-2 (volume DC).
-// Order matters — RunPod tries first-match. Never crash just because cheap GPUs are sold out.
+// A6000 fallback (proven workhorse, ~$0.76/hr community). Order matters — first-match.
+// NO expensive fallbacks — if cheap GPUs are sold out, retry later rather than burn budget.
 const DEFAULT_GPU_TYPE_IDS: readonly string[] = [
   "NVIDIA L40S",
   "NVIDIA RTX A6000",
-  "NVIDIA A100 80GB PCIe",
-  "NVIDIA A100-SXM4-80GB",
-  "NVIDIA H100 80GB HBM3",
 ] as const;
 
 // Pod env vars forwarded from Railway — these are the keys the worker reads.

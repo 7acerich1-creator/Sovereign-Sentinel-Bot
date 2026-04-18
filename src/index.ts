@@ -79,6 +79,7 @@ import { pollYouTubeComments } from "./proactive/youtube-comment-watcher";
 // ── Content Engine ──
 import { dailyContentProduction, distributionSweep, contentEngineStatus, discoverChannels, nukeBufferQueue } from "./engine/content-engine";
 import { warmChannelCache } from "./engine/buffer-graphql";
+import { drainBacklog } from "./engine/backlog-drainer";
 
 // ── Brand Niche Allowlist (Phase 3 Task 3.2) ──
 // Intake-layer guard: Alfred's seeds and the pipeline entry both consume these
@@ -1636,6 +1637,15 @@ async function main() {
 
   // SESSION 89: Pre-warm shared channel cache at boot (1 API call, shared by all consumers)
   warmChannelCache();
+
+  // SESSION 90: Backlog drainer — push existing R2 clips to Buffer
+  // Delay 5 minutes after boot to let channel cache warm + quota settle.
+  // Self-retries every hour if budget is exhausted.
+  setTimeout(() => {
+    drainBacklog().catch((err: any) =>
+      console.error(`[BacklogDrainer] Fatal: ${err.message?.slice(0, 300)}`)
+    );
+  }, 5 * 60 * 1000);
 
   // Daily Content Production (1:30 PM CDT = 18:30 UTC — after Vector sweep + Veritas clear)
   scheduler.add({

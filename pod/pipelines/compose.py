@@ -233,7 +233,7 @@ def _generate_caption_ass(
     ass_lines.append("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding")
     ass_lines.append(
         f"Style: Caption,{style['font']},{style['fontsize']},{style['primary_color']},"
-        f"&H000000FF,{style['outline_color']},&H00000000,{style['bold']},"
+        f"&HFF000000,{style['outline_color']},&H00000000,{style['bold']},"
         f"0,0,0,100,100,2.0,0,{style['border_style']},{style['outline_width']},"
         f"{style['shadow_depth']},2,80,80,100,1"
     )
@@ -388,7 +388,7 @@ MUSIC_BED_FILES = {
     "ace_richie": os.path.join(BRAND_ASSETS_DIR, "music_sovereign.mp3"),
     "containment_field": os.path.join(BRAND_ASSETS_DIR, "music_urgent.mp3"),
 }
-MUSIC_BED_DB = -12  # dB attenuation for music underneath narration (S81: was -18, inaudible after amix)
+MUSIC_BED_DB = -8  # dB attenuation for music underneath narration (S86: was -12, barely audible. -8 = present but not competing)
 
 # Brand stings
 TYPING_SOUND = os.path.join(BRAND_ASSETS_DIR, "typing.mp3")
@@ -642,7 +642,7 @@ PlayResY: {OUT_HEIGHT}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Typewriter,{style['font']},{style['fontsize']},{style['primary_color']},&H000000FF,{style['outline_color']},&H80000000,{style['bold']},0,0,0,100,100,1.5,0,1,{style['outline_width']},{style['shadow_depth']},2,80,80,120,1
+Style: Typewriter,{style['font']},{style['fontsize']},{style['primary_color']},&HFF000000,{style['outline_color']},&H80000000,{style['bold']},0,0,0,100,100,1.5,0,1,{style['outline_width']},{style['shadow_depth']},2,80,80,120,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

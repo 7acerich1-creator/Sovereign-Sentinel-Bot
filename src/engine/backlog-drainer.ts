@@ -145,7 +145,10 @@ async function getDistributedClips(): Promise<Set<string>> {
         },
       }
     );
-    if (!resp.ok) return new Set(); // Table might not exist yet — that's fine
+    if (!resp.ok) {
+      console.warn(`⚠️ [BacklogDrainer] backlog_distributed query failed (${resp.status}) — table may not exist. Treating all clips as un-distributed.`);
+      return new Set();
+    }
     const rows = (await resp.json()) as any[];
     return new Set(rows.map(r => r.clip_key));
   } catch {

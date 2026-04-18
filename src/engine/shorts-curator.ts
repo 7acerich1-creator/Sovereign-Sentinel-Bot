@@ -89,7 +89,9 @@ function buildCuratorPrompt(
     const startTs = cumulativeTs;
     const dur = segmentDurations[i] || seg.duration_hint || 20;
     cumulativeTs += dur;
-    return `[${i}] ${startTs.toFixed(1)}s-${cumulativeTs.toFixed(1)}s (${dur.toFixed(1)}s): "${seg.voiceover.slice(0, 200)}"`;
+    // SESSION 92: Show FULL voiceover text (was sliced to 200 chars — LLM couldn't
+    // see how segments end, causing incoherent shorts that cut mid-thought).
+    return `[${i}] ${startTs.toFixed(1)}s-${cumulativeTs.toFixed(1)}s (${dur.toFixed(1)}s): "${seg.voiceover}"`;
   }).join("\n");
 
   const totalDur = cumulativeTs;
@@ -111,6 +113,11 @@ RULES:
 6. Quality > quantity. If only 3 moments are genuinely strong, return 3. Never pad with weak clips. But a typical 12-16 segment long-form should yield 5-6 strong moments — look harder before settling for fewer.
 7. CTA overlay for every short: "Full video on the channel — ${channelHandle}"
 8. Mix durations — some shorts should be punchy (1-2 segments, under 30s), others can be deeper dives (3-4 segments, 60-120s). Variety in pacing keeps the channel from feeling algorithmic.
+
+NARRATIVE COHERENCE (NON-NEGOTIABLE):
+9. Every short MUST be a COMPLETE STORY with its own beginning, middle, and end. "Get off your ass!" is a complete story. "off your ass and" is NOT. Read the FULL text of each segment — if the first segment starts mid-argument (references something from a previous segment the viewer hasn't seen), it is NOT a valid start. If the last segment ends on a cliffhanger that only resolves in the next segment, it is NOT a valid end.
+10. The first sentence of your selected range must INTRODUCE its own premise — no dangling references to prior segments. The last sentence must RESOLVE the point — no open loops or "but that's not all" trailing into the next segment.
+11. A single-segment short is PREFERRED over a multi-segment short that starts or ends mid-thought. One powerful, complete statement beats three segments stitched into an incoherent mess.
 
 VERTICAL SCENE GENERATION (CRITICAL):
 Each short will be rendered as a NATIVE 9:16 vertical video, NOT cropped from horizontal. You must generate "vertical_scenes" for each short — these are NEW image prompts composed for PORTRAIT framing.

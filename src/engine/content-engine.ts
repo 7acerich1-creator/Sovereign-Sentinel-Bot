@@ -814,7 +814,14 @@ export async function distributionSweep(): Promise<number> {
     `status=eq.partial&order=scheduled_time.asc&limit=12`
   );
 
-  const drafts = [...readyDrafts, ...partialDrafts];
+  // SESSION 92 FIX: Retry "failed" drafts too — previously abandoned forever.
+  // Cap at 3 retries (check retry_count column, default 0) to avoid infinite loops.
+  const failedDrafts = await supabaseQuery(
+    "content_engine_queue",
+    `status=eq.failed&retry_count=lt.3&order=scheduled_time.asc&limit=5`
+  );
+
+  const drafts = [...readyDrafts, ...partialDrafts, ...failedDrafts];
 
   if (drafts.length === 0) return 0;
 
@@ -992,6 +999,8 @@ export async function distributionSweep(): Promise<number> {
         buffer_results: allResults,
         channels_hit: successCount,
         channels_total: channels.length,
+        // SESSION 92: Track retry count so failed drafts don't loop forever
+        retry_count: (draft.retry_count || 0) + 1,
       });
 
       // Log to content_transmissions for Vector's metrics sweep

@@ -692,6 +692,99 @@ export async function fetchHealth(handle: PodHandle): Promise<HealthReport> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SESSION 92: Pod log capture — download logs BEFORE termination.
+// Ring buffer on the pod holds last 2000 lines. We fetch them and store to R2
+// so failures are diagnosable even after the pod is destroyed.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface PodLogResponse {
+  lines: string[];
+  total_captured: number;
+  returned: number;
+}
+
+/**
+ * Fetch the last N log lines from the pod's ring buffer.
+ * Best-effort — returns empty array on any failure (pod may already be dying).
+ */
+export async function fetchPodLogs(
+  handle: PodHandle,
+  tail: number = 500,
+): Promise<string[]> {
+  try {
+    const resp = await podFetchJson<PodLogResponse>(
+      handle,
+      "GET",
+      `/logs?tail=${tail}`,
+      {},
+    );
+    return resp.lines || [];
+  } catch (err) {
+    console.warn(
+      `[RunPod] fetchPodLogs failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+    );
+    return [];
+  }
+}
+
+/**
+ * Download pod logs and upload them to R2 for post-mortem analysis.
+ * Called from session.ts before every stopPod(). 7-day sweep handled by
+ * R2 lifecycle rules.
+ */
+export async function capturePodLogs(
+  handle: PodHandle,
+  reason: string,
+): Promise<string | null> {
+  const lines = await fetchPodLogs(handle, 1000);
+  if (lines.length === 0) return null;
+
+  const logText = lines.join("\n");
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const key = `pod-logs/${ts}_${handle.podId}_${reason}.jsonl`;
+
+  // Upload to R2 if configured
+  const R2_ENDPOINT = process.env.R2_ENDPOINT;
+  const R2_ACCESS_KEY = process.env.R2_ACCESS_KEY_ID;
+  const R2_SECRET_KEY = process.env.R2_SECRET_ACCESS_KEY;
+  const R2_BUCKET = process.env.R2_BUCKET || "sovereign-media";
+
+  if (!R2_ENDPOINT || !R2_ACCESS_KEY || !R2_SECRET_KEY) {
+    // Fallback: just log a summary to console
+    console.log(
+      `📋 [RunPod] Pod ${handle.podId} logs (${lines.length} lines, reason=${reason}):`,
+    );
+    console.log(logText.slice(-2000)); // Last 2KB to console as fallback
+    return null;
+  }
+
+  try {
+    // Use AWS SDK-compatible PUT to R2
+    const { S3Client, PutObjectCommand } = await import("@aws-sdk/client-s3");
+    const s3 = new S3Client({
+      region: "auto",
+      endpoint: R2_ENDPOINT,
+      credentials: { accessKeyId: R2_ACCESS_KEY, secretAccessKey: R2_SECRET_KEY },
+    });
+    await s3.send(new PutObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+      Body: logText,
+      ContentType: "application/x-ndjson",
+    }));
+    console.log(`📋 [RunPod] Pod logs captured → R2 ${key} (${lines.length} lines)`);
+    return key;
+  } catch (err) {
+    console.error(
+      `[RunPod] R2 log upload failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+    );
+    // Still dump to console as last resort
+    console.log(logText.slice(-2000));
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Pod safety net — list + sweep orphans
 // ─────────────────────────────────────────────────────────────────────────────
 

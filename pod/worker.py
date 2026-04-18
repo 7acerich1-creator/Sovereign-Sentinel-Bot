@@ -37,12 +37,24 @@ from pydantic import BaseModel, Field, field_validator
 # Logging
 # ---------------------------------------------------------------------------
 logging.basicConfig(format="%(message)s", level=logging.INFO)
+
+# SESSION 92: Ring buffer captures last 2000 log lines for /logs endpoint.
+# Railway fetches these before pod termination so failures are diagnosable.
+from collections import deque
+_LOG_RING: deque[str] = deque(maxlen=2000)
+
+def _ring_buffer_sink(_, __, event_dict: dict) -> str:
+    """structlog processor that appends rendered JSON to the ring buffer."""
+    rendered = structlog.processors.JSONRenderer()(_, __, event_dict)
+    _LOG_RING.append(rendered)
+    return rendered
+
 structlog.configure(
     processors=[
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.format_exc_info,  # SESSION 88: serialize tracebacks into JSON
-        structlog.processors.JSONRenderer(),
+        _ring_buffer_sink,  # SESSION 92: capture to ring buffer before render
     ],
 )
 log = structlog.get_logger("sovereign-pod")
@@ -325,6 +337,19 @@ def readiness(_: None = Depends(require_bearer)) -> HealthReport:
         pod_worker_token_configured=bool(POD_WORKER_TOKEN),
         r2_configured=r2_ok,
     )
+
+
+@app.get("/logs", tags=["diagnostics"])
+def get_logs(
+    tail: int = 500,
+    _: None = Depends(require_bearer),
+) -> dict:
+    """SESSION 92: Return last N log lines from ring buffer.
+    Railway fetches this before stopPod() so failures are diagnosable
+    even after the pod terminates."""
+    tail = min(tail, len(_LOG_RING))
+    lines = list(_LOG_RING)[-tail:] if tail > 0 else []
+    return {"lines": lines, "total_captured": len(_LOG_RING), "returned": len(lines)}
 
 
 @app.post(

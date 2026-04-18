@@ -7,10 +7,9 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { LLMProvider } from "../types";
+import { bufferGraphQL, BUFFER_ORG_ID } from "./buffer-graphql";
 
 // ── Constants ──
-
-const BUFFER_GRAPHQL_ENDPOINT = "https://api.buffer.com";
 
 // Niche rotation: Mon=0 → Sun=6, getDay() returns 0=Sun
 const NICHE_ROTATION: Record<number, { niche: string; hookStyle: string }> = {
@@ -373,64 +372,9 @@ async function generateContentImage(
 
   return publicUrl;
 }
-// ── Buffer GraphQL Helpers ──
+// SESSION 85: bufferGraphQL + BUFFER_ORG_ID imported from shared ./buffer-graphql.ts
+// Single rate limiter across all Buffer consumers.
 
-function getBufferToken(): string {
-  const token = process.env.BUFFER_API_KEY;
-  if (!token) throw new Error("BUFFER_API_KEY not configured");
-  return token;
-}
-
-const CE_BUFFER_MIN_INTERVAL_MS = 3500;
-const CE_BUFFER_MAX_RETRIES = 6;
-let ceLastBufferCall = 0;
-
-async function bufferGraphQL(query: string): Promise<any> {
-  const token = getBufferToken();
-
-  for (let attempt = 0; attempt < CE_BUFFER_MAX_RETRIES; attempt++) {
-    // ── Rate-limit pacing ──
-    const now = Date.now();
-    const wait = CE_BUFFER_MIN_INTERVAL_MS - (now - ceLastBufferCall);
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    ceLastBufferCall = Date.now();
-
-    const resp = await fetch(BUFFER_GRAPHQL_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ query }),
-    });
-
-    // ── 429 Rate Limit — exponential backoff with Retry-After respect ──
-    if (resp.status === 429) {
-      if (attempt >= CE_BUFFER_MAX_RETRIES - 1) {
-        throw new Error(`Buffer GraphQL 429: Rate limited after ${CE_BUFFER_MAX_RETRIES} attempts`);
-      }
-      const retryAfter = resp.headers.get("retry-after");
-      const backoff = retryAfter
-        ? Math.max(parseInt(retryAfter, 10) * 1000, CE_BUFFER_MIN_INTERVAL_MS)
-        : CE_BUFFER_MIN_INTERVAL_MS * Math.pow(2, attempt + 1);
-      console.warn(`⚠️ [CE-BufferGQL] 429 rate-limited — backing off ${backoff}ms (attempt ${attempt + 1}/${CE_BUFFER_MAX_RETRIES})`);
-      await new Promise((r) => setTimeout(r, backoff));
-      continue;
-    }
-
-    if (!resp.ok) {
-      const errText = await resp.text();
-      throw new Error(`Buffer GraphQL ${resp.status}: ${errText.slice(0, 500)}`);
-    }
-
-    const result: any = await resp.json();
-    if (result.errors?.length > 0) {
-      throw new Error(`Buffer GraphQL error: ${result.errors.map((e: any) => e.message).join("; ")}`);
-    }
-    return result.data;
-  }
-  throw new Error("Buffer GraphQL: exhausted retries");
-}
 // ── Channel Discovery & Caching ──
 
 let cachedChannelMap: BrandChannelMap | null = null;
@@ -444,7 +388,7 @@ const CHANNEL_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour — channels don't change
 export async function discoverChannels(): Promise<BrandChannelMap> {
   if (cachedChannelMap && Date.now() - channelCacheTimestamp < CHANNEL_CACHE_TTL_MS) return cachedChannelMap;
 
-  const orgId = process.env.BUFFER_ORG_ID || "69c613a244dbc563b3e05050";
+  const orgId = BUFFER_ORG_ID;
   const query = `
     query GetChannels {
       channels(input: { organizationId: "${orgId}" }) {
@@ -1138,7 +1082,7 @@ export async function nukeBufferQueue(): Promise<string> {
     const channelMap = await discoverChannels();
     const allChannels = [...channelMap.ace_richie, ...channelMap.containment_field];
 
-    const orgId = process.env.BUFFER_ORG_ID || "69c613a244dbc563b3e05050";
+    const orgId = BUFFER_ORG_ID;
 
     for (const ch of allChannels) {
       try {

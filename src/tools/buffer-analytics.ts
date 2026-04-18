@@ -5,41 +5,10 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { Tool, ToolDefinition } from "../types";
+import { bufferGraphQL, BUFFER_ORG_ID } from "../engine/buffer-graphql";
 
-const BUFFER_GRAPHQL_ENDPOINT = "https://api.buffer.com";
-const BUFFER_ORG_ID = process.env.BUFFER_ORG_ID || "69c613a244dbc563b3e05050";
-
-function getBufferToken(): string {
-  const token = process.env.BUFFER_API_KEY;
-  if (!token) throw new Error("BUFFER_API_KEY not configured. Set it in Railway.");
-  return token;
-}
-
-async function bufferGraphQL(query: string, variables?: Record<string, unknown>): Promise<any> {
-  const token = getBufferToken();
-  const body: Record<string, unknown> = { query };
-  if (variables) body.variables = variables;
-
-  const resp = await fetch(BUFFER_GRAPHQL_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`Buffer GraphQL ${resp.status}: ${errText.slice(0, 500)}`);
-  }
-
-  const result: any = await resp.json();
-  if (result.errors?.length) {
-    throw new Error(`Buffer GraphQL error: ${result.errors.map((e: any) => e.message).join("; ")}`);
-  }
-  return result.data;
-}
+// SESSION 85: bufferGraphQL + BUFFER_ORG_ID imported from shared engine/buffer-graphql.ts
+// Single rate limiter across all Buffer consumers.
 
 export class BufferAnalyticsTool implements Tool {
   definition: ToolDefinition = {

@@ -1124,8 +1124,8 @@ async function distributeClips(
       results.push(`Clip ${clip.index + 1}: ❌ ${err.message?.slice(0, 150)}`);
     }
 
-    // 3s delay between platform posts to avoid rate limits
-    await new Promise(r => setTimeout(r, 3000));
+    // SESSION 85: 10s delay — Buffer allows 100 req/15min (shared limiter also enforces)
+    await new Promise(r => setTimeout(r, 10_000));
   }
 
   console.log(`✅ [Orchestrator] Distribution complete — ${results.length} clips processed`);
@@ -1274,7 +1274,7 @@ async function scheduleBufferWeek(
       }
 
       globalSlotIndex++;
-      await new Promise(r => setTimeout(r, 3500));
+      await new Promise(r => setTimeout(r, 10_000)); // SESSION 85: 10s gap — Buffer allows 100 req/15min
     }
 
     // ── MEDIA-REQUIRED CHANNELS (TikTok, Instagram, YouTube) ──
@@ -1364,7 +1364,7 @@ async function scheduleBufferWeek(
         }
 
         globalSlotIndex++;
-        await new Promise(r => setTimeout(r, 3500));
+        await new Promise(r => setTimeout(r, 10_000)); // SESSION 85: 10s gap — Buffer allows 100 req/15min
       }
     } else {
       console.warn(`  ⚠️ Clip ${clipIdx} has no public URL — skipping media-required channels (TikTok/IG/YouTube)`);

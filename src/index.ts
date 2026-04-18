@@ -346,10 +346,13 @@ async function main() {
     yuki: buildTeamLLM(["anthropic", "groq"], 1, true),       // Anthropic-first — dispatches + user chat
   };
 
-  // Pipeline LLMs stay Groq-first — these are heavy batch jobs (25+ sequential calls)
-  // where Groq's speed matters and we WANT to burn the free tier here, not on chat.
-  const pipelineLLM = buildTeamLLM(["groq", "anthropic"], 1, false);     // Key A — Ace pipeline
-  const tcfPipelineLLM = buildTeamLLM(["groq", "anthropic"], 1, true);   // Key B — TCF pipeline
+  // SESSION 84: Pipeline LLMs flipped to Anthropic-first.
+  // Groq free tier is persistently 429'd (1600s+ retry-after), burning ~90s of dead
+  // retries per call before Anthropic catches it. At ~$0.05-0.15/video in Anthropic
+  // tokens, the cost is negligible vs. minutes of wasted wall-clock time per run.
+  // Groq stays as fallback in case Anthropic ever rate-limits.
+  const pipelineLLM = buildTeamLLM(["anthropic", "groq"], 1, false);     // Key A — Ace pipeline
+  const tcfPipelineLLM = buildTeamLLM(["anthropic", "groq"], 1, true);   // Key B — TCF pipeline
 
   if (groqTcfKey) {
     console.log(`🔑 [LLM Teams] Session 34 routing: ALL agents Anthropic-first. Groq reserved for pipelines only. Key A: pipeline. Key B: tcf-pipeline.`);

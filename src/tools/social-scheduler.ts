@@ -4,17 +4,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { Tool, ToolDefinition } from "../types";
-
-const BUFFER_GRAPHQL_ENDPOINT = "https://api.buffer.com";
-
-// Organization ID — from Buffer account settings
-const BUFFER_ORG_ID = process.env.BUFFER_ORG_ID || "69c613a244dbc563b3e05050";
-
-function getBufferToken(): string {
-  const token = process.env.BUFFER_API_KEY;
-  if (!token) throw new Error("Buffer API key not configured. Set BUFFER_API_KEY in Railway.");
-  return token;
-}
+import { bufferGraphQL, BUFFER_ORG_ID } from "../engine/buffer-graphql";
 
 
 // ── content_transmissions payload sanitizer ──
@@ -80,81 +70,8 @@ export function sanitizeTransmissionPayload(raw: Record<string, unknown>): Recor
   return clean;
 }
 
-// ── Rate Limit Queue ──
-// Buffer GraphQL enforces a 24h rolling window rate limit (RATE_LIMIT_EXCEEDED).
-// This queue spaces requests and retries with exponential backoff on 429s.
-const BUFFER_MIN_INTERVAL_MS = 2000; // Min 2s between requests
-const BUFFER_MAX_RETRIES = 4;
-let lastBufferRequestAt = 0;
-
-async function bufferGraphQL(query: string, variables?: Record<string, unknown>): Promise<any> {
-  const token = getBufferToken();
-
-  const body: Record<string, unknown> = { query };
-  if (variables) body.variables = variables;
-
-  let attempt = 0;
-  let backoffMs = 3000; // Initial backoff: 3s
-
-  while (attempt < BUFFER_MAX_RETRIES) {
-    // Enforce minimum interval between requests (rate limit evasion)
-    const now = Date.now();
-    const elapsed = now - lastBufferRequestAt;
-    if (elapsed < BUFFER_MIN_INTERVAL_MS) {
-      await new Promise((r) => setTimeout(r, BUFFER_MIN_INTERVAL_MS - elapsed));
-    }
-    lastBufferRequestAt = Date.now();
-
-    const resp = await fetch(BUFFER_GRAPHQL_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`,
-      },
-      body: JSON.stringify(body),
-    });
-
-    // Rate limit hit — backoff and retry
-    if (resp.status === 429) {
-      attempt++;
-      if (attempt > BUFFER_MAX_RETRIES) {
-        throw new Error(`Buffer RATE_LIMIT_EXCEEDED after ${BUFFER_MAX_RETRIES} retries. 24h window exhausted — queue posts for later.`);
-      }
-      const retryAfter = resp.headers.get("retry-after");
-      const waitMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : backoffMs;
-      console.warn(`⚠️ [Buffer] 429 Rate Limited — retry ${attempt}/${BUFFER_MAX_RETRIES} in ${waitMs / 1000}s`);
-      await new Promise((r) => setTimeout(r, waitMs));
-      backoffMs = Math.min(backoffMs * 2, 60_000); // Cap at 60s
-      continue;
-    }
-
-    if (!resp.ok) {
-      const errText = await resp.text();
-      throw new Error(`Buffer GraphQL ${resp.status}: ${errText.slice(0, 500)}`);
-    }
-
-    const result: any = await resp.json();
-
-    // Check for GraphQL-level rate limit errors (not HTTP 429 but in error payload)
-    if (result.errors && result.errors.length > 0) {
-      const rateLimitError = result.errors.find((e: any) =>
-        e.message?.includes("RATE_LIMIT") || e.extensions?.code === "RATE_LIMIT_EXCEEDED"
-      );
-      if (rateLimitError && attempt < BUFFER_MAX_RETRIES) {
-        attempt++;
-        console.warn(`⚠️ [Buffer] GraphQL RATE_LIMIT — retry ${attempt}/${BUFFER_MAX_RETRIES} in ${backoffMs / 1000}s`);
-        await new Promise((r) => setTimeout(r, backoffMs));
-        backoffMs = Math.min(backoffMs * 2, 60_000);
-        continue;
-      }
-      throw new Error(`Buffer GraphQL error: ${result.errors.map((e: any) => e.message).join("; ")}`);
-    }
-
-    return result.data;
-  }
-
-  throw new Error("Buffer GraphQL: exhausted retries");
-}
+// SESSION 85: bufferGraphQL + BUFFER_ORG_ID imported from shared ../engine/buffer-graphql.ts
+// Single rate limiter across all Buffer consumers (social-scheduler, content-engine, buffer-analytics).
 
 // ── List Channels Tool ──
 export class SocialSchedulerListProfilesTool implements Tool {
@@ -399,26 +316,8 @@ export class SocialSchedulerPostTool implements Tool {
             }
           `;
 
-          // SESSION 84: 3-tier exponential backoff on 429 at the per-post level.
-          // bufferGraphQL already retries internally, but carpet-bombing across
-          // channels can still trigger rate limits between calls. This outer
-          // retry catches any 429-sourced error that escapes the inner loop.
-          let postData: any;
-          for (let attempt = 0; attempt < 3; attempt++) {
-            try {
-              postData = await bufferGraphQL(query);
-              break; // success — exit retry loop
-            } catch (retryErr: any) {
-              if (retryErr.message?.includes("RATE_LIMIT") || retryErr.message?.includes("429")) {
-                const sleepMs = Math.pow(2, attempt) * 2000;
-                console.warn(`⚠️ [SocialScheduler] 429 on ${channelId} — retry ${attempt + 1}/3 in ${sleepMs / 1000}s`);
-                await new Promise((r) => setTimeout(r, sleepMs));
-                if (attempt === 2) throw retryErr; // exhausted — rethrow
-                continue;
-              }
-              throw retryErr; // non-429 error — don't retry
-            }
-          }
+          // SESSION 85: Retry logic moved to shared buffer-graphql.ts (10s pacing + 900s cap).
+          const postData = await bufferGraphQL(query);
           const result = postData?.createPost;
 
           if (result?.post) {

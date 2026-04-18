@@ -1088,6 +1088,25 @@ def compose_video(
     except Exception as exc:
         log.error("compose_audio_mix_failed", error=str(exc)[:300])
 
+    # SESSION 85: If mix failed, final_path is still MKV+PCM. Downstream steps
+    # (caption burn uses -c:a copy → MP4) would fail because MP4 can't hold PCM.
+    # Transcode to MP4+AAC so the pipeline can continue.
+    if final_path.endswith(".mkv"):
+        log.warning("compose_mkv_fallback", msg="Mix skipped/failed — encoding MKV→MP4 with AAC")
+        mp4_fallback = os.path.join(job_dir, "final_fallback.mp4")
+        fb_cmd = [
+            "ffmpeg", "-y", "-i", final_path,
+            "-c:v", "copy",
+            "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE, "-ar", "48000",
+            "-movflags", "+faststart",
+            mp4_fallback,
+        ]
+        fb_result = subprocess.run(fb_cmd, capture_output=True, text=True, timeout=300)
+        if fb_result.returncode == 0:
+            final_path = mp4_fallback
+        else:
+            log.error("compose_mkv_fallback_failed", stderr=fb_result.stderr[:300] if fb_result.stderr else "")
+
     # ── Stage 3: Kinetic captions (GPU Whisper → ASS → burn) ────────────
     # Captions skip the opening sequence (brand card + typewriter) and start
     # at OPENING_TOTAL_DUR. If the opening was skipped, captions start at 0.

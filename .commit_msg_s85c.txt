@@ -1,0 +1,7 @@
+S85c: MKV fallback safety net for mix-stage failure
+
+If _mix_audio fails, final_path stays as .mkv with PCM audio.
+Caption burn uses -c:a copy into .mp4, but MP4 can't hold PCM → hard fail.
+
+Fix: After mix stage, if final_path is still .mkv, transcode to MP4+AAC
+before caption burn proceeds. Logged as compose_mkv_fallback.

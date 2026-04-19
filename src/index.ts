@@ -1381,6 +1381,190 @@ async function main() {
         return true;
       }
 
+      // SESSION 94: Rechop pipeline — generate native vertical shorts from
+      // existing R2 long-forms that never got shorts (23 videos identified).
+      // /rechop       → list unchopped videos + summary
+      // /rechop all   → batch process ALL unchopped long-forms
+      // /rechop <idx> → rechop a specific video by index from the list
+      case "/rechop": {
+        try {
+          const { listR2LongForms, rechopVideo, rechopAll, rechopBatch } = await import("./engine/rechop-pipeline");
+
+          if (arg === "all") {
+            // Batch mode — process ALL unchopped videos
+            await telegram.sendMessage(message.chatId,
+              "🔄 /rechop all — scanning R2 for unchopped long-forms..."
+            );
+            const unchopped = await listR2LongForms({ onlyUnchopped: true });
+            if (unchopped.length === 0) {
+              await telegram.sendMessage(message.chatId, "✅ All long-forms already have shorts. Nothing to rechop.");
+              return true;
+            }
+
+            await telegram.sendMessage(message.chatId,
+              `🎬 Found ${unchopped.length} unchopped long-forms. Starting batch rechop...\n\n` +
+              `This will spin up a pod per video. Expect ~15-25 min per video.\n` +
+              `Total estimate: ${unchopped.length * 20} min.`
+            );
+
+            const results = await rechopAll(
+              pipelineLLM,
+              async (step, detail) => {
+                // Rate-limit progress updates to avoid Telegram spam
+                if (step.startsWith("STEP") || step === "BATCH" || step === "COMPLETE" || step === "DONE") {
+                  try { await telegram.sendMessage(message.chatId, `[Rechop] ${step}: ${detail}`); } catch {}
+                }
+              },
+            );
+
+            const totalRendered = results.reduce((a, r) => a + r.shortsRendered, 0);
+            const totalFailed = results.reduce((a, r) => a + r.shortsFailed, 0);
+            const errorVideos = results.filter(r => r.errors.length > 0);
+
+            let summary = `✅ RECHOP BATCH COMPLETE\n\n` +
+              `Videos processed: ${results.length}\n` +
+              `Shorts rendered: ${totalRendered}\n` +
+              `Shorts failed: ${totalFailed}\n`;
+            if (errorVideos.length > 0) {
+              summary += `\nErrors (${errorVideos.length} videos):\n` +
+                errorVideos.map(r => `  ${r.videoKey.split("/").pop()}: ${r.errors[0]}`).join("\n");
+            }
+            summary += `\n\nRun /drain to distribute the new shorts.`;
+
+            await telegram.sendMessage(message.chatId, summary.slice(0, 4000));
+
+          } else if (arg && /^[\d,\s]+$/.test(arg)) {
+            // Single or multiple videos by index: /rechop 0 or /rechop 1,2,3
+            // Indices are STABLE — based on the FULL list (including already-rechopped).
+            // Rechopped videos show as "(done)" in the list and are rejected here.
+            const indices = arg.split(/[,\s]+/).map(Number).filter((n) => !isNaN(n));
+            const allVideos = await listR2LongForms(); // full list, stable indices
+            const unchopped = await listR2LongForms({ onlyUnchopped: true });
+            const unchoppedJobIds = new Set(unchopped.map(v => v.jobId));
+
+            const invalid = indices.filter((i) => i < 0 || i >= allVideos.length);
+            if (invalid.length > 0) {
+              await telegram.sendMessage(message.chatId, `Invalid index(es): ${invalid.join(", ")}. Range: 0-${allVideos.length - 1}`);
+              return true;
+            }
+
+            // Filter out already-rechopped
+            const alreadyDone = indices.filter((i) => !unchoppedJobIds.has(allVideos[i].jobId));
+            if (alreadyDone.length > 0) {
+              await telegram.sendMessage(message.chatId,
+                `⚠️ Index(es) ${alreadyDone.join(", ")} already rechopped — skipping.`
+              );
+            }
+            const validIndices = indices.filter((i) => unchoppedJobIds.has(allVideos[i].jobId));
+            if (validIndices.length === 0) {
+              await telegram.sendMessage(message.chatId, "All selected videos already rechopped. Nothing to do.");
+              return true;
+            }
+
+            const selected = validIndices.map((i) => allVideos[i]);
+            await telegram.sendMessage(message.chatId,
+              `🎬 Rechopping ${selected.length} video(s) in ONE pod session:\n` +
+              selected.map((v, i) => `  [${validIndices[i]}] ${v.brand} — ${v.jobId.slice(0, 45)} (${(v.sizeBytes / 1024 / 1024).toFixed(0)}MB)`).join("\n") +
+              `\n\n🔥 Single pod = 1 cold-start, not ${selected.length}.`
+            );
+
+            // rechopBatch and rechopVideo already imported above
+
+            let results;
+            if (selected.length === 1) {
+              // Single video — use rechopVideo directly (simpler, same pod behavior)
+              const video = selected[0];
+              try {
+                const result = await rechopVideo(
+                  video,
+                  video.brand === "containment_field" ? tcfPipelineLLM : pipelineLLM,
+                  async (step, detail) => {
+                    try { await telegram.sendMessage(message.chatId, `[Rechop] ${step}: ${detail}`); } catch {}
+                  },
+                );
+                results = [result];
+              } catch (err: any) {
+                results = [{
+                  videoKey: video.key, brand: video.brand,
+                  shortsRendered: 0, shortsFailed: 0, clipKeys: [],
+                  errors: [`Fatal: ${err.message?.slice(0, 200)}`],
+                }];
+              }
+            } else {
+              // Multi-video — use rechopBatch for single pod session
+              results = await rechopBatch(
+                selected,
+                (brand) => brand === "containment_field" ? tcfPipelineLLM : pipelineLLM,
+                async (step, detail) => {
+                  if (step.startsWith("PREP") || step.startsWith("RENDER") || step === "COMPLETE") {
+                    try { await telegram.sendMessage(message.chatId, `[Rechop] ${step}: ${detail}`); } catch {}
+                  }
+                },
+              );
+            }
+
+            const totalRendered = results.reduce((a: number, r: any) => a + r.shortsRendered, 0);
+            const totalFailed = results.reduce((a: number, r: any) => a + r.shortsFailed, 0);
+            let msg = `✅ Rechop complete — ${selected.length} video(s)\n\n` +
+              `Shorts rendered: ${totalRendered}\n` +
+              `Shorts failed: ${totalFailed}`;
+            const errResults = results.filter((r: any) => r.errors.length > 0);
+            if (errResults.length > 0) {
+              msg += `\n\nErrors:\n${errResults.map((r: any) => `  ${r.videoKey.split("/").pop()}: ${r.errors[0]}`).join("\n")}`;
+            }
+            msg += `\n\nRun /drain to distribute.`;
+            await telegram.sendMessage(message.chatId, msg.slice(0, 4000));
+
+          } else {
+            // Default: list ALL videos with STABLE indices.
+            // Rechopped videos show as "(done)" — indices never shift.
+            await telegram.sendMessage(message.chatId, "🔍 Scanning R2 for long-forms...");
+            const allVideos = await listR2LongForms();
+            const unchopped = await listR2LongForms({ onlyUnchopped: true });
+            const unchoppedJobIds = new Set(unchopped.map(v => v.jobId));
+
+            if (unchopped.length === 0) {
+              await telegram.sendMessage(message.chatId, "✅ All long-forms have shorts. Nothing to rechop.");
+              return true;
+            }
+
+            const aceUnchopped = unchopped.filter(v => v.brand === "ace_richie").length;
+            const cfUnchopped = unchopped.filter(v => v.brand === "containment_field").length;
+
+            const list = allVideos.map((v, i) => {
+              const done = !unchoppedJobIds.has(v.jobId);
+              const emoji = v.brand === "ace_richie" ? "🔴" : "🟣";
+              const status = done ? " ✅" : "";
+              return `[${i}]${status} ${emoji} ${v.jobId.slice(0, 48)} (${(v.sizeBytes / 1024 / 1024).toFixed(0)}MB)`;
+            }).join("\n");
+
+            const msg = `📦 LONG-FORMS: ${allVideos.length} total, ${unchopped.length} need shorts\n` +
+              `🔴 Ace: ${aceUnchopped} unchopped\n🟣 TCF: ${cfUnchopped} unchopped\n\n` +
+              `${list}\n\n` +
+              `Indices are STABLE — they never shift after rechop.\n` +
+              `Commands:\n` +
+              `/rechop all — process ALL ${unchopped.length} remaining\n` +
+              `/rechop <N> — one video (e.g. /rechop 0)\n` +
+              `/rechop 1,2,3 — multi-video, ONE pod session`;
+
+            // Split if too long for Telegram
+            if (msg.length > 4000) {
+              await telegram.sendMessage(message.chatId, msg.slice(0, 4000));
+              if (msg.length > 4000) {
+                await telegram.sendMessage(message.chatId, msg.slice(4000, 8000));
+              }
+            } else {
+              await telegram.sendMessage(message.chatId, msg);
+            }
+          }
+        } catch (err: any) {
+          await telegram.sendMessage(message.chatId,
+            `❌ /rechop failed: ${err.message?.slice(0, 400)}`
+          );
+        }
+        return true;
+      }
+
       case "/mesh":
         if (!arg) {
           await telegram.sendMessage(message.chatId, "Usage: /mesh <goal>");

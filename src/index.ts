@@ -1314,6 +1314,81 @@ async function main() {
         return true;
       }
 
+      // SESSION 92: Manual backlog drain — replaces automatic sweep + boot drainer.
+      // Single-pass, zero-retry. Pre-flight rate limit check. Full Telegram reporting.
+      case "/drain": {
+        try {
+          const { getDailyCallCount, isBufferQuotaExhausted, bufferGraphQL, getBufferChannels } = await import("./engine/buffer-graphql");
+          const { distributionSweep } = await import("./engine/content-engine");
+
+          // ── Pre-flight: Check if Buffer is actually accepting calls ──
+          if (isBufferQuotaExhausted()) {
+            await telegram.sendMessage(message.chatId,
+              `⏸️ Buffer quota still exhausted. Daily call count: ${getDailyCallCount()}/250.\n` +
+              `Wait for the cooldown to expire, then try /drain again.`
+            );
+            return true;
+          }
+
+          // Probe Buffer with a lightweight query (1 call) to verify it's actually live
+          try {
+            await bufferGraphQL(`query Probe { organizations { id } }`);
+          } catch (probeErr: any) {
+            if (probeErr.message?.includes("quota") || probeErr.message?.includes("429") || probeErr.message?.includes("RATE_LIMIT")) {
+              await telegram.sendMessage(message.chatId,
+                `⏸️ Buffer rate limit still active. Probe failed: ${probeErr.message?.slice(0, 200)}\n\nTry again later.`
+              );
+              return true;
+            }
+            // Non-rate-limit error — might still work, continue cautiously
+            console.warn(`[/drain] Probe returned non-rate error: ${probeErr.message?.slice(0, 200)}`);
+          }
+
+          const budgetBefore = getDailyCallCount();
+          await telegram.sendMessage(message.chatId,
+            `🔄 /drain starting...\nDaily budget used: ${budgetBefore}/250\n\n` +
+            `Mode: single-pass, zero retry. Will stop immediately if Buffer says no.`
+          );
+
+          // ── Phase 1: Distribute any ready ContentEngine drafts ──
+          let cePosted = 0;
+          try {
+            cePosted = await distributionSweep();
+          } catch (ceErr: any) {
+            console.warn(`[/drain] CE sweep error: ${ceErr.message?.slice(0, 200)}`);
+          }
+
+          // ── Phase 2: Drain R2 backlog clips ──
+          let backlogPosted = 0;
+          if (!isBufferQuotaExhausted()) {
+            try {
+              const { drainBacklog } = await import("./engine/backlog-drainer");
+              // drainBacklog is self-contained — it checks budget, lists R2, posts clips
+              // If it hits the limit it stops cleanly
+              await drainBacklog();
+              // Count is approximate — drainBacklog logs to console
+              backlogPosted = getDailyCallCount() - budgetBefore - cePosted;
+            } catch (blErr: any) {
+              console.warn(`[/drain] Backlog drain error: ${blErr.message?.slice(0, 200)}`);
+            }
+          }
+
+          const budgetAfter = getDailyCallCount();
+          await telegram.sendMessage(message.chatId,
+            `✅ /drain complete.\n\n` +
+            `ContentEngine drafts posted: ${cePosted}\n` +
+            `Backlog API calls used: ~${Math.max(0, backlogPosted)}\n` +
+            `Daily budget: ${budgetAfter}/250 calls used\n` +
+            `Remaining: ${250 - budgetAfter} calls`
+          );
+        } catch (err: any) {
+          await telegram.sendMessage(message.chatId,
+            `❌ /drain failed: ${err.message?.slice(0, 400)}`
+          );
+        }
+        return true;
+      }
+
       case "/mesh":
         if (!arg) {
           await telegram.sendMessage(message.chatId, "Usage: /mesh <goal>");
@@ -1638,14 +1713,14 @@ async function main() {
   // SESSION 89: Pre-warm shared channel cache at boot (1 API call, shared by all consumers)
   warmChannelCache();
 
-  // SESSION 90: Backlog drainer — push existing R2 clips to Buffer
-  // Delay 5 minutes after boot to let channel cache warm + quota settle.
-  // Self-retries every hour if budget is exhausted.
-  setTimeout(() => {
-    drainBacklog().catch((err: any) =>
-      console.error(`[BacklogDrainer] Fatal: ${err.message?.slice(0, 300)}`)
-    );
-  }, 5 * 60 * 1000);
+  // SESSION 92: Automatic backlog drainer DISABLED.
+  // Was burning 40-60 Buffer API calls at every boot, competing with pipeline distribution.
+  // Backlog drain is now manual-only via /drain Telegram command.
+  // setTimeout(() => {
+  //   drainBacklog().catch((err: any) =>
+  //     console.error(`[BacklogDrainer] Fatal: ${err.message?.slice(0, 300)}`)
+  //   );
+  // }, 5 * 60 * 1000);
 
   // Daily Content Production (1:30 PM CDT = 18:30 UTC — after Vector sweep + Veritas clear)
   scheduler.add({
@@ -1682,25 +1757,30 @@ async function main() {
     },
   });
 
-  // Distribution Sweep (every 5 minutes — checks for ready content whose time has arrived)
-  scheduler.add({
-    name: "Content Engine — Distribution Sweep",
-    intervalMs: 300_000, // 5 minutes
-    nextRun: new Date(Date.now() + 60_000), // Start 1 min after boot
-    enabled: true,
-    handler: async () => {
-      try {
-        const posted = await distributionSweep();
-        if (posted > 0) {
-          console.log(`📤 [ContentEngine] Distribution sweep posted ${posted} piece(s)`);
-        }
-      } catch (err: any) {
-        console.error(`[ContentEngine] Distribution sweep failed: ${err.message}`);
-      }
-    },
-  });
+  // SESSION 92: Automatic distribution sweep DISABLED.
+  // Was burning 50-100+ Buffer API calls/day via 5-min polling cycle, retrying failed drafts
+  // in infinite loops, and competing with pipeline shorts distribution for the 250/day budget.
+  // Distribution now happens ONLY during pipeline runs (scheduleBufferWeek) or via /drain command.
+  // ContentEngine daily production (LLM-only) still runs — drafts queue in Supabase for /drain.
+  //
+  // scheduler.add({
+  //   name: "Content Engine — Distribution Sweep",
+  //   intervalMs: 300_000,
+  //   nextRun: new Date(Date.now() + 60_000),
+  //   enabled: true,
+  //   handler: async () => {
+  //     try {
+  //       const posted = await distributionSweep();
+  //       if (posted > 0) {
+  //         console.log(`📤 [ContentEngine] Distribution sweep posted ${posted} piece(s)`);
+  //       }
+  //     } catch (err: any) {
+  //       console.error(`[ContentEngine] Distribution sweep failed: ${err.message}`);
+  //     }
+  //   },
+  // });
 
-  console.log("⚡ [ContentEngine] Scheduled: Daily production (1:30PM CDT/18:30UTC), Distribution sweep (every 5min)");
+  console.log("⚡ [ContentEngine] Scheduled: Daily production (1:30PM CDT/18:30UTC). Distribution sweep DISABLED (S92 — use /drain).");
 
   // ── CTA Audit — Weekly Monday 10:00 AM CDT = 15:00 UTC (after YT stats fetch at 14:00) ──
   // Scans top-performing videos for missing sovereign-landing CTAs.

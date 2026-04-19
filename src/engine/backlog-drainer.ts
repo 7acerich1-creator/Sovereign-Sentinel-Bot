@@ -363,8 +363,13 @@ export async function drainBacklog(): Promise<void> {
         await new Promise(r => setTimeout(r, 10_000));
       }
 
-      // Mark this clip as distributed
-      await markDistributed(clip.key, bufferPostIds);
+      // SESSION 92 FIX: Only mark as distributed if at least one channel succeeded.
+      // Prior bug: marked clips "distributed" with empty buffer_post_ids[], hiding 40 unposted clips.
+      if (bufferPostIds.length > 0) {
+        await markDistributed(clip.key, bufferPostIds);
+      } else {
+        console.warn(`  ⚠️ ${clip.key}: No channels succeeded — NOT marking as distributed (will retry on next /drain)`);
+      }
     }
   }
 

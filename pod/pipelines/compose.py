@@ -1043,22 +1043,22 @@ def compose_video(
         for clip in scene_clips:
             f.write(f"file '{clip}'\n")
 
-    # SESSION 85: Concat stays MKV+PCM — no lossy audio encode yet.
+    # SESSION 95: Stream-copy concat — all clips share identical codec/res/crf.
+    # Re-encoding was redundant and caused 600s timeout on 16-scene videos.
     final_path = os.path.join(job_dir, "final.mkv")
 
     concat_cmd = [
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0",
         "-i", concat_list_path,
-        "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
-        "-c:a", INTERMEDIATE_AUDIO_CODEC,
+        "-c", "copy",
         final_path,
     ]
 
     log.info("compose_concat", clip_count=len(scene_clips))
     result = subprocess.run(
         concat_cmd, capture_output=True, text=True,
-        timeout=600,  # up to 10 min for long videos
+        timeout=120,  # stream-copy is near-instant, 120s generous safety net
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -1079,17 +1079,16 @@ def compose_video(
             drift_s=round(drift_s, 2),
             msg="Video/audio duration mismatch -- trimming to audio master",
         )
-        # SESSION 85: Trim stays MKV+PCM — no lossy audio encode yet.
+        # SESSION 95: Stream-copy trim — just cuts at keyframe, no re-encode.
         trimmed_path = os.path.join(job_dir, "final_trimmed.mkv")
         trim_cmd = [
             "ffmpeg", "-y",
             "-i", final_path,
             "-t", f"{audio_master_dur:.3f}",
-            "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
-            "-c:a", INTERMEDIATE_AUDIO_CODEC,
+            "-c", "copy",
             trimmed_path,
         ]
-        trim_result = subprocess.run(trim_cmd, capture_output=True, text=True, timeout=600)
+        trim_result = subprocess.run(trim_cmd, capture_output=True, text=True, timeout=120)
         if trim_result.returncode == 0:
             final_path = trimmed_path
             video_dur = _probe_duration(final_path)

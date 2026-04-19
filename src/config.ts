@@ -42,7 +42,10 @@ export const config: GravityClawConfig = {
     providers: {
       gemini: {
         apiKey: process.env.GEMINI_API_KEY || "",
-        model: process.env.GEMINI_MODEL || "gemini-3.1-pro-preview",
+        // S95: Swapped from gemini-3.1-pro-preview ($2/$12 per 1M tokens) to
+        // gemini-2.5-flash ($0.30/$2.50). Flash benchmarks HIGHER than Pro on
+        // 6/6 evals and costs 75% less. Override via GEMINI_MODEL env var.
+        model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
         baseUrl: process.env.GEMINI_BASE_URL,
         // SESSION 35: GEMINI_IMAGEN_KEY must be set explicitly on Railway.
         // The old fallback to GEMINI_API_KEY was the "zero logs" ghost —

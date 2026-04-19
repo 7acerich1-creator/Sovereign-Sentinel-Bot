@@ -2010,7 +2010,7 @@ Video publisher code is fully written and registered. This is purely a credentia
 | `BUFFER_ORG_ID` | "69c613a244dbc563b3e05050" (hardcoded) | Not needed in Railway |
 | `LLM_DEFAULT_PROVIDER` | "anthropic" (changed 2026-04-03) | Not needed — hardcoded default updated |
 | `LLM_FAILOVER_ORDER` | "groq,gemini,anthropic,openai" | UPDATED Session 22 — was "gemini,anthropic,openai" (Groq missing!) |
-| `GEMINI_MODEL` | "gemini-3.1-pro-preview" | Not needed |
+| `GEMINI_MODEL` | "gemini-2.5-flash" (S95: swapped from 3.1-pro-preview — 75% cheaper, higher benchmarks) | Not needed |
 | `BROWSER_ENABLED` | "false" | NOT SET — see Browser section below |
 | `SHELL_ENABLED` | "true" (default) | Not needed |
 | `SEARCH_PROVIDER` | "duckduckgo" | Not needed |

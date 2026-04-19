@@ -22,7 +22,7 @@ import { curateShorts, type CuratorResult, type VerticalScene } from "./shorts-c
 import { detectNiche } from "./whisper-extract";
 import { withPodSession } from "../pod/session";
 import { produceShort } from "../pod/runpod-client";
-import { uploadToR2, isR2Configured } from "../tools/r2-upload";
+import { uploadToR2, isR2Configured, getR2PresignedUrl } from "../tools/r2-upload";
 import type { ShortJobSpec, ShortScene } from "../pod/types";
 import type { FacelessScript, ScriptSegment, Brand } from "./faceless-factory";
 import type { LLMProvider } from "../types";
@@ -545,8 +545,8 @@ export async function rechopVideo(
         const r2Key = `rechop-audio/${video.jobId}/audio_${i.toString().padStart(2, "0")}.wav`;
         const audioBuf = readFileSync(audioPath);
         const r2Result = await uploadToR2(R2_BUCKET, r2Key, audioBuf, "audio/wav");
-        audioUrl = r2Result.publicUrl;
-        console.log(`  📤 Short ${i} audio → R2`);
+        audioUrl = await getR2PresignedUrl(R2_BUCKET, r2Key, 3600);
+        console.log(`  📤 Short ${i} audio → R2 (presigned)`);
       } catch (err: any) {
         console.error(`[Rechop] Short ${i} R2 audio upload failed: ${err.message?.slice(0, 200)}`);
         result.shortsFailed++;
@@ -939,7 +939,7 @@ async function rechopVideoPrepOnly(
       const r2Key = `rechop-audio/${video.jobId}/audio_${i.toString().padStart(2, "0")}.wav`;
       const audioBuf = readFileSync(audioPath);
       const r2Result = await uploadToR2(R2_BUCKET, r2Key, audioBuf, "audio/wav");
-      audioUrl = r2Result.publicUrl;
+      audioUrl = await getR2PresignedUrl(R2_BUCKET, r2Key, 3600);
     } catch (err: any) {
       result.shortsFailed++;
       result.errors.push(`Short ${i} R2 audio upload failed`);

@@ -6,7 +6,8 @@
 // Zero egress fees — no cleanup needed (unlike old Supabase Storage path).
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 // ── Env vars (same keys Railway forwards to the pod) ──
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
@@ -92,4 +93,22 @@ export async function uploadToR2(
   }
 
   throw new Error(`R2 upload failed after ${retries} attempts for ${key}: ${lastError?.message}`);
+}
+
+/**
+ * Generate a presigned GET URL for an R2 object.
+ * The RunPod worker downloads shorts audio via this URL — no public bucket access needed.
+ *
+ * @param bucket   - R2 bucket name
+ * @param key      - Object key inside the bucket
+ * @param expiresIn - Seconds until the URL expires (default 3600 = 1 hour)
+ */
+export async function getR2PresignedUrl(
+  bucket: string,
+  key: string,
+  expiresIn = 3600,
+): Promise<string> {
+  const client = getClient();
+  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+  return getSignedUrl(client, command, { expiresIn });
 }

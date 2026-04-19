@@ -43,7 +43,7 @@ import {
   type AudienceAngle,
 } from "../prompts/social-optimization-prompt";
 import type { LLMProvider } from "../types";
-import { isR2Configured, uploadToR2 } from "../tools/r2-upload";
+import { isR2Configured, uploadToR2, getR2PresignedUrl } from "../tools/r2-upload";
 import { isBufferQuotaExhausted } from "./buffer-graphql";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -1786,8 +1786,9 @@ export async function executeFullPipeline(
               const r2Key = `shorts-audio/${jobId}/audio_${i.toString().padStart(2, "0")}.wav`;
               const audioBuffer = readFileSync(audioPath);
               const r2Result = await uploadToR2(R2_BUCKET_CLIPS, r2Key, audioBuffer, "audio/wav");
-              audioUrl = r2Result.publicUrl;
-              console.log(`  📤 Short ${i} audio uploaded to R2: ${audioUrl?.slice(0, 80)}`);
+              // Use presigned URL so RunPod worker can download without public bucket access
+              audioUrl = await getR2PresignedUrl(R2_BUCKET_CLIPS, r2Key, 3600);
+              console.log(`  📤 Short ${i} audio uploaded to R2 (presigned): ${audioUrl?.slice(0, 80)}`);
             }
           } catch (r2Err: any) {
             console.error(`[Orchestrator] Short ${i} R2 audio upload failed: ${r2Err.message?.slice(0, 200)}`);

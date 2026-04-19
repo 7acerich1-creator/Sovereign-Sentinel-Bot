@@ -32,10 +32,12 @@ export const config: GravityClawConfig = {
   } as any,
 
   llm: {
-    defaultProvider: process.env.LLM_DEFAULT_PROVIDER || "anthropic",
-    // Groq FREE tier first. Anthropic secondary (paid, controlled). OpenAI last resort.
-    // Gemini REMOVED from text-gen chains — kept only for Imagen 4 + embeddings.
-    failoverOrder: envList("LLM_FAILOVER_ORDER", ["groq", "anthropic", "openai"]),
+    defaultProvider: process.env.LLM_DEFAULT_PROVIDER || "gemini",
+    // SESSION 93: GEMINI PRIMARY. Anthropic credits exhausted — parked as emergency-only.
+    // Gemini re-admitted to text-gen (was excluded S29c due to Anita billing leak,
+    // root cause was Supabase overwriting prompts — fixed in S29c commit 624fc28).
+    // Order: Gemini (primary, has API credit) → Groq (free backup) → Anthropic (emergency only).
+    failoverOrder: envList("LLM_FAILOVER_ORDER", ["gemini", "groq", "anthropic"]),
     maxIterations: envInt("LLM_MAX_ITERATIONS", 10),
     providers: {
       gemini: {

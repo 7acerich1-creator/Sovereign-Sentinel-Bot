@@ -240,8 +240,10 @@ async function main() {
   // (set before Groq was added) didn't list it. Pipeline ran without its free LLM.
   const llmProviders: LLMProvider[] = [];
   // First pass: initialize in failoverOrder sequence
-  // Gemini is EXCLUDED from text-gen — reserved for Imagen 4 + embeddings only (Session 29c)
-  for (const providerName of config.llm.failoverOrder.filter((n: string) => n !== "gemini")) {
+  // SESSION 93: Gemini RE-ADMITTED to text-gen. Was excluded S29c due to Anita billing leak
+  // (root cause: Supabase overwriting prompts, fixed commit 624fc28). Anthropic credits
+  // exhausted — Gemini is now primary for all text-gen. Groq backup. Anthropic emergency only.
+  for (const providerName of config.llm.failoverOrder) {
     const providerConfig = (config.llm.providers as Record<string, any>)[providerName];
     if (providerConfig?.apiKey) {
       try {
@@ -260,13 +262,10 @@ async function main() {
   }
 
   // Second pass: catch any providers with keys that were NOT in failoverOrder.
-  // EXCLUDES gemini — Gemini is reserved for Imagen 4 image gen + embeddings ONLY.
-  // Session 29c fix: Gemini in text-gen chains was the root cause of the billing leak.
-  // The GEMINI_IMAGEN_KEY env var is read directly by faceless-factory, content-engine,
-  // and pinecone embeddings — it never enters the text-gen provider pool.
-  const TEXT_GEN_EXCLUDED = new Set(["gemini"]);
+  // SESSION 93: Gemini exclusion REMOVED. All providers with keys are eligible for text-gen.
+  // GEMINI_IMAGEN_KEY is still a separate key read directly by faceless-factory/content-engine
+  // for image gen — that's independent of the text-gen Gemini provider.
   for (const providerName of Object.keys(config.llm.providers)) {
-    if (TEXT_GEN_EXCLUDED.has(providerName)) continue; // Gemini = image/embedding only
     if (llmProviders.some(p => p.name === providerName)) continue; // Already initialized
     const providerConfig = (config.llm.providers as Record<string, any>)[providerName];
     if (providerConfig?.apiKey) {
@@ -328,36 +327,29 @@ async function main() {
     return new FailoverLLM(chain, llmTimeoutMs, primaryRetries);
   }
 
-  // Session 34: LLM ROUTING REDESIGN — "Right tool for the right job"
-  // PRINCIPLE: Anthropic handles ALL conversational/dispatch tasks (cheap, reliable, always answers).
-  //            Groq handles ONLY heavy batch work (pipeline script gen, content engine daily production).
-  // WHY: Groq free tier = 1,000 req/day + 500K tokens/day PER ORG (not per key).
-  //      A single VidRush pipeline burns 30-50 calls. That leaves nothing for agents.
-  //      Anthropic (claude-sonnet) costs ~$0.003/dispatch call (~700 tokens). $10 = ~3,300 calls = months of runway.
-  //      Groq's strength is speed on bulk sequential work, not availability for on-demand agent tasks.
-  // SESSION 55: Give agents 1 primaryRetry so Anthropic gets a real second chance
-  // on 429s before falling to Groq. Previously 0 = one shot, instant failover.
-  // With fetchWithRetry now doing 2 internal retries x 15s cap, plus 1 FailoverLLM
-  // retry with 3s backoff, Anthropic gets ~35s of runway before Groq is attempted.
+  // SESSION 93: LLM ROUTING — GEMINI PRIMARY
+  // Anthropic credits exhausted. Gemini is primary for ALL agents + pipelines.
+  // Groq (free) is first fallback. Anthropic is emergency-only last resort.
+  // useGroqB splits Groq Key B across TCF-branded agents to prevent rate stampedes.
+  // 1 primaryRetry = Gemini gets a second chance on 429 before failover to Groq.
   const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
-    alfred: buildTeamLLM(["anthropic", "groq"], 1, false),    // Anthropic-first — dispatches + user chat
-    anita: buildTeamLLM(["anthropic", "groq"], 1, true),      // Anthropic-first — dispatches + user chat
-    sapphire: buildTeamLLM(["anthropic", "groq"], 1),         // Anthropic-first (unchanged)
-    veritas: buildTeamLLM(["anthropic", "groq"], 1),          // Anthropic-first (unchanged)
-    vector: buildTeamLLM(["anthropic", "groq"], 1, false),    // Anthropic-first — dispatches + user chat
-    yuki: buildTeamLLM(["anthropic", "groq"], 1, true),       // Anthropic-first — dispatches + user chat
+    alfred: buildTeamLLM(["gemini", "groq", "anthropic"], 1, false),    // Gemini-first — dispatches + user chat
+    anita: buildTeamLLM(["gemini", "groq", "anthropic"], 1, true),      // Gemini-first — dispatches + user chat
+    sapphire: buildTeamLLM(["gemini", "groq", "anthropic"], 1),         // Gemini-first
+    veritas: buildTeamLLM(["gemini", "groq", "anthropic"], 1),          // Gemini-first
+    vector: buildTeamLLM(["gemini", "groq", "anthropic"], 1, false),    // Gemini-first — dispatches + user chat
+    yuki: buildTeamLLM(["gemini", "groq", "anthropic"], 1, true),       // Gemini-first — dispatches + user chat
   };
 
-  // SESSION 84: Pipeline LLMs flipped to Anthropic-first.
-  // Groq free tier is persistently 429'd (1600s+ retry-after), burning ~90s of dead
-  // retries per call before Anthropic catches it. At ~$0.05-0.15/video in Anthropic
-  // tokens, the cost is negligible vs. minutes of wasted wall-clock time per run.
-  // Groq stays as fallback in case Anthropic ever rate-limits.
-  const pipelineLLM = buildTeamLLM(["anthropic", "groq"], 1, false);     // Key A — Ace pipeline
-  const tcfPipelineLLM = buildTeamLLM(["anthropic", "groq"], 1, true);   // Key B — TCF pipeline
+  // SESSION 93: Pipeline LLMs — Gemini-first.
+  // Anthropic credits exhausted. Gemini handles bulk pipeline work (script gen, social copy,
+  // clip generation — 30-50+ calls per video). Groq free tier as first fallback.
+  // Anthropic parked as emergency-only last resort.
+  const pipelineLLM = buildTeamLLM(["gemini", "groq", "anthropic"], 1, false);     // Key A — Ace pipeline
+  const tcfPipelineLLM = buildTeamLLM(["gemini", "groq", "anthropic"], 1, true);   // Key B — TCF pipeline
 
   if (groqTcfKey) {
-    console.log(`🔑 [LLM Teams] Session 34 routing: ALL agents Anthropic-first. Groq reserved for pipelines only. Key A: pipeline. Key B: tcf-pipeline.`);
+    console.log(`🔑 [LLM Teams] Session 93 routing: ALL agents+pipelines Gemini-first. Groq fallback. Anthropic emergency-only. Key A: pipeline. Key B: tcf-pipeline.`);
   } else {
     console.warn(`⚠️ [LLM Teams] GROQ_API_KEY_TCF not set — TCF pipeline shares Groq Key A with Ace pipeline.`);
   }

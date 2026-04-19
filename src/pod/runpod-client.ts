@@ -92,7 +92,7 @@ const POD_ENV_FORWARD_KEYS: readonly string[] = [
 // Timing defaults (ms). Overridable per-call.
 const DEFAULT_READY_TIMEOUT_MS = 10 * 60_000;   // 10 min for cold FLUX + XTTS pull
 const DEFAULT_READY_POLL_MS = 5_000;            // 5s between /health/live probes
-const DEFAULT_JOB_TIMEOUT_MS = 30 * 60_000;     // 30 min for a long-form job
+const DEFAULT_JOB_TIMEOUT_MS = 45 * 60_000;     // 45 min — S93: was 30min, but 16-scene videos take ~37min on cold start
 const DEFAULT_JOB_POLL_MS = 3_000;              // 3s between /jobs/{id} probes
 const DEFAULT_FETCH_TIMEOUT_MS = 30_000;        // 30s per HTTP call
 const DEFAULT_API_RETRIES = 3;

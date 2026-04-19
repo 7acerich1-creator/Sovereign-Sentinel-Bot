@@ -40,7 +40,8 @@ OUT_WIDTH = 1920
 OUT_HEIGHT = 1080
 OUT_FPS = 30
 VIDEO_CODEC = "libx264"
-VIDEO_PRESET = "medium"   # quality/speed balance — "slow" is better but 3x time
+VIDEO_PRESET = "fast"     # SESSION 95: intermediate clips — caption burn re-encodes anyway
+VIDEO_PRESET_FINAL = "medium"  # used ONLY by caption burn (sets final quality)
 VIDEO_CRF = "20"          # near-lossless, ~5-8 MB/min
 AUDIO_CODEC = "aac"
 AUDIO_BITRATE = "192k"
@@ -290,7 +291,7 @@ def _burn_captions(video_path: str, ass_path: str, output_path: str) -> str:
         "ffmpeg", "-y",
         "-i", video_path,
         "-vf", f"subtitles='{ass_escaped}'",
-        "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
+        "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET_FINAL, "-crf", VIDEO_CRF,
         "-c:a", "copy",
         "-movflags", "+faststart",
         output_path,
@@ -1515,11 +1516,11 @@ def compose_short(
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0",
         "-i", concat_list,
-        "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", SHORT_CRF,
-        "-c:a", INTERMEDIATE_AUDIO_CODEC,
+        "-c", "copy",
         concat_path,
     ]
-    result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=300)
+    # SESSION 95: stream-copy — clips already share identical codec params
+    result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=120)
     if result.returncode != 0:
         raise RuntimeError(f"compose_short concat failed: {result.stderr[:500] if result.stderr else ''}")
 
@@ -1659,7 +1660,7 @@ def compose_short(
                 "ffmpeg", "-y",
                 "-i", final_path,
                 "-vf", cta_filter,
-                "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", SHORT_CRF,
+                "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET_FINAL, "-crf", SHORT_CRF,
                 "-c:a", "copy",
                 "-movflags", "+faststart",
                 cta_out,

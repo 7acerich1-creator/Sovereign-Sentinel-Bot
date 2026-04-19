@@ -133,6 +133,11 @@ export const PLATFORM_DEFAULTS = {
     optimalHashtags: 2,
     bestFormat: "shareable_insight",
   },
+  bluesky: {
+    maxLength: 300,
+    optimalHashtags: 0,       // Bluesky culture is anti-hashtag
+    bestFormat: "memetic_trigger", // Raw, clinical, containment-field frequency
+  },
 } as const;
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

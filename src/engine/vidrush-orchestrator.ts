@@ -1726,6 +1726,31 @@ export async function executeFullPipeline(
         }
         const podQueue: PreparedShort[] = [];
 
+        // ── SESSION 92: Download raw narration for clean shorts audio ──────
+        // If the pod uploaded a raw TTS narration (no music bed), download it
+        // and use it as the audio source for shorts. This produces cleaner
+        // shorts because compose_short can mix its own music bed at the right
+        // level for vertical format. Falls back to rendered video if unavailable.
+        let shortsAudioSource = facelessResult.localPath;
+        let usingRawNarration = false;
+        if (facelessResult.rawNarrationUrl) {
+          const rawNarrPath = `${clipDir}/raw_narration.wav`;
+          try {
+            const resp = await fetch(facelessResult.rawNarrationUrl);
+            if (resp.ok) {
+              const buf = Buffer.from(await resp.arrayBuffer());
+              writeFileSync(rawNarrPath, buf);
+              if (existsSync(rawNarrPath) && buf.length > 1000) {
+                shortsAudioSource = rawNarrPath;
+                usingRawNarration = true;
+                console.log(`🎤 [Orchestrator] Using raw narration for shorts (${(buf.length / 1024 / 1024).toFixed(1)}MB)`);
+              }
+            }
+          } catch (err: any) {
+            console.warn(`⚠️ [Orchestrator] Raw narration download failed, using rendered video: ${err.message?.slice(0, 100)}`);
+          }
+        }
+
         for (let i = 0; i < curatorResult.shorts.length; i++) {
           const short = curatorResult.shorts[i];
 
@@ -1745,7 +1770,7 @@ export async function executeFullPipeline(
 
           try {
             execSync(
-              `ffmpeg -ss ${paddedStart.toFixed(2)} -i "${facelessResult.localPath}" -t ${duration.toFixed(2)} ` +
+              `ffmpeg -ss ${paddedStart.toFixed(2)} -i "${shortsAudioSource}" -t ${duration.toFixed(2)} ` +
               `-vn -acodec pcm_s16le -ar 48000 -ac 2 -af "${audioFilter}" -y "${audioPath}"`,
               { timeout: FFMPEG_CLIP_TIMEOUT_MS, stdio: "pipe" },
             );
@@ -1792,10 +1817,18 @@ export async function executeFullPipeline(
           }
 
           // ── Step C: Build pod job spec and queue for Phase 2 ──
-          const vScenes: ShortScene[] = short.vertical_scenes.map((vs: VerticalScene) => ({
+          // SESSION 92: Normalize scene durations to match actual audio duration.
+          // The curator estimates duration_s per scene, but the sum often drifts
+          // from the real extracted audio length, causing visual/audio desync.
+          const rawSceneDurs = short.vertical_scenes.map((vs: VerticalScene) => vs.duration_s);
+          const rawSum = rawSceneDurs.reduce((a: number, b: number) => a + b, 0);
+          const driftRatio = rawSum > 0 ? duration / rawSum : 1;
+          const normalizedDurs = rawSceneDurs.map((d: number) => Math.max(0.5, d * driftRatio));
+
+          const vScenes: ShortScene[] = short.vertical_scenes.map((vs: VerticalScene, idx: number) => ({
             index: vs.index,
             image_prompt: vs.image_prompt,
-            duration_s: vs.duration_s,
+            duration_s: normalizedDurs[idx],
           }));
 
           podQueue.push({
@@ -1806,6 +1839,8 @@ export async function executeFullPipeline(
               audio_duration_s: duration,
               scenes: vScenes,
               hook_text: short.hook_text?.slice(0, 200),
+              cta_text: short.cta_overlay?.slice(0, 300),
+              audio_is_raw_tts: usingRawNarration,
               client_job_id: `${jobId}_short_${i}`,
             },
             paddedStart,

@@ -233,7 +233,7 @@ export async function drainBacklog(): Promise<void> {
   }
 
   const acePatterns = /ace|richie|77/i;
-  const cfPatterns = /containment/i;
+  const cfPatterns = /containment|sovereign-synthesis\.com/i;
 
   type ChannelWithService = { id: string; service: string; name: string; displayName?: string };
   const aceChannels: ChannelWithService[] = [];

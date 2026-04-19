@@ -39,7 +39,7 @@ type Brand = typeof BRANDS[number];
 const IMAGE_REQUIRED_PLATFORMS = new Set(["instagram", "tiktok"]);
 // Platforms that accept text-only posts
 // Buffer supports ALL connected channels — YouTube (community), IG, TikTok, X, Threads, LinkedIn, FB
-const TEXT_OK_PLATFORMS = new Set(["x", "twitter", "threads", "youtube", "linkedin", "facebook"]);
+const TEXT_OK_PLATFORMS = new Set(["x", "twitter", "threads", "youtube", "linkedin", "facebook", "bluesky"]);
 // Threads hard limit from Meta API (500 chars max)
 const THREADS_CHAR_LIMIT = 500;
 
@@ -61,6 +61,8 @@ const PLATFORM_NOTES: Record<string, string> = {
   threads: "Conversational, raw, authentic. Like talking to a friend who gets it. Medium length.",
   instagram: "Hook in first line (gets truncated). Use line breaks. 3-5 relevant hashtags at end.",
   tiktok: "Short, scroll-stopping. Speak like the viewer's internal voice. Under 150 chars ideal.",
+  linkedin: "TROJAN HORSE: Use corporate/executive language — efficiency, systems, automation, architecture, ROI, leverage, strategic. Present as a high-level Systems Engineer sharing operational insights. Deliver sovereign synthesis payload INSIDE professional framing. Max 3000 chars. 3-5 industry hashtags (#SystemsThinking #Automation #Leadership). NEVER sound esoteric or guru-like — LinkedIn's algorithm and corporate audience will filter it as noise.",
+  bluesky: "High-velocity memetic trigger for The Containment Field. Clinical, pattern-interrupt, raw transmission. Like a declassified briefing dropped on a decentralized grid. Max 300 chars (Bluesky limit). 0 hashtags. No corporate polish — this is the containment frequency.",
 };
 
 // ── Types ──
@@ -401,7 +403,7 @@ export async function discoverChannels(): Promise<BrandChannelMap> {
     }
     // Categorize by brand using known naming patterns
     const acePatterns = /ace|richie|77/i;
-    const cfPatterns = /containment/i;
+    const cfPatterns = /containment|sovereign-synthesis\.com/i;
 
     const map: BrandChannelMap = {
       ace_richie: [],

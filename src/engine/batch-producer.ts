@@ -256,6 +256,7 @@ async function produceBatchOnPod(
           thumbnailUrl: artifacts.thumbnailUrl,
           durationS: artifacts.durationS ?? 0,
           podMs,
+          rawNarrationUrl: artifacts.rawNarrationUrl,
         });
 
         await onProgress?.(
@@ -293,6 +294,7 @@ interface ProducedVideo {
   thumbnailUrl: string | null;
   durationS: number;
   podMs: number;
+  rawNarrationUrl?: string;  // SESSION 92: clean TTS narration from pod
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -365,6 +367,7 @@ async function distributeVideo(
       segmentCount: video.script.segments.length,
       script: video.script,
       segmentDurations: video.script.segments.map(() => actualPerSeg),
+      rawNarrationUrl: video.rawNarrationUrl,
     };
 
     // Feed into orchestrator Steps 3-8 via preProduced bypass

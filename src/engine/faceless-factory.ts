@@ -197,6 +197,8 @@ export interface FacelessResult {
   script?: FacelessScript;
   /** Phase 5 Task 5.5: Per-segment durations (seconds) for shorts-curator timestamp calc. */
   segmentDurations?: number[];
+  /** SESSION 92: R2 URL of raw TTS narration (no music) for clean shorts audio. */
+  rawNarrationUrl?: string;
 }
 
 // ── Brand voice for script generation (reuses Anita's Protocol 77 voice) ──

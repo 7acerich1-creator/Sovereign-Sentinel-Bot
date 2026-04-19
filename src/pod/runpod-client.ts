@@ -513,6 +513,7 @@ export async function produceVideo(
         videoUrl: result.video_url,
         thumbnailUrl: result.thumbnail_url,
         durationS: result.duration_s,
+        rawNarrationUrl: result.raw_narration_url ?? undefined,
       };
     }
     if (result.status === "failed") {

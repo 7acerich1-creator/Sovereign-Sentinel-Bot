@@ -1379,6 +1379,8 @@ def compose_short(
     job_dir: str,
     brand: str,
     hook_text: Optional[str] = None,
+    cta_text: Optional[str] = None,
+    audio_is_raw_tts: bool = False,
 ) -> dict:
     """
     Assemble a native 9:16 vertical short from scene images + pre-extracted audio.
@@ -1398,6 +1400,8 @@ def compose_short(
         job_dir: Working directory for intermediate files.
         brand: 'ace_richie' or 'containment_field'.
         hook_text: Short hook for thumbnail overlay.
+        cta_text: Call-to-action overlay for the last 3 seconds (e.g.,
+                  "Full video on the channel — @TheContainmentField").
 
     Returns:
         {
@@ -1522,35 +1526,57 @@ def compose_short(
 
     # ── Stage 2.5: Re-mux with real audio ──────────────────────────────────
     # Scene clips have silent placeholder audio. Now swap in the real extracted audio.
+    #
+    # SESSION 92 FIX: NO MUSIC BED MIX HERE.
+    # When audio_source == "rendered" (default), the extracted audio already has
+    # the music bed baked in from the long-form compose. Mixing it again causes
+    # double-music phasing artifacts. Only mix a fresh music bed when the audio
+    # comes from raw TTS WAVs (audio_source == "raw_tts").
     muxed_path = os.path.join(job_dir, "short_muxed.mp4")
 
-    # Shorts get a lighter audio mix: narration + music bed only (no stings/typing)
-    music_path = MUSIC_BED_FILES.get(brand)
-    if music_path and os.path.isfile(music_path):
-        # Mix narration + attenuated music bed
-        mix_filter = (
-            f"[0:a]apad=whole_dur={audio_duration_s:.3f}[narr];"
-            f"[1:a]atrim=0:{audio_duration_s:.3f},asetpts=PTS-STARTPTS,"
-            f"volume={MUSIC_BED_DB}dB[music];"
-            f"[narr][music]amix=inputs=2:duration=first:normalize=0[mixed]"
-        )
-        mix_cmd = [
-            "ffmpeg", "-y",
-            "-i", audio_path,
-            "-stream_loop", "-1", "-i", music_path,
-            "-i", concat_path,
-            "-filter_complex", mix_filter,
-            "-map", "2:v",
-            "-map", "[mixed]",
-            "-c:v", "copy",
-            "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE, "-ar", "48000",
-            "-movflags", "+faststart",
-            "-t", f"{audio_duration_s:.3f}",
-            "-shortest",
-            muxed_path,
-        ]
+    use_raw_tts = audio_is_raw_tts
+
+    if use_raw_tts:
+        # Raw TTS audio has NO music — mix in a fresh bed
+        music_path = MUSIC_BED_FILES.get(brand)
+        if music_path and os.path.isfile(music_path):
+            mix_filter = (
+                f"[0:a]apad=whole_dur={audio_duration_s:.3f}[narr];"
+                f"[1:a]atrim=0:{audio_duration_s:.3f},asetpts=PTS-STARTPTS,"
+                f"volume={MUSIC_BED_DB}dB[music];"
+                f"[narr][music]amix=inputs=2:duration=first:normalize=0[mixed]"
+            )
+            mix_cmd = [
+                "ffmpeg", "-y",
+                "-i", audio_path,
+                "-stream_loop", "-1", "-i", music_path,
+                "-i", concat_path,
+                "-filter_complex", mix_filter,
+                "-map", "2:v",
+                "-map", "[mixed]",
+                "-c:v", "copy",
+                "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE, "-ar", "48000",
+                "-movflags", "+faststart",
+                "-t", f"{audio_duration_s:.3f}",
+                "-shortest",
+                muxed_path,
+            ]
+        else:
+            mix_cmd = [
+                "ffmpeg", "-y",
+                "-i", concat_path, "-i", audio_path,
+                "-map", "0:v", "-map", "1:a",
+                "-c:v", "copy",
+                "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE, "-ar", "48000",
+                "-movflags", "+faststart",
+                "-t", f"{audio_duration_s:.3f}",
+                "-shortest",
+                muxed_path,
+            ]
     else:
-        # No music bed — just mux narration directly
+        # Rendered audio already has music bed — just mux directly (no double-mix)
+        log.info("compose_short_skip_music_mix",
+                 reason="audio extracted from rendered long-form already contains music bed")
         mix_cmd = [
             "ffmpeg", "-y",
             "-i", concat_path,
@@ -1606,6 +1632,49 @@ def compose_short(
                     final_path = captioned
     except Exception as exc:
         log.error("compose_short_captions_failed", error=str(exc)[:300])
+
+    # ── Stage 3.5: CTA overlay — last 3 seconds ─────────────────────────
+    # SESSION 92: Burns the curator-generated cta_text (e.g., "Full video
+    # on the channel — @TheContainmentField") into the final 3 seconds of
+    # the short so viewers know where to find the long-form.
+    if cta_text and cta_text.strip():
+        try:
+            cta_dur = min(3.0, audio_duration_s * 0.15)  # 3s or 15% of short
+            cta_start = max(0, audio_duration_s - cta_dur - 0.3)  # slight pre-end buffer
+            _safe_cta = cta_text.strip().replace("'", "\u2019").replace(":", "\\:")
+            # Two-line drawtext: smaller, semi-transparent bar at bottom third
+            cta_filter = (
+                f"drawtext=fontfile='{FONT_BEBAS}'"
+                f":text='{_safe_cta}'"
+                f":fontsize=48"
+                f":fontcolor=white"
+                f":borderw=3"
+                f":bordercolor=black@0.7"
+                f":x=(w-text_w)/2"
+                f":y=h-text_h-180"
+                f":enable='between(t,{cta_start:.2f},{cta_start + cta_dur:.2f})'"
+                f":alpha=0.95"
+            )
+            cta_out = os.path.join(job_dir, "short_cta.mp4")
+            cta_cmd = [
+                "ffmpeg", "-y",
+                "-i", final_path,
+                "-vf", cta_filter,
+                "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", SHORT_CRF,
+                "-c:a", "copy",
+                "-movflags", "+faststart",
+                cta_out,
+            ]
+            cta_result = subprocess.run(cta_cmd, capture_output=True, text=True, timeout=120)
+            if cta_result.returncode == 0 and os.path.isfile(cta_out):
+                final_path = cta_out
+                log.info("compose_short_cta_burned", cta_text=cta_text[:60],
+                         start_s=round(cta_start, 1), dur_s=round(cta_dur, 1))
+            else:
+                log.warning("compose_short_cta_failed",
+                            stderr=cta_result.stderr[:300] if cta_result.stderr else "")
+        except Exception as exc:
+            log.warning("compose_short_cta_error", error=str(exc)[:300])
 
     # ── Stage 4: Probe final duration ──────────────────────────────────────
     total_duration = _probe_duration(final_path)

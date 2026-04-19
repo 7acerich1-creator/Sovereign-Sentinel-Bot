@@ -61,6 +61,10 @@ export interface ShortJobSpec {
   scenes: ShortScene[];
   /** Hook text for thumbnail overlay. */
   hook_text?: string;
+  /** CTA overlay burned into the last 3s (e.g., "Full video — @channel"). */
+  cta_text?: string;
+  /** True when audio is raw TTS (no music) — pod mixes fresh music bed. */
+  audio_is_raw_tts?: boolean;
   /** Optional idempotency key. */
   client_job_id?: string;
 }
@@ -84,6 +88,8 @@ export interface JobResult {
   video_url?: string | null;
   thumbnail_url?: string | null;
   duration_s?: number | null;
+  /** R2 URL of raw TTS narration (no music bed) for clean shorts audio. */
+  raw_narration_url?: string | null;
   error?: string | null;
 }
 
@@ -97,6 +103,8 @@ export interface ArtifactUrls {
   videoUrl: string;
   thumbnailUrl: string;
   durationS: number;
+  /** R2 URL of raw TTS narration (no music) — may be undefined for older jobs. */
+  rawNarrationUrl?: string;
 }
 
 /** GET /health response — authenticated readiness probe. */

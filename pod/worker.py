@@ -160,6 +160,11 @@ class ProduceShortRequest(BaseModel):
     audio_duration_s: float = Field(gt=0, le=180)
     scenes: list[ShortScene] = Field(min_length=1, max_length=12)
     hook_text: Optional[str] = Field(default=None, max_length=200)
+    cta_text: Optional[str] = Field(default=None, max_length=300,
+                                    description="CTA overlay for last 3s of the short.")
+    audio_is_raw_tts: bool = Field(default=False,
+                                   description="True when audio is raw TTS (no music). "
+                                               "compose_short will mix a fresh music bed.")
     client_job_id: Optional[str] = Field(default=None, max_length=64)
 
     @field_validator("scenes")
@@ -183,6 +188,7 @@ class ProduceResult(BaseModel):
     video_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
     duration_s: Optional[float] = None
+    raw_narration_url: Optional[str] = None  # SESSION 92: clean TTS audio (no music) for shorts
     error: Optional[str] = None
 
 
@@ -462,6 +468,8 @@ def _run_short_pipeline(job_id: str, req: ProduceShortRequest) -> None:
             job_dir=job_dir,
             brand=brand,
             hook_text=req.hook_text,
+            cta_text=req.cta_text,
+            audio_is_raw_tts=req.audio_is_raw_tts,
         )
         video_path = compose_result["video_path"]
         thumb_path = compose_result["thumbnail_path"]
@@ -549,6 +557,52 @@ def _run_pipeline(job_id: str, req: ProduceRequest) -> None:
             total_s=round(tts_result["total_duration_s"], 2),
         )
 
+        # Stage 1.5: Upload raw narration WAV to R2 (for clean shorts audio)
+        # SESSION 92: Concat all scene WAVs into one raw narration file (no music)
+        # and upload to R2. Orchestrator uses this for shorts instead of extracting
+        # from the rendered video (which has music baked in).
+        raw_narration_url: Optional[str] = None
+        try:
+            import subprocess as _sp
+            raw_narration_path = os.path.join(job_dir, "raw_narration.wav")
+            concat_list_path = os.path.join(job_dir, "narration_concat.txt")
+            with open(concat_list_path, "w") as cl:
+                for wav in scene_wavs:
+                    cl.write(f"file '{wav}'\n")
+            concat_result = _sp.run(
+                ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                 "-i", concat_list_path,
+                 "-c:a", "pcm_s16le", "-ar", "24000", "-ac", "1",
+                 raw_narration_path],
+                capture_output=True, text=True, timeout=120,
+            )
+            if concat_result.returncode == 0 and os.path.isfile(raw_narration_path):
+                from pipelines.r2 import is_configured as r2_ok
+                if r2_ok():
+                    import boto3
+                    s3 = boto3.client(
+                        "s3",
+                        endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+                        aws_access_key_id=os.environ.get("R2_ACCESS_KEY_ID", ""),
+                        aws_secret_access_key=os.environ.get("R2_SECRET_ACCESS_KEY", ""),
+                        region_name="auto",
+                    )
+                    r2_key = f"{brand}/{job_id}/raw_narration.wav"
+                    bucket = R2_BUCKET_VIDEOS  # same bucket as videos
+                    s3.upload_file(raw_narration_path, bucket, r2_key,
+                                  ExtraArgs={"ContentType": "audio/wav"})
+                    pub_base = os.environ.get("R2_PUBLIC_URL_BASE", "").replace("https://", "").replace("http://", "")
+                    raw_narration_url = f"https://{pub_base}/{r2_key}" if pub_base else None
+                    log.info("pipeline_raw_narration_uploaded", job_id=job_id,
+                             url=raw_narration_url[:80] if raw_narration_url else "")
+                else:
+                    log.info("pipeline_raw_narration_r2_skip", reason="R2 not configured")
+            else:
+                log.warning("pipeline_raw_narration_concat_failed",
+                            stderr=concat_result.stderr[:300] if concat_result.stderr else "")
+        except Exception as exc:
+            log.warning("pipeline_raw_narration_error", error=str(exc)[:300])
+
         # Stage 2: FLUX — generate all scene images
         log.info("pipeline_flux_start", job_id=job_id, scene_count=len(scenes_data))
         from pipelines.flux import generate_scene_images
@@ -602,6 +656,7 @@ def _run_pipeline(job_id: str, req: ProduceRequest) -> None:
             video_url=video_url,
             thumbnail_url=thumbnail_url,
             duration_s=duration_s,
+            raw_narration_url=raw_narration_url,
         ))
         log.info(
             "pipeline_done",

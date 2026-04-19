@@ -1326,7 +1326,7 @@ async function main() {
 
           // Probe Buffer with a lightweight query (1 call) to verify it's actually live
           try {
-            await bufferGraphQL(`query Probe { organizations { id } }`);
+            await bufferGraphQL(`query Probe { organizations(input: { organizationId: "${(await import("./engine/buffer-graphql")).BUFFER_ORG_ID}" }) { id } }`);
           } catch (probeErr: any) {
             if (probeErr.message?.includes("quota") || probeErr.message?.includes("429") || probeErr.message?.includes("RATE_LIMIT")) {
               await telegram.sendMessage(message.chatId,

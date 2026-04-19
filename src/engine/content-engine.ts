@@ -946,7 +946,6 @@ export async function distributionSweep(): Promise<number> {
                 }
                 ... on LimitReachedError {
                   message
-                  limit
                 }
               }
             }
@@ -957,9 +956,10 @@ export async function distributionSweep(): Promise<number> {
 
           if (result?.post) {
             postResults.push(`✅ ${channel.service}(${channel.id}): ${result.post.id}`);
-          } else if (result?.limit !== undefined) {
-            // Plan-level post limit hit — stop posting, mark as partial for retry later
-            postResults.push(`⏸️ ${channel.service}(${channel.id}): Plan limit reached (${result.limit} posts) — ${result.message}`);
+          } else if (result?.message?.toLowerCase().includes('limit')) {
+            // SESSION 95: Buffer removed `limit` field from LimitReachedError (Apr 2026 schema change).
+            // Detect plan-level cap from message text instead.
+            postResults.push(`⏸️ ${channel.service}(${channel.id}): Plan limit reached — ${result.message}`);
             break; // No point trying more channels — they'll all hit the same limit
           } else if (result?.message) {
             postResults.push(`❌ ${channel.service}(${channel.id}): ${result.message}`);

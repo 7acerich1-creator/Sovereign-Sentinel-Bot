@@ -288,7 +288,6 @@ export class SocialSchedulerPostTool implements Tool {
                 }
                 ... on LimitReachedError {
                   message
-                  limit
                 }
               }
             }
@@ -300,9 +299,10 @@ export class SocialSchedulerPostTool implements Tool {
 
           if (result?.post) {
             results.push(`✅ ${channelId}: Post created (ID: ${result.post.id})`);
-          } else if (result?.limit !== undefined) {
-            // SESSION 87: Plan-level post limit hit — stop trying more channels
-            results.push(`⏸️ ${channelId}: Plan limit reached (${result.limit} posts) — ${result.message}`);
+          } else if (result?.message?.toLowerCase().includes('limit')) {
+            // SESSION 95: Buffer removed `limit` field from LimitReachedError (Apr 2026 schema change).
+            // Detect plan-level cap from message text instead.
+            results.push(`⏸️ ${channelId}: Plan limit reached — ${result.message}`);
             break; // No point trying more channels, they'll all hit the same limit
           } else if (result?.message) {
             results.push(`❌ ${channelId}: ${result.message}`);

@@ -75,7 +75,9 @@ export async function uploadToR2(
         }),
       );
 
-      const publicUrl = `https://${R2_PUBLIC_URL_BASE}/${key}`;
+      // Strip protocol if env var already includes it (prevents https://https://… URLs)
+      const base = (R2_PUBLIC_URL_BASE || "").replace(/^https?:\/\//, "");
+      const publicUrl = `https://${base}/${key}`;
       return { publicUrl, key };
     } catch (err: any) {
       lastError = err;

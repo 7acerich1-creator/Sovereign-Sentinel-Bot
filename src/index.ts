@@ -1455,6 +1455,124 @@ async function main() {
         return true;
       }
 
+      // SESSION 92: One-shot rescue — upload rendered R2 videos to YouTube
+      // when distribution was interrupted by a redeploy or crash. Remove after use.
+      case "/rescue": {
+        try {
+          await telegram.sendMessage(message.chatId,
+            `🚨 RESCUE MODE — uploading orphaned containment_field videos from R2 to YouTube...`
+          );
+
+          const { YouTubeLongFormPublishTool } = await import("./tools/video-publisher");
+          const ytTool = new YouTubeLongFormPublishTool();
+          const { mkdirSync, writeFileSync, existsSync } = await import("fs");
+
+          const rescueDir = "/tmp/rescue-tcf";
+          if (!existsSync(rescueDir)) mkdirSync(rescueDir, { recursive: true });
+
+          const R2_BASE = "https://pub-0ae5dfb3341f45418f0d28e0a2d89c41.r2.dev";
+
+          const rescueVideos = [
+            {
+              jobId: "job_98c2ce0dec094269",
+              title: "Your Anxiety Is Someone Else's Business Model",
+              niche: "dark_psychology",
+              scheduleOffset: 0, // 14:25 UTC
+            },
+            {
+              jobId: "job_e9ce94adb2be4ea6",
+              title: "Why High Performers Burn Out First",
+              niche: "burnout",
+              scheduleOffset: 3, // 17:25 UTC
+            },
+            {
+              jobId: "job_85690f5316bd4ab2",
+              title: "Why You Over-Explain Everything",
+              niche: "dark_psychology",
+              scheduleOffset: 6, // 20:25 UTC
+            },
+          ];
+
+          // Schedule times: today at 14:25, 17:25, 20:25 UTC
+          // If it's already past those times, schedule for tomorrow
+          const now = new Date();
+          const baseHour = 14;
+          const baseMinute = 25;
+
+          const results: string[] = [];
+
+          for (const video of rescueVideos) {
+            try {
+              const videoUrl = `${R2_BASE}/videos/containment_field/${video.jobId}.mp4`;
+              const thumbUrl = `${R2_BASE}/thumbs/containment_field/${video.jobId}.jpg`;
+
+              // Download thumbnail to local disk (YouTube API needs local file or buffer)
+              let thumbPath: string | null = null;
+              try {
+                const thumbResp = await fetch(thumbUrl);
+                if (thumbResp.ok) {
+                  const thumbBuf = Buffer.from(await thumbResp.arrayBuffer());
+                  thumbPath = `${rescueDir}/${video.jobId}_thumb.jpg`;
+                  writeFileSync(thumbPath, thumbBuf);
+                  console.log(`🖼️ [Rescue] Downloaded thumbnail: ${thumbPath} (${(thumbBuf.length / 1024).toFixed(0)}KB)`);
+                }
+              } catch (thumbErr: any) {
+                console.warn(`[Rescue] Thumbnail download failed for ${video.jobId}: ${thumbErr.message?.slice(0, 150)}`);
+              }
+
+              // Calculate scheduled publish time
+              const scheduleDate = new Date(now);
+              scheduleDate.setUTCHours(baseHour + video.scheduleOffset, baseMinute, 0, 0);
+              // If that time has already passed today, push to tomorrow
+              if (scheduleDate.getTime() <= now.getTime()) {
+                scheduleDate.setUTCDate(scheduleDate.getUTCDate() + 1);
+              }
+              const scheduledAt = scheduleDate.toISOString();
+
+              // Build description — emergency angle template (same as orchestrator fallback)
+              const description =
+                `${video.title}\n\n` +
+                `The patterns running your behavior weren't installed by accident.\n\n` +
+                `🧬 Take the Diagnostic: https://sovereign-synthesis.com/diagnostic\n\n` +
+                `🔗 The Protocol: https://sovereign-synthesis.com\n\n` +
+                `#thecontainmentfield #darkpsychology #${video.niche.replace(/_/g, "")} #mindcontrol #awakenedminds`;
+
+              const tags = `dark psychology,manipulation,${video.niche.replace(/_/g, " ")},containment field,sovereign synthesis`;
+
+              await telegram.sendMessage(message.chatId,
+                `📤 Uploading: "${video.title}"\n` +
+                `Scheduled: ${scheduledAt}\n` +
+                `Thumbnail: ${thumbPath ? "✅" : "❌ skipped"}`
+              );
+
+              const result = await ytTool.execute({
+                video_url: videoUrl,
+                title: video.title,
+                description,
+                tags,
+                niche: video.niche,
+                brand: "containment_field",
+                thumbnail_path: thumbPath,
+                scheduled_publish_at: scheduledAt,
+              });
+
+              results.push(`✅ ${video.title}: ${result.slice(0, 300)}`);
+              await telegram.sendMessage(message.chatId, `✅ "${video.title}" — ${result.slice(0, 400)}`);
+            } catch (vidErr: any) {
+              results.push(`❌ ${video.title}: ${vidErr.message?.slice(0, 200)}`);
+              await telegram.sendMessage(message.chatId, `❌ "${video.title}" FAILED: ${vidErr.message?.slice(0, 400)}`);
+            }
+          }
+
+          await telegram.sendMessage(message.chatId,
+            `🚨 RESCUE COMPLETE\n\n${results.join("\n\n")}`
+          );
+        } catch (err: any) {
+          await telegram.sendMessage(message.chatId, `❌ /rescue failed: ${err.message?.slice(0, 400)}`);
+        }
+        return true;
+      }
+
       default:
         // Unknown command — let agent loop handle it
         return false;

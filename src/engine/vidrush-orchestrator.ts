@@ -187,6 +187,7 @@ interface PlatformCopy {
   threads: string;
   linkedin: string;
   facebook: string;
+  bluesky: string;
 }
 
 export interface OrchestratorResult {
@@ -822,8 +823,9 @@ PLATFORM-SPECIFIC OPTIMIZATION RULES (obey these exactly):
 - INSTAGRAM: Reels caption from the assigned angle's emotional entry. 3-5 lines + 8-12 hashtags tailored to THAT demographic. First line IS the hook.
 - X_TWITTER: Max 280 chars. Speak the assigned demographic's language. 0-2 hashtags max. Write something that demographic would QUOTE-TWEET.
 - THREADS: 2-3 lines in the assigned voice. 0 hashtags. Like texting a smart friend who shares that demographic.
-- LINKEDIN: Professional authority tone FROM the assigned angle (e.g. Corporate Burnout → contrarian ex-manager; Tech/AI Realism → staff engineer; etc.). 2-3 sentences. 3-5 hashtags. NOT generic #mindset/#leadership.
+- LINKEDIN: TROJAN HORSE — write as a high-level Systems Engineer sharing operational insights. Use CORPORATE language: efficiency, systems, automation, architecture, ROI, leverage, strategic, scalable. The sovereign payload is INSIDE the professional framing. From the assigned angle (e.g. Corporate Burnout → contrarian ex-exec exposing operational failures; Tech/AI Realism → staff engineer on system design; Wealth → capital architect on leverage mechanics). 2-3 sentences. 3-5 INDUSTRY hashtags (#SystemsThinking #Automation #Leadership #OperationalExcellence). NEVER sound esoteric, guru-like, or use quantum/frequency/monad vocabulary — LinkedIn's algorithm will kill reach.
 - FACEBOOK: Shareable insight format in the assigned angle's voice. 2-3 lines + a question the assigned demographic would answer.
+- BLUESKY: High-velocity memetic trigger for The Containment Field. Clinical, raw, declassified-briefing tone. Pattern-interrupt opening. Max 300 chars. 0 hashtags. No corporate polish. This is the containment frequency — use the CONTAINMENT_FIELD lexicon (nervous system, extraction loop, behavioral program, micro-compliance). Like a transmission dropped on a decentralized grid.
 
 COPY ARCHITECTURE (applied through the assigned angle's lens):
 GLITCH (pattern interrupt that lands in the assigned demographic's world) → PIVOT (reframe using their vocabulary) → BRIDGE (to the universal insight) → ANCHOR (subtle, no Sovereign Synthesis name-drop unless natural).
@@ -831,7 +833,7 @@ GLITCH (pattern interrupt that lands in the assigned demographic's world) → PI
 CLIPS:
 ${clipDescriptions}
 
-Return ONLY valid JSON — an array of objects, one per clip in the exact order shown above, each with keys: youtube_short, tiktok, instagram, x_twitter, threads, linkedin, facebook.
+Return ONLY valid JSON — an array of objects, one per clip in the exact order shown above, each with keys: youtube_short, tiktok, instagram, x_twitter, threads, linkedin, facebook, bluesky.
 All values are strings. The youtube_short string MUST contain a title, a hook, and a "Related topics: ..." trailing line (tag smuggling). No two clips may reuse the same angle keywords.`;
 
     try {
@@ -879,6 +881,7 @@ All values are strings. The youtube_short string MUST contain a title, a hook, a
           threads: `${firstPattern}\n\n${secondPattern}`,
           linkedin: `${firstPattern}\n\n${secondPattern}\n\n#${angle.id.replace(/_/g, "")}`,
           facebook: `${firstPattern}\n\n${secondPattern}`,
+          bluesky: `${firstPattern}\n\n${secondPattern}`,
         });
       }
     }
@@ -1160,6 +1163,7 @@ const SERVICE_TO_COPY_KEY: Record<string, keyof PlatformCopy> = {
   googlebusiness: "facebook",
   mastodon: "threads",
   pinterest: "instagram",
+  bluesky: "bluesky",
 };
 
 // Platforms that REQUIRE media (video or image) — text-only will be rejected
@@ -1701,6 +1705,27 @@ export async function executeFullPipeline(
 
         clips = [];
 
+        // ── SESSION 92 FIX: Two-phase shorts render ──────────────────────
+        // PHASE 1: Extract audio + upload to R2 for ALL shorts (no pod needed).
+        //          Collect pod-ready specs into an array. Legacy-crop fallbacks
+        //          (no R2 URL) are handled inline without a pod.
+        // PHASE 2: Open ONE withPodSession and render ALL pod specs inside it.
+        //          This mirrors the batch-producer pattern and prevents the
+        //          catastrophic pod-per-short waste (was creating+destroying a
+        //          pod for each short — 36 cold-starts across a 6-video batch).
+
+        interface PreparedShort {
+          index: number;
+          spec: ShortJobSpec;
+          paddedStart: number;
+          duration: number;
+          hookText: string;
+          whyThisMoment: string;
+          confidence: number;
+          vSceneCount: number;
+        }
+        const podQueue: PreparedShort[] = [];
+
         for (let i = 0; i < curatorResult.shorts.length; i++) {
           const short = curatorResult.shorts[i];
 
@@ -1766,52 +1791,71 @@ export async function executeFullPipeline(
             continue;
           }
 
-          // ── Step C: Build pod job spec with vertical scenes ──
+          // ── Step C: Build pod job spec and queue for Phase 2 ──
           const vScenes: ShortScene[] = short.vertical_scenes.map((vs: VerticalScene) => ({
             index: vs.index,
             image_prompt: vs.image_prompt,
             duration_s: vs.duration_s,
           }));
 
-          const shortSpec: ShortJobSpec = {
-            brand: brand as "ace_richie" | "containment_field",
-            audio_url: audioUrl,
-            audio_duration_s: duration,
-            scenes: vScenes,
-            hook_text: short.hook_text?.slice(0, 200),
-            client_job_id: `${jobId}_short_${i}`,
-          };
+          podQueue.push({
+            index: i,
+            spec: {
+              brand: brand as "ace_richie" | "containment_field",
+              audio_url: audioUrl,
+              audio_duration_s: duration,
+              scenes: vScenes,
+              hook_text: short.hook_text?.slice(0, 200),
+              client_job_id: `${jobId}_short_${i}`,
+            },
+            paddedStart,
+            duration,
+            hookText: short.hook_text,
+            whyThisMoment: short.why_this_moment,
+            confidence: short.confidence,
+            vSceneCount: vScenes.length,
+          });
+        }
 
-          // ── Step D: Submit to pod and poll for result ──
+        // ── PHASE 2: Single pod session for ALL queued shorts ──
+        if (podQueue.length > 0) {
+          console.log(`🎬 [Orchestrator] Rendering ${podQueue.length} shorts in single pod session...`);
           try {
-            const artifacts = await withPodSession(async (handle) => {
-              return produceShort(handle, shortSpec);
-            });
+            await withPodSession(async (handle) => {
+              for (const queued of podQueue) {
+                try {
+                  const artifacts = await produceShort(handle, queued.spec);
 
-            // Download the rendered short from R2 to local disk for distribution
-            const clipPath = `${clipDir}/clip_${i.toString().padStart(2, "0")}.mp4`;
-            execSync(`curl -sL -o "${clipPath}" "${artifacts.videoUrl}"`, {
-              timeout: 60_000, stdio: "pipe",
-            });
+                  // Download the rendered short from R2 to local disk for distribution
+                  const clipPath = `${clipDir}/clip_${queued.index.toString().padStart(2, "0")}.mp4`;
+                  execSync(`curl -sL -o "${clipPath}" "${artifacts.videoUrl}"`, {
+                    timeout: 60_000, stdio: "pipe",
+                  });
 
-            clips.push({
-              index: i,
-              localPath: clipPath,
-              publicUrl: artifacts.videoUrl,
-              startSec: paddedStart,
-              endSec: paddedStart + duration,
-              captionText: `${short.hook_text} | ${short.why_this_moment}`,
-              storyTitle: short.hook_text,
-              storyHook: short.why_this_moment,
+                  clips.push({
+                    index: queued.index,
+                    localPath: clipPath,
+                    publicUrl: artifacts.videoUrl,
+                    startSec: queued.paddedStart,
+                    endSec: queued.paddedStart + queued.duration,
+                    captionText: `${queued.hookText} | ${queued.whyThisMoment}`,
+                    storyTitle: queued.hookText,
+                    storyHook: queued.whyThisMoment,
+                  });
+                  console.log(
+                    `  🎬 Short ${queued.index} (native vertical): "${queued.hookText.slice(0, 50)}" ` +
+                    `${queued.duration.toFixed(1)}s conf=${queued.confidence.toFixed(2)} ` +
+                    `vScenes=${queued.vSceneCount} → ${artifacts.videoUrl.slice(0, 60)}`
+                  );
+                } catch (podErr: any) {
+                  console.error(`[Orchestrator] Short ${queued.index} pod render FAILED: ${podErr.message?.slice(0, 300)}`);
+                  // Non-fatal — skip this short, continue with the rest using the SAME pod
+                }
+              }
             });
-            console.log(
-              `  🎬 Short ${i} (native vertical): "${short.hook_text.slice(0, 50)}" ` +
-              `${duration.toFixed(1)}s conf=${short.confidence.toFixed(2)} ` +
-              `vScenes=${vScenes.length} → ${artifacts.videoUrl.slice(0, 60)}`
-            );
-          } catch (podErr: any) {
-            console.error(`[Orchestrator] Short ${i} pod render FAILED: ${podErr.message?.slice(0, 300)}`);
-            // Non-fatal — skip this short, continue with the rest
+          } catch (sessionErr: any) {
+            console.error(`[Orchestrator] Pod session for shorts FAILED: ${sessionErr.message?.slice(0, 300)}`);
+            // All remaining shorts in the queue are lost, but clips from Phase 1 fallbacks survive
           }
         }
 
@@ -1859,6 +1903,7 @@ export async function executeFullPipeline(
         threads: `DRY RUN — The architecture of liberation, piece by piece.`,
         linkedin: `DRY RUN — A framework for sovereign execution. #MindsetShift`,
         facebook: `DRY RUN — Full protocol at sovereign-synthesis.com`,
+        bluesky: `DRY RUN — The architecture of liberation, piece by piece.`,
       });
       clip.captionText = `DRY RUN — Clip ${clip.index + 1}`;
     }

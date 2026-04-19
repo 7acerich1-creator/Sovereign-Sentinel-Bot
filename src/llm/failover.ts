@@ -5,7 +5,9 @@
 
 import type { LLMProvider, LLMMessage, LLMOptions, LLMResponse } from "../types";
 
-const DEFAULT_TIMEOUT_MS = 60_000;
+// S95: Bumped from 60s → 120s. Gemini thinking-model calls on complex script
+// generation routinely hit 60-90s. 13 timeouts in one batch at 60s threshold.
+const DEFAULT_TIMEOUT_MS = 120_000;
 const PRIMARY_RETRY_DELAY_MS = 3000;
 
 export class FailoverLLM implements LLMProvider {

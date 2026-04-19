@@ -37,6 +37,7 @@ import {
   getNicheCooldownSnapshot,
   recordNicheRun,
 } from "../tools/niche-cooldown";
+import { pickUnusedAngle } from "../data/thesis-angles";
 import { withPodSession } from "../pod/session";
 import { produceVideo, splitOversizedScenes } from "../pod/runpod-client";
 import type { JobSpec, Scene as PodScene } from "../pod/types";
@@ -78,6 +79,7 @@ interface ValidatedScript {
   brand: Brand;
   niche: string;
   sourceIntelligence: string;
+  angleId: string | null;
   script: FacelessScript;
 }
 
@@ -117,11 +119,14 @@ async function preGenerateScripts(
     const niches = await selectNichesForBrand(brand, perBrand);
     const brandLabel = brand === "ace_richie" ? "Ace Richie" : "TCF";
 
-    await onProgress?.(`📝 ${brandLabel}: generating ${niches.length} scripts [${niches.join(", ")}]`);
+    // Fetch previously used angle IDs for this brand (cross-batch dedup)
+    const usedAngleIds = await getUsedAngleIds(brand);
+
+    await onProgress?.(`📝 ${brandLabel}: generating ${niches.length} scripts [${niches.join(", ")}] (${usedAngleIds.size} angles previously consumed)`);
 
     for (let i = 0; i < niches.length; i++) {
       const niche = niches[i];
-      const sourceIntelligence = buildSourceIntelligence(brand, niche);
+      const { text: sourceIntelligence, angleId } = buildSourceIntelligence(brand, niche, usedAngleIds);
 
       try {
         let script: FacelessScript | null = null;
@@ -170,7 +175,7 @@ async function preGenerateScripts(
             continue;
           }
 
-          valid.push({ brand, niche, sourceIntelligence, script });
+          valid.push({ brand, niche, sourceIntelligence, angleId, script });
           await onProgress?.(
             `✅ ${brandLabel}/${niche}: "${script.title.slice(0, 60)}" ` +
             `(${script.segments.length} segments) [${valid.length}/${brands.length * perBrand}]`,
@@ -186,20 +191,92 @@ async function preGenerateScripts(
   return { valid, errors };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Thesis Angle Selection — replaces the generic "make a video about X" prompt
+// with a deeply specific thesis seed from the angle matrix.
+// Cross-batch tracking: angle IDs stored in niche_cooldown.source as "angle:<id>".
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Build synthetic source intelligence for Alfred-less batch mode.
- * In batch mode we don't run Alfred — the niche itself drives the LLM's
- * blueprint extraction. This generates a rich thesis seed.
+ * Pull all previously consumed angle IDs for a brand from Supabase.
+ * Reads niche_cooldown rows where source starts with "angle:".
+ * Graceful: returns empty Set on any failure.
  */
-function buildSourceIntelligence(brand: Brand, niche: string): string {
+async function getUsedAngleIds(brand: Brand): Promise<Set<string>> {
+  const usedIds = new Set<string>();
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseKey) return usedIds;
+
+  try {
+    const resp = await fetch(
+      `${supabaseUrl}/rest/v1/niche_cooldown?brand=eq.${encodeURIComponent(brand)}&source=like.angle:%25&select=source`,
+      {
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+        },
+      },
+    );
+    if (resp.ok) {
+      const rows = (await resp.json()) as Array<{ source: string }>;
+      for (const row of rows) {
+        const angleId = row.source.replace(/^angle:/, "");
+        if (angleId) usedIds.add(angleId);
+      }
+      if (rows.length > 0) {
+        console.log(`🎯 [BatchProducer] ${brand}: ${rows.length} angles previously consumed`);
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[BatchProducer] Failed to fetch used angles for ${brand}: ${err?.message}`);
+  }
+  return usedIds;
+}
+
+/**
+ * Build source intelligence from the thesis angle matrix.
+ * Each call picks an unused angle and returns both the rich seed prompt AND the
+ * angle ID for tracking. Falls back to a generic prompt if the matrix is exhausted.
+ *
+ * `usedAngleIds` is mutated in-place — the picked angle's ID is added so the
+ * same angle can't be picked twice within a single batch.
+ */
+function buildSourceIntelligence(
+  brand: Brand,
+  niche: string,
+  usedAngleIds: Set<string>,
+): { text: string; angleId: string | null } {
   const brandName = brand === "ace_richie" ? "Ace Richie / Sovereign Synthesis" : "The Containment Field";
-  return (
-    `Generate a powerful ${niche} thesis for the ${brandName} brand. ` +
-    `The video must explore a specific, non-obvious angle within ${niche} — ` +
-    `not a general overview. Find the hidden mechanism, the counterintuitive truth, ` +
-    `the thing the viewer has felt but never had words for. ` +
-    `Make it concrete and actionable, not abstract philosophy.`
-  );
+
+  const angle = pickUnusedAngle(brand, niche, usedAngleIds);
+
+  if (angle) {
+    usedAngleIds.add(angle.id);
+    return {
+      text:
+        `BRAND: ${brandName}\n` +
+        `NICHE: ${niche}\n\n` +
+        `THESIS ANGLE:\n${angle.seed}\n\n` +
+        `Build the entire video around this specific angle. Do NOT generalize or ` +
+        `broaden the topic — the thesis seed above IS the video's core argument. ` +
+        `Expand it with evidence, mechanisms, lived examples, and a concrete ` +
+        `sovereign takeaway the viewer can act on immediately.`,
+      angleId: angle.id,
+    };
+  }
+
+  // All angles exhausted for this niche — fall back to generic prompt
+  console.warn(`⚠️ [BatchProducer] All thesis angles exhausted for ${brand}/${niche} — using generic prompt`);
+  return {
+    text:
+      `Generate a powerful ${niche} thesis for the ${brandName} brand. ` +
+      `The video must explore a specific, non-obvious angle within ${niche} — ` +
+      `not a general overview. Find the hidden mechanism, the counterintuitive truth, ` +
+      `the thing the viewer has felt but never had words for. ` +
+      `Make it concrete and actionable, not abstract philosophy.`,
+    angleId: null,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -264,9 +341,15 @@ async function produceBatchOnPod(
           `(${Math.round((artifacts.durationS ?? 0))}s video)`,
         );
 
-        // Record niche cooldown
+        // Record niche cooldown + angle consumption
         try {
-          await recordNicheRun({ brand, niche, thesis: script.title });
+          const { angleId } = scripts[i];
+          await recordNicheRun({
+            brand,
+            niche,
+            thesis: script.title,
+            source: angleId ? `angle:${angleId}` : "batch_generic",
+          });
         } catch { /* non-fatal */ }
 
         // Inter-job delay (let VRAM settle)

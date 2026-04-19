@@ -7,11 +7,11 @@ import { GoogleGenerativeAI, Content, Part, FunctionDeclarationSchema } from "@g
 import type { LLMProvider, LLMMessage, LLMOptions, LLMResponse, ToolDefinition, ToolCall } from "../types";
 
 // ── Rate-limit retry with exponential backoff ──
-// SESSION 31 FIX (revised S55): Raised MAX_RETRIES to 2 and cap to 15s.
-// Original S31 reduced to 1 retry / 5s cap to avoid racing FailoverLLM's 60s timeout.
+// SESSION 31 FIX (revised S55, S95): Raised MAX_RETRIES to 2 and cap to 15s.
+// Original S31 reduced to 1 retry / 5s cap to avoid racing FailoverLLM's timeout.
 // But Anthropic's retry-after headers are typically 15-20s for temporary rate limits.
 // Capping at 5s meant the retry always hit a STILL-limited endpoint → instant failure.
-// With 2 retries x 15s cap = 30s worst case, well within the 60s outer timeout.
+// With 2 retries x 15s cap = 30s worst case, well within the 120s outer timeout (S95).
 // Groq's 30s retry-after headers are STILL capped — they'd burn 30s of 60s budget.
 const MAX_RETRIES = 2;
 const BASE_DELAY_MS = 2000;

@@ -304,7 +304,9 @@ async function main() {
 
   // LLM_TIMEOUT_MS env var lets Railway override per-call timeout without a code deploy.
   // Default 60s is too short for 6144-token Groq completions under rate limiting.
-  const llmTimeoutMs = parseInt(process.env.LLM_TIMEOUT_MS || "60000", 10);
+  // S95: Default bumped 60s → 120s to stop Gemini thinking-model timeouts.
+  // Override via LLM_TIMEOUT_MS env var on Railway if needed.
+  const llmTimeoutMs = parseInt(process.env.LLM_TIMEOUT_MS || "120000", 10);
 
   // Session 31: Dual Groq key distribution across agents AND pipelines.
   // GROQ_API_KEY = Key A (primary), GROQ_API_KEY_TCF = Key B (secondary).

@@ -993,7 +993,7 @@ export async function distributionSweep(): Promise<number> {
       let finalStatus = "failed";
       if (successCount > 0 && retryableFailCount === 0) finalStatus = "posted";
       else if (successCount > 0 && retryableFailCount > 0) finalStatus = "partial";
-      else if (successCount === 0 && retryableFailCount === 0 && permanentFailCount > 0) finalStatus = "posted"; // all channels permanently failed = stop retrying
+      else if (successCount === 0 && retryableFailCount === 0 && permanentFailCount > 0) finalStatus = "failed"; // all channels permanently failed = mark failed, not "posted"
 
       await supabasePatch("content_engine_queue", draft.id, {
         status: finalStatus,

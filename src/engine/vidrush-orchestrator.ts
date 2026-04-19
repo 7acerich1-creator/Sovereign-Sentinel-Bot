@@ -295,11 +295,12 @@ Respond with ONLY a JSON array, no markdown, no explanation:
 ]
 
 THUMBNAIL_TEXT RULES:
-- 2-4 words MAXIMUM, ALL CAPS. This is overlaid on a still frame at massive font size.
-- Must create instant curiosity or emotional hit readable at tiny thumbnail size (120x68px).
-- Style reference: "THEY KNEW", "SYSTEM OVERRIDE", "WAKE UP", "YOU WERE CHOSEN", "BREAK FREE", "THE REAL TRAP".
-- NEVER repeat the title — thumbnail_text is a DIFFERENT angle on the same moment.
-- Think: what single phrase would make someone STOP scrolling and tap?
+- 2-5 words ALL CAPS — a complete thought that works as protest-sign graffiti.
+- This is a memetic trigger overlaid at massive font size on a dark still frame.
+- Write a FINISHED statement. A stranger reads it on a wall and feels something with zero context.
+- DECLARATIONS: "THEY DESIGNED YOUR CAGE", "YOUR COMFORT IS THE TRAP", "REALITY HAS AN OWNER".
+- COMMANDS: "DELETE YOUR OLD SELF", "BURN THE MANUAL", "STOP OBEYING".
+- REVELATIONS: "NOBODY IS COMING", "YOUR MEMORIES ARE INSTALLED", "THE EXIT IS OPEN".
 
 TRANSCRIPT:
 ${transcriptBlock}`;

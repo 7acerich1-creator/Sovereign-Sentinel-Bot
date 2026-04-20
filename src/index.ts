@@ -1391,7 +1391,7 @@ async function main() {
       // /rechop --force ... → bypass quality gate (include pre-XTTS videos)
       case "/rechop": {
         try {
-          const { listR2LongForms, rechopVideo, rechopAll, rechopBatch } = await import("./engine/rechop-pipeline");
+          const { listR2LongForms, rechopVideo, rechopAll, rechopBatch, unmarkRechopped } = await import("./engine/rechop-pipeline");
           const forceMode = arg?.includes("--force") ?? false;
           const cleanArg = (arg || "").replace("--force", "").trim();
 
@@ -1440,12 +1440,9 @@ async function main() {
 
           } else if (cleanArg && /^[\d,\s]+$/.test(cleanArg)) {
             // Single or multiple videos by index: /rechop 0 or /rechop 1,2,3
-            // Indices are STABLE — based on the FULL list (including already-rechopped).
-            // Rechopped videos show as "(done)" in the list and are rejected here.
+            // SESSION 101: --force bypasses dedup and clears rechop entries for retry.
             const indices = cleanArg.split(/[,\s]+/).map(Number).filter((n) => !isNaN(n));
             const allVideos = await listR2LongForms({ force: forceMode }); // full list, stable indices
-            const unchopped = await listR2LongForms({ onlyUnchopped: true, force: forceMode });
-            const unchoppedJobIds = new Set(unchopped.map(v => v.jobId));
 
             const invalid = indices.filter((i) => i < 0 || i >= allVideos.length);
             if (invalid.length > 0) {
@@ -1453,16 +1450,29 @@ async function main() {
               return true;
             }
 
-            // Filter out already-rechopped
-            const alreadyDone = indices.filter((i) => !unchoppedJobIds.has(allVideos[i].jobId));
-            if (alreadyDone.length > 0) {
+            let validIndices: number[];
+            if (forceMode) {
+              // --force: bypass dedup, clear rechop entries so they re-run
+              validIndices = indices;
+              for (const idx of indices) {
+                await unmarkRechopped(allVideos[idx].jobId);
+              }
               await telegram.sendMessage(message.chatId,
-                `⚠️ Index(es) ${alreadyDone.join(", ")} already rechopped — skipping.`
+                `🔓 Force mode: cleared rechop status for ${indices.length} video(s). Re-running...`
               );
+            } else {
+              const unchopped = await listR2LongForms({ onlyUnchopped: true, force: forceMode });
+              const unchoppedJobIds = new Set(unchopped.map(v => v.jobId));
+              const alreadyDone = indices.filter((i) => !unchoppedJobIds.has(allVideos[i].jobId));
+              if (alreadyDone.length > 0) {
+                await telegram.sendMessage(message.chatId,
+                  `⚠️ Index(es) ${alreadyDone.join(", ")} already rechopped — skipping. Use \`--force\` to retry.`
+                );
+              }
+              validIndices = indices.filter((i) => unchoppedJobIds.has(allVideos[i].jobId));
             }
-            const validIndices = indices.filter((i) => unchoppedJobIds.has(allVideos[i].jobId));
             if (validIndices.length === 0) {
-              await telegram.sendMessage(message.chatId, "All selected videos already rechopped. Nothing to do.");
+              await telegram.sendMessage(message.chatId, "All selected videos already rechopped. Use `--force` to retry.");
               return true;
             }
 

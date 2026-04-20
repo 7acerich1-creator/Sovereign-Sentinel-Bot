@@ -150,6 +150,27 @@ async function markRechopped(videoJobId: string, shortsCount: number, clipKeys: 
   }
 }
 
+/** SESSION 101: Remove a video from rechop_completed so it can be retried. */
+export async function unmarkRechopped(videoJobId: string): Promise<boolean> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return false;
+  try {
+    const resp = await fetch(
+      `${SUPABASE_URL}/rest/v1/rechop_completed?video_job_id=eq.${encodeURIComponent(videoJobId)}`,
+      {
+        method: "DELETE",
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          Prefer: "return=minimal",
+        },
+      },
+    );
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Step 1: List R2 long-forms without corresponding clips
 // ─────────────────────────────────────────────────────────────────────────────
@@ -739,9 +760,15 @@ export async function rechopVideo(
       console.error(`[Rechop] Pod session FAILED: ${sessionErr.message?.slice(0, 300)}`);
     }
 
-    // Mark as rechopped in Supabase so it won't be re-processed
-    if (result.shortsRendered > 0) {
+    // Mark as rechopped in Supabase — but ONLY if most shorts survived.
+    // SESSION 101: If majority failed, DON'T mark as done so the video can be retried
+    // after fixes are deployed. This prevents partial runs from permanently blocking retries.
+    const totalAttempted = result.shortsRendered + result.shortsFailed;
+    const successRate = totalAttempted > 0 ? result.shortsRendered / totalAttempted : 0;
+    if (result.shortsRendered > 0 && successRate >= 0.5) {
       await markRechopped(video.jobId, result.shortsRendered, result.clipKeys);
+    } else if (result.shortsRendered > 0) {
+      console.log(`⚠️ [Rechop] Only ${result.shortsRendered}/${totalAttempted} shorts rendered (${(successRate * 100).toFixed(0)}%) — NOT marking as done (retry-eligible)`);
     }
 
     await log("DONE", `✅ ${result.shortsRendered}/${podQueue.length} shorts rendered for ${video.jobId}`);
@@ -903,9 +930,13 @@ export async function rechopBatch(
           }
         }
 
-        // Mark video as rechopped
-        if (p.result.shortsRendered > 0) {
+        // Mark video as rechopped — only if majority succeeded (SESSION 101)
+        const batchTotal = p.result.shortsRendered + p.result.shortsFailed;
+        const batchRate = batchTotal > 0 ? p.result.shortsRendered / batchTotal : 0;
+        if (p.result.shortsRendered > 0 && batchRate >= 0.5) {
           await markRechopped(p.video.jobId, p.result.shortsRendered, p.result.clipKeys);
+        } else if (p.result.shortsRendered > 0) {
+          console.log(`⚠️ [RechopBatch] ${p.video.jobId}: ${p.result.shortsRendered}/${batchTotal} — NOT marking done`);
         }
       }
     });

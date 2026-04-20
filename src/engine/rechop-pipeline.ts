@@ -544,18 +544,13 @@ export async function rechopVideo(
     }
 
     // ── Step 4: Extract audio per-short + upload to R2 ──
-    await log("STEP 4/5", `Extracting audio for ${curatorResult.shorts.length} shorts...`);
+    // SESSION 101b: DIAGNOSTIC TAG — if this line appears in Telegram, the new code is running.
+    await log("STEP 4/5", `[S101b] Extracting audio for ${curatorResult.shorts.length} shorts (two-step WAV method)...`);
     const clipDir = `${jobDir}/clips`;
     if (!existsSync(clipDir)) mkdirSync(clipDir, { recursive: true });
 
     // SESSION 101: Two-step audio extraction — ROOT CAUSE FIX for silent shorts.
-    // Previous approach: seek directly within the video container per-short.
-    // Problem: ffmpeg output-seeking in MP4 containers silently produces silence
-    // for ~80% of seek positions (only the first short worked). The container's
-    // audio index may be unreliable for random-access seeks.
-    // Fix: Extract the FULL audio track once (fast, no seeking issues), then
-    // seek within the audio-only WAV for each short. WAV is headerless PCM so
-    // seeking is byte-exact and cannot fail.
+    // Extract the FULL audio track once, then seek within the WAV per-short.
     const fullAudioPath = `${jobDir}/full_audio.wav`;
     if (!existsSync(fullAudioPath)) {
       try {
@@ -563,12 +558,30 @@ export async function rechopVideo(
           `ffmpeg -i "${videoPath}" -vn -acodec pcm_s16le -ar 48000 -ac 2 -y "${fullAudioPath}"`,
           { timeout: FFMPEG_TIMEOUT_MS, stdio: "pipe" },
         );
-        console.log(`📦 [Rechop] Full audio extracted: ${(statSync(fullAudioPath).size / 1024 / 1024).toFixed(1)}MB`);
+        const fullSize = statSync(fullAudioPath).size;
+        console.log(`📦 [Rechop] Full audio extracted: ${(fullSize / 1024 / 1024).toFixed(1)}MB`);
+
+        // DIAGNOSTIC: Verify the full WAV has audio, not silence
+        try {
+          const fullVol = execSync(
+            `ffmpeg -i "${fullAudioPath}" -af volumedetect -f null /dev/null 2>&1 | grep mean_volume || true`,
+            { timeout: 60_000, encoding: "utf-8" },
+          );
+          const fullVolMatch = fullVol.match(/mean_volume:\s*(-?\d+\.?\d*)/);
+          const fullDb = fullVolMatch ? parseFloat(fullVolMatch[1]) : null;
+          await log("STEP 4/5", `🔊 Full audio WAV: ${(fullSize / 1024 / 1024).toFixed(1)}MB, ${fullDb !== null ? fullDb.toFixed(1) + " dB" : "level unknown"}`);
+          if (fullDb !== null && fullDb < -70) {
+            result.errors.push(`Full audio WAV is SILENT (${fullDb.toFixed(1)} dB) — source video may have no audio`);
+            return result;
+          }
+        } catch { /* non-fatal diagnostic */ }
       } catch (err: any) {
         console.error(`[Rechop] Full audio extraction FAILED: ${err.message?.slice(0, 300)}`);
         result.errors.push("Full audio extraction failed — cannot produce shorts");
         return result;
       }
+    } else {
+      await log("STEP 4/5", `📦 Using cached full_audio.wav (${(statSync(fullAudioPath).size / 1024 / 1024).toFixed(1)}MB)`);
     }
 
     interface PreparedShort {

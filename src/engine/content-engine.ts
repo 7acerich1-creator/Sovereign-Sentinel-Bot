@@ -796,11 +796,10 @@ export async function dailyContentProduction(llm: LLMProvider): Promise<number> 
  * Also retries "partial" items (some channels succeeded, others failed).
  */
 export async function distributionSweep(): Promise<number> {
-  // SESSION 87: Pre-flight — if Buffer quota is known-blown, skip the entire sweep.
-  // This prevents hammering a dead API and burning retries. Next 5-min cycle will re-check.
-  if (isBufferQuotaExhausted()) {
-    console.warn(`⏸️ [ContentEngine] Distribution skipped — Buffer quota exhausted, waiting for reset`);
-    return 0;
+  // SESSION 87+97: Buffer quota check — skip Buffer channels but still run Facebook direct.
+  const bufferBlocked = isBufferQuotaExhausted();
+  if (bufferBlocked) {
+    console.warn(`⏸️ [ContentEngine] Buffer quota exhausted — skipping Buffer channels, Facebook direct still active`);
   }
 
   const now = new Date().toISOString();
@@ -865,7 +864,14 @@ export async function distributionSweep(): Promise<number> {
       const postResults: string[] = [];
 
       // Post to each channel with platform-specific text
+      // SESSION 97: Skip entire Buffer loop if quota is blown — Facebook direct still fires below
+      if (bufferBlocked) {
+        postResults.push(`⏸️ ALL_BUFFER: Skipped — Buffer quota exhausted`);
+      }
+
       for (const channel of channels) {
+        if (bufferBlocked) break; // Skip all Buffer channels when quota blown
+
         const service = channel.service.toLowerCase();
         const text = variants[service] || universalText;
 

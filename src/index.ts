@@ -1385,19 +1385,22 @@ async function main() {
 
       // SESSION 94: Rechop pipeline — generate native vertical shorts from
       // existing R2 long-forms that never got shorts (23 videos identified).
-      // /rechop       → list unchopped videos + summary
-      // /rechop all   → batch process ALL unchopped long-forms
-      // /rechop <idx> → rechop a specific video by index from the list
+      // /rechop             → list unchopped videos + summary
+      // /rechop all         → batch process ALL unchopped long-forms
+      // /rechop <idx>       → rechop a specific video by index from the list
+      // /rechop --force ... → bypass quality gate (include pre-XTTS videos)
       case "/rechop": {
         try {
           const { listR2LongForms, rechopVideo, rechopAll, rechopBatch } = await import("./engine/rechop-pipeline");
+          const forceMode = arg?.includes("--force") ?? false;
+          const cleanArg = (arg || "").replace("--force", "").trim();
 
-          if (arg === "all") {
+          if (cleanArg === "all") {
             // Batch mode — process ALL unchopped videos
             await telegram.sendMessage(message.chatId,
-              "🔄 /rechop all — scanning R2 for unchopped long-forms..."
+              `🔄 /rechop all — scanning R2 for unchopped long-forms...${forceMode ? " (⚠️ FORCE MODE — quality gate OFF)" : ""}`
             );
-            const unchopped = await listR2LongForms({ onlyUnchopped: true });
+            const unchopped = await listR2LongForms({ onlyUnchopped: true, force: forceMode });
             if (unchopped.length === 0) {
               await telegram.sendMessage(message.chatId, "✅ All long-forms already have shorts. Nothing to rechop.");
               return true;
@@ -1435,13 +1438,13 @@ async function main() {
 
             await telegram.sendMessage(message.chatId, summary.slice(0, 4000));
 
-          } else if (arg && /^[\d,\s]+$/.test(arg)) {
+          } else if (cleanArg && /^[\d,\s]+$/.test(cleanArg)) {
             // Single or multiple videos by index: /rechop 0 or /rechop 1,2,3
             // Indices are STABLE — based on the FULL list (including already-rechopped).
             // Rechopped videos show as "(done)" in the list and are rejected here.
-            const indices = arg.split(/[,\s]+/).map(Number).filter((n) => !isNaN(n));
-            const allVideos = await listR2LongForms(); // full list, stable indices
-            const unchopped = await listR2LongForms({ onlyUnchopped: true });
+            const indices = cleanArg.split(/[,\s]+/).map(Number).filter((n) => !isNaN(n));
+            const allVideos = await listR2LongForms({ force: forceMode }); // full list, stable indices
+            const unchopped = await listR2LongForms({ onlyUnchopped: true, force: forceMode });
             const unchoppedJobIds = new Set(unchopped.map(v => v.jobId));
 
             const invalid = indices.filter((i) => i < 0 || i >= allVideos.length);
@@ -1520,13 +1523,15 @@ async function main() {
           } else {
             // Default: list ALL videos with STABLE indices.
             // Rechopped videos show as "(done)" — indices never shift.
+            // Quality gate filters out pre-XTTS videos unless --force.
             await telegram.sendMessage(message.chatId, "🔍 Scanning R2 for long-forms...");
-            const allVideos = await listR2LongForms();
-            const unchopped = await listR2LongForms({ onlyUnchopped: true });
+            const allVideos = await listR2LongForms({ force: forceMode });
+            const unchopped = await listR2LongForms({ onlyUnchopped: true, force: forceMode });
             const unchoppedJobIds = new Set(unchopped.map(v => v.jobId));
 
             if (unchopped.length === 0) {
-              await telegram.sendMessage(message.chatId, "✅ All long-forms have shorts. Nothing to rechop.");
+              const gateMsg = forceMode ? "" : "\n\n(Pre-XTTS videos hidden by quality gate. Use /rechop --force to see all.)";
+              await telegram.sendMessage(message.chatId, `✅ All eligible long-forms have shorts. Nothing to rechop.${gateMsg}`);
               return true;
             }
 
@@ -1537,11 +1542,13 @@ async function main() {
               const done = !unchoppedJobIds.has(v.jobId);
               const emoji = v.brand === "ace_richie" ? "🔴" : "🟣";
               const status = done ? " ✅" : "";
-              return `[${i}]${status} ${emoji} ${v.jobId.slice(0, 48)} (${(v.sizeBytes / 1024 / 1024).toFixed(0)}MB)`;
+              const dateStr = v.lastModified ? v.lastModified.toISOString().slice(0, 10) : "???";
+              return `[${i}]${status} ${emoji} ${dateStr} ${v.jobId.slice(0, 40)} (${(v.sizeBytes / 1024 / 1024).toFixed(0)}MB)`;
             }).join("\n");
 
-            const msg = `📦 LONG-FORMS: ${allVideos.length} total, ${unchopped.length} need shorts\n` +
-              `🔴 Ace: ${aceUnchopped} unchopped\n🟣 TCF: ${cfUnchopped} unchopped\n\n` +
+            const gateNote = forceMode ? "" : `\n⚠️ Quality gate ON — pre-XTTS videos hidden. Add --force to see all.\n`;
+            const msg = `📦 LONG-FORMS: ${allVideos.length} eligible, ${unchopped.length} need shorts\n` +
+              `🔴 Ace: ${aceUnchopped} unchopped\n🟣 TCF: ${cfUnchopped} unchopped\n${gateNote}\n` +
               `${list}\n\n` +
               `Indices are STABLE — they never shift after rechop.\n` +
               `Commands:\n` +

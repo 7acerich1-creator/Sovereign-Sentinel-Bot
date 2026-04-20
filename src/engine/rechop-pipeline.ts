@@ -40,6 +40,11 @@ const R2_PUBLIC_URL_BASE = process.env.R2_PUBLIC_URL_BASE;
 const R2_BUCKET = process.env.R2_BUCKET_VIDEOS || "sovereign-videos";
 const FFMPEG_TIMEOUT_MS = 180_000;
 
+// ── Quality gate: only rechop videos produced AFTER XTTS voice clone went live.
+// Videos before this date used Edge TTS (robotic/synthetic). Rechop inherits the
+// source audio, so old videos produce trash shorts. Override with /rechop N --force.
+const RECHOP_MIN_DATE = new Date("2026-04-15T00:00:00Z");
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -151,8 +156,10 @@ async function markRechopped(videoJobId: string, shortsCount: number, clipKeys: 
 /**
  * List all long-form videos in R2. Optionally filter to only those
  * that haven't been rechopped (checked via Supabase rechop_completed table).
+ * By default applies a quality gate: videos older than RECHOP_MIN_DATE are
+ * skipped because they used Edge TTS (robotic audio). Override with force=true.
  */
-export async function listR2LongForms(opts?: { onlyUnchopped?: boolean }): Promise<R2LongForm[]> {
+export async function listR2LongForms(opts?: { onlyUnchopped?: boolean; force?: boolean }): Promise<R2LongForm[]> {
   const s3 = getS3();
   const base = (R2_PUBLIC_URL_BASE || "").replace(/^https?:\/\//, "");
 
@@ -187,6 +194,22 @@ export async function listR2LongForms(opts?: { onlyUnchopped?: boolean }): Promi
     }
     token = listResp.NextContinuationToken;
   } while (token);
+
+  // ── Quality gate: skip pre-XTTS videos unless forced ──
+  if (!opts?.force) {
+    const before = videos.length;
+    const filtered = videos.filter((v) => {
+      if (!v.lastModified) return false; // No date = unknown era, skip
+      return v.lastModified >= RECHOP_MIN_DATE;
+    });
+    const skipped = before - filtered.length;
+    if (skipped > 0) {
+      console.log(`🚫 [Rechop] Quality gate: skipped ${skipped} pre-XTTS videos (before ${RECHOP_MIN_DATE.toISOString().slice(0, 10)})`);
+    }
+    // Replace videos array with filtered
+    videos.length = 0;
+    videos.push(...filtered);
+  }
 
   if (!opts?.onlyUnchopped) return videos;
 

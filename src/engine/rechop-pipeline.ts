@@ -623,14 +623,18 @@ export async function rechopVideo(
       const duration = Math.min(rawPaddedEnd - paddedStart, MAX_DURATION);
 
       const audioPath = `${clipDir}/audio_${i.toString().padStart(2, "0")}.wav`;
-      const audioFilter = `afade=t=in:st=0:d=0.3,afade=t=out:st=${Math.max(0, duration - 0.5).toFixed(2)}:d=0.5`;
+      // SESSION 102 FIX: Railway ffmpeg -ss on WAV produces silence for seek>0.
+      // Use atrim filter instead — trims audio inside the filter graph, no seeking.
+      const trimFilter = `atrim=start=${paddedStart.toFixed(2)}:duration=${duration.toFixed(2)},asetpts=PTS-STARTPTS`;
+      const fadeFilter = `afade=t=in:st=0:d=0.3,afade=t=out:st=${Math.max(0, duration - 0.5).toFixed(2)}:d=0.5`;
+      const audioFilter = `${trimFilter},${fadeFilter}`;
 
       try {
-        // SESSION 101: Seek within the pre-extracted AUDIO-ONLY WAV.
-        // WAV seeking is byte-exact — no container index issues.
+        // SESSION 102: atrim filter replaces -ss/-t seeking which was broken on Railway.
+        // atrim operates entirely in the filter graph — no WAV seek bugs.
         execSync(
-          `ffmpeg -i "${fullAudioPath}" -ss ${paddedStart.toFixed(2)} -t ${duration.toFixed(2)} ` +
-          `-acodec pcm_s16le -ar 48000 -ac 2 -af "${audioFilter}" -y "${audioPath}"`,
+          `ffmpeg -i "${fullAudioPath}" -af "${audioFilter}" ` +
+          `-acodec pcm_s16le -ar 48000 -ac 2 -y "${audioPath}"`,
           { timeout: FFMPEG_TIMEOUT_MS, stdio: "pipe" },
         );
       } catch (err: any) {

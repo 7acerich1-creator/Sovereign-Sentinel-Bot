@@ -365,21 +365,22 @@ export async function drainBacklog(): Promise<void> {
       }
 
       // ── SESSION 97: Facebook direct publish for shorts ──
-      // Posts clip caption + thumbnail to Sovereign Synthesis FB Page via Graph API.
-      if (brand !== "containment_field") {
+      // Posts clip caption to the correct FB Page (ace or CF) via Graph API.
+      {
         try {
           const fbResult = await publishToFacebook(caption, {
             link: clip.publicUrl || undefined,
+            brand: brand,
           });
           if (fbResult.success) {
             totalScheduled++;
             bufferPostIds.push(`fb:${fbResult.postId}`);
-            console.log(`  📌 ${clip.key} → facebook_direct [Graph API]: ${fbResult.postId}`);
+            console.log(`  📌 ${clip.key} → facebook_direct [Graph API, ${brand}]: ${fbResult.postId}`);
           } else {
-            console.error(`  ❌ ${clip.key} → facebook_direct: ${fbResult.error}`);
+            console.error(`  ❌ ${clip.key} → facebook_direct [${brand}]: ${fbResult.error}`);
           }
         } catch (err: any) {
-          console.error(`  ❌ ${clip.key} → facebook_direct: ${err.message?.slice(0, 200)}`);
+          console.error(`  ❌ ${clip.key} → facebook_direct [${brand}]: ${err.message?.slice(0, 200)}`);
         }
       }
 

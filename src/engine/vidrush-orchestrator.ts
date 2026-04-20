@@ -1177,7 +1177,8 @@ const TEXT_OK_SERVICES = new Set(["twitter", "threads", "linkedin", "facebook", 
 async function scheduleBufferWeek(
   clips: ClipMeta[],
   copyMap: Map<number, PlatformCopy>,
-  niche: string
+  niche: string,
+  brand: Brand = "ace_richie"
 ): Promise<number> {
   // SESSION 87: Pre-flight — don't attempt scheduling if quota is already blown
   if (isBufferQuotaExhausted()) {
@@ -1300,25 +1301,28 @@ async function scheduleBufferWeek(
     }
 
     // ── SESSION 97: Facebook direct publish (not a Buffer channel) ──
-    // Posts clip text + thumbnail to Sovereign Synthesis FB Page via Graph API.
-    // Only for ace_richie brand (the_containment_field FB page is not wired yet).
+    // Posts clip text + thumbnail to the correct FB Page via Graph API.
+    // Routes to ace_richie or containment_field page based on brand param.
     {
       const fbCopyKey = "facebook";
       const fbText = (copy as any)[fbCopyKey] || copy.x_twitter || copy.threads ||
-        `Firmware Update incoming. sovereign-synthesis.com #SovereignSynthesis #${niche.replace(/_/g, "")}`;
+        (brand === "ace_richie"
+          ? `Firmware Update incoming. sovereign-synthesis.com #SovereignSynthesis #${niche.replace(/_/g, "")}`
+          : `The containment field runs deeper than you think. sovereign-synthesis.com #TheContainmentField #${niche.replace(/_/g, "")}`);
       try {
         const fbResult = await publishToFacebook(fbText, {
           imageUrl: clip.thumbnailUrl || undefined,
           link: clip.publicUrl || undefined,
+          brand: brand as "ace_richie" | "containment_field",
         });
         if (fbResult.success) {
           scheduledCount++;
-          console.log(`  📌 Clip ${clipIdx} → facebook_direct @ NOW [Graph API]: ${fbResult.postId}`);
+          console.log(`  📌 Clip ${clipIdx} → facebook_direct [${brand}] @ NOW [Graph API]: ${fbResult.postId}`);
         } else {
-          console.error(`  ❌ Clip ${clipIdx} → facebook_direct: ${fbResult.error}`);
+          console.error(`  ❌ Clip ${clipIdx} → facebook_direct [${brand}]: ${fbResult.error}`);
         }
       } catch (err: any) {
-        console.error(`  ❌ Clip ${clipIdx} → facebook_direct EXCEPTION: ${err.message?.slice(0, 300)}`);
+        console.error(`  ❌ Clip ${clipIdx} → facebook_direct [${brand}] EXCEPTION: ${err.message?.slice(0, 300)}`);
       }
     }
 
@@ -2024,7 +2028,7 @@ export async function executeFullPipeline(
   } else {
     await progress("STEP 8/8", "Scheduling a week of content in Buffer...");
     try {
-      bufferScheduled = await scheduleBufferWeek(clips, copyMap, whisperResult.niche);
+      bufferScheduled = await scheduleBufferWeek(clips, copyMap, whisperResult.niche, brand);
       await progress("STEP 8/8", `✅ ${bufferScheduled} posts scheduled in Buffer`);
     } catch (err: any) {
       errors.push(`Buffer scheduling failed: ${err.message}`);

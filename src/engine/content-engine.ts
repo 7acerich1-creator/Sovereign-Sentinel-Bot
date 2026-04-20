@@ -991,13 +991,14 @@ export async function distributionSweep(): Promise<number> {
       }
 
       // ── SESSION 97: Facebook direct publish (bypasses Buffer — no slot available) ──
-      // Only fires for ace_richie brand; uses Graph API v25.0 system-user token.
-      if (brand === "ace_richie" && !alreadyHandled.has("facebook_direct")) {
+      // Fires for BOTH brands; routes to correct FB Page via brand param.
+      if (!alreadyHandled.has("facebook_direct")) {
         const fbText = variants["facebook"] || universalText;
         if (fbText) {
           try {
             const fbResult = await publishToFacebook(fbText, {
               imageUrl: draft.media_url || undefined,
+              brand: brand as "ace_richie" | "containment_field",
             });
             if (fbResult.success) {
               postResults.push(`✅ facebook_direct(facebook_direct): ${fbResult.postId}`);

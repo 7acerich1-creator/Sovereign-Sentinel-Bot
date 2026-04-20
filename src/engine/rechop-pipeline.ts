@@ -470,7 +470,7 @@ function buildSyntheticScript(
     brand,
     hook,
     segments,
-    cta: `Full video on the channel — ${brand === "containment_field" ? "@TheContainmentField" : "@ace_richie77"}`,
+    cta: brand === "containment_field" ? "Exit the field — @TheContainmentField" : "The protocol is live — @ace_richie77",
   };
 
   return { script, segmentDurations };
@@ -574,7 +574,10 @@ export async function rechopVideo(
             result.errors.push(`Full audio WAV is SILENT (${fullDb.toFixed(1)} dB) — source video may have no audio`);
             return result;
           }
-        } catch { /* non-fatal diagnostic */ }
+        } catch (fullVolErr: any) {
+          // SESSION 103: Log but continue — per-short checks below will catch individual failures.
+          console.warn(`[Rechop] Full audio volumedetect failed (non-fatal): ${fullVolErr?.message?.slice(0, 120) || "unknown"}`);
+        }
       } catch (err: any) {
         console.error(`[Rechop] Full audio extraction FAILED: ${err.message?.slice(0, 300)}`);
         result.errors.push("Full audio extraction failed — cannot produce shorts");
@@ -593,14 +596,11 @@ export async function rechopVideo(
     }
     const podQueue: PreparedShort[] = [];
 
-    // SESSION 101: Detect intro music offset — long-forms have a branded intro
-    // with music-only before voice starts. Whisper's first segment tells us
-    // where voice begins. Any short starting before this gets advanced past
-    // the intro so viewers hear content immediately, not 4s of music.
-    const voiceStartOffset = whisper.segments.length > 0 ? whisper.segments[0].start : 0;
-    if (voiceStartOffset > 1) {
-      console.log(`🎵 [Rechop] Intro music detected: voice starts at ${voiceStartOffset.toFixed(1)}s — shorts starting before this will be advanced`);
-    }
+    // SESSION 103: Hard 4.0s intro skip — Ace confirmed music-only intro is
+    // always exactly 4 seconds on both brands. Whisper segment[0].start was
+    // always 0 (useless), so we use a hard constant instead.
+    // ONLY shorts starting within the first 4s get advanced — later clips untouched.
+    const BRAND_INTRO_DUR = 4.0;
 
     for (let i = 0; i < curatorResult.shorts.length; i++) {
       const short = curatorResult.shorts[i];
@@ -610,12 +610,12 @@ export async function rechopVideo(
       const PAD_AFTER = 1.5;
       const MAX_DURATION = 179;
 
-      // SESSION 101: Skip intro music — if the short starts within the music-only
-      // intro (before first voice segment), advance start_ts to where voice begins.
+      // SESSION 103: Skip intro music — only if this short starts within the
+      // 4s branded intro. Shorts starting later are NOT affected.
       let effectiveStart = short.start_ts;
-      if (voiceStartOffset > 1 && effectiveStart < voiceStartOffset) {
-        console.log(`  ⏩ Short ${i}: advancing start from ${effectiveStart.toFixed(1)}s → ${voiceStartOffset.toFixed(1)}s (skip intro music)`);
-        effectiveStart = voiceStartOffset;
+      if (effectiveStart < BRAND_INTRO_DUR) {
+        console.log(`  ⏩ Short ${i}: advancing start from ${effectiveStart.toFixed(1)}s → ${BRAND_INTRO_DUR}s (skip 4s intro music)`);
+        effectiveStart = BRAND_INTRO_DUR;
       }
 
       const paddedStart = Math.max(0, effectiveStart - PAD_BEFORE);
@@ -665,7 +665,15 @@ export async function rechopVideo(
           result.errors.push(`Short ${i} audio silent at ${meanDb.toFixed(1)} dB (seek=${paddedStart.toFixed(1)}s)`);
           continue;
         }
-      } catch { /* non-fatal diagnostic */ }
+      } catch (volErr: any) {
+        // SESSION 103: Previously swallowed — this let silent/corrupt audio reach the pod
+        // where it burned GPU time and failed with "Audio is silent (-91.0 dB)".
+        // If we can't even measure volume, the audio file is suspect. Skip it.
+        console.error(`[Rechop] ⚠️ Short ${i} volumedetect FAILED — skipping (${volErr?.message?.slice(0, 120) || "unknown"})`);
+        result.shortsFailed++;
+        result.errors.push(`Short ${i} volumedetect failed — audio suspect`);
+        continue;
+      }
 
       // Upload audio to R2
       let audioUrl: string | null = null;
@@ -1048,28 +1056,62 @@ async function rechopVideoPrepOnly(
 
   const podQueue: any[] = [];
 
+  // SESSION 103: Same 4s intro skip as primary rechop path
+  const BRAND_INTRO_DUR_PREP = 4.0;
+
   for (let i = 0; i < curatorResult.shorts.length; i++) {
     const short = curatorResult.shorts[i];
     const PAD_BEFORE = 0.3;
     const PAD_AFTER = 1.5;
     const MAX_DURATION = 179;
-    const paddedStart = Math.max(0, short.start_ts - PAD_BEFORE);
+
+    // SESSION 103: Skip 4s intro music for shorts starting within the intro
+    let effectiveStart = short.start_ts;
+    if (effectiveStart < BRAND_INTRO_DUR_PREP) {
+      console.log(`  ⏩ PrepOnly Short ${i}: advancing start from ${effectiveStart.toFixed(1)}s → ${BRAND_INTRO_DUR_PREP}s (skip intro music)`);
+      effectiveStart = BRAND_INTRO_DUR_PREP;
+    }
+
+    const paddedStart = Math.max(0, effectiveStart - PAD_BEFORE);
     const rawPaddedEnd = Math.min(whisper.totalDuration, short.end_ts + PAD_AFTER);
     const duration = Math.min(rawPaddedEnd - paddedStart, MAX_DURATION);
 
     const audioPath = `${clipDir}/audio_${i.toString().padStart(2, "0")}.wav`;
-    const audioFilter = `afade=t=in:st=0:d=0.3,afade=t=out:st=${Math.max(0, duration - 0.5).toFixed(2)}:d=0.5`;
+    // SESSION 103: Use atrim filter (same as primary path) — -ss seeking on WAV is broken on Railway.
+    const trimFilter = `atrim=start=${paddedStart.toFixed(2)}:duration=${duration.toFixed(2)},asetpts=PTS-STARTPTS`;
+    const fadeFilter = `afade=t=in:st=0:d=0.3,afade=t=out:st=${Math.max(0, duration - 0.5).toFixed(2)}:d=0.5`;
+    const audioFilter = `${trimFilter},${fadeFilter}`;
 
     try {
-      // Output seeking (-ss AFTER -i) — accurate at all seek positions.
       execSync(
-        `ffmpeg -i "${videoPath}" -ss ${paddedStart.toFixed(2)} -t ${duration.toFixed(2)} ` +
-        `-vn -acodec pcm_s16le -ar 48000 -ac 2 -af "${audioFilter}" -y "${audioPath}"`,
+        `ffmpeg -i "${videoPath}" -af "${audioFilter}" ` +
+        `-acodec pcm_s16le -ar 48000 -ac 2 -y "${audioPath}"`,
         { timeout: FFMPEG_TIMEOUT_MS, stdio: "pipe" },
       );
     } catch (err: any) {
       result.shortsFailed++;
       result.errors.push(`Short ${i} audio extraction failed`);
+      continue;
+    }
+
+    // SESSION 103: Silence check (was completely missing in prep path)
+    try {
+      const volOut = execSync(
+        `ffmpeg -i "${audioPath}" -af volumedetect -f null /dev/null 2>&1 | grep mean_volume || true`,
+        { timeout: 30_000, encoding: "utf-8" },
+      );
+      const meanMatch = volOut.match(/mean_volume:\s*(-?\d+\.?\d*)/);
+      const meanDb = meanMatch ? parseFloat(meanMatch[1]) : null;
+      if (meanDb !== null && meanDb < -70) {
+        console.error(`[RechopPrep] ⚠️ Short ${i} audio SILENT (${meanDb.toFixed(1)} dB) — skipping`);
+        result.shortsFailed++;
+        result.errors.push(`Short ${i} audio silent at ${meanDb.toFixed(1)} dB`);
+        continue;
+      }
+    } catch (volErr: any) {
+      console.error(`[RechopPrep] ⚠️ Short ${i} volumedetect FAILED — skipping (${volErr?.message?.slice(0, 120) || "unknown"})`);
+      result.shortsFailed++;
+      result.errors.push(`Short ${i} volumedetect failed`);
       continue;
     }
 

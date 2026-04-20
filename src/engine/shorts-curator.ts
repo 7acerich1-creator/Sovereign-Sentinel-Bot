@@ -75,6 +75,12 @@ const CHANNEL_HANDLES: Record<string, string> = {
   containment_field: "@TheContainmentField",
 };
 
+/** SESSION 103: Per-brand CTA — standalone phrasing, no "Full video" implication */
+const BRAND_CTA: Record<string, string> = {
+  ace_richie: "The protocol is live — @ace_richie77",
+  containment_field: "Exit the field — @TheContainmentField",
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Curator Prompt
 // ─────────────────────────────────────────────────────────────────────────────
@@ -111,7 +117,7 @@ RULES:
 4. Prioritize: CLIMAX moments, HEAD FAKES (narrative misdirection then correction), EMOTIONAL PEAKS, SINGLE-LINE TRUTH BOMBS (even if only one segment), and ACTIONABLE INSIGHTS (itemized lists, frameworks, techniques).
 5. The hook_text is the first thing spoken — it must be a scroll-stopping statement or question, NOT "In this video" or "Let me explain."
 6. Quality > quantity. If only 3 moments are genuinely strong, return 3. Never pad with weak clips. But a typical 12-16 segment long-form should yield 5-6 strong moments — look harder before settling for fewer.
-7. CTA overlay for every short: "Full video on the channel — ${channelHandle}"
+7. CTA overlay is handled by code — do NOT generate CTA text. Focus only on content selection.
 8. Mix durations — some shorts should be punchy (1-2 segments, under 30s), others can be deeper dives (3-4 segments, 60-120s). Variety in pacing keeps the channel from feeling algorithmic.
 
 NARRATIVE COHERENCE (NON-NEGOTIABLE):
@@ -341,7 +347,7 @@ export async function curateShorts(
       end_ts: endTs,
       hook_text: String(c.hook_text || script.segments[startSeg].voiceover.split(".")[0] || ""),
       why_this_moment: String(c.why_this_moment || ""),
-      cta_overlay: `Full video on the channel — ${channelHandle}`,
+      cta_overlay: BRAND_CTA[script.brand] || `${channelHandle}`,
       confidence: Math.max(0, Math.min(1, Number(c.confidence) || 0.5)),
       vertical_scenes: rawVScenes,
     });

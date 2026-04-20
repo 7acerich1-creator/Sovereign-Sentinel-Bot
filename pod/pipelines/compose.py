@@ -579,45 +579,22 @@ def _mix_audio(
     log.info("audio_mix_done", layers=n_layers, elapsed_s=round(elapsed, 1))
     return output_path
 
-def _extract_hook_text(hook_text: Optional[str], script: str, max_chars: int = 80) -> str:
+def _extract_hook_text(hook_text: Optional[str], script: str, max_words: int = 18) -> str:
     """
     Get the opening typewriter text. Prefer explicit hook_text from the job spec;
-    fall back to the first complete sentence of the full script.
-
-    SESSION 98 FIX: Old logic chopped at 9 words, often cutting mid-thought
-    (e.g. "...that doesn't m."). Now finds the first complete sentence that
-    fits within max_chars. If no sentence break fits, takes full words up to
-    the limit and adds an ellipsis.
+    fall back to the first ~18 words of the full script.
     """
     raw = (hook_text or "").strip()
     if not raw:
         raw = script.strip()
-    if not raw:
-        return "Watch this."
-
-    # Strategy 1: Find the first complete sentence that fits
-    import re as _re
-    sentences = _re.split(r'(?<=[.!?])\s+', raw)
-    if sentences and len(sentences[0]) <= max_chars:
-        candidate = sentences[0].strip()
-        # Ensure it ends with punctuation
-        if candidate and candidate[-1] in ".!?":
-            return candidate
-
-    # Strategy 2: If the raw text itself is short enough, use it as-is
-    if len(raw) <= max_chars:
-        text = raw.rstrip(",;:—- ")
-        if not text.endswith((".", "?", "!", "…")):
-            text += "."
-        return text
-
-    # Strategy 3: Truncate at last complete word within limit, add ellipsis
-    truncated = raw[:max_chars]
-    last_space = truncated.rfind(" ")
-    if last_space > 20:
-        truncated = truncated[:last_space]
-    truncated = truncated.rstrip(",;:—- ")
-    return truncated + "…"
+    # Take first max_words words
+    words = raw.split()[:max_words]
+    text = " ".join(words)
+    # Strip trailing partial punctuation, ensure clean ending
+    text = text.rstrip(",;:—-")
+    if not text.endswith((".", "?", "!", "…")):
+        text += "."
+    return text
 
 
 def _generate_typewriter_ass(
@@ -1659,11 +1636,9 @@ def compose_short(
     # SESSION 98: Replaced small drawtext with a full-screen branded card
     # appended to the Short, matching the style seen on high-performing
     # Shorts (big centered text on dark background = visible in shelf).
-    # Guard: only append CTA if total won't exceed 59s (YouTube Shorts limit = 60s)
-    _current_dur = _probe_duration(final_path)
-    if cta_text and cta_text.strip() and _current_dur < 56.5:
+    if cta_text and cta_text.strip():
         try:
-            CTA_CARD_DUR = min(2.5, 59.0 - _current_dur)  # never exceed 59s total
+            CTA_CARD_DUR = 2.5  # seconds
             _safe_cta = cta_text.strip().replace("'", "\u2019").replace(":", "\\:")
             # Split into 2 lines if too long (max ~30 chars per line)
             _cta_words = _safe_cta.split()

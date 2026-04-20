@@ -72,6 +72,14 @@ export const ACE_RICHIE_NICHES = [
   "exit-velocity",
   "memetic-engineering",
   "signal-discipline",
+  // S103 expansion — 7 new axes to prevent cooldown starvation on daily runs
+  "pattern-recognition",
+  "resource-dynamics",
+  "time-sovereignty",
+  "network-architecture",
+  "legacy-engineering",
+  "creative-leverage",
+  "decision-architecture",
 ] as const;
 
 /** Niches The Containment Field (anonymous dark-psych top-of-funnel) is allowed to produce.
@@ -86,6 +94,14 @@ export const CONTAINMENT_FIELD_NICHES = [
   "information-warfare",
   "narrative-capture",
   "frame-control",
+  // S103 expansion — 7 new axes to prevent cooldown starvation on daily runs
+  "cognitive-traps",
+  "emotional-engineering",
+  "social-programming",
+  "compliance-machinery",
+  "perception-management",
+  "identity-hijacking",
+  "manufactured-consent",
 ] as const;
 
 /** Allowed-niche string literal unions for type-level brand safety. */

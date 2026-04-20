@@ -40,10 +40,11 @@ const R2_PUBLIC_URL_BASE = process.env.R2_PUBLIC_URL_BASE;
 const R2_BUCKET = process.env.R2_BUCKET_VIDEOS || "sovereign-videos";
 const FFMPEG_TIMEOUT_MS = 180_000;
 
-// ── Quality gate: only rechop videos produced AFTER XTTS voice clone went live.
-// Videos before this date used Edge TTS (robotic/synthetic). Rechop inherits the
-// source audio, so old videos produce trash shorts. Override with /rechop N --force.
-const RECHOP_MIN_DATE = new Date("2026-04-15T00:00:00Z");
+// ── Quality gate: only rechop videos produced AFTER all major quality fixes shipped.
+// S92b (2026-04-19) was the last major quality overhaul: CTA drawtext, captions,
+// audio normalization, shorts coherence. Videos before this date may have broken
+// captions, missing CTAs, or robotic audio. Override with /rechop N --force.
+const RECHOP_MIN_DATE = new Date("2026-04-19T00:00:00Z");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

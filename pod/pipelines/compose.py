@@ -1633,46 +1633,77 @@ def compose_short(
     except Exception as exc:
         log.error("compose_short_captions_failed", error=str(exc)[:300])
 
-    # ── Stage 3.5: CTA overlay — last 3 seconds ─────────────────────────
-    # SESSION 92: Burns the curator-generated cta_text (e.g., "Full video
-    # on the channel — @TheContainmentField") into the final 3 seconds of
-    # the short so viewers know where to find the long-form.
+    # ── Stage 3.5: Full-screen CTA card — appended as last 2.5s ────────
+    # SESSION 98: Replaced small drawtext with a full-screen branded card
+    # appended to the Short, matching the style seen on high-performing
+    # Shorts (big centered text on dark background = visible in shelf).
     if cta_text and cta_text.strip():
         try:
-            cta_dur = min(3.0, audio_duration_s * 0.15)  # 3s or 15% of short
-            cta_start = max(0, audio_duration_s - cta_dur - 0.3)  # slight pre-end buffer
+            CTA_CARD_DUR = 2.5  # seconds
             _safe_cta = cta_text.strip().replace("'", "\u2019").replace(":", "\\:")
-            # Two-line drawtext: smaller, semi-transparent bar at bottom third
-            cta_filter = (
+            # Split into 2 lines if too long (max ~30 chars per line)
+            _cta_words = _safe_cta.split()
+            _mid = len(_cta_words) // 2
+            _line1 = " ".join(_cta_words[:_mid])
+            _line2 = " ".join(_cta_words[_mid:])
+            _cta_display = f"{_line1}\\n{_line2}" if len(_safe_cta) > 28 else _safe_cta
+
+            # Brand-specific card background colors (dark, premium feel)
+            _bg_color = "0x0A1628" if brand == "ace_richie" else "0x0D0D1A"
+            _accent = "0xFFCF80" if brand == "ace_richie" else "0xF0F0F0"
+
+            # Generate a solid-color card with centered CTA text
+            cta_card = os.path.join(job_dir, "cta_card.mp4")
+            card_filter = (
+                f"color=c={_bg_color}:s={SHORT_WIDTH}x{SHORT_HEIGHT}:d={CTA_CARD_DUR}:r={SHORT_FPS},"
                 f"drawtext=fontfile='{FONT_BEBAS}'"
-                f":text='{_safe_cta}'"
-                f":fontsize=48"
-                f":fontcolor=white"
-                f":borderw=3"
-                f":bordercolor=black@0.7"
+                f":text='{_cta_display}'"
+                f":fontsize=72"
+                f":fontcolor={_accent}"
+                f":borderw=4"
+                f":bordercolor=black"
                 f":x=(w-text_w)/2"
-                f":y=h-text_h-180"
-                f":enable='between(t,{cta_start:.2f},{cta_start + cta_dur:.2f})'"
-                f":alpha=0.95"
+                f":y=(h-text_h)/2-40"
+                f":line_spacing=20"
             )
-            cta_out = os.path.join(job_dir, "short_cta.mp4")
-            cta_cmd = [
+            card_cmd = [
                 "ffmpeg", "-y",
-                "-i", final_path,
-                "-vf", cta_filter,
-                "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET_FINAL, "-crf", SHORT_CRF,
-                "-c:a", "copy",
+                "-f", "lavfi", "-i", card_filter,
+                "-f", "lavfi", "-i", f"anullsrc=channel_layout=stereo:sample_rate=48000",
+                "-t", str(CTA_CARD_DUR),
+                "-c:v", VIDEO_CODEC, "-preset", "fast", "-crf", SHORT_CRF,
+                "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE,
+                "-pix_fmt", "yuv420p",
                 "-movflags", "+faststart",
-                cta_out,
+                cta_card,
             ]
-            cta_result = subprocess.run(cta_cmd, capture_output=True, text=True, timeout=120)
-            if cta_result.returncode == 0 and os.path.isfile(cta_out):
-                final_path = cta_out
-                log.info("compose_short_cta_burned", cta_text=cta_text[:60],
-                         start_s=round(cta_start, 1), dur_s=round(cta_dur, 1))
+            card_result = subprocess.run(card_cmd, capture_output=True, text=True, timeout=30)
+
+            if card_result.returncode == 0 and os.path.isfile(cta_card):
+                # Concat main video + CTA card
+                cta_concat_list = os.path.join(job_dir, "cta_concat.txt")
+                with open(cta_concat_list, "w") as f:
+                    f.write(f"file '{final_path}'\nfile '{cta_card}'\n")
+                cta_out = os.path.join(job_dir, "short_cta.mp4")
+                concat_cmd = [
+                    "ffmpeg", "-y",
+                    "-f", "concat", "-safe", "0", "-i", cta_concat_list,
+                    "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET_FINAL, "-crf", SHORT_CRF,
+                    "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE,
+                    "-movflags", "+faststart",
+                    cta_out,
+                ]
+                cta_result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=120)
+                if cta_result.returncode == 0 and os.path.isfile(cta_out):
+                    final_path = cta_out
+                    log.info("compose_short_cta_card_appended", cta_text=cta_text[:60],
+                             card_dur_s=CTA_CARD_DUR)
+                else:
+                    log.warning("compose_short_cta_concat_failed",
+                                stderr=cta_result.stderr[:300] if cta_result.stderr else "")
             else:
-                log.warning("compose_short_cta_failed",
-                            stderr=cta_result.stderr[:300] if cta_result.stderr else "")
+                log.warning("compose_short_cta_card_gen_failed",
+                            stderr=card_result.stderr[:300] if card_result.stderr else "")
         except Exception as exc:
             log.warning("compose_short_cta_error", error=str(exc)[:300])
 

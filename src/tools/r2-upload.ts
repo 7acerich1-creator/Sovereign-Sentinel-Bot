@@ -6,7 +6,7 @@
 // Zero egress fees — no cleanup needed (unlike old Supabase Storage path).
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 // ── Env vars (same keys Railway forwards to the pod) ──
@@ -103,6 +103,16 @@ export async function uploadToR2(
  * @param key      - Object key inside the bucket
  * @param expiresIn - Seconds until the URL expires (default 3600 = 1 hour)
  */
+/**
+ * Delete an object from R2.
+ * Used for cleanup of failed renders, orphaned clips, etc.
+ */
+export async function deleteFromR2(bucket: string, key: string): Promise<void> {
+  const client = getClient();
+  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  console.log(`🗑️ [R2] Deleted: ${key}`);
+}
+
 export async function getR2PresignedUrl(
   bucket: string,
   key: string,

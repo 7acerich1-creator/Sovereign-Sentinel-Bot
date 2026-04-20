@@ -551,12 +551,11 @@ export async function rechopVideo(
       const audioFilter = `afade=t=in:st=0:d=0.3,afade=t=out:st=${Math.max(0, duration - 0.5).toFixed(2)}:d=0.5`;
 
       try {
-        // Output seeking (-ss AFTER -i) is slower but guarantees accurate audio
-        // at every seek position. Input seeking corrupted audio on shorts 1+2.
-        // loudnorm ensures broadcast-standard levels regardless of source.
+        // Output seeking (-ss AFTER -i) — accurate at all seek positions.
+        // No loudnorm — source audio is already mixed from long-form render.
         execSync(
           `ffmpeg -i "${videoPath}" -ss ${paddedStart.toFixed(2)} -t ${duration.toFixed(2)} ` +
-          `-vn -acodec pcm_s16le -ar 48000 -ac 2 -af "${audioFilter},loudnorm=I=-16:TP=-1.5:LRA=11" -y "${audioPath}"`,
+          `-vn -acodec pcm_s16le -ar 48000 -ac 2 -af "${audioFilter}" -y "${audioPath}"`,
           { timeout: FFMPEG_TIMEOUT_MS, stdio: "pipe" },
         );
       } catch (err: any) {
@@ -950,11 +949,10 @@ async function rechopVideoPrepOnly(
     const audioFilter = `afade=t=in:st=0:d=0.3,afade=t=out:st=${Math.max(0, duration - 0.5).toFixed(2)}:d=0.5`;
 
     try {
-      // Output seeking (-ss AFTER -i) — accurate at all positions.
-      // loudnorm ensures broadcast-standard levels.
+      // Output seeking (-ss AFTER -i) — accurate at all seek positions.
       execSync(
         `ffmpeg -i "${videoPath}" -ss ${paddedStart.toFixed(2)} -t ${duration.toFixed(2)} ` +
-        `-vn -acodec pcm_s16le -ar 48000 -ac 2 -af "${audioFilter},loudnorm=I=-16:TP=-1.5:LRA=11" -y "${audioPath}"`,
+        `-vn -acodec pcm_s16le -ar 48000 -ac 2 -af "${audioFilter}" -y "${audioPath}"`,
         { timeout: FFMPEG_TIMEOUT_MS, stdio: "pipe" },
       );
     } catch (err: any) {

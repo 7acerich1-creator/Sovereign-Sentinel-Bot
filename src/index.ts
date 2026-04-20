@@ -2060,30 +2060,28 @@ async function main() {
     },
   });
 
-  // SESSION 92: Automatic distribution sweep DISABLED.
-  // Was burning 50-100+ Buffer API calls/day via 5-min polling cycle, retrying failed drafts
-  // in infinite loops, and competing with pipeline shorts distribution for the 250/day budget.
-  // Distribution now happens ONLY during pipeline runs (scheduleBufferWeek) or via /drain command.
-  // ContentEngine daily production (LLM-only) still runs — drafts queue in Supabase for /drain.
-  //
-  // scheduler.add({
-  //   name: "Content Engine — Distribution Sweep",
-  //   intervalMs: 300_000,
-  //   nextRun: new Date(Date.now() + 60_000),
-  //   enabled: true,
-  //   handler: async () => {
-  //     try {
-  //       const posted = await distributionSweep();
-  //       if (posted > 0) {
-  //         console.log(`📤 [ContentEngine] Distribution sweep posted ${posted} piece(s)`);
-  //       }
-  //     } catch (err: any) {
-  //       console.error(`[ContentEngine] Distribution sweep failed: ${err.message}`);
-  //     }
-  //   },
-  // });
+  // SESSION 97: Distribution sweep RE-ENABLED at 6-hour intervals (was 5-min, killed in S92).
+  // 4 runs/day max. Each run posts ready ContentEngine drafts to Buffer + Facebook direct.
+  // Buffer quota gate (S97b) skips Buffer channels if quota blown, Facebook still fires.
+  // At 6h intervals with ~6 drafts/run, worst case = 24 Buffer API calls/day. Safe.
+  scheduler.add({
+    name: "Content Engine — Distribution Sweep (6h)",
+    intervalMs: 6 * 60 * 60 * 1000, // 6 hours
+    nextRun: new Date(Date.now() + 5 * 60 * 1000), // First run 5 min after boot
+    enabled: true,
+    handler: async () => {
+      try {
+        const posted = await distributionSweep();
+        if (posted > 0) {
+          console.log(`📤 [ContentEngine] Distribution sweep posted ${posted} piece(s)`);
+        }
+      } catch (err: any) {
+        console.error(`[ContentEngine] Distribution sweep failed: ${err.message}`);
+      }
+    },
+  });
 
-  console.log("⚡ [ContentEngine] Scheduled: Daily production (1:30PM CDT/18:30UTC). Distribution sweep DISABLED (S92 — use /drain).");
+  console.log("⚡ [ContentEngine] Scheduled: Daily production (1:30PM CDT/18:30UTC). Distribution sweep every 6h (S97).");
 
   // ── CTA Audit — Weekly Monday 10:00 AM CDT = 15:00 UTC (after YT stats fetch at 14:00) ──
   // Scans top-performing videos for missing sovereign-landing CTAs.

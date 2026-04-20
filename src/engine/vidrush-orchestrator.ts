@@ -651,6 +651,14 @@ async function uploadClipsToStorage(clips: ClipMeta[], jobId: string, meta?: { b
   for (const clip of clips) {
     let uploaded = false;
 
+    // SESSION 99 FIX: Pod-rendered clips already have an R2 publicUrl from
+    // produceShort(). Skip the redundant re-upload — saves R2 write ops and
+    // avoids overwriting a valid URL if the local file is somehow corrupted.
+    if (clip.publicUrl) {
+      console.log(`📤 [Orchestrator] Clip ${clip.index} → already on R2 (skipping re-upload)`);
+      continue;
+    }
+
     try {
       const fileBuffer = readFileSync(clip.localPath);
       const clipKey = `clips/${folderName}/clip_${clip.index.toString().padStart(2, "0")}.mp4`;

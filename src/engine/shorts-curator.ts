@@ -174,6 +174,7 @@ export async function curateShorts(
   script: FacelessScript,
   segmentDurations: number[],
 ): Promise<CuratorResult> {
+  const totalDurationEarly = segmentDurations.reduce((a, b) => a + b, 0);
   const prompt = buildCuratorPrompt(script, segmentDurations);
 
   const messages: LLMMessage[] = [
@@ -181,42 +182,80 @@ export async function curateShorts(
     { role: "user", content: prompt },
   ];
 
-  console.log(`🎬 [ShortsCurator] Analyzing ${script.segments.length} segments for ${script.brand}...`);
+  console.log(`🎬 [ShortsCurator] Analyzing ${script.segments.length} segments for ${script.brand} (${totalDurationEarly.toFixed(0)}s, avg ${(totalDurationEarly / script.segments.length).toFixed(1)}s/seg)...`);
 
-  const response = await llm.generate(messages, { temperature: 0.3 });
-  const raw = response.content.trim();
+  // SESSION 99: Retry up to 2 times on parse failure. The #1 cause of
+  // "0 curated shorts" was unparseable LLM output (commentary wrapping
+  // the JSON, or invalid escape sequences). A single retry at temp 0.1
+  // almost always produces clean JSON on the second attempt.
+  let candidates: any[] | null = null;
+  const MAX_PARSE_ATTEMPTS = 2;
 
-  // Parse response — handle markdown code fences if the LLM wraps them
-  let jsonStr = raw;
-  const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) {
-    jsonStr = fenceMatch[1].trim();
+  for (let attempt = 1; attempt <= MAX_PARSE_ATTEMPTS; attempt++) {
+    const temp = attempt === 1 ? 0.3 : 0.1; // Lower temp on retry for cleaner JSON
+    const response = await llm.generate(messages, { temperature: temp });
+    const raw = response.content.trim();
+
+    // ── Robust JSON extraction (SESSION 99) ──
+    // Try multiple strategies in order:
+    //   1. Markdown code fence
+    //   2. First [ to last ] (strip surrounding commentary)
+    //   3. Raw string as-is
+    let jsonStr: string | null = null;
+
+    // Strategy 1: code fence
+    const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) {
+      jsonStr = fenceMatch[1].trim();
+    }
+
+    // Strategy 2: bracket extraction — find the outermost [ ... ]
+    if (!jsonStr) {
+      const firstBracket = raw.indexOf("[");
+      const lastBracket = raw.lastIndexOf("]");
+      if (firstBracket !== -1 && lastBracket > firstBracket) {
+        jsonStr = raw.slice(firstBracket, lastBracket + 1);
+      }
+    }
+
+    // Strategy 3: raw
+    if (!jsonStr) {
+      jsonStr = raw;
+    }
+
+    try {
+      const parsed = JSON.parse(jsonStr);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        candidates = parsed;
+        break;
+      } else if (Array.isArray(parsed)) {
+        console.warn(`[ShortsCurator] LLM returned empty array (attempt ${attempt}/${MAX_PARSE_ATTEMPTS})`);
+      } else {
+        console.warn(`[ShortsCurator] LLM returned ${typeof parsed}, not array (attempt ${attempt}/${MAX_PARSE_ATTEMPTS})`);
+      }
+    } catch (err) {
+      console.error(`[ShortsCurator] JSON parse failed (attempt ${attempt}/${MAX_PARSE_ATTEMPTS}): ${jsonStr.slice(0, 200)}`);
+    }
+
+    // Brief pause before retry
+    if (attempt < MAX_PARSE_ATTEMPTS) {
+      await new Promise(r => setTimeout(r, 2000));
+    }
   }
 
-  let candidates: any[];
-  try {
-    candidates = JSON.parse(jsonStr);
-  } catch (err) {
-    console.error(`[ShortsCurator] Failed to parse LLM response: ${raw.slice(0, 300)}`);
+  if (!candidates || candidates.length === 0) {
+    console.error(`[ShortsCurator] ❌ All ${MAX_PARSE_ATTEMPTS} parse attempts failed — returning 0 shorts`);
     return {
       brand: script.brand,
       shorts: [],
-      long_form_duration_s: segmentDurations.reduce((a, b) => a + b, 0),
-    };
-  }
-
-  if (!Array.isArray(candidates)) {
-    console.error(`[ShortsCurator] Expected array, got: ${typeof candidates}`);
-    return {
-      brand: script.brand,
-      shorts: [],
-      long_form_duration_s: segmentDurations.reduce((a, b) => a + b, 0),
+      long_form_duration_s: totalDurationEarly,
     };
   }
 
   // ── Validate + enrich each candidate ──────────────────────────────────
-  const totalDuration = segmentDurations.reduce((a, b) => a + b, 0);
+  const totalDuration = totalDurationEarly;
   const channelHandle = CHANNEL_HANDLES[script.brand] || "@ace_richie77";
+  let rejectedBounds = 0, rejectedDuration = 0, rejectedOverlap = 0;
   const validShorts: CuratedShort[] = [];
 
   for (const c of candidates) {
@@ -229,7 +268,8 @@ export async function curateShorts(
       startSeg < 0 || endSeg < startSeg ||
       endSeg >= script.segments.length
     ) {
-      console.warn(`[ShortsCurator] Skipping invalid segment range: ${startSeg}-${endSeg}`);
+      console.warn(`[ShortsCurator] Skipping invalid segment range: ${startSeg}-${endSeg} (max=${script.segments.length - 1})`);
+      rejectedBounds++;
       continue;
     }
 
@@ -247,11 +287,13 @@ export async function curateShorts(
 
     // Duration bounds
     if (clipDuration < MIN_SHORT_DURATION_S) {
-      console.warn(`[ShortsCurator] Skipping too-short clip: ${clipDuration.toFixed(1)}s`);
+      console.warn(`[ShortsCurator] Skipping too-short clip: ${clipDuration.toFixed(1)}s (segments ${startSeg}-${endSeg})`);
+      rejectedDuration++;
       continue;
     }
     if (clipDuration > MAX_SHORT_DURATION_S) {
-      console.warn(`[ShortsCurator] Skipping too-long clip: ${clipDuration.toFixed(1)}s (max ${MAX_SHORT_DURATION_S}s)`);
+      console.warn(`[ShortsCurator] Skipping too-long clip: ${clipDuration.toFixed(1)}s > ${MAX_SHORT_DURATION_S}s (segments ${startSeg}-${endSeg}, ${endSeg - startSeg + 1} segs × ${(clipDuration / (endSeg - startSeg + 1)).toFixed(1)}s avg)`);
+      rejectedDuration++;
       continue;
     }
 
@@ -262,6 +304,7 @@ export async function curateShorts(
     );
     if (overlaps) {
       console.warn(`[ShortsCurator] Skipping overlapping clip: segments ${startSeg}-${endSeg}`);
+      rejectedOverlap++;
       continue;
     }
 
@@ -308,10 +351,17 @@ export async function curateShorts(
   validShorts.sort((a, b) => b.confidence - a.confidence);
   const finalShorts = validShorts.slice(0, MAX_SHORTS);
 
+  // SESSION 99: Diagnostic summary so Railway logs always show WHY shorts were rejected
+  const rejected = candidates.length - validShorts.length;
   console.log(
     `🎬 [ShortsCurator] ${finalShorts.length} shorts curated from ${candidates.length} candidates ` +
-    `(${script.brand}, ${totalDuration.toFixed(0)}s long-form)`
+    `(${script.brand}, ${totalDuration.toFixed(0)}s long-form, ${script.segments.length} segs)`
   );
+  if (rejected > 0) {
+    console.log(
+      `   ⚠️ ${rejected} rejected: bounds=${rejectedBounds}, duration=${rejectedDuration}, overlap=${rejectedOverlap}`
+    );
+  }
 
   for (const s of finalShorts) {
     console.log(

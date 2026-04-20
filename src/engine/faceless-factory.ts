@@ -3140,6 +3140,12 @@ export async function produceFacelessVideo(
     segmentCount: script.segments.length,
     script,
     segmentDurations: segDurations,
+    // SESSION 99 FIX: Was missing — pod returns raw TTS narration URL but it
+    // never reached the orchestrator. Shorts always used the rendered long-form
+    // audio (with music already baked in) instead of clean TTS. Now the
+    // orchestrator can download clean narration and tell the pod to mix its
+    // own music bed at the right level for vertical format.
+    rawNarrationUrl: artifacts.rawNarrationUrl,
   };
 }
 

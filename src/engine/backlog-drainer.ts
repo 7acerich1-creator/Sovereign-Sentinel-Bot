@@ -13,6 +13,7 @@ import {
   getBufferChannels,
 } from "./buffer-graphql";
 import { SocialSchedulerPostTool } from "../tools/social-scheduler";
+import { publishToFacebook } from "./facebook-publisher";
 
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
@@ -361,6 +362,25 @@ export async function drainBacklog(): Promise<void> {
 
         // 10s delay between API calls
         await new Promise(r => setTimeout(r, 10_000));
+      }
+
+      // ── SESSION 97: Facebook direct publish for shorts ──
+      // Posts clip caption + thumbnail to Sovereign Synthesis FB Page via Graph API.
+      if (brand !== "containment_field") {
+        try {
+          const fbResult = await publishToFacebook(caption, {
+            link: clip.publicUrl || undefined,
+          });
+          if (fbResult.success) {
+            totalScheduled++;
+            bufferPostIds.push(`fb:${fbResult.postId}`);
+            console.log(`  📌 ${clip.key} → facebook_direct [Graph API]: ${fbResult.postId}`);
+          } else {
+            console.error(`  ❌ ${clip.key} → facebook_direct: ${fbResult.error}`);
+          }
+        } catch (err: any) {
+          console.error(`  ❌ ${clip.key} → facebook_direct: ${err.message?.slice(0, 200)}`);
+        }
       }
 
       // SESSION 92 FIX: Only mark as distributed if at least one channel succeeded.

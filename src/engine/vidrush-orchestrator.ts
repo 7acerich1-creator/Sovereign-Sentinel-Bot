@@ -45,6 +45,7 @@ import {
 import type { LLMProvider } from "../types";
 import { isR2Configured, uploadToR2, getR2PresignedUrl } from "../tools/r2-upload";
 import { isBufferQuotaExhausted } from "./buffer-graphql";
+import { publishToFacebook } from "./facebook-publisher";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
@@ -1296,6 +1297,29 @@ async function scheduleBufferWeek(
 
       globalSlotIndex++;
       await new Promise(r => setTimeout(r, 10_000)); // SESSION 85: 10s gap — Buffer allows 100 req/15min
+    }
+
+    // ── SESSION 97: Facebook direct publish (not a Buffer channel) ──
+    // Posts clip text + thumbnail to Sovereign Synthesis FB Page via Graph API.
+    // Only for ace_richie brand (the_containment_field FB page is not wired yet).
+    {
+      const fbCopyKey = "facebook";
+      const fbText = (copy as any)[fbCopyKey] || copy.x_twitter || copy.threads ||
+        `Firmware Update incoming. sovereign-synthesis.com #SovereignSynthesis #${niche.replace(/_/g, "")}`;
+      try {
+        const fbResult = await publishToFacebook(fbText, {
+          imageUrl: clip.thumbnailUrl || undefined,
+          link: clip.publicUrl || undefined,
+        });
+        if (fbResult.success) {
+          scheduledCount++;
+          console.log(`  📌 Clip ${clipIdx} → facebook_direct @ NOW [Graph API]: ${fbResult.postId}`);
+        } else {
+          console.error(`  ❌ Clip ${clipIdx} → facebook_direct: ${fbResult.error}`);
+        }
+      } catch (err: any) {
+        console.error(`  ❌ Clip ${clipIdx} → facebook_direct EXCEPTION: ${err.message?.slice(0, 300)}`);
+      }
     }
 
     // ── MEDIA-REQUIRED CHANNELS (TikTok, Instagram, YouTube) ──

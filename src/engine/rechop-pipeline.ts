@@ -527,6 +527,29 @@ export async function rechopVideo(
     const clipDir = `${jobDir}/clips`;
     if (!existsSync(clipDir)) mkdirSync(clipDir, { recursive: true });
 
+    // SESSION 101: Two-step audio extraction — ROOT CAUSE FIX for silent shorts.
+    // Previous approach: seek directly within the video container per-short.
+    // Problem: ffmpeg output-seeking in MP4 containers silently produces silence
+    // for ~80% of seek positions (only the first short worked). The container's
+    // audio index may be unreliable for random-access seeks.
+    // Fix: Extract the FULL audio track once (fast, no seeking issues), then
+    // seek within the audio-only WAV for each short. WAV is headerless PCM so
+    // seeking is byte-exact and cannot fail.
+    const fullAudioPath = `${jobDir}/full_audio.wav`;
+    if (!existsSync(fullAudioPath)) {
+      try {
+        execSync(
+          `ffmpeg -i "${videoPath}" -vn -acodec pcm_s16le -ar 48000 -ac 2 -y "${fullAudioPath}"`,
+          { timeout: FFMPEG_TIMEOUT_MS, stdio: "pipe" },
+        );
+        console.log(`📦 [Rechop] Full audio extracted: ${(statSync(fullAudioPath).size / 1024 / 1024).toFixed(1)}MB`);
+      } catch (err: any) {
+        console.error(`[Rechop] Full audio extraction FAILED: ${err.message?.slice(0, 300)}`);
+        result.errors.push("Full audio extraction failed — cannot produce shorts");
+        return result;
+      }
+    }
+
     interface PreparedShort {
       index: number;
       spec: ShortJobSpec;
@@ -536,6 +559,15 @@ export async function rechopVideo(
     }
     const podQueue: PreparedShort[] = [];
 
+    // SESSION 101: Detect intro music offset — long-forms have a branded intro
+    // with music-only before voice starts. Whisper's first segment tells us
+    // where voice begins. Any short starting before this gets advanced past
+    // the intro so viewers hear content immediately, not 4s of music.
+    const voiceStartOffset = whisper.segments.length > 0 ? whisper.segments[0].start : 0;
+    if (voiceStartOffset > 1) {
+      console.log(`🎵 [Rechop] Intro music detected: voice starts at ${voiceStartOffset.toFixed(1)}s — shorts starting before this will be advanced`);
+    }
+
     for (let i = 0; i < curatorResult.shorts.length; i++) {
       const short = curatorResult.shorts[i];
 
@@ -543,7 +575,16 @@ export async function rechopVideo(
       const PAD_BEFORE = 0.3;
       const PAD_AFTER = 1.5;
       const MAX_DURATION = 179;
-      const paddedStart = Math.max(0, short.start_ts - PAD_BEFORE);
+
+      // SESSION 101: Skip intro music — if the short starts within the music-only
+      // intro (before first voice segment), advance start_ts to where voice begins.
+      let effectiveStart = short.start_ts;
+      if (voiceStartOffset > 1 && effectiveStart < voiceStartOffset) {
+        console.log(`  ⏩ Short ${i}: advancing start from ${effectiveStart.toFixed(1)}s → ${voiceStartOffset.toFixed(1)}s (skip intro music)`);
+        effectiveStart = voiceStartOffset;
+      }
+
+      const paddedStart = Math.max(0, effectiveStart - PAD_BEFORE);
       const rawPaddedEnd = Math.min(whisper.totalDuration, short.end_ts + PAD_AFTER);
       const duration = Math.min(rawPaddedEnd - paddedStart, MAX_DURATION);
 
@@ -551,11 +592,11 @@ export async function rechopVideo(
       const audioFilter = `afade=t=in:st=0:d=0.3,afade=t=out:st=${Math.max(0, duration - 0.5).toFixed(2)}:d=0.5`;
 
       try {
-        // Output seeking (-ss AFTER -i) — accurate at all seek positions.
-        // No loudnorm — source audio is already mixed from long-form render.
+        // SESSION 101: Seek within the pre-extracted AUDIO-ONLY WAV.
+        // WAV seeking is byte-exact — no container index issues.
         execSync(
-          `ffmpeg -i "${videoPath}" -ss ${paddedStart.toFixed(2)} -t ${duration.toFixed(2)} ` +
-          `-vn -acodec pcm_s16le -ar 48000 -ac 2 -af "${audioFilter}" -y "${audioPath}"`,
+          `ffmpeg -i "${fullAudioPath}" -ss ${paddedStart.toFixed(2)} -t ${duration.toFixed(2)} ` +
+          `-acodec pcm_s16le -ar 48000 -ac 2 -af "${audioFilter}" -y "${audioPath}"`,
           { timeout: FFMPEG_TIMEOUT_MS, stdio: "pipe" },
         );
       } catch (err: any) {

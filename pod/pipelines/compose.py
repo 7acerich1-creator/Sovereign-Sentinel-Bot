@@ -1728,6 +1728,9 @@ def compose_short(
 
             if card_result.returncode == 0 and os.path.isfile(cta_card):
                 # Concat main video + CTA card
+                # SESSION 101: Use -c copy (stream copy) instead of re-encoding.
+                # Both files use identical codec params (libx264/aac, same res/fps/pix_fmt).
+                # Re-encoding a 2-min video was hitting the 120s timeout and failing.
                 cta_concat_list = os.path.join(job_dir, "cta_concat.txt")
                 with open(cta_concat_list, "w") as f:
                     f.write(f"file '{final_path}'\nfile '{cta_card}'\n")
@@ -1735,8 +1738,7 @@ def compose_short(
                 concat_cmd = [
                     "ffmpeg", "-y",
                     "-f", "concat", "-safe", "0", "-i", cta_concat_list,
-                    "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET_FINAL, "-crf", SHORT_CRF,
-                    "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE,
+                    "-c", "copy",
                     "-movflags", "+faststart",
                     cta_out,
                 ]

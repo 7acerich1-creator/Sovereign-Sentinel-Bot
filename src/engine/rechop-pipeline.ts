@@ -640,8 +640,9 @@ export async function rechopVideo(
         continue;
       }
 
-      // SESSION 100: Post-extraction audio sanity check — detect silent extracts
+      // Post-extraction audio sanity check — detect silent extracts
       // BEFORE uploading to R2 and burning GPU render time on the pod.
+      // SESSION 101b: Push diagnostics to Telegram (await log) so we can see ALL shorts.
       try {
         const volOut = execSync(
           `ffmpeg -i "${audioPath}" -af volumedetect -f null /dev/null 2>&1 | grep mean_volume || true`,
@@ -650,11 +651,14 @@ export async function rechopVideo(
         const meanMatch = volOut.match(/mean_volume:\s*(-?\d+\.?\d*)/);
         const meanDb = meanMatch ? parseFloat(meanMatch[1]) : null;
         const fileSize = statSync(audioPath).size;
-        console.log(`  🔊 Short ${i} audio: ${fileSize} bytes, ${meanDb !== null ? meanDb.toFixed(1) + " dB" : "level unknown"} (seek=${paddedStart.toFixed(1)}s, dur=${duration.toFixed(1)}s)`);
+        // Log to BOTH console AND Telegram so we can see every short's status
+        const shortDiag = `Short ${i}: ${(fileSize / 1024).toFixed(0)}KB, ${meanDb !== null ? meanDb.toFixed(1) + " dB" : "level?"}, seek=${paddedStart.toFixed(1)}s, dur=${duration.toFixed(1)}s`;
+        console.log(`  🔊 ${shortDiag}`);
+        await log("STEP 4/5", `🔊 ${shortDiag}`);
         if (meanDb !== null && meanDb < -70) {
-          console.error(`[Rechop] ⚠️ Short ${i} audio is essentially SILENT (${meanDb.toFixed(1)} dB) — skipping to avoid Whisper hallucination`);
+          console.error(`[Rechop] ⚠️ Short ${i} audio is essentially SILENT (${meanDb.toFixed(1)} dB) — skipping`);
           result.shortsFailed++;
-          result.errors.push(`Short ${i} audio silent at ${meanDb.toFixed(1)} dB`);
+          result.errors.push(`Short ${i} audio silent at ${meanDb.toFixed(1)} dB (seek=${paddedStart.toFixed(1)}s)`);
           continue;
         }
       } catch { /* non-fatal diagnostic */ }

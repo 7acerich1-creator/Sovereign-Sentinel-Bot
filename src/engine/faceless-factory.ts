@@ -938,6 +938,176 @@ RULES:
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 1B: STANDALONE SHORTS GENERATOR (Session 102)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Generates 4 completely independent short scripts from source intelligence.
+// Each short is a COMPLETE STORY with its own hook, premise, and payoff.
+// NOT chopped from long-form. NOT referencing a "full video."
+// This replaces the shorts-curator for new production.
+
+/** A standalone short script ready for TTS + pod rendering. */
+export interface StandaloneShort {
+  /** Script — same FacelessScript shape, 5 segments, 30-60s target. */
+  script: FacelessScript;
+  /** CTA overlay text burned into last 3s of the rendered short. */
+  cta_overlay: string;
+  /** Vertical scene prompts for native 9:16 rendering. */
+  vertical_scenes: { index: number; image_prompt: string; duration_s: number }[];
+}
+
+const STANDALONE_CTA: Record<Brand, string> = {
+  ace_richie: "The protocol is live — @ace_richie77",
+  containment_field: "Exit the field — @TheContainmentField",
+};
+
+/**
+ * Generate 4 standalone short scripts from source intelligence.
+ * Each is a complete, self-contained story — no reference to a long-form video.
+ */
+export async function generateStandaloneShorts(
+  llm: LLMProvider,
+  sourceIntelligence: string,
+  niche: string,
+  brand: Brand,
+): Promise<StandaloneShort[]> {
+  const voice = SCRIPT_VOICE[brand];
+  const channelCta = STANDALONE_CTA[brand] || STANDALONE_CTA.ace_richie;
+  const recentTitles = await getRecentTitles(20);
+  const titleBan = recentTitles.length > 0
+    ? `\nBANNED TITLES (already used): ${recentTitles.slice(0, 10).map(t => `"${t}"`).join(", ")}`
+    : "";
+
+  const prompt = `${voice}
+
+You have source material to draw INSPIRATION from (do NOT copy it):
+${sourceIntelligence.slice(0, 8000)}
+
+NICHE: ${niche.replace(/_/g, " ")}
+${titleBan}
+
+Write EXACTLY 4 standalone YouTube Shorts scripts. Each short is a COMPLETE, SELF-CONTAINED story — a viewer who has never seen ANY other content from this channel must understand and be hooked by EACH short independently.
+
+RULES:
+1. Each short = 5 segments, 30-60 seconds total spoken. ONE powerful idea with setup → twist → payoff.
+2. Each short MUST have a DIFFERENT thesis/angle from the others. Mine 4 distinct veins from the source material.
+3. The hook (segment 1) must stop the scroll in 3 seconds — a bold statement, a named feeling, or a pattern interrupt. NOT "Imagine..." or "Let me tell you..."
+4. Each short MUST resolve its own premise. No open loops, no "but that's not all," no cliffhangers pointing elsewhere.
+5. Write ORIGINAL content. The source is inspiration, not a script to rewrite.
+6. Visual directions must describe concrete physical scenes — real people, real rooms, real objects. NOT abstract symbolism.
+7. FORMAT: VERTICAL 9:16 (all visual compositions for portrait framing).
+8. duration_hint per segment ~6-12s, total ~40-55s.
+
+VISUAL DNA v3 (HBO prestige documentary):
+Every visual_direction describes a concrete real scene — a real person doing a real thing in a real room with real props and a real motivated practical light source. Shot on ARRI Alexa 65, 35mm prime, f/2.0, Kodak Vision3 500T, tangible skin texture.
+HARD BANS: silhouette, sacred geometry (unless ace_richie brand), cosmic void, abstract particles, chains shattering into light, wireframe holograms, stock-photo poses.
+
+BANNED PHRASES: "Imagine...", "But here's the thing...", "Now pay attention...", "Let that sink in", "Think about it", "Here's the truth", "Are you ready?"
+
+Return ONLY a JSON array of 4 objects (no markdown, no explanation):
+[
+  {
+    "title": "Short title (max 50 chars, scroll-stopping)",
+    "hook": "First spoken line — the scroll stopper",
+    "segments": [
+      { "voiceover": "2-4 spoken sentences (30-50 words)", "visual_direction": "9:16 portrait scene description", "duration_hint": 10 }
+    ],
+    "cta": "Organic closing line (1 sentence, sovereign tone)",
+    "thumbnail_text": "3-5 word ALL CAPS memetic trigger",
+    "thumbnail_visual": "Movie poster 9:16 composition"
+  }
+]
+
+Each object must have exactly 5 segments. Highest-impact short first.`;
+
+  console.log(`🎬 [StandaloneShorts] Generating 4 standalone shorts for ${brand} / ${niche}...`);
+
+  // Retry up to 2 times on parse failure
+  let shorts: any[] | null = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const temp = attempt === 1 ? 0.8 : 0.5;
+    const response = await llm.generate(
+      [{ role: "user", content: prompt }],
+      { maxTokens: 6144, temperature: temp },
+    );
+    const raw = response.content.trim();
+
+    // Extract JSON array
+    let jsonStr: string | null = null;
+    const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) jsonStr = fenceMatch[1].trim();
+    if (!jsonStr) {
+      const firstBracket = raw.indexOf("[");
+      const lastBracket = raw.lastIndexOf("]");
+      if (firstBracket !== -1 && lastBracket > firstBracket) {
+        jsonStr = raw.slice(firstBracket, lastBracket + 1);
+      }
+    }
+    if (!jsonStr) jsonStr = raw;
+
+    try {
+      const parsed = JSON.parse(jsonStr);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        shorts = parsed;
+        break;
+      }
+    } catch (err) {
+      console.error(`[StandaloneShorts] JSON parse failed (attempt ${attempt}): ${jsonStr?.slice(0, 200)}`);
+    }
+    if (attempt < 2) await new Promise(r => setTimeout(r, 2000));
+  }
+
+  if (!shorts || shorts.length === 0) {
+    console.error(`[StandaloneShorts] ❌ All parse attempts failed — returning 0 shorts`);
+    return [];
+  }
+
+  // Validate and build StandaloneShort objects
+  const results: StandaloneShort[] = [];
+  for (let i = 0; i < Math.min(shorts.length, 4); i++) {
+    const s = shorts[i];
+    if (!s.segments || !Array.isArray(s.segments) || s.segments.length === 0) {
+      console.warn(`[StandaloneShorts] Short ${i} has no segments, skipping`);
+      continue;
+    }
+
+    const segments: ScriptSegment[] = s.segments.map((seg: any) => ({
+      voiceover: String(seg.voiceover || ""),
+      visual_direction: String(seg.visual_direction || "dark atmospheric portrait scene"),
+      duration_hint: Math.max(Number(seg.duration_hint) || 8, 5),
+    }));
+
+    const script: FacelessScript = {
+      title: String(s.title || `Standalone Short ${i + 1}`),
+      niche,
+      brand,
+      hook: String(s.hook || segments[0]?.voiceover?.split(".")[0] || ""),
+      segments,
+      cta: String(s.cta || "The protocol is at sovereign-synthesis.com"),
+      thumbnail_text: String(s.thumbnail_text || ""),
+      thumbnail_visual: String(s.thumbnail_visual || ""),
+    };
+
+    // Build vertical scenes from segment visual directions
+    const vertical_scenes = segments.map((seg, idx) => ({
+      index: idx,
+      image_prompt: `9:16 portrait cinematic composition. ${seg.visual_direction}. Shot on 35mm kodak portra 400, f/2.8 shallow depth of field, chiaroscuro lighting, tangible texture`,
+      duration_s: seg.duration_hint,
+    }));
+
+    results.push({
+      script,
+      cta_overlay: channelCta,
+      vertical_scenes,
+    });
+
+    console.log(`  📎 Short ${i}: "${script.title}" — ${segments.length} segs, ~${segments.reduce((a, s) => a + s.duration_hint, 0)}s`);
+  }
+
+  console.log(`🎬 [StandaloneShorts] ${results.length} standalone shorts generated for ${brand}`);
+  return results;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // STEP 2: Render TTS Audio from Script
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

@@ -2016,14 +2016,25 @@ async function main() {
   // SESSION 89: Pre-warm shared channel cache at boot (1 API call, shared by all consumers)
   warmChannelCache();
 
-  // SESSION 92: Automatic backlog drainer DISABLED.
-  // Was burning 40-60 Buffer API calls at every boot, competing with pipeline distribution.
-  // Backlog drain is now manual-only via /drain Telegram command.
-  // setTimeout(() => {
-  //   drainBacklog().catch((err: any) =>
-  //     console.error(`[BacklogDrainer] Fatal: ${err.message?.slice(0, 300)}`)
-  //   );
-  // }, 5 * 60 * 1000);
+  // SESSION 99: Automatic backlog drainer — every 6 hours.
+  // Was disabled in S92 (boot-only setTimeout was burning budget).
+  // Now runs on a proper 6h interval: checks R2 clips/, skips already-distributed,
+  // pushes new clips to Buffer. Manual /drain still works for immediate triggers.
+  const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+  scheduler.add({
+    name: "Backlog Drainer — 6h Auto",
+    intervalMs: SIX_HOURS_MS,
+    nextRun: new Date(Date.now() + 10 * 60 * 1000), // first run 10min after boot (let channels warm)
+    enabled: true,
+    handler: async () => {
+      console.log("🔄 [AutoDrain] 6-hour backlog drain firing...");
+      try {
+        await drainBacklog();
+      } catch (err: any) {
+        console.error(`[AutoDrain] Fatal: ${err.message?.slice(0, 300)}`);
+      }
+    },
+  });
 
   // Daily Content Production (1:30 PM CDT = 18:30 UTC — after Vector sweep + Veritas clear)
   scheduler.add({

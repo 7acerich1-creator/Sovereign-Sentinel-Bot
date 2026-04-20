@@ -449,7 +449,7 @@ function buildSyntheticScript(
     brand,
     hook,
     segments,
-    cta: `Full video on ${brand === "containment_field" ? "@TheContainmentField" : "@ace_richie77"}`,
+    cta: `Full video on the channel — ${brand === "containment_field" ? "@TheContainmentField" : "@ace_richie77"}`,
   };
 
   return { script, segmentDurations };
@@ -564,6 +564,25 @@ export async function rechopVideo(
         result.errors.push(`Short ${i} audio extraction failed`);
         continue;
       }
+
+      // SESSION 100: Post-extraction audio sanity check — detect silent extracts
+      // BEFORE uploading to R2 and burning GPU render time on the pod.
+      try {
+        const volOut = execSync(
+          `ffmpeg -i "${audioPath}" -af volumedetect -f null /dev/null 2>&1 | grep mean_volume || true`,
+          { timeout: 30_000, encoding: "utf-8" },
+        );
+        const meanMatch = volOut.match(/mean_volume:\s*(-?\d+\.?\d*)/);
+        const meanDb = meanMatch ? parseFloat(meanMatch[1]) : null;
+        const fileSize = statSync(audioPath).size;
+        console.log(`  🔊 Short ${i} audio: ${fileSize} bytes, ${meanDb !== null ? meanDb.toFixed(1) + " dB" : "level unknown"} (seek=${paddedStart.toFixed(1)}s, dur=${duration.toFixed(1)}s)`);
+        if (meanDb !== null && meanDb < -70) {
+          console.error(`[Rechop] ⚠️ Short ${i} audio is essentially SILENT (${meanDb.toFixed(1)} dB) — skipping to avoid Whisper hallucination`);
+          result.shortsFailed++;
+          result.errors.push(`Short ${i} audio silent at ${meanDb.toFixed(1)} dB`);
+          continue;
+        }
+      } catch { /* non-fatal diagnostic */ }
 
       // Upload audio to R2
       let audioUrl: string | null = null;

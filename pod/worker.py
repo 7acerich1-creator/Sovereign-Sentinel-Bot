@@ -436,9 +436,43 @@ def _run_short_pipeline(job_id: str, req: ProduceShortRequest) -> None:
         log.info("short_pipeline_audio_download", job_id=job_id, url=req.audio_url[:100])
         audio_path = os.path.join(job_dir, "short_audio.wav")
         import urllib.request
-        urllib.request.urlretrieve(req.audio_url, audio_path)
+        import subprocess as _sp
+        # SESSION 100: Use explicit opener with no caching to avoid stale downloads
+        # when downloading multiple presigned URLs in the same pod session.
+        _opener = urllib.request.build_opener()
+        _opener.addheaders = [("Cache-Control", "no-cache"), ("Pragma", "no-cache")]
+        with _opener.open(req.audio_url) as _resp, open(audio_path, "wb") as _f:
+            _f.write(_resp.read())
         if not os.path.isfile(audio_path) or os.path.getsize(audio_path) < 1000:
             raise RuntimeError(f"Audio download failed or too small: {req.audio_url[:100]}")
+
+        # SESSION 100: Audio sanity check — detect silent downloads BEFORE burning GPU
+        _audio_sz = os.path.getsize(audio_path)
+        log.info("short_pipeline_audio_downloaded", job_id=job_id, size_bytes=_audio_sz)
+        try:
+            _vol_out = _sp.run(
+                ["ffmpeg", "-i", audio_path, "-af", "volumedetect", "-f", "null", "/dev/null"],
+                capture_output=True, text=True, timeout=30,
+            )
+            for _line in (_vol_out.stderr or "").splitlines():
+                if "mean_volume" in _line:
+                    log.info("short_pipeline_audio_level", job_id=job_id, level=_line.strip())
+                    # If mean volume is below -80 dB, the file is effectively silent
+                    import re as _re
+                    _m = _re.search(r"mean_volume:\s*(-?\d+\.?\d*)", _line)
+                    if _m and float(_m.group(1)) < -80:
+                        log.error("short_pipeline_audio_silent", job_id=job_id,
+                                  mean_db=float(_m.group(1)),
+                                  msg="Downloaded audio is silent — aborting to save GPU time")
+                        raise RuntimeError(
+                            f"Audio is silent ({float(_m.group(1)):.1f} dB). "
+                            f"Presigned URL may have returned bad data or extraction produced silence."
+                        )
+                    break
+        except RuntimeError:
+            raise  # re-raise the silent audio abort
+        except Exception as _e:
+            log.warning("short_pipeline_audio_check_failed", job_id=job_id, error=str(_e)[:200])
 
         # Stage 2: FLUX — generate vertical scene images (9:16)
         scenes_data = [

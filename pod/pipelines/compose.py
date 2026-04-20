@@ -29,6 +29,11 @@ from typing import Optional
 import structlog
 import tempfile
 
+
+class _SilentAudioError(Exception):
+    """Raised when muxed audio is silent — signals to skip Whisper captions."""
+    pass
+
 log = structlog.get_logger("pipeline.compose")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1611,26 +1616,58 @@ def compose_short(
 
     final_path = muxed_path
 
-    # ── Stage 3: Kinetic captions (GPU Whisper → vertical ASS → burn) ──────
+    # SESSION 100: Post-mux audio sanity gate — catch silent audio before
+    # Whisper hallucinates "you you you you" on silence.
     try:
-        cap_wav = os.path.join(job_dir, "short_captions_audio.wav")
-        _extract_audio_from_video(final_path, cap_wav)
-        words = _transcribe_word_timestamps(cap_wav)
+        _vol_check = subprocess.run(
+            ["ffmpeg", "-i", muxed_path, "-af", "volumedetect", "-f", "null", "/dev/null"],
+            capture_output=True, text=True, timeout=60,
+        )
+        for _vl in (_vol_check.stderr or "").splitlines():
+            if "mean_volume" in _vl:
+                log.info("compose_short_muxed_audio_level", level=_vl.strip())
+                import re as _re
+                _mv = _re.search(r"mean_volume:\s*(-?\d+\.?\d*)", _vl)
+                if _mv and float(_mv.group(1)) < -80:
+                    log.error("compose_short_audio_silent_after_mux",
+                              mean_db=float(_mv.group(1)),
+                              msg="Audio is silent after mux — real audio was not mapped correctly. "
+                                  "Skipping Whisper captions to avoid hallucination.")
+                    # Skip captions entirely — burned garbage is worse than no captions
+                    raise _SilentAudioError("muxed audio is silent")
+                break
+    except _SilentAudioError:
+        _skip_captions = True
+        log.warning("compose_short_skipping_captions", reason="audio silent after mux")
+    except Exception as _e:
+        _skip_captions = False
+        log.warning("compose_short_vol_check_failed", error=str(_e)[:200])
+    else:
+        _skip_captions = False
 
-        if words:
-            bursts = _chunk_words_into_bursts(words)
-            if bursts:
-                ass_path = os.path.join(job_dir, "short_captions.ass")
-                _generate_caption_ass_vertical(
-                    bursts, brand, ass_path,
-                    audio_end_s=audio_duration_s,
-                )
-                captioned = os.path.join(job_dir, "short_captioned.mp4")
-                _burn_captions(final_path, ass_path, captioned)
-                if os.path.isfile(captioned):
-                    final_path = captioned
-    except Exception as exc:
-        log.error("compose_short_captions_failed", error=str(exc)[:300])
+    # ── Stage 3: Kinetic captions (GPU Whisper → vertical ASS → burn) ──────
+    if not _skip_captions:
+        try:
+            cap_wav = os.path.join(job_dir, "short_captions_audio.wav")
+            _extract_audio_from_video(final_path, cap_wav)
+            words = _transcribe_word_timestamps(cap_wav)
+
+            if words:
+                bursts = _chunk_words_into_bursts(words)
+                if bursts:
+                    ass_path = os.path.join(job_dir, "short_captions.ass")
+                    _generate_caption_ass_vertical(
+                        bursts, brand, ass_path,
+                        audio_end_s=audio_duration_s,
+                    )
+                    captioned = os.path.join(job_dir, "short_captioned.mp4")
+                    _burn_captions(final_path, ass_path, captioned)
+                    if os.path.isfile(captioned):
+                        final_path = captioned
+        except Exception as exc:
+            log.error("compose_short_captions_failed", error=str(exc)[:300])
+    else:
+        log.info("compose_short_captions_skipped_silent_audio")
 
     # ── Stage 3.5: Full-screen CTA card — appended as last 2.5s ────────
     # SESSION 98: Replaced small drawtext with a full-screen branded card
@@ -1640,12 +1677,23 @@ def compose_short(
         try:
             CTA_CARD_DUR = 2.5  # seconds
             _safe_cta = cta_text.strip().replace("'", "\u2019").replace(":", "\\:")
-            # Split into 2 lines if too long (max ~30 chars per line)
-            _cta_words = _safe_cta.split()
-            _mid = len(_cta_words) // 2
-            _line1 = " ".join(_cta_words[:_mid])
-            _line2 = " ".join(_cta_words[_mid:])
-            _cta_display = f"{_line1}\\n{_line2}" if len(_safe_cta) > 28 else _safe_cta
+            # SESSION 100: Split on em-dash (natural break) or midpoint.
+            # Old naive midpoint smashed "ON" + "THE" together as "ONNTHE".
+            # Use %{eol} which ffmpeg drawtext interprets as a real newline.
+            if "\u2014" in _safe_cta:
+                # Split on em-dash: "FULL VIDEO ON THE CHANNEL" / "@ACE_RICHIE77"
+                _parts = _safe_cta.split("\u2014", 1)
+                _line1 = _parts[0].strip()
+                _line2 = _parts[1].strip() if len(_parts) > 1 else ""
+            elif len(_safe_cta) > 28:
+                _cta_words = _safe_cta.split()
+                _mid = len(_cta_words) // 2
+                _line1 = " ".join(_cta_words[:_mid])
+                _line2 = " ".join(_cta_words[_mid:])
+            else:
+                _line1 = _safe_cta
+                _line2 = ""
+            _cta_display = f"{_line1}%{{eol}}{_line2}" if _line2 else _safe_cta
 
             # Brand-specific card background colors (dark, premium feel)
             _bg_color = "0x0A1628" if brand == "ace_richie" else "0x0D0D1A"

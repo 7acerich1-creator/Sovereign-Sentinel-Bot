@@ -705,7 +705,7 @@ export async function rechopVideo(
           cta_text: short.cta_overlay?.slice(0, 300),
           // Audio from rendered video (has music already) — pod should NOT add another music bed
           audio_is_raw_tts: false,
-          client_job_id: `rc_${video.jobId.slice(-50)}_s${i}`,
+          client_job_id: `rechop_${video.jobId}_short_${i}`,
         },
         paddedStart,
         duration,
@@ -1106,7 +1106,7 @@ async function rechopVideoPrepOnly(
         hook_text: short.hook_text?.slice(0, 200),
         cta_text: short.cta_overlay?.slice(0, 300),
         audio_is_raw_tts: false,
-        client_job_id: `rc_${video.jobId.slice(-50)}_s${i}`,
+        client_job_id: `rechop_${video.jobId}_short_${i}`,
       },
       paddedStart,
       duration,

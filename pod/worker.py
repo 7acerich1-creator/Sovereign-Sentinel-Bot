@@ -134,7 +134,7 @@ class ProduceRequest(BaseModel):
         default=None, max_length=500,
         description="Opening typewriter text. Falls back to first ~9 words of script.",
     )
-    client_job_id: Optional[str] = Field(default=None, max_length=64)
+    client_job_id: Optional[str] = Field(default=None, max_length=200)
 
     @field_validator("scenes")
     @classmethod
@@ -165,7 +165,7 @@ class ProduceShortRequest(BaseModel):
     audio_is_raw_tts: bool = Field(default=False,
                                    description="True when audio is raw TTS (no music). "
                                                "compose_short will mix a fresh music bed.")
-    client_job_id: Optional[str] = Field(default=None, max_length=64)
+    client_job_id: Optional[str] = Field(default=None, max_length=200)
 
     @field_validator("scenes")
     @classmethod

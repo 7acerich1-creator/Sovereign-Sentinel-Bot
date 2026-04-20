@@ -47,7 +47,7 @@ class ProduceRequest(BaseModel):
         default=None, max_length=500,
         description="Opening typewriter text (first 8-9 words of hook). Falls back to first ~9 words of script.",
     )
-    client_job_id: Optional[str] = Field(default=None, max_length=64)
+    client_job_id: Optional[str] = Field(default=None, max_length=200)
 
     @field_validator("scenes")
     @classmethod

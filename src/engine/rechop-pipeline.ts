@@ -41,10 +41,10 @@ const R2_BUCKET = process.env.R2_BUCKET_VIDEOS || "sovereign-videos";
 const FFMPEG_TIMEOUT_MS = 180_000;
 
 // ── Quality gate: only rechop videos produced AFTER all major quality fixes shipped.
-// S92b (2026-04-19) was the last major quality overhaul: CTA drawtext, captions,
-// audio normalization, shorts coherence. Videos before this date may have broken
-// captions, missing CTAs, or robotic audio. Override with /rechop N --force.
-const RECHOP_MIN_DATE = new Date("2026-04-19T00:00:00Z");
+// Videos from 2026-04-18 onward have XTTS voice, working captions, CTA, and
+// proper audio levels. Anything before April 18 is pre-fix garbage.
+// Override with /rechop N --force.
+const RECHOP_MIN_DATE = new Date("2026-04-18T00:00:00Z");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

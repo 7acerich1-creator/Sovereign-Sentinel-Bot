@@ -8,6 +8,7 @@
 
 import type { LLMProvider } from "../types";
 import { bufferGraphQL, BUFFER_ORG_ID, isBufferQuotaExhausted, BufferQuotaExhaustedError, getBufferChannels } from "./buffer-graphql";
+import { publishToFacebook } from "./facebook-publisher";
 
 // ── Constants ──
 
@@ -980,6 +981,26 @@ export async function distributionSweep(): Promise<number> {
             err.message?.includes("GraphQL error");
           const prefix = isNonRetryable ? "🚫" : "❌";
           postResults.push(`${prefix} ${channel.service}(${channel.id}): ${err.message}`);
+        }
+      }
+
+      // ── SESSION 97: Facebook direct publish (bypasses Buffer — no slot available) ──
+      // Only fires for ace_richie brand; uses Graph API v25.0 system-user token.
+      if (brand === "ace_richie" && !alreadyHandled.has("facebook_direct")) {
+        const fbText = variants["facebook"] || universalText;
+        if (fbText) {
+          try {
+            const fbResult = await publishToFacebook(fbText, {
+              imageUrl: draft.media_url || undefined,
+            });
+            if (fbResult.success) {
+              postResults.push(`✅ facebook_direct(facebook_direct): ${fbResult.postId}`);
+            } else {
+              postResults.push(`❌ facebook_direct(facebook_direct): ${fbResult.error}`);
+            }
+          } catch (err: any) {
+            postResults.push(`❌ facebook_direct(facebook_direct): ${err.message}`);
+          }
         }
       }
 

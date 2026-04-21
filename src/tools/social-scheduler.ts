@@ -286,9 +286,6 @@ export class SocialSchedulerPostTool implements Tool {
                 ... on MutationError {
                   message
                 }
-                ... on LimitReachedError {
-                  message
-                }
               }
             }
           `;
@@ -300,8 +297,8 @@ export class SocialSchedulerPostTool implements Tool {
           if (result?.post) {
             results.push(`✅ ${channelId}: Post created (ID: ${result.post.id})`);
           } else if (result?.message?.toLowerCase().includes('limit')) {
-            // SESSION 95: Buffer removed `limit` field from LimitReachedError (Apr 2026 schema change).
-            // Detect plan-level cap from message text instead.
+            // SESSION 95+104: Buffer removed LimitReachedError from union entirely.
+            // Detect plan-level cap from MutationError message text.
             results.push(`⏸️ ${channelId}: Plan limit reached — ${result.message}`);
             break; // No point trying more channels, they'll all hit the same limit
           } else if (result?.message) {

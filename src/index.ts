@@ -846,6 +846,7 @@ async function main() {
           `/voice — Toggle voice responses\n` +
           `/dryrun <url> — Validate pipeline (zero cost)\n` +
           `/pipeline <url> — Run full VidRush pipeline (LIVE)\n` +
+          `/produce — Content Engine: generate drafts + FLUX images + distribute\n` +
           `/buffer_audit — Audit Buffer channels + purge failed posts\n` +
           `/test_tts — Test TTS on one segment\n` +
           `/test_yt — Test YouTube upload with 5s clip`,
@@ -1303,6 +1304,38 @@ async function main() {
         } catch (err: any) {
           await telegram.sendMessage(message.chatId,
             `❌ /batch failed: ${err.message?.slice(0, 400)}`
+          );
+        }
+        return true;
+      }
+
+      // SESSION 105: /produce — trigger Content Engine cycle (generate drafts + FLUX images + distribute)
+      case "/produce": {
+        try {
+          await telegram.sendMessage(message.chatId, "🔄 /produce — firing Content Engine cycle...");
+          const { dailyContentProduction, distributionSweep, fluxBatchImageGen } = await import("./engine/content-engine");
+
+          // Step 1: Generate new drafts
+          await telegram.sendMessage(message.chatId, "📝 Step 1/3: Generating content drafts...");
+          const drafted = await dailyContentProduction();
+          await telegram.sendMessage(message.chatId, `✅ Drafts: ${drafted} new posts generated`);
+
+          // Step 2: FLUX batch images for any drafts with image_prompt but no media_url
+          await telegram.sendMessage(message.chatId, "🎨 Step 2/3: FLUX batch image generation...");
+          const imaged = await fluxBatchImageGen();
+          await telegram.sendMessage(message.chatId, `✅ Images: ${imaged} media_urls patched`);
+
+          // Step 3: Distribute ready posts to Buffer + Facebook
+          await telegram.sendMessage(message.chatId, "📡 Step 3/3: Distribution sweep...");
+          const swept = await distributionSweep();
+          await telegram.sendMessage(message.chatId,
+            `✅ /produce complete.\n\n` +
+            `📝 Drafted: ${drafted}\n🎨 Imaged: ${imaged}\n📡 Distributed: ${swept}`
+          );
+        } catch (err: any) {
+          console.error(`❌ [/produce] ${err.message}\n${err.stack}`);
+          await telegram.sendMessage(message.chatId,
+            `❌ /produce failed: ${err.message?.slice(0, 400)}`
           );
         }
         return true;

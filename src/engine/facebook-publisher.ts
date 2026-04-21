@@ -82,9 +82,11 @@ export async function publishToFacebook(
       return { success: true, postId: data.id };
     }
 
+    const errCode = data.error?.code || "unknown";
+    const errSubcode = data.error?.error_subcode || "";
     const errMsg = data.error?.message || JSON.stringify(data);
-    console.error(`❌ [FacebookPublisher] API error (${brand}): ${errMsg}`);
-    return { success: false, error: errMsg };
+    console.error(`❌ [FacebookPublisher] API error (${brand}): code=${errCode} subcode=${errSubcode} - ${errMsg}`);
+    return { success: false, error: `${errMsg} (code=${errCode})` };
   } catch (err: any) {
     console.error(`❌ [FacebookPublisher] Network error (${brand}): ${err.message}`);
     return { success: false, error: err.message };
@@ -120,7 +122,9 @@ async function postPhoto(
     return { success: true, postId: id };
   }
 
+  const errCode = data.error?.code || "unknown";
+  const errSubcode = data.error?.error_subcode || "";
   const errMsg = data.error?.message || JSON.stringify(data);
-  console.error(`❌ [FacebookPublisher] Photo API error: ${errMsg}`);
-  return { success: false, error: errMsg };
+  console.error(`❌ [FacebookPublisher] Photo API error: code=${errCode} subcode=${errSubcode} - ${errMsg}`);
+  return { success: false, error: `${errMsg} (code=${errCode})` };
 }

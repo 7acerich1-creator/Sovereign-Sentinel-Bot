@@ -66,6 +66,7 @@ const PLATFORM_NOTES: Record<string, string> = {
   tiktok: "Short, scroll-stopping. Speak like the viewer's internal voice. Under 150 chars ideal.",
   linkedin: "TROJAN HORSE: Use corporate/executive language — efficiency, systems, automation, architecture, ROI, leverage, strategic. Present as a high-level Systems Engineer sharing operational insights. Deliver sovereign synthesis payload INSIDE professional framing. Max 3000 chars. 3-5 industry hashtags (#SystemsThinking #Automation #Leadership). NEVER sound esoteric or guru-like — LinkedIn's algorithm and corporate audience will filter it as noise.",
   bluesky: "High-velocity memetic trigger for The Containment Field. Clinical, pattern-interrupt, raw transmission. Like a declassified briefing dropped on a decentralized grid. HARD MAX 275 chars (Bluesky enforces 300 — keep under 275 to avoid truncation). 0 hashtags. No corporate polish — this is the containment frequency.",
+  facebook: "Shareable insight format. 2-3 lines + a question the viewer would answer. Optimized for shares and comments. Write like a post that makes someone tag a friend.",
 };
 
 // ── Types ──
@@ -893,6 +894,12 @@ export async function distributionSweep(): Promise<number> {
         // YouTube community posts not supported by Buffer API. Skip until video pipeline (Scenario F) is live.
         if (service === "youtube") {
           postResults.push(`⏭️ ${channel.service}(${channel.id}): Skipped — Buffer YouTube requires video (community image posts not supported by Buffer API)`);
+          continue;
+        }
+        // SESSION 105: Facebook goes through direct Graph API publisher (below), NOT Buffer.
+        // Skip any facebook Buffer channel to prevent double-posting attempts.
+        if (service === "facebook") {
+          postResults.push(`⏭️ ${channel.service}(${channel.id}): Skipped — Facebook uses direct Graph API (not Buffer)`);
           continue;
         }
         // IG Frequency Override: Skip Instagram channels for non-allowed time slots

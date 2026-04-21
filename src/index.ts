@@ -1344,6 +1344,24 @@ async function main() {
         return true;
       }
 
+      // SESSION 105: Deterministic /flux-batch — no LLM, no tools, no Gemini burn.
+      case "/flux-batch": {
+        try {
+          await telegram.sendMessage(message.chatId, "🎨 Running FLUX pod batch...");
+          const { fluxBatchImageGen } = await import("./engine/content-engine");
+          const patched = await fluxBatchImageGen();
+          await telegram.sendMessage(message.chatId,
+            patched > 0
+              ? `✅ FLUX batch complete — ${patched} videos generated with hook text.`
+              : `⏸️ No pending images found (all queue entries already have media_url).`
+          );
+        } catch (err: any) {
+          console.error(`❌ [/flux-batch] ${err.message}\n${err.stack}`);
+          await telegram.sendMessage(message.chatId, `❌ /flux-batch failed: ${err.message?.slice(0, 400)}`);
+        }
+        return true;
+      }
+
       // SESSION 92: Manual backlog drain — replaces automatic sweep + boot drainer.
       // Single-pass, zero-retry. Pre-flight rate limit check. Full Telegram reporting.
       case "/drain": {

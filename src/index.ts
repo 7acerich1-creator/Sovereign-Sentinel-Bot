@@ -2574,6 +2574,16 @@ async function main() {
     }
   });
 
+  // ── /api/content-engine/flux-batch — Manual FLUX pod batch image generation trigger ──
+  webhookServer.register("/api/content-engine/flux-batch", async () => {
+    try {
+      const patched = await fluxBatchImageGen();
+      return JSON.stringify({ status: "ok", patched });
+    } catch (err: any) {
+      return JSON.stringify({ status: "error", message: err.message, stack: err.stack?.slice(0, 500) });
+    }
+  });
+
   // ── /api/content-engine/nuke-queue — Delete ALL queued Buffer posts + clear Supabase queue ──
   webhookServer.register("/api/content-engine/nuke-queue", async () => {
     try {

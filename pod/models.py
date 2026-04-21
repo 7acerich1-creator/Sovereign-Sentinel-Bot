@@ -88,3 +88,33 @@ class HealthReport(BaseModel):
     uptime_s: float
     pod_worker_token_configured: bool
     r2_configured: bool
+
+
+# ── SESSION 104: Image Batch Generation (Content Engine) ──
+
+class ImageBatchItem(BaseModel):
+    """One image request in a batch."""
+    id: str = Field(min_length=1, max_length=200, description="Caller's row ID (e.g., content_engine_queue UUID)")
+    prompt: str = Field(min_length=1, max_length=2000, description="FLUX image prompt")
+    width: int = Field(default=1024, ge=256, le=2048)
+    height: int = Field(default=1024, ge=256, le=2048)
+
+
+class ImageBatchRequest(BaseModel):
+    """POST /generate-images — batch FLUX image generation for Content Engine."""
+    items: list[ImageBatchItem] = Field(min_length=1, max_length=50)
+    brand: Brand = Brand.ace_richie
+
+
+class ImageBatchResultItem(BaseModel):
+    """One result from the batch."""
+    id: str
+    url: Optional[str] = None
+    error: Optional[str] = None
+
+
+class ImageBatchResult(BaseModel):
+    """Response from POST /generate-images."""
+    generated: int
+    failed: int
+    results: list[ImageBatchResultItem]

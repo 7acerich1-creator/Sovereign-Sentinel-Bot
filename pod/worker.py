@@ -203,6 +203,32 @@ class HealthReport(BaseModel):
     r2_configured: bool
 
 
+# ── SESSION 104: Image Batch Generation (Content Engine) ──
+
+class ImageBatchItem(BaseModel):
+    id: str = Field(min_length=1, max_length=200)
+    prompt: str = Field(min_length=1, max_length=2000)
+    width: int = Field(default=1024, ge=256, le=2048)
+    height: int = Field(default=1024, ge=256, le=2048)
+
+
+class ImageBatchRequest(BaseModel):
+    items: list[ImageBatchItem] = Field(min_length=1, max_length=50)
+    brand: Brand = Brand.ace_richie
+
+
+class ImageBatchResultItem(BaseModel):
+    id: str
+    url: Optional[str] = None
+    error: Optional[str] = None
+
+
+class ImageBatchResult(BaseModel):
+    generated: int
+    failed: int
+    results: list[ImageBatchResultItem]
+
+
 # ---------------------------------------------------------------------------
 # In-memory job registry + file-backed persistence (SESSION 80 FIX)
 #
@@ -415,6 +441,112 @@ def produce_short(
     )
     background.add_task(_run_short_pipeline, job_id, req)
     return ProduceAccepted(job_id=job_id, queued_at=now)
+
+
+# ---------------------------------------------------------------------------
+# SESSION 104: Image Batch Generation — Content Engine FLUX images
+# ---------------------------------------------------------------------------
+@app.post(
+    "/generate-images",
+    response_model=ImageBatchResult,
+    tags=["pipeline"],
+)
+def generate_images(
+    req: ImageBatchRequest,
+    _: None = Depends(require_bearer),
+) -> ImageBatchResult:
+    """
+    Synchronous batch image generation via FLUX.
+    Takes up to 50 prompts, generates images, uploads to R2, returns URLs.
+    Used by Content Engine to replace Imagen 4 ($3/day → ~$0.07/batch).
+    """
+    from pipelines.flux import ensure_loaded, generate_scene_images
+    from pipelines.r2 import is_configured as r2_configured, _get_client
+
+    log.info("image_batch_start", count=len(req.items), brand=req.brand.value)
+    t0 = time.monotonic()
+
+    # Ensure FLUX is loaded
+    ensure_loaded()
+
+    # Create a temp job dir for this batch
+    batch_id = f"imgbatch_{uuid.uuid4().hex[:12]}"
+    batch_dir = os.path.join(JOB_WORK_DIR, batch_id)
+    os.makedirs(batch_dir, exist_ok=True)
+
+    results: list[ImageBatchResultItem] = []
+    generated = 0
+    failed = 0
+
+    try:
+        # Convert items to scene-like dicts for generate_scene_images
+        scenes = [
+            {"index": i, "image_prompt": item.prompt}
+            for i, item in enumerate(req.items)
+        ]
+
+        # Generate all images in one batch call
+        img_result = generate_scene_images(
+            scenes=scenes,
+            job_dir=batch_dir,
+            width=req.items[0].width,
+            height=req.items[0].height,
+        )
+
+        # Upload each to R2
+        if r2_configured():
+            client = _get_client()
+            thumb_bucket = os.environ.get("R2_BUCKET_THUMBS",
+                                          os.environ.get("R2_BUCKET_VIDEOS", "sovereign-videos"))
+            public_base = os.environ.get("R2_PUBLIC_URL_BASE", "").rstrip("/")
+
+            scene_images = img_result.get("scene_images", [])
+
+            for i, item in enumerate(req.items):
+                img_path = scene_images[i] if i < len(scene_images) else None
+                if not img_path or not os.path.isfile(img_path):
+                    results.append(ImageBatchResultItem(id=item.id, error="generation_failed"))
+                    failed += 1
+                    continue
+
+                try:
+                    r2_key = f"content-images/{req.brand.value}/{item.id}.png"
+                    client.upload_file(
+                        img_path, thumb_bucket, r2_key,
+                        ExtraArgs={"ContentType": "image/png"},
+                    )
+                    url = f"{public_base}/{r2_key}" if public_base else r2_key
+                    results.append(ImageBatchResultItem(id=item.id, url=url))
+                    generated += 1
+                except Exception as e:
+                    results.append(ImageBatchResultItem(id=item.id, error=str(e)[:200]))
+                    failed += 1
+        else:
+            # No R2 — return local paths (shouldn't happen in prod)
+            scene_images = img_result.get("scene_images", [])
+            for i, item in enumerate(req.items):
+                img_path = scene_images[i] if i < len(scene_images) else None
+                if img_path and os.path.isfile(img_path):
+                    results.append(ImageBatchResultItem(id=item.id, url=img_path))
+                    generated += 1
+                else:
+                    results.append(ImageBatchResultItem(id=item.id, error="no_r2"))
+                    failed += 1
+
+    except Exception as e:
+        log.error("image_batch_failed", error=str(e)[:300])
+        # Return all as failed
+        for item in req.items:
+            if not any(r.id == item.id for r in results):
+                results.append(ImageBatchResultItem(id=item.id, error=str(e)[:200]))
+                failed += 1
+    finally:
+        # Cleanup
+        shutil.rmtree(batch_dir, ignore_errors=True)
+
+    elapsed = time.monotonic() - t0
+    log.info("image_batch_done", generated=generated, failed=failed, elapsed_s=round(elapsed, 1))
+    return ImageBatchResult(generated=generated, failed=failed, results=results)
 
 
 # ---------------------------------------------------------------------------

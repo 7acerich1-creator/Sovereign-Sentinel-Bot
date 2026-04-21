@@ -77,7 +77,7 @@ import { HeartbeatSystem } from "./proactive/heartbeat";
 import { pollYouTubeComments } from "./proactive/youtube-comment-watcher";
 
 // ── Content Engine ──
-import { dailyContentProduction, distributionSweep, contentEngineStatus, discoverChannels, nukeBufferQueue } from "./engine/content-engine";
+import { dailyContentProduction, distributionSweep, draftAutoPublisher, fluxBatchImageGen, contentEngineStatus, discoverChannels, nukeBufferQueue } from "./engine/content-engine";
 import { warmChannelCache } from "./engine/buffer-graphql";
 import { drainBacklog } from "./engine/backlog-drainer";
 
@@ -2118,6 +2118,50 @@ async function main() {
   });
 
   console.log("⚡ [ContentEngine] Scheduled: Daily production (1:30PM CDT/18:30UTC). Distribution sweep every 6h (S97).");
+
+  // SESSION 104: Draft Auto-Publisher — promotes agent content_drafts to distribution queue.
+  // Runs every 4h. Picks up social-type drafts (caption, social_post, post, tweet, hook)
+  // with pending_review status older than 2h and inserts them into content_engine_queue.
+  // Non-social drafts (email, blog, landing_page) are left for manual review.
+  scheduler.add({
+    name: "Draft Auto-Publisher (4h)",
+    intervalMs: 4 * 60 * 60 * 1000, // 4 hours
+    nextRun: new Date(Date.now() + 10 * 60 * 1000), // First run 10 min after boot
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      try {
+        const promoted = await draftAutoPublisher();
+        if (promoted > 0) {
+          console.log(`📤 [DraftPublisher] Auto-promoted ${promoted} draft(s) to distribution queue`);
+        }
+      } catch (err: any) {
+        console.error(`[DraftPublisher] Auto-publish sweep failed: ${err.message}`);
+      }
+    },
+  });
+
+  // SESSION 104: FLUX Pod Batch — generate images for Content Engine queue entries.
+  // Runs every 3 days. Collects entries with image_prompt but no media_url,
+  // spins up one pod session, batch-generates via FLUX, patches media_url back.
+  // Cost: ~$0.07/batch (pod GPU time) vs $3/day (Imagen 4).
+  scheduler.add({
+    name: "FLUX Pod Batch Image Gen (3d)",
+    intervalMs: 3 * 24 * 60 * 60 * 1000, // 3 days
+    nextRun: new Date(Date.now() + 30 * 60 * 1000), // First run 30 min after boot
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      try {
+        const patched = await fluxBatchImageGen();
+        if (patched > 0) {
+          console.log(`🎨 [FluxBatch] Patched ${patched} queue entries with FLUX images`);
+        }
+      } catch (err: any) {
+        console.error(`[FluxBatch] Batch image generation failed: ${err.message}`);
+      }
+    },
+  });
 
   // ── CTA Audit — Weekly Monday 10:00 AM CDT = 15:00 UTC (after YT stats fetch at 14:00) ──
   // Scans top-performing videos for missing sovereign-landing CTAs.

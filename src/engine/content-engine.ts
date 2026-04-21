@@ -9,6 +9,8 @@
 import type { LLMProvider } from "../types";
 import { bufferGraphQL, BUFFER_ORG_ID, isBufferQuotaExhausted, BufferQuotaExhaustedError, getBufferChannels } from "./buffer-graphql";
 import { publishToFacebook } from "./facebook-publisher";
+import { withPodSession } from "../pod/session";
+import { generateImageBatch, type ImageBatchItem } from "../pod/runpod-client";
 
 // ── Constants ──
 
@@ -43,6 +45,8 @@ const IMAGE_REQUIRED_PLATFORMS = new Set(["instagram", "tiktok"]);
 const TEXT_OK_PLATFORMS = new Set(["x", "twitter", "threads", "youtube", "linkedin", "facebook", "bluesky"]);
 // Threads hard limit from Meta API (500 chars max)
 const THREADS_CHAR_LIMIT = 500;
+const BLUESKY_CHAR_LIMIT = 300;
+const X_CHAR_LIMIT = 280;
 
 // ── IG Frequency Override (prevent shadowban) ──
 // Instagram accounts are capped to protect account health
@@ -743,21 +747,17 @@ export async function dailyContentProduction(llm: LLMProvider): Promise<number> 
           llm, brand, nicheConfig.niche, nicheConfig.hookStyle, slot.label, platforms
         );
 
-        // ── IMAGE GENERATION (Gap 12 fix) ──
-        // Generate a branded image for this post and upload to Supabase Storage.
-        // If generation fails, post goes out as text-only (IG/TikTok will be skipped by distribution sweep).
-        let mediaUrl: string | null = null;
-        try {
-          mediaUrl = await generateContentImage(universal, nicheConfig.niche, brand, dateStr, slot.label);
-          if (mediaUrl) {
-            console.log(`🖼️ [ContentEngine] Image attached: ${brand}/${slot.label} → ${mediaUrl.slice(-60)}`);
-          } else {
-            console.warn(`⚠️ [ContentEngine] No image for ${brand}/${slot.label} — text-only fallback`);
-          }
-        } catch (err: any) {
-          console.error(`[ContentEngine] Image generation crashed for ${brand}/${slot.label}: ${err.message}`);
-          // Continue without image — text-only is better than no post
-        }
+        // ── IMAGE GENERATION — SESSION 104: FLUX POD BATCH ──
+        // Instead of calling Imagen 4 per-post ($3/day), we store the image_prompt
+        // and let the FLUX pod batch job generate images every 3 days (~$0.07/batch).
+        // Posts go out text-only immediately (IG/TikTok skipped if no image).
+        // When FLUX batch runs, it fills media_url and those platforms light up.
+        const nichePrefixes = IMAGE_NICHE_PREFIXES[nicheConfig.niche];
+        const nichePrefix = nichePrefixes?.[brand] || IMAGE_NICHE_FALLBACK[brand];
+        const brandSuffix = BRAND_IMAGE_STYLE[brand];
+        const conceptSeed = universal.replace(/[#@\n"]/g, " ").replace(/—.*$/, "").slice(0, 100).trim();
+        const imagePrompt = `${nichePrefix}Thematic concept: ${conceptSeed}. ${brandSuffix}`;
+
         // Build scheduled_time for today at slot.hour UTC
         const scheduledTime = new Date(today);
         scheduledTime.setUTCHours(slot.hour, 0, 0, 0);
@@ -772,7 +772,7 @@ export async function dailyContentProduction(llm: LLMProvider): Promise<number> 
           scheduled_hour_utc: slot.hour,
           universal_text: universal,
           platform_variants: variants,
-          media_url: mediaUrl || undefined,
+          image_prompt: imagePrompt,
           status: "ready",
         });
 
@@ -911,6 +911,14 @@ export async function distributionSweep(): Promise<number> {
         if (service === "threads" && postText.length > THREADS_CHAR_LIMIT) {
           // Truncate to 497 chars + "..." to stay under 500
           postText = postText.slice(0, THREADS_CHAR_LIMIT - 3) + "...";
+        }
+        // CE-7 FIX: Bluesky has a 300-character hard limit (AT Protocol)
+        if (service === "bluesky" && postText.length > BLUESKY_CHAR_LIMIT) {
+          postText = postText.slice(0, BLUESKY_CHAR_LIMIT - 3) + "...";
+        }
+        // CE-8 FIX: X/Twitter has a 280-character hard limit
+        if ((service === "x" || service === "twitter") && postText.length > X_CHAR_LIMIT) {
+          postText = postText.slice(0, X_CHAR_LIMIT - 3) + "...";
         }
 
         try {
@@ -1108,6 +1116,157 @@ async function queueWeekendReposts(): Promise<number> {
 
   console.log(`♻️ [ContentEngine] Queued ${queued} weekend reposts from top performers`);
   return queued;
+}
+
+// ── FLUX Pod Batch Image Generation — replaces Imagen 4 ($3/day → ~$0.07/batch) ──
+
+/**
+ * SESSION 104: Collect content_engine_queue entries that have image_prompt
+ * but no media_url, spin up the pod, batch-generate via FLUX, patch media_url back.
+ * Runs every 3 days. One pod session = one batch = ~$0.07 (vs $3/day with Imagen 4).
+ */
+export async function fluxBatchImageGen(): Promise<number> {
+  // Fetch queue entries with image_prompt but no media_url
+  const needsImages = await supabaseQuery(
+    "content_engine_queue",
+    `image_prompt=not.is.null&media_url=is.null&order=created_at.asc&limit=50`
+  );
+
+  if (needsImages.length === 0) {
+    console.log("[FluxBatch] No pending images — skipping pod spin-up");
+    return 0;
+  }
+
+  console.log(`🎨 [FluxBatch] ${needsImages.length} images pending — starting pod session`);
+
+  // Build batch items
+  const items: ImageBatchItem[] = needsImages.map((row: any) => ({
+    id: row.id,
+    prompt: row.image_prompt,
+    width: 1024,
+    height: 1024,
+  }));
+
+  // Group by brand for R2 folder routing
+  const aceItems = needsImages.filter((r: any) => r.brand === "ace_richie");
+  const cfItems = needsImages.filter((r: any) => r.brand === "containment_field");
+
+  let patched = 0;
+
+  try {
+    await withPodSession(async (handle) => {
+      // Process Ace Richie batch
+      if (aceItems.length > 0) {
+        const aceResult = await generateImageBatch(
+          handle,
+          aceItems.map((r: any) => ({ id: r.id, prompt: r.image_prompt })),
+          "ace_richie"
+        );
+        for (const r of aceResult.results) {
+          if (r.url) {
+            await supabasePatch("content_engine_queue", r.id, { media_url: r.url });
+            patched++;
+          }
+        }
+      }
+
+      // Process Containment Field batch
+      if (cfItems.length > 0) {
+        const cfResult = await generateImageBatch(
+          handle,
+          cfItems.map((r: any) => ({ id: r.id, prompt: r.image_prompt })),
+          "containment_field"
+        );
+        for (const r of cfResult.results) {
+          if (r.url) {
+            await supabasePatch("content_engine_queue", r.id, { media_url: r.url });
+            patched++;
+          }
+        }
+      }
+    });
+  } catch (err: any) {
+    console.error(`[FluxBatch] Pod session failed: ${err.message?.slice(0, 300)}`);
+    // Don't throw — partial success is still progress
+  }
+
+  console.log(`🎨 [FluxBatch] Patched ${patched}/${needsImages.length} queue entries with FLUX images`);
+  return patched;
+}
+
+// ── Draft Auto-Publisher — Promote agent drafts to distribution queue ──
+
+/**
+ * SESSION 104: Picks up social-type content_drafts with status "pending_review"
+ * older than 2 hours and promotes them to content_engine_queue for distribution.
+ * This wires Yuki/Anita/Alfred's save_content_draft output into actual posting.
+ * Non-social drafts (email, landing_page, blog, script) are left for manual review.
+ */
+const PUBLISHABLE_DRAFT_TYPES = new Set(["caption", "social_post", "post", "tweet", "hook"]);
+
+export async function draftAutoPublisher(): Promise<number> {
+  // Fetch pending_review drafts that are social-type and older than 2h
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
+  const drafts = await supabaseQuery(
+    "content_drafts",
+    `status=eq.pending_review&created_at=lte.${twoHoursAgo}&order=created_at.asc&limit=10`
+  );
+
+  if (drafts.length === 0) return 0;
+
+  // Filter to publishable types
+  const publishable = drafts.filter((d: any) => PUBLISHABLE_DRAFT_TYPES.has(d.draft_type));
+  if (publishable.length === 0) return 0;
+
+  let promoted = 0;
+  const now = new Date();
+  const dateStr = now.toISOString().split("T")[0];
+
+  for (const draft of publishable) {
+    try {
+      // Determine brand from niche/platform heuristics or default to ace_richie
+      // Containment Field drafts typically mention "containment" or have dark_psychology niche
+      let brand: Brand = "ace_richie";
+      const bodyLower = (draft.body || "").toLowerCase();
+      const titleLower = (draft.title || "").toLowerCase();
+      if (
+        draft.niche === "dark_psychology" ||
+        bodyLower.includes("containment") ||
+        titleLower.includes("containment") ||
+        titleLower.includes("tcf")
+      ) {
+        brand = "containment_field";
+      }
+
+      // Insert into content_engine_queue with immediate scheduling
+      await supabasePost("content_engine_queue", {
+        brand,
+        niche: draft.niche || "self_improvement",
+        time_slot: "draft_promotion",
+        scheduled_date: dateStr,
+        scheduled_time: now.toISOString(),
+        scheduled_hour_utc: now.getUTCHours(),
+        universal_text: draft.body,
+        platform_variants: {},  // Distribution sweep uses universal_text as fallback
+        status: "ready",
+        source: "draft_auto_publisher",
+      });
+
+      // Mark draft as published so it's not re-processed
+      await supabasePatch("content_drafts", draft.id, {
+        status: "published",
+      });
+
+      promoted++;
+      console.log(`📤 [DraftPublisher] Promoted draft ${draft.id}: "${draft.title?.slice(0, 40)}..." → ${brand}`);
+    } catch (err: any) {
+      console.warn(`[DraftPublisher] Failed to promote draft ${draft.id}: ${err.message?.slice(0, 200)}`);
+    }
+  }
+
+  console.log(`📤 [DraftPublisher] Promoted ${promoted} drafts to distribution queue`);
+  return promoted;
 }
 
 // ── Buffer Queue Nuke — Clean Slate ──

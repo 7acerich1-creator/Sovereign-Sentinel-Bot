@@ -684,6 +684,70 @@ export async function fetchHealth(handle: PodHandle): Promise<HealthReport> {
   return podFetchJson<HealthReport>(handle, "GET", "/health", {});
 }
 
+// ── SESSION 104: FLUX Image Batch Generation ──
+
+export interface ImageBatchItem {
+  id: string;
+  prompt: string;
+  width?: number;
+  height?: number;
+}
+
+export interface ImageBatchResultItem {
+  id: string;
+  url?: string | null;
+  error?: string | null;
+}
+
+export interface ImageBatchResult {
+  generated: number;
+  failed: number;
+  results: ImageBatchResultItem[];
+}
+
+/**
+ * POST /generate-images — batch FLUX image generation on the pod.
+ * Synchronous call (not poll-based like /produce). Times out at 10 min
+ * which allows ~50 images at ~10-12s each.
+ */
+export async function generateImageBatch(
+  handle: PodHandle,
+  items: ImageBatchItem[],
+  brand: string = "ace_richie",
+): Promise<ImageBatchResult> {
+  // Retry up to 3 times for proxy stabilization (same pattern as produceVideo)
+  let result: ImageBatchResult | undefined;
+  let lastErr: unknown;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      result = await podFetchJson<ImageBatchResult>(
+        handle,
+        "POST",
+        "/generate-images",
+        {
+          body: { items, brand },
+          signal: AbortSignal.timeout(10 * 60 * 1000), // 10 min for batch
+        },
+      );
+      break;
+    } catch (err) {
+      lastErr = err;
+      if (err instanceof PodContractError && (err.httpStatus === 404 || err.httpStatus === 502)) {
+        console.warn(`⚠️ [RunPod] POST /generate-images returned ${err.httpStatus}. Retrying in 3s (attempt ${attempt}/3)...`);
+        await sleep(3000);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  if (!result) throw lastErr;
+
+  console.log(`🎨 [RunPod] Image batch done: ${result.generated} generated, ${result.failed} failed`);
+  return result;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SESSION 92: Pod log capture — download logs BEFORE termination.
 // Ring buffer on the pod holds last 2000 lines. We fetch them and store to R2

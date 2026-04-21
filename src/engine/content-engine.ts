@@ -11,19 +11,45 @@ import { bufferGraphQL, BUFFER_ORG_ID, isBufferQuotaExhausted, BufferQuotaExhaus
 import { publishToFacebook } from "./facebook-publisher";
 import { withPodSession } from "../pod/session";
 import { generateImageBatch, type ImageBatchItem } from "../pod/runpod-client";
+import { ACE_RICHIE_NICHES, CONTAINMENT_FIELD_NICHES } from "../data/shared-context";
+import { THESIS_ANGLES, type ThesisAngle } from "../data/thesis-angles";
 
 // ── Constants ──
 
-// Niche rotation: Mon=0 → Sun=6, getDay() returns 0=Sun
-const NICHE_ROTATION: Record<number, { niche: string; hookStyle: string }> = {
-  1: { niche: "dark_psychology", hookStyle: "They don't want you to know..." },
-  2: { niche: "self_improvement", hookStyle: "The version of you that..." },
-  3: { niche: "burnout", hookStyle: "Your 9-to-5 is a..." },
-  4: { niche: "quantum", hookStyle: "Reality isn't what you think..." },
-  5: { niche: "brand", hookStyle: "I built this because..." },
-  0: { niche: "top_performer_repost", hookStyle: "Data-driven repost" }, // Sunday
-  6: { niche: "top_performer_repost", hookStyle: "Data-driven repost" }, // Saturday
+// Brand niche lists — each brand cycles independently through its own 15 niches
+const BRAND_NICHES: Record<Brand, readonly string[]> = {
+  ace_richie: ACE_RICHIE_NICHES,
+  containment_field: CONTAINMENT_FIELD_NICHES,
 };
+
+/**
+ * Get today's niche for a specific brand.
+ * - Weekends (Sun=0, Sat=6) → "top_performer_repost"
+ * - Weekdays → dayOfYear % nicheCount cycles through the brand's 15 niches
+ * Each brand rotates independently so they don't share a niche on the same day.
+ */
+function getTodaysNiche(brand: Brand, date: Date = new Date()): { niche: string; thesisSeed: string | null } {
+  const dayOfWeek = date.getDay();
+  if (dayOfWeek === 0 || dayOfWeek === 6) {
+    return { niche: "top_performer_repost", thesisSeed: null };
+  }
+
+  const niches = BRAND_NICHES[brand];
+  // dayOfYear: Jan 1 = 0
+  const start = new Date(date.getFullYear(), 0, 0);
+  const diff = date.getTime() - start.getTime();
+  const dayOfYear = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const niche = niches[dayOfYear % niches.length];
+
+  // Pick a random thesis angle seed for this brand+niche
+  const angles: ThesisAngle[] | undefined = THESIS_ANGLES[brand]?.[niche];
+  let thesisSeed: string | null = null;
+  if (angles && angles.length > 0) {
+    thesisSeed = angles[Math.floor(Math.random() * angles.length)].seed;
+  }
+
+  return { niche, thesisSeed };
+}
 // 6 posting time slots (UTC hours — adjust for Ace's timezone if needed)
 const TIME_SLOTS_UTC = [
   { hour: 12, label: "morning_hook" },       // 7AM ET
@@ -108,61 +134,61 @@ const STORAGE_BUCKET = "public-assets";
  * These aren't generic AI art prompts — they're cinematic direction that produces
  * scroll-stopping visuals native to each brand × niche combination.
  */
+// Visual family prefixes — similar niches share visual DNA.
+// Ace Richie: sovereignty/authority/system-mastery, architecture/network-architecture/decision-architecture,
+//   wealth-frequency/resource-dynamics, exit-velocity/creative-leverage/legacy-engineering,
+//   memetic-engineering/signal-discipline/pattern-recognition, time-sovereignty
+// Containment Field: dark-psychology/manipulation-exposed/emotional-engineering,
+//   burnout/compliance-machinery/social-programming, containment/frame-control/perception-management,
+//   pattern-interrupt/cognitive-traps/identity-hijacking,
+//   information-warfare/narrative-capture/manufactured-consent
+
+const _ACE_SOVEREIGNTY = "Cinematic noir photograph, deep shadows with single amber light source cutting through darkness, silhouette of a figure standing at the edge of a vast geometric structure, gold and midnight blue color palette, brutalist architecture, fog, tension and revelation, movie-poster composition, 1:1 square format, photorealistic cinematic quality, ";
+const _ACE_ARCHITECTURE = "Blueprint aesthetic photograph, holographic control room, architectural wireframes in amber and teal, sovereign command center, technical precision, structural mastery, 1:1 square format, photorealistic cinematic quality, ";
+const _ACE_WEALTH = "Obsidian and gold photograph, currency as energy visualization, liquid metal flowing through geometric channels, dark luxury, alchemical transformation, 1:1 square format, photorealistic cinematic quality, ";
+const _ACE_EXIT = "Cinematic photograph of chains dissolving into golden particles, figure breaking through a barrier into open landscape, transition from cage to cosmos, liberation energy, 1:1 square format, photorealistic cinematic quality, ";
+const _ACE_MEMETIC = "Neural network visualization photograph, data streams forming patterns, digital consciousness, electric amber on void black, the signal emerging from noise, 1:1 square format, photorealistic cinematic quality, ";
+const _ACE_TIME = "Shattered clock face with golden light bleeding through cracks, time as a physical material being bent, cosmic hourglass, control over temporal flow, 1:1 square format, photorealistic cinematic quality, ";
+
+const _CF_DARKPSYCH = "Surveillance-aesthetic photograph, clinical cold blue (#5A9CF5) lighting on concrete and steel, security camera angle, rain-slicked urban environment at night, teal (#00e5c7) accent light bleeding through shadows, noir detective film still, oppressive atmosphere, institutional architecture, 1:1 square format, photorealistic, ";
+const _CF_BURNOUT = "Industrial horror photograph, human silhouette inside a hamster wheel made of screens and notifications, desaturated cold palette with toxic green glow from devices, factory-floor atmosphere, extraction machinery aesthetic, 1:1 square format, photorealistic, ";
+const _CF_CONTAINMENT = "Clinical laboratory photograph, specimen under microscope, sterile white with single crack, the experiment revealing itself, institutional cold, 1:1 square format, photorealistic, ";
+const _CF_PATTERN = "Glitch aesthetic photograph, reality fragmenting into pixels, corrupt data overlay on physical space, matrix-style revelation, cold digital distortion, 1:1 square format, photorealistic, ";
+const _CF_INFOWAR = "War room command center photograph, wall of screens showing conflicting narratives, cold blue light, information as weaponry, classified document aesthetic, 1:1 square format, photorealistic, ";
+
 const IMAGE_NICHE_PREFIXES: Record<string, Record<Brand, string>> = {
-  dark_psychology: {
-    ace_richie:
-      "Cinematic noir photograph, deep shadows with single amber light source cutting through darkness, " +
-      "silhouette of a figure standing at the edge of a vast geometric structure, " +
-      "gold and midnight blue color palette, brutalist architecture, fog, tension and revelation, " +
-      "movie-poster composition, 1:1 square format, photorealistic cinematic quality, ",
-    containment_field:
-      "Surveillance-aesthetic photograph, clinical cold blue (#5A9CF5) lighting on concrete and steel, " +
-      "security camera angle, rain-slicked urban environment at night, " +
-      "teal (#00e5c7) accent light bleeding through shadows, noir detective film still, " +
-      "oppressive atmosphere, institutional architecture, 1:1 square format, photorealistic, ",
-  },
-  self_improvement: {
-    ace_richie:
-      "Golden hour cinematic photograph, figure ascending stone steps toward bright horizon, " +
-      "warm amber and teal sky, architectural grandeur, columns and open space, " +
-      "sense of elevation and breaking through, sovereign and majestic, " +
-      "wide lens perspective, 1:1 square format, photorealistic cinematic quality, ",
-    containment_field:
-      "Sterile corporate environment photograph, pristine white office with one shattered mirror, " +
-      "clinical fluorescent lighting, the illusion cracking, self-help books stacked like a prison, " +
-      "cold and revealing, deconstructed wellness aesthetic, 1:1 square format, photorealistic, ",
-  },
-  burnout: {
-    ace_richie:
-      "Cinematic photograph of chains dissolving into golden particles, " +
-      "figure walking away from a cubicle into open landscape at dawn, " +
-      "muted grays transitioning to warm amber, industrial to natural, " +
-      "liberation energy, the cage opening, 1:1 square format, photorealistic cinematic, ",
-    containment_field:
-      "Industrial horror photograph, human silhouette inside a hamster wheel made of screens and notifications, " +
-      "desaturated cold palette with toxic green glow from devices, " +
-      "factory-floor atmosphere, extraction machinery aesthetic, 1:1 square format, photorealistic, ",
-  },
-  quantum: {
-    ace_richie:
-      "Abstract cosmic photograph, human figure standing in a field of geometric light patterns, " +
-      "deep space indigo and electric gold, sacred geometry, observer effect visualization, " +
-      "reality bending at the edges, mystical but scientific, 1:1 square format, cinematic, ",
-    containment_field:
-      "Data-visualization aesthetic, reality glitching into matrix-like patterns, " +
-      "cold blue wireframe overlaid on physical space, information warfare visualization, " +
-      "quantum uncertainty as threat landscape, 1:1 square format, photorealistic digital art, ",
-  },
-  brand: {
-    ace_richie:
-      "Sovereign Synthesis brand image, midnight blue background with amber and teal accent lighting, " +
-      "architectural sovereignty, throne-like composition, gold geometric accents, " +
-      "power and intention, master architect energy, 1:1 square format, cinematic, ",
-    containment_field:
-      "Anonymous intelligence aesthetic, dark room with single cold blue (#5A9CF5) light on a classified document, " +
-      "noir atmosphere, information broker setting, teal (#00e5c7) accent glow, shadows and revelation, " +
-      "the truth behind the curtain, void (#0a0a0f) background, 1:1 square format, photorealistic noir, ",
-  },
+  // ── ACE RICHIE niches ──
+  "sovereignty":            { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
+  "authority":              { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
+  "system-mastery":         { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
+  "architecture":           { ace_richie: _ACE_ARCHITECTURE, containment_field: _CF_CONTAINMENT },
+  "network-architecture":   { ace_richie: _ACE_ARCHITECTURE, containment_field: _CF_CONTAINMENT },
+  "decision-architecture":  { ace_richie: _ACE_ARCHITECTURE, containment_field: _CF_CONTAINMENT },
+  "wealth-frequency":       { ace_richie: _ACE_WEALTH, containment_field: _CF_DARKPSYCH },
+  "resource-dynamics":      { ace_richie: _ACE_WEALTH, containment_field: _CF_DARKPSYCH },
+  "exit-velocity":          { ace_richie: _ACE_EXIT, containment_field: _CF_BURNOUT },
+  "creative-leverage":      { ace_richie: _ACE_EXIT, containment_field: _CF_BURNOUT },
+  "legacy-engineering":     { ace_richie: _ACE_EXIT, containment_field: _CF_BURNOUT },
+  "memetic-engineering":    { ace_richie: _ACE_MEMETIC, containment_field: _CF_PATTERN },
+  "signal-discipline":      { ace_richie: _ACE_MEMETIC, containment_field: _CF_PATTERN },
+  "pattern-recognition":    { ace_richie: _ACE_MEMETIC, containment_field: _CF_PATTERN },
+  "time-sovereignty":       { ace_richie: _ACE_TIME, containment_field: _CF_CONTAINMENT },
+  // ── CONTAINMENT FIELD niches ──
+  "dark-psychology":        { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
+  "manipulation-exposed":   { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
+  "emotional-engineering":  { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
+  "burnout":                { ace_richie: _ACE_EXIT, containment_field: _CF_BURNOUT },
+  "compliance-machinery":   { ace_richie: _ACE_EXIT, containment_field: _CF_BURNOUT },
+  "social-programming":     { ace_richie: _ACE_EXIT, containment_field: _CF_BURNOUT },
+  "containment":            { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_CONTAINMENT },
+  "frame-control":          { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_CONTAINMENT },
+  "perception-management":  { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_CONTAINMENT },
+  "pattern-interrupt":      { ace_richie: _ACE_MEMETIC, containment_field: _CF_PATTERN },
+  "cognitive-traps":        { ace_richie: _ACE_MEMETIC, containment_field: _CF_PATTERN },
+  "identity-hijacking":     { ace_richie: _ACE_MEMETIC, containment_field: _CF_PATTERN },
+  "information-warfare":    { ace_richie: _ACE_MEMETIC, containment_field: _CF_INFOWAR },
+  "narrative-capture":      { ace_richie: _ACE_MEMETIC, containment_field: _CF_INFOWAR },
+  "manufactured-consent":   { ace_richie: _ACE_MEMETIC, containment_field: _CF_INFOWAR },
 };
 
 /** Fallback for unknown niches */
@@ -590,40 +616,32 @@ SIGN-OFF: "— The Containment Field"
 WHAT YOU ARE NOT: Edgy for edge's sake. Conspiracy theory. Joker memes. You never use terms like "sigma" or "alpha." You don't quote Marcus Aurelius. You are ORIGINAL ANALYSIS presented in a clinical format. Every post should feel like reading a field report from inside the machine.`
 };
 
-/** Niche-specific content direction — tells Anita WHAT to write about, not just HOW */
-const NICHE_CONTENT_DIRECTION: Record<string, Record<Brand, string>> = {
-  dark_psychology: {
-    ace_richie: "Focus on a specific dark psychology tactic (gaslighting, triangulation, intermittent reinforcement, trauma bonding) and show how recognizing it is the first step to sovereignty. Be specific — name the tactic, show how it works in everyday life, then flip it into a defense tool.",
-    containment_field: "Expose a specific manipulation mechanism used by institutions, media, or social systems. Clinical breakdown — how the tactic works neurologically, who deploys it, and what the countermeasure is. Make the reader feel like they've been given classified intel.",
-  },
-  self_improvement: {
-    ace_richie: "Challenge a mainstream self-improvement belief that's actually keeping people trapped. 'The Simulation told you to journal every morning. Here's what actually rewires your neural pathways.' Be contrarian but backed by specifics.",
-    containment_field: "Deconstruct a self-help industry tactic — how 'positive thinking' is used as a control mechanism, how goal-setting frameworks create dependency loops, how the wellness industry monetizes your insecurity. Expose the business model behind the advice.",
-  },
-  burnout: {
-    ace_richie: "Speak to the person who knows they're in a cage but hasn't figured out the door yet. The 9-to-5 isn't just tiring — it's architecturally designed to extract your creative energy before you can use it for yourself. Offer the blueprint for the transition.",
-    containment_field: "Expose the industrial design of burnout — how work culture, notification systems, and 'always-on' expectations are ENGINEERED to deplete cognitive resources. Show the factory floor of attention extraction.",
-  },
-  quantum: {
-    ace_richie: "Bridge quantum physics concepts to sovereignty — observer effect as evidence that attention creates reality, entanglement as proof that disconnecting from The Simulation changes your field. Make the science feel mystical AND practical.",
-    containment_field: "Use quantum mechanics as a framework for understanding information warfare — superposition of narratives, observer-dependent reality in media, collapse of truth into whatever gets measured. Make physics feel like a threat model.",
-  },
-  brand: {
-    ace_richie: "Personal story or origin moment. Why Sovereign Synthesis exists. What happened to Ace that broke the simulation. Authenticity > polish. This is the 'I built this because...' slot.",
-    containment_field: "Meta-analysis of The Containment Field itself — why anonymous intelligence matters, why this channel exists, what the reader gains by paying attention. Self-referential but not self-promotional.",
-  },
-};
+/**
+ * Get content direction from thesis angles.
+ * The thesis seed IS the direction — deeply specific, gives the LLM a real angle.
+ * Falls back to a generic brand-appropriate direction if no seed was selected.
+ */
+function getContentDirection(brand: Brand, niche: string, thesisSeed: string | null): string {
+  if (thesisSeed) return thesisSeed;
+
+  // Generic fallbacks per brand (should rarely fire — all 30 niches have angles)
+  const fallbacks: Record<Brand, string> = {
+    ace_richie: `Write about ${niche.replace(/-/g, " ")} from the sovereign architect frame. Be deeply specific — name the mechanism, show how it operates in everyday life, and flip it into a sovereignty tool. No vague motivation.`,
+    containment_field: `Expose the hidden mechanism behind ${niche.replace(/-/g, " ")}. Clinical breakdown — how the system works, who benefits from your ignorance, and what the countermeasure is. Make the reader feel like they've received a classified field report.`,
+  };
+  return fallbacks[brand];
+}
 
 async function generateContent(
   llm: LLMProvider,
   brand: Brand,
   niche: string,
-  hookStyle: string,
+  thesisSeed: string | null,
   timeSlot: string,
   platforms: string[]
 ): Promise<{ universal: string; variants: Record<string, string> }> {
   const brandVoice = BRAND_VOICE_BLUEPRINTS[brand];
-  const nicheDirection = NICHE_CONTENT_DIRECTION[niche]?.[brand] || "Write about today's theme with specificity and pattern-interrupting energy.";
+  const contentDirection = getContentDirection(brand, niche, thesisSeed);
 
   const platformInstructions = platforms
     .map((p) => `- ${p.toUpperCase()}: ${PLATFORM_NOTES[p] || "Standard social post format."}`)
@@ -631,9 +649,9 @@ async function generateContent(
 
   const prompt = `${brandVoice}
 
-TODAY'S MISSION: ${niche.replace(/_/g, " ").toUpperCase()}
-CONTENT DIRECTION: ${nicheDirection}
-HOOK ENERGY: "${hookStyle}"
+TODAY'S MISSION: ${niche.replace(/-/g, " ").toUpperCase()}
+THESIS ANGLE — THIS IS YOUR SPECIFIC CONTENT DIRECTION (do NOT just restate it — BUILD on it, extend it, make it hit harder):
+${contentDirection}
 TIME SLOT: ${timeSlot}
 
 Generate ONE post concept adapted for these platforms:
@@ -644,6 +662,7 @@ RULES:
 - Every version must hit the same core message but be NATIVE to each platform's format
 - The hook MUST be in the first line — it's what stops the scroll
 - Be SPECIFIC. Name tactics, cite mechanisms, reference real systems. No vague motivational language.
+- The thesis angle above gives you a precise starting point — use it as a launchpad, not a cage. Add your own examples and extensions.
 - No hashtag spam — max 2 hashtags on any platform, and only if they serve the message
 - Do NOT include platform labels in the actual post text
 
@@ -683,7 +702,8 @@ ${platforms.map((p) => `  "${p}": "Platform-adapted version for ${p}"`).join(",\
   } catch (err: any) {
     console.error(`[ContentEngine] LLM generation failed: ${err.message}`);
     // Fallback: return a simple post
-    const fallback = `${hookStyle} #${niche.replace(/_/g, "")}`;    const variants: Record<string, string> = {};
+    const fallback = `${niche.replace(/-/g, " ")} #${niche.replace(/-/g, "")}`;
+    const variants: Record<string, string> = {};
     for (const p of platforms) variants[p] = fallback;
     return { universal: fallback, variants };
   }
@@ -701,18 +721,13 @@ export async function dailyContentProduction(llm: LLMProvider, force = false): P
 
   const today = new Date();
   const dayOfWeek = today.getDay();
-  const nicheConfig = NICHE_ROTATION[dayOfWeek];
-
-  if (!nicheConfig) {
-    console.warn("[ContentEngine] No niche configured for day", dayOfWeek);
-    return 0;
-  }
 
   // Weekend = repost top performers (skip generation)
-  if (nicheConfig.niche === "top_performer_repost") {
+  if (dayOfWeek === 0 || dayOfWeek === 6) {
     console.log("📊 [ContentEngine] Weekend — queueing top performer reposts instead of new content");
     return await queueWeekendReposts();
   }
+
   let channelMap: BrandChannelMap;
   try {
     channelMap = await discoverChannels();
@@ -725,6 +740,11 @@ export async function dailyContentProduction(llm: LLMProvider, force = false): P
   const dateStr = today.toISOString().split("T")[0]; // YYYY-MM-DD
 
   for (const brand of BRANDS) {
+    // Each brand gets its own niche for the day (independent rotation)
+    const { niche, thesisSeed } = getTodaysNiche(brand, today);
+
+    if (niche === "top_performer_repost") continue; // safety — weekends handled above
+
     const channels = channelMap[brand];
     if (channels.length === 0) {
       console.warn(`[ContentEngine] No channels for ${brand} — skipping`);
@@ -748,10 +768,10 @@ export async function dailyContentProduction(llm: LLMProvider, force = false): P
           }
         }
 
-        console.log(`✍️ [ContentEngine] Generating: ${brand} / ${nicheConfig.niche} / ${slot.label}`);
+        console.log(`✍️ [ContentEngine] Generating: ${brand} / ${niche} / ${slot.label}`);
 
         const { universal, variants } = await generateContent(
-          llm, brand, nicheConfig.niche, nicheConfig.hookStyle, slot.label, platforms
+          llm, brand, niche, thesisSeed, slot.label, platforms
         );
 
         // ── IMAGE GENERATION — SESSION 104: FLUX POD BATCH ──
@@ -759,7 +779,7 @@ export async function dailyContentProduction(llm: LLMProvider, force = false): P
         // and let the FLUX pod batch job generate images every 3 days (~$0.07/batch).
         // Posts go out text-only immediately (IG/TikTok skipped if no image).
         // When FLUX batch runs, it fills media_url and those platforms light up.
-        const nichePrefixes = IMAGE_NICHE_PREFIXES[nicheConfig.niche];
+        const nichePrefixes = IMAGE_NICHE_PREFIXES[niche];
         const nichePrefix = nichePrefixes?.[brand] || IMAGE_NICHE_FALLBACK[brand];
         const brandSuffix = BRAND_IMAGE_STYLE[brand];
         const conceptSeed = universal.replace(/[#@\n"]/g, " ").replace(/—.*$/, "").slice(0, 100).trim();
@@ -772,7 +792,7 @@ export async function dailyContentProduction(llm: LLMProvider, force = false): P
 
         await supabasePost("content_engine_queue", {
           brand,
-          niche: nicheConfig.niche,
+          niche,
           time_slot: slot.label,
           scheduled_date: dateStr,
           scheduled_time: scheduledTime.toISOString(),
@@ -794,7 +814,8 @@ export async function dailyContentProduction(llm: LLMProvider, force = false): P
     }
   }
 
-  console.log(`🏁 [ContentEngine] Daily production complete: ${generated} pieces generated`);  return generated;
+  console.log(`🏁 [ContentEngine] Daily production complete: ${generated} pieces generated`);
+  return generated;
 }
 
 /**
@@ -1242,12 +1263,13 @@ export async function draftAutoPublisher(): Promise<number> {
   for (const draft of publishable) {
     try {
       // Determine brand from niche/platform heuristics or default to ace_richie
-      // Containment Field drafts typically mention "containment" or have dark_psychology niche
+      // Containment Field drafts: niche is in CF allowlist, or body/title mention containment/tcf
       let brand: Brand = "ace_richie";
       const bodyLower = (draft.body || "").toLowerCase();
       const titleLower = (draft.title || "").toLowerCase();
+      const draftNiche = draft.niche || "";
       if (
-        draft.niche === "dark_psychology" ||
+        (CONTAINMENT_FIELD_NICHES as readonly string[]).includes(draftNiche) ||
         bodyLower.includes("containment") ||
         titleLower.includes("containment") ||
         titleLower.includes("tcf")
@@ -1258,7 +1280,7 @@ export async function draftAutoPublisher(): Promise<number> {
       // Insert into content_engine_queue with immediate scheduling
       await supabasePost("content_engine_queue", {
         brand,
-        niche: draft.niche || "self_improvement",
+        niche: draft.niche || "sovereignty",
         time_slot: "draft_promotion",
         scheduled_date: dateStr,
         scheduled_time: now.toISOString(),
@@ -1416,6 +1438,6 @@ export async function contentEngineStatus(): Promise<string> {
     `Ready: ${ready.length} | Posted: ${posted.length} | Failed: ${failed.length}\n` +
     `Target: 12/day (6 slots × 2 brands)\n` +
     `Channels: ${channelInfo}\n` +
-    `Niche today: ${NICHE_ROTATION[new Date().getDay()]?.niche || "unknown"}`
+    `Niche today: Ace=${getTodaysNiche("ace_richie").niche}, CF=${getTodaysNiche("containment_field").niche}`
   );
 }

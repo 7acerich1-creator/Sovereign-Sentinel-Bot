@@ -558,14 +558,11 @@ def generate_images(
     Takes up to 50 prompts, generates images, uploads to R2, returns URLs.
     Used by Content Engine to replace Imagen 4 ($3/day → ~$0.07/batch).
     """
-    from pipelines.flux import ensure_loaded, generate_scene_images
+    from pipelines.flux import generate_scene_images
     from pipelines.r2 import is_configured as r2_configured, _get_client
 
     log.info("image_batch_start", count=len(req.items), brand=req.brand.value)
     t0 = time.monotonic()
-
-    # Ensure FLUX is loaded
-    ensure_loaded()
 
     # Create a temp job dir for this batch
     batch_id = f"imgbatch_{uuid.uuid4().hex[:12]}"

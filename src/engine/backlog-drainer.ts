@@ -10,6 +10,7 @@ import { S3Client, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import {
   getDailyCallCount,
   isDailyBudgetExhausted,
+  isBufferQuotaExhausted,
   getBufferChannels,
 } from "./buffer-graphql";
 import { SocialSchedulerPostTool } from "../tools/social-scheduler";
@@ -198,8 +199,9 @@ export async function drainBacklog(): Promise<void> {
     return;
   }
 
-  // Reserve 80 calls for ContentEngine + normal operations
-  const RESERVED_BUDGET = 80;
+  // SESSION 105: Reserve 100 calls for ContentEngine sweeps + channel discovery + /drain manual.
+  // In-memory counter resets on deploy, so be conservative — assume we might be mid-day.
+  const RESERVED_BUDGET = 100;
   const availableBudget = 240 - getDailyCallCount() - RESERVED_BUDGET;
   if (availableBudget <= 0) {
     console.log(`⏸️ [BacklogDrainer] Not enough headroom (${availableBudget} calls available after reserve). Retry in 1h.`);
@@ -281,8 +283,8 @@ export async function drainBacklog(): Promise<void> {
     console.log(`📤 [BacklogDrainer] Batch: ${batchFolder} (${clips.length} clips, brand=${brand})`);
 
     for (const clip of clips) {
-      // Budget check before each clip
-      if (isDailyBudgetExhausted() || apiCallsUsed >= availableBudget) {
+      // Budget check before each clip — local counter OR server-side 429 flag
+      if (isDailyBudgetExhausted() || isBufferQuotaExhausted() || apiCallsUsed >= availableBudget) {
         console.warn(`⏸️ [BacklogDrainer] Budget limit reached after ${totalScheduled} posts. Will retry remaining in 1h.`);
         setTimeout(() => drainBacklog(), 60 * 60 * 1000);
         return;

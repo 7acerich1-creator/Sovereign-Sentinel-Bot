@@ -832,26 +832,33 @@ export async function distributionSweep(): Promise<number> {
 
   const now = new Date().toISOString();
 
+  // SESSION 105: Cap drafts per sweep to stay inside the 250/day Buffer budget.
+  // At ~5 Buffer channels per draft, 6 drafts = ~30 API calls. Safe ceiling.
+  const SWEEP_DRAFT_CAP = 6;
+
   // Fetch ready drafts whose time has come
   const readyDrafts = await supabaseQuery(
     "content_engine_queue",
-    `status=eq.ready&scheduled_time=lte.${now}&order=scheduled_time.asc&limit=5`
+    `status=eq.ready&scheduled_time=lte.${now}&order=scheduled_time.asc&limit=${SWEEP_DRAFT_CAP}`
   );
 
   // CE-6 FIX: Also pick up "partial" items — channels that failed can be retried without duplicating successes
+  // SESSION 105: Capped at 4 (was 12 — caused 60+ API calls on retry storms)
   const partialDrafts = await supabaseQuery(
     "content_engine_queue",
-    `status=eq.partial&order=scheduled_time.asc&limit=12`
+    `status=eq.partial&order=scheduled_time.asc&limit=4`
   );
 
   // SESSION 92 FIX: Retry "failed" drafts too — previously abandoned forever.
   // Cap at 3 retries (check retry_count column, default 0) to avoid infinite loops.
   const failedDrafts = await supabaseQuery(
     "content_engine_queue",
-    `status=eq.failed&retry_count=lt.3&order=scheduled_time.asc&limit=5`
+    `status=eq.failed&retry_count=lt.3&order=scheduled_time.asc&limit=3`
   );
 
-  const drafts = [...readyDrafts, ...partialDrafts, ...failedDrafts];
+  // SESSION 105: Hard cap total drafts at SWEEP_DRAFT_CAP to prevent budget blowout
+  const allDrafts = [...readyDrafts, ...partialDrafts, ...failedDrafts];
+  const drafts = allDrafts.slice(0, SWEEP_DRAFT_CAP);
 
   if (drafts.length === 0) return 0;
 

@@ -2100,7 +2100,7 @@ async function main() {
   scheduler.add({
     name: "Backlog Drainer — 6h Auto",
     intervalMs: SIX_HOURS_MS,
-    nextRun: new Date(Date.now() + 10 * 60 * 1000), // first run 10min after boot (let channels warm)
+    nextRun: new Date(Date.now() + 30 * 60 * 1000), // SESSION 105: 30min after boot (was 10m — overlapped with distribution sweep at 5m, both competed for budget)
     enabled: true,
     handler: async () => {
       if (isAutonomousPaused()) return;
@@ -2150,9 +2150,9 @@ async function main() {
   });
 
   // SESSION 97: Distribution sweep RE-ENABLED at 6-hour intervals (was 5-min, killed in S92).
-  // 4 runs/day max. Each run posts ready ContentEngine drafts to Buffer + Facebook direct.
+  // 4 runs/day max. Each run posts up to 6 drafts to Buffer + Facebook direct.
   // Buffer quota gate (S97b) skips Buffer channels if quota blown, Facebook still fires.
-  // At 6h intervals with ~6 drafts/run, worst case = 24 Buffer API calls/day. Safe.
+  // SESSION 105: Capped at 6 drafts/sweep × ~5 channels = ~30 API calls/sweep. 4 sweeps/day = ~120 max.
   scheduler.add({
     name: "Content Engine — Distribution Sweep (6h)",
     intervalMs: 6 * 60 * 60 * 1000, // 6 hours

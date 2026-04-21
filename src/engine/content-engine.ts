@@ -42,11 +42,10 @@ type Brand = typeof BRANDS[number];
 const IMAGE_REQUIRED_PLATFORMS = new Set(["instagram", "tiktok"]);
 // Platforms that accept text-only posts
 // Buffer supports ALL connected channels — YouTube (community), IG, TikTok, X, Threads, LinkedIn, FB
-const TEXT_OK_PLATFORMS = new Set(["x", "twitter", "threads", "youtube", "linkedin", "facebook", "bluesky"]);
+const TEXT_OK_PLATFORMS = new Set(["threads", "youtube", "linkedin", "facebook", "bluesky"]);
 // Threads hard limit from Meta API (500 chars max)
 const THREADS_CHAR_LIMIT = 500;
 const BLUESKY_CHAR_LIMIT = 300;
-const X_CHAR_LIMIT = 280;
 
 // ── IG Frequency Override (prevent shadowban) ──
 // Instagram accounts are capped to protect account health
@@ -62,12 +61,11 @@ const IG_FREQUENCY_OVERRIDE: Record<Brand, { maxPerDay: number; allowedSlots: st
 };
 // Platform-specific character/style notes for LLM
 const PLATFORM_NOTES: Record<string, string> = {
-  x: "Max 280 chars. Punchy, direct. Hashtags: 1-2 max. End with a hook or question.",
   threads: "Conversational, raw, authentic. Like talking to a friend who gets it. Medium length.",
   instagram: "Hook in first line (gets truncated). Use line breaks. 3-5 relevant hashtags at end.",
   tiktok: "Short, scroll-stopping. Speak like the viewer's internal voice. Under 150 chars ideal.",
   linkedin: "TROJAN HORSE: Use corporate/executive language — efficiency, systems, automation, architecture, ROI, leverage, strategic. Present as a high-level Systems Engineer sharing operational insights. Deliver sovereign synthesis payload INSIDE professional framing. Max 3000 chars. 3-5 industry hashtags (#SystemsThinking #Automation #Leadership). NEVER sound esoteric or guru-like — LinkedIn's algorithm and corporate audience will filter it as noise.",
-  bluesky: "High-velocity memetic trigger for The Containment Field. Clinical, pattern-interrupt, raw transmission. Like a declassified briefing dropped on a decentralized grid. Max 300 chars (Bluesky limit). 0 hashtags. No corporate polish — this is the containment frequency.",
+  bluesky: "High-velocity memetic trigger for The Containment Field. Clinical, pattern-interrupt, raw transmission. Like a declassified briefing dropped on a decentralized grid. HARD MAX 275 chars (Bluesky enforces 300 — keep under 275 to avoid truncation). 0 hashtags. No corporate polish — this is the containment frequency.",
 };
 
 // ── Types ──
@@ -915,10 +913,6 @@ export async function distributionSweep(): Promise<number> {
         // CE-7 FIX: Bluesky has a 300-character hard limit (AT Protocol)
         if (service === "bluesky" && postText.length > BLUESKY_CHAR_LIMIT) {
           postText = postText.slice(0, BLUESKY_CHAR_LIMIT - 3) + "...";
-        }
-        // CE-8 FIX: X/Twitter has a 280-character hard limit
-        if ((service === "x" || service === "twitter") && postText.length > X_CHAR_LIMIT) {
-          postText = postText.slice(0, X_CHAR_LIMIT - 3) + "...";
         }
 
         try {

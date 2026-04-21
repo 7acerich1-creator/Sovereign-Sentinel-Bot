@@ -2826,7 +2826,7 @@ async function main() {
     if (!domain || typeof domain !== "string") {
       return JSON.stringify({ status: "error", message: "Missing or invalid 'domain'. Expected 'tiktok' or 'instagram'." });
     }
-    const allowedDomains = ["tiktok", "instagram", "youtube", "twitter", "threads"];
+    const allowedDomains = ["tiktok", "instagram", "youtube", "threads"];
     const normalizedDomain = domain.toLowerCase().trim();
     if (!allowedDomains.includes(normalizedDomain)) {
       return JSON.stringify({ status: "error", message: `Invalid domain '${domain}'. Allowed: ${allowedDomains.join(", ")}` });
@@ -2918,7 +2918,7 @@ async function main() {
 
   // ── /api/browser/cookie-status — Check which domains have cookies saved (multi-account) ──
   webhookServer.register("/api/browser/cookie-status", async () => {
-    const domains = ["tiktok", "instagram", "youtube", "twitter", "threads"];
+    const domains = ["tiktok", "instagram", "youtube", "threads"];
     const accounts = ["acerichie", "tcf"];
     const status: Record<string, Record<string, { has_cookies: boolean; cookie_count: number }>> = {};
 
@@ -3810,7 +3810,7 @@ async function main() {
                   `If the payload includes video/clip metadata, use publish_video for video platforms (YouTube, TikTok, Instagram). ` +
                   `Do NOT just file a briefing or analyze metrics — actually SCHEDULE the content using the posting tools.`,
                 caption_weaponization: `EXECUTION ORDER: Write platform-ready captions from the content provided. ` +
-                  `Create at least 3 variations optimized for different platforms (X/Twitter, Instagram, Threads). ` +
+                  `Create at least 3 variations optimized for different platforms (Instagram, Threads, Bluesky). ` +
                   `Each caption must include hooks, hashtags, and a CTA. ` +
                   `Save ALL captions via save_content_draft so they're visible in Mission Control.`,
                 narrative_weaponization: `EXECUTION ORDER: Transform this content into publishable copy. ` +

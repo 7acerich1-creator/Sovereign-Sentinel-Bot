@@ -186,7 +186,6 @@ interface PlatformCopy {
   youtube_short: string;
   tiktok: string;
   instagram: string;
-  x_twitter: string;
   threads: string;
   linkedin: string;
   facebook: string;
@@ -833,7 +832,6 @@ PLATFORM-SPECIFIC OPTIMIZATION RULES (obey these exactly):
 - YOUTUBE_SHORT: Hook in first 3 words of title. Max 100 chars. Include #Shorts. Title MUST come from the assigned angle's vocabulary, not Sovereign lexicon. The youtube_short VALUE MUST be structured as: "<Title>\\n\\n<1-2 sentence hook>\\n\\nRelated topics: <5-7 comma-separated angle keywords>" — the Related topics line is MANDATORY (tag smuggling).
 - TIKTOK: Hook within 1.5 seconds of reading. 2-3 lines + exactly 5 hashtags drawn from the ASSIGNED ANGLE's demographic (NOT #darkpsychology/#sovereignty defaults unless the angle IS those). Pattern-interrupt opening in the assigned voice.
 - INSTAGRAM: Reels caption from the assigned angle's emotional entry. 3-5 lines + 8-12 hashtags tailored to THAT demographic. First line IS the hook.
-- X_TWITTER: Max 280 chars. Speak the assigned demographic's language. 0-2 hashtags max. Write something that demographic would QUOTE-TWEET.
 - THREADS: 2-3 lines in the assigned voice. 0 hashtags. Like texting a smart friend who shares that demographic.
 - LINKEDIN: TROJAN HORSE — write as a high-level Systems Engineer sharing operational insights. Use CORPORATE language: efficiency, systems, automation, architecture, ROI, leverage, strategic, scalable. The sovereign payload is INSIDE the professional framing. From the assigned angle (e.g. Corporate Burnout → contrarian ex-exec exposing operational failures; Tech/AI Realism → staff engineer on system design; Wealth → capital architect on leverage mechanics). 2-3 sentences. 3-5 INDUSTRY hashtags (#SystemsThinking #Automation #Leadership #OperationalExcellence). NEVER sound esoteric, guru-like, or use quantum/frequency/monad vocabulary — LinkedIn's algorithm will kill reach.
 - FACEBOOK: Shareable insight format in the assigned angle's voice. 2-3 lines + a question the assigned demographic would answer.
@@ -845,7 +843,7 @@ GLITCH (pattern interrupt that lands in the assigned demographic's world) → PI
 CLIPS:
 ${clipDescriptions}
 
-Return ONLY valid JSON — an array of objects, one per clip in the exact order shown above, each with keys: youtube_short, tiktok, instagram, x_twitter, threads, linkedin, facebook, bluesky.
+Return ONLY valid JSON — an array of objects, one per clip in the exact order shown above, each with keys: youtube_short, tiktok, instagram, threads, linkedin, facebook, bluesky.
 All values are strings. The youtube_short string MUST contain a title, a hook, and a "Related topics: ..." trailing line (tag smuggling). No two clips may reuse the same angle keywords.`;
 
     try {
@@ -889,7 +887,6 @@ All values are strings. The youtube_short string MUST contain a title, a hook, a
           youtube_short: `${firstPattern} #Shorts\n\n${secondPattern}\n\nRelated topics: ${seeds}`,
           tiktok: `${firstPattern}\n\n${secondPattern}\n\n${tagline5}`,
           instagram: `${firstPattern}\n\n${secondPattern}\n\n${tagline5}`,
-          x_twitter: `${firstPattern} — ${angle.name.toLowerCase()} edition.`,
           threads: `${firstPattern}\n\n${secondPattern}`,
           linkedin: `${firstPattern}\n\n${secondPattern}\n\n#${angle.id.replace(/_/g, "")}`,
           facebook: `${firstPattern}\n\n${secondPattern}`,
@@ -1158,14 +1155,13 @@ async function distributeClips(
 //   - TikTok: REQUIRES video or images. Text-only WILL FAIL.
 //   - Instagram: REQUIRES image or video. Text-only WILL FAIL.
 //   - YouTube: REQUIRES video (Shorts only). Text-only WILL FAIL. No community posts via Buffer.
-//   - X/Twitter, Threads, LinkedIn, Facebook: text-only works fine.
+//   - Threads, LinkedIn, Facebook: text-only works fine.
 // Strategy: Clips with publicUrl → video platforms get video URL as media.
 //           Clips without publicUrl → skip video platforms, text-only to text platforms.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 // Map Buffer service names to our platform copy keys
 const SERVICE_TO_COPY_KEY: Record<string, keyof PlatformCopy> = {
-  twitter: "x_twitter",
   threads: "threads",
   linkedin: "linkedin",
   facebook: "facebook",
@@ -1182,7 +1178,7 @@ const SERVICE_TO_COPY_KEY: Record<string, keyof PlatformCopy> = {
 const MEDIA_REQUIRED_SERVICES = new Set(["tiktok", "instagram", "youtube"]);
 
 // Platforms that accept text-only posts
-const TEXT_OK_SERVICES = new Set(["twitter", "threads", "linkedin", "facebook", "mastodon", "googlebusiness", "bluesky"]);
+const TEXT_OK_SERVICES = new Set(["threads", "linkedin", "facebook", "mastodon", "googlebusiness", "bluesky"]);
 
 async function scheduleBufferWeek(
   clips: ClipMeta[],
@@ -1285,8 +1281,8 @@ async function scheduleBufferWeek(
         `${schedDate.toISOString().split("T")[0]}T${timeSlots[slotIdx]}Z`
       );
 
-      const copyKey = SERVICE_TO_COPY_KEY[channel.service] || "x_twitter";
-      const postText = (copy as any)[copyKey] || copy.x_twitter || copy.threads ||
+      const copyKey = SERVICE_TO_COPY_KEY[channel.service] || "threads";
+      const postText = (copy as any)[copyKey] || copy.threads ||
         `Firmware Update incoming. sovereign-synthesis.com #SovereignSynthesis #${niche.replace(/_/g, "")}`;
 
       try {
@@ -1315,7 +1311,7 @@ async function scheduleBufferWeek(
     // Routes to ace_richie or containment_field page based on brand param.
     {
       const fbCopyKey = "facebook";
-      const fbText = (copy as any)[fbCopyKey] || copy.x_twitter || copy.threads ||
+      const fbText = (copy as any)[fbCopyKey] || copy.threads ||
         (brand === "ace_richie"
           ? `Firmware Update incoming. sovereign-synthesis.com #SovereignSynthesis #${niche.replace(/_/g, "")}`
           : `The containment field runs deeper than you think. sovereign-synthesis.com #TheContainmentField #${niche.replace(/_/g, "")}`);
@@ -1907,7 +1903,6 @@ export async function executeFullPipeline(
         youtube_short: `DRY RUN — Clip ${clip.index + 1} #Shorts #SovereignSynthesis`,
         tiktok: `DRY RUN — The simulation cracks. Clip ${clip.index + 1}\n#darkpsychology #mindset`,
         instagram: `DRY RUN — Protocol 77 activated.\n\n#sovereignty #mindset #protocol77`,
-        x_twitter: `DRY RUN — The Firmware Update continues. sovereign-synthesis.com`,
         threads: `DRY RUN — The architecture of liberation, piece by piece.`,
         linkedin: `DRY RUN — A framework for sovereign execution. #MindsetShift`,
         facebook: `DRY RUN — Full protocol at sovereign-synthesis.com`,

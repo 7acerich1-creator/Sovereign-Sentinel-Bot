@@ -9,7 +9,7 @@
 
 export interface SocialOptimizationContext {
   contentType: "faceless_video" | "short_clip" | "long_form" | "carousel" | "text_post";
-  platform: "youtube_shorts" | "tiktok" | "instagram_reels" | "x_twitter" | "threads" | "linkedin" | "facebook";
+  platform: "youtube_shorts" | "tiktok" | "instagram_reels" | "threads" | "linkedin" | "facebook" | "bluesky";
   targetAudience: string;
   sourceTitle: string;
   niche: string;
@@ -114,10 +114,6 @@ export const PLATFORM_DEFAULTS = {
     optimalHashtags: 10,     // 8-12 is the sweet spot for Reels
     shouldShareToFeed: true,
     type: "reel" as const,
-  },
-  x_twitter: {
-    maxLength: 280,
-    optimalHashtags: 2,      // X penalizes hashtag-heavy posts
   },
   threads: {
     maxLength: 500,

@@ -727,7 +727,7 @@ export async function generateImageBatch(
         "POST",
         "/generate-images",
         {
-          body: { items, brand, video_mode: true },
+          body: { items, brand, video_mode: false },  // SESSION 105: disabled while debugging pod 500
           signal: AbortSignal.timeout(10 * 60 * 1000), // 10 min for batch
         },
       );

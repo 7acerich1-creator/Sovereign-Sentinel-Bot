@@ -504,9 +504,14 @@ async function supabaseQuery(table: string, query: string): Promise<any[]> {
         Authorization: `Bearer ${key}`,
       },
     });
-    if (!resp.ok) return [];
+    if (!resp.ok) {
+      const errBody = await resp.text().catch(() => "");
+      console.error(`[supabaseQuery] ${table} ${resp.status}: ${errBody.slice(0, 300)}`);
+      return [];
+    }
     return (await resp.json()) as any[];
-  } catch {
+  } catch (err: any) {
+    console.error(`[supabaseQuery] ${table} fetch error: ${err.message}`);
     return [];
   }
 }

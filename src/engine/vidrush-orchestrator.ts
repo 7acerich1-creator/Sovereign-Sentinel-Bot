@@ -32,7 +32,7 @@ import { produceFacelessVideo, generateStandaloneShorts, renderAudio, type Facel
 // Retained in rechop-pipeline.ts for retroactive shorts from existing videos.
 // import { curateShorts, type CuratedShort, type CuratorResult, type VerticalScene } from "./shorts-curator";
 import { withPodSession } from "../pod/session";
-import { produceShort } from "../pod/runpod-client";
+import { produceShort, podTTS } from "../pod/runpod-client";
 import type { ShortJobSpec, ShortScene } from "../pod/types";
 import { YouTubeLongFormPublishTool } from "../tools/video-publisher";
 import {
@@ -1734,133 +1734,117 @@ export async function executeFullPipeline(
 
         clips = [];
 
-        interface PreparedStandaloneShort {
-          index: number;
-          spec: ShortJobSpec;
-          title: string;
-          hookText: string;
-          duration: number;
-          vSceneCount: number;
-        }
-        const podQueue: PreparedStandaloneShort[] = [];
+        // SESSION 105: Single pod session for TTS (XTTS) + render — everything on GPU.
+        // Old flow: Railway edge-tts/ElevenLabs → upload WAV → pod render.
+        // New flow: pod XTTS → upload WAV → pod render. Zero Railway TTS dependency.
+        try {
+          await withPodSession(async (handle) => {
+            // Build a podTTS-backed ttsFn for renderAudio
+            const xttsForBrand = async (text: string, b: "ace_richie" | "containment_field"): Promise<Buffer> => {
+              const result = await podTTS(handle, { text, brand: b });
+              return result.audioBuffer;
+            };
 
-        for (let i = 0; i < standaloneShorts.length; i++) {
-          const standalone = standaloneShorts[i];
-          const shortJobId = `${jobId}_standalone_${i}`;
+            for (let i = 0; i < standaloneShorts.length; i++) {
+              const standalone = standaloneShorts[i];
+              const shortJobId = `${jobId}_standalone_${i}`;
 
-          // ── Step A: TTS the standalone short script ──
-          await progress("STEP 4/8", `TTS for standalone short ${i + 1}/${standaloneShorts.length}: "${standalone.script.title.slice(0, 40)}..."`);
-          let audioPath: string;
-          let audioDuration: number;
-          let segDurations: number[];
-          try {
-            const audioResult = await renderAudio(standalone.script, shortJobId);
-            audioPath = audioResult.audioPath;
-            segDurations = audioResult.segmentDurations;
-            audioDuration = segDurations.reduce((a, b) => a + b, 0);
-            console.log(`  🎤 Short ${i} TTS complete: ${audioDuration.toFixed(1)}s (${segDurations.length} segments)`);
-          } catch (ttsErr: any) {
-            console.error(`[Orchestrator] Short ${i} TTS FAILED: ${ttsErr.message?.slice(0, 200)}`);
-            continue;
-          }
-
-          // ── Step B: Convert to WAV (pod expects WAV) and upload to R2 ──
-          const wavPath = `${clipDir}/standalone_audio_${i.toString().padStart(2, "0")}.wav`;
-          try {
-            execSync(
-              `ffmpeg -i "${audioPath}" -vn -acodec pcm_s16le -ar 48000 -ac 2 -y "${wavPath}"`,
-              { timeout: 30_000, stdio: "pipe" },
-            );
-          } catch (convErr: any) {
-            console.error(`[Orchestrator] Short ${i} WAV conversion failed: ${convErr.message?.slice(0, 200)}`);
-            continue;
-          }
-
-          let audioUrl: string | null = null;
-          try {
-            if (isR2Configured()) {
-              const r2Key = `shorts-audio/${jobId}/standalone_${i.toString().padStart(2, "0")}.wav`;
-              const audioBuffer = readFileSync(wavPath);
-              await uploadToR2(R2_BUCKET_CLIPS, r2Key, audioBuffer, "audio/wav");
-              audioUrl = await getR2PresignedUrl(R2_BUCKET_CLIPS, r2Key, 3600);
-              console.log(`  📤 Short ${i} audio uploaded to R2: ${audioUrl?.slice(0, 80)}`);
-            }
-          } catch (r2Err: any) {
-            console.error(`[Orchestrator] Short ${i} R2 upload failed: ${r2Err.message?.slice(0, 200)}`);
-          }
-
-          if (!audioUrl) {
-            console.warn(`  ⚠️ Short ${i}: no R2 audio URL — skipping (standalone shorts require pod rendering)`);
-            continue;
-          }
-
-          // ── Step C: Build pod job spec ──
-          // Normalize vertical_scene durations to match actual TTS audio duration
-          const rawSceneDurs = standalone.vertical_scenes.map(vs => vs.duration_s);
-          const rawSum = rawSceneDurs.reduce((a, b) => a + b, 0);
-          const driftRatio = rawSum > 0 ? audioDuration / rawSum : 1;
-
-          const vScenes: ShortScene[] = standalone.vertical_scenes.map((vs, idx) => ({
-            index: vs.index,
-            image_prompt: vs.image_prompt,
-            duration_s: Math.max(0.5, rawSceneDurs[idx] * driftRatio),
-          }));
-
-          podQueue.push({
-            index: i,
-            spec: {
-              brand: brand as "ace_richie" | "containment_field",
-              audio_url: audioUrl,
-              audio_duration_s: audioDuration,
-              scenes: vScenes,
-              hook_text: standalone.script.hook?.slice(0, 200),
-              cta_text: standalone.cta_overlay?.slice(0, 300),
-              audio_is_raw_tts: true, // Standalone shorts always use fresh TTS
-              client_job_id: `${jobId}_standalone_${i}`,
-            },
-            title: standalone.script.title,
-            hookText: standalone.script.hook,
-            duration: audioDuration,
-            vSceneCount: vScenes.length,
-          });
-        }
-
-        // ── Single pod session for ALL queued standalone shorts ──
-        if (podQueue.length > 0) {
-          console.log(`🎬 [Orchestrator] Rendering ${podQueue.length} standalone shorts in single pod session...`);
-          try {
-            await withPodSession(async (handle) => {
-              for (const queued of podQueue) {
-                try {
-                  const artifacts = await produceShort(handle, queued.spec);
-
-                  const clipPath = `${clipDir}/clip_${queued.index.toString().padStart(2, "0")}.mp4`;
-                  execSync(`curl -sL -o "${clipPath}" "${artifacts.videoUrl}"`, {
-                    timeout: 60_000, stdio: "pipe",
-                  });
-
-                  clips.push({
-                    index: queued.index,
-                    localPath: clipPath,
-                    publicUrl: artifacts.videoUrl,
-                    startSec: 0,
-                    endSec: queued.duration,
-                    captionText: `${queued.title} | ${queued.hookText}`,
-                    storyTitle: queued.title,
-                    storyHook: queued.hookText,
-                  });
-                  console.log(
-                    `  🎬 Standalone ${queued.index}: "${queued.title.slice(0, 50)}" ` +
-                    `${queued.duration.toFixed(1)}s vScenes=${queued.vSceneCount} → ${artifacts.videoUrl.slice(0, 60)}`
-                  );
-                } catch (podErr: any) {
-                  console.error(`[Orchestrator] Standalone ${queued.index} pod render FAILED: ${podErr.message?.slice(0, 300)}`);
-                }
+              // ── Step A: TTS via pod XTTS ──
+              await progress("STEP 4/8", `TTS for standalone short ${i + 1}/${standaloneShorts.length}: "${standalone.script.title.slice(0, 40)}..."`);
+              let audioPath: string;
+              let audioDuration: number;
+              let segDurations: number[];
+              try {
+                const audioResult = await renderAudio(standalone.script, shortJobId, xttsForBrand);
+                audioPath = audioResult.audioPath;
+                segDurations = audioResult.segmentDurations;
+                audioDuration = segDurations.reduce((a, b) => a + b, 0);
+                console.log(`  🎤 Short ${i} TTS complete (pod XTTS): ${audioDuration.toFixed(1)}s (${segDurations.length} segments)`);
+              } catch (ttsErr: any) {
+                console.error(`[Orchestrator] Short ${i} TTS FAILED: ${ttsErr.message?.slice(0, 200)}`);
+                continue;
               }
-            });
-          } catch (sessionErr: any) {
-            console.error(`[Orchestrator] Pod session for standalone shorts FAILED: ${sessionErr.message?.slice(0, 300)}`);
-          }
+
+              // ── Step B: Convert to WAV (pod expects WAV) and upload to R2 ──
+              const wavPath = `${clipDir}/standalone_audio_${i.toString().padStart(2, "0")}.wav`;
+              try {
+                execSync(
+                  `ffmpeg -i "${audioPath}" -vn -acodec pcm_s16le -ar 48000 -ac 2 -y "${wavPath}"`,
+                  { timeout: 30_000, stdio: "pipe" },
+                );
+              } catch (convErr: any) {
+                console.error(`[Orchestrator] Short ${i} WAV conversion failed: ${convErr.message?.slice(0, 200)}`);
+                continue;
+              }
+
+              let audioUrl: string | null = null;
+              try {
+                if (isR2Configured()) {
+                  const r2Key = `shorts-audio/${jobId}/standalone_${i.toString().padStart(2, "0")}.wav`;
+                  const audioBuffer = readFileSync(wavPath);
+                  await uploadToR2(R2_BUCKET_CLIPS, r2Key, audioBuffer, "audio/wav");
+                  audioUrl = await getR2PresignedUrl(R2_BUCKET_CLIPS, r2Key, 3600);
+                  console.log(`  📤 Short ${i} audio uploaded to R2: ${audioUrl?.slice(0, 80)}`);
+                }
+              } catch (r2Err: any) {
+                console.error(`[Orchestrator] Short ${i} R2 upload failed: ${r2Err.message?.slice(0, 200)}`);
+              }
+
+              if (!audioUrl) {
+                console.warn(`  ⚠️ Short ${i}: no R2 audio URL — skipping (standalone shorts require pod rendering)`);
+                continue;
+              }
+
+              // ── Step C: Build pod job spec + render immediately ──
+              const rawSceneDurs = standalone.vertical_scenes.map(vs => vs.duration_s);
+              const rawSum = rawSceneDurs.reduce((a, b) => a + b, 0);
+              const driftRatio = rawSum > 0 ? audioDuration / rawSum : 1;
+
+              const vScenes: ShortScene[] = standalone.vertical_scenes.map((vs, idx) => ({
+                index: vs.index,
+                image_prompt: vs.image_prompt,
+                duration_s: Math.max(0.5, rawSceneDurs[idx] * driftRatio),
+              }));
+
+              const spec: ShortJobSpec = {
+                brand: brand as "ace_richie" | "containment_field",
+                audio_url: audioUrl,
+                audio_duration_s: audioDuration,
+                scenes: vScenes,
+                hook_text: standalone.script.hook?.slice(0, 200),
+                cta_text: standalone.cta_overlay?.slice(0, 300),
+                audio_is_raw_tts: true,
+                client_job_id: `${jobId}_standalone_${i}`,
+              };
+
+              try {
+                const artifacts = await produceShort(handle, spec);
+                const clipPath = `${clipDir}/clip_${i.toString().padStart(2, "0")}.mp4`;
+                execSync(`curl -sL -o "${clipPath}" "${artifacts.videoUrl}"`, {
+                  timeout: 60_000, stdio: "pipe",
+                });
+
+                clips.push({
+                  index: i,
+                  localPath: clipPath,
+                  publicUrl: artifacts.videoUrl,
+                  startSec: 0,
+                  endSec: audioDuration,
+                  captionText: `${standalone.script.title} | ${standalone.script.hook}`,
+                  storyTitle: standalone.script.title,
+                  storyHook: standalone.script.hook,
+                });
+                console.log(
+                  `  🎬 Standalone ${i}: "${standalone.script.title.slice(0, 50)}" ` +
+                  `${audioDuration.toFixed(1)}s vScenes=${vScenes.length} → ${artifacts.videoUrl.slice(0, 60)}`
+                );
+              } catch (podErr: any) {
+                console.error(`[Orchestrator] Standalone ${i} pod render FAILED: ${podErr.message?.slice(0, 300)}`);
+              }
+            }
+          });
+        } catch (sessionErr: any) {
+          console.error(`[Orchestrator] Pod session for standalone shorts FAILED: ${sessionErr.message?.slice(0, 300)}`);
         }
 
         console.log(`✅ [Orchestrator] ${clips.length}/${standaloneShorts.length} standalone shorts rendered (native vertical)`);

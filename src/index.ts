@@ -2092,23 +2092,30 @@ async function main() {
   // SESSION 89: Pre-warm shared channel cache at boot (1 API call, shared by all consumers)
   warmChannelCache();
 
-  // SESSION 99: Automatic backlog drainer — every 6 hours.
-  // Was disabled in S92 (boot-only setTimeout was burning budget).
-  // Now runs on a proper 6h interval: checks R2 clips/, skips already-distributed,
-  // pushes new clips to Buffer. Manual /drain still works for immediate triggers.
-  const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+  // SESSION 105: Backlog drainer — fixed daily at 20:00 UTC (3:00 PM CDT).
+  // Was boot-relative (fired every deploy, burned Buffer quota). Now once/day on a clock.
+  // Manual /drain still works for immediate triggers.
+  const drainFiredDate = { key: "" };
   scheduler.add({
-    name: "Backlog Drainer — 6h Auto",
-    intervalMs: SIX_HOURS_MS,
-    nextRun: new Date(Date.now() + 30 * 60 * 1000), // SESSION 105: 30min after boot (was 10m — overlapped with distribution sweep at 5m, both competed for budget)
+    name: "Backlog Drainer — Daily 20:00 UTC",
+    intervalMs: 60_000, // check every minute
+    nextRun: new Date(),
     enabled: true,
     handler: async () => {
       if (isAutonomousPaused()) return;
-      console.log("🔄 [AutoDrain] 6-hour backlog drain firing...");
-      try {
-        await drainBacklog();
-      } catch (err: any) {
-        console.error(`[AutoDrain] Fatal: ${err.message?.slice(0, 300)}`);
+      const now = new Date();
+      const hour = now.getUTCHours();
+      const minute = now.getUTCMinutes();
+      const dateKey = now.toDateString();
+      // Fire at 20:00 UTC — 1.5h after ContentEngine production (18:30), giving drafts time to generate
+      if (hour === 20 && minute >= 0 && minute <= 4 && drainFiredDate.key !== dateKey) {
+        drainFiredDate.key = dateKey;
+        console.log("🔄 [AutoDrain] Daily backlog drain firing (20:00 UTC)...");
+        try {
+          await drainBacklog();
+        } catch (err: any) {
+          console.error(`[AutoDrain] Fatal: ${err.message?.slice(0, 300)}`);
+        }
       }
     },
   });
@@ -2149,29 +2156,46 @@ async function main() {
     },
   });
 
-  // SESSION 97: Distribution sweep RE-ENABLED at 6-hour intervals (was 5-min, killed in S92).
-  // 4 runs/day max. Each run posts up to 6 drafts to Buffer + Facebook direct.
-  // Buffer quota gate (S97b) skips Buffer channels if quota blown, Facebook still fires.
-  // SESSION 105: Capped at 6 drafts/sweep × ~5 channels = ~30 API calls/sweep. 4 sweeps/day = ~120 max.
+  // SESSION 105: Distribution sweep — fixed 2x daily at 12:00 UTC + 19:00 UTC.
+  // Was boot-relative (fired every deploy). Now clock-based: morning sweep (12:00 UTC / 7AM CDT)
+  // catches overnight drafts, evening sweep (19:00 UTC / 2PM CDT) catches daily production output.
+  // Capped at 6 drafts/sweep × ~5 channels = ~30 API calls/sweep. 2 sweeps/day = ~60 max.
+  const sweepFiredSlots = { morning: "", evening: "" };
   scheduler.add({
-    name: "Content Engine — Distribution Sweep (6h)",
-    intervalMs: 6 * 60 * 60 * 1000, // 6 hours
-    nextRun: new Date(Date.now() + 5 * 60 * 1000), // First run 5 min after boot
+    name: "Content Engine — Distribution Sweep (2x daily)",
+    intervalMs: 60_000,
+    nextRun: new Date(),
     enabled: true,
     handler: async () => {
       if (isAutonomousPaused()) return;
-      try {
-        const posted = await distributionSweep();
-        if (posted > 0) {
-          console.log(`📤 [ContentEngine] Distribution sweep posted ${posted} piece(s)`);
+      const now = new Date();
+      const hour = now.getUTCHours();
+      const minute = now.getUTCMinutes();
+      const dateKey = now.toDateString();
+
+      let shouldFire = false;
+      if (hour === 12 && minute >= 0 && minute <= 4 && sweepFiredSlots.morning !== dateKey) {
+        sweepFiredSlots.morning = dateKey;
+        shouldFire = true;
+      } else if (hour === 19 && minute >= 0 && minute <= 4 && sweepFiredSlots.evening !== dateKey) {
+        sweepFiredSlots.evening = dateKey;
+        shouldFire = true;
+      }
+
+      if (shouldFire) {
+        try {
+          const posted = await distributionSweep();
+          if (posted > 0) {
+            console.log(`📤 [ContentEngine] Distribution sweep posted ${posted} piece(s)`);
+          }
+        } catch (err: any) {
+          console.error(`[ContentEngine] Distribution sweep failed: ${err.message}`);
         }
-      } catch (err: any) {
-        console.error(`[ContentEngine] Distribution sweep failed: ${err.message}`);
       }
     },
   });
 
-  console.log("⚡ [ContentEngine] Scheduled: Daily production (1:30PM CDT/18:30UTC). Distribution sweep every 6h (S97).");
+  console.log("⚡ [ContentEngine] Scheduled: Production 18:30 UTC, Sweep 12:00+19:00 UTC, Drain 20:00 UTC.");
 
   // SESSION 104: Draft Auto-Publisher — promotes agent content_drafts to distribution queue.
   // Runs every 4h. Picks up social-type drafts (caption, social_post, post, tweet, hook)

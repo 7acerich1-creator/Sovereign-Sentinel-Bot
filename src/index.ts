@@ -1312,12 +1312,15 @@ async function main() {
       // SESSION 105: /produce — trigger Content Engine cycle (generate drafts + FLUX images + distribute)
       case "/produce": {
         try {
-          await telegram.sendMessage(message.chatId, "🔄 /produce — firing Content Engine cycle...");
+          // /produce force — bypass date check and regenerate today's drafts
+          const forceMode = (arg || "").trim().toLowerCase() === "force";
+          await telegram.sendMessage(message.chatId,
+            `🔄 /produce — firing Content Engine cycle...${forceMode ? " (FORCE MODE)" : ""}`);
           const { dailyContentProduction, distributionSweep, fluxBatchImageGen } = await import("./engine/content-engine");
 
           // Step 1: Generate new drafts
           await telegram.sendMessage(message.chatId, "📝 Step 1/3: Generating content drafts...");
-          const drafted = await dailyContentProduction(failoverLLM);
+          const drafted = await dailyContentProduction(failoverLLM, forceMode);
           await telegram.sendMessage(message.chatId, `✅ Drafts: ${drafted} new posts generated`);
 
           // Step 2: FLUX batch images for any drafts with image_prompt but no media_url

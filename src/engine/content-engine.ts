@@ -696,8 +696,8 @@ ${platforms.map((p) => `  "${p}": "Platform-adapted version for ${p}"`).join(",\
  * Generates 6 time slots × 2 brands = 12 content pieces.
  * Stores in content_engine_queue table for the distribution job.
  */
-export async function dailyContentProduction(llm: LLMProvider): Promise<number> {
-  console.log("🚀 [ContentEngine] Daily content production starting...");
+export async function dailyContentProduction(llm: LLMProvider, force = false): Promise<number> {
+  console.log(`🚀 [ContentEngine] Daily content production starting...${force ? " (FORCE — bypassing date check)" : ""}`);
 
   const today = new Date();
   const dayOfWeek = today.getDay();
@@ -737,12 +737,15 @@ export async function dailyContentProduction(llm: LLMProvider): Promise<number> 
     for (const slot of TIME_SLOTS_UTC) {
       try {
         // Check if content already exists for this slot+brand+date
-        const existing = await supabaseQuery(
-          "content_engine_queue",
-          `brand=eq.${brand}&time_slot=eq.${slot.label}&scheduled_date=eq.${dateStr}&select=id`
-        );
-        if (existing.length > 0) {          console.log(`[ContentEngine] Skipping ${brand}/${slot.label} — already generated`);
-          continue;
+        if (!force) {
+          const existing = await supabaseQuery(
+            "content_engine_queue",
+            `brand=eq.${brand}&time_slot=eq.${slot.label}&scheduled_date=eq.${dateStr}&select=id`
+          );
+          if (existing.length > 0) {
+            console.log(`[ContentEngine] Skipping ${brand}/${slot.label} — already generated`);
+            continue;
+          }
         }
 
         console.log(`✍️ [ContentEngine] Generating: ${brand} / ${nicheConfig.niche} / ${slot.label}`);

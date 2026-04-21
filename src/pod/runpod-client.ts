@@ -808,39 +808,52 @@ export async function podTTS(
   opts: PodTTSOptions,
 ): Promise<{ audioBuffer: Buffer; durationS: number }> {
   const url = `${handle.workerUrl}/tts`;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${handle.workerToken}`,
-      "Content-Type": "application/json",
-      Accept: "audio/wav",
-    },
-    body: JSON.stringify({
-      text: opts.text,
-      brand: opts.brand || "ace_richie",
-      language: opts.language || "en",
-    }),
-    signal: AbortSignal.timeout(180_000), // 3min — long scripts need time
-  });
+  const MAX_RETRIES = 3;
 
-  if (!resp.ok) {
-    const errText = await resp.text().catch(() => "");
-    throw new PodContractError(
-      `pod POST /tts → HTTP ${resp.status}: ${errText.slice(0, 400)}`,
-      resp.status,
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${handle.workerToken}`,
+        "Content-Type": "application/json",
+        Accept: "audio/wav",
+      },
+      body: JSON.stringify({
+        text: opts.text,
+        brand: opts.brand || "ace_richie",
+        language: opts.language || "en",
+      }),
+      signal: AbortSignal.timeout(180_000), // 3min — long scripts need time
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      // Retry on 404 (pod proxy race after cold start) or 502/503 (proxy not ready)
+      if ((resp.status === 404 || resp.status === 502 || resp.status === 503) && attempt < MAX_RETRIES) {
+        console.warn(`⚠️ [PodTTS] attempt ${attempt}/${MAX_RETRIES} → HTTP ${resp.status}, retrying in ${attempt * 2}s...`);
+        await new Promise(r => setTimeout(r, attempt * 2000));
+        continue;
+      }
+      throw new PodContractError(
+        `pod POST /tts → HTTP ${resp.status}: ${errText.slice(0, 400)}`,
+        resp.status,
+      );
+    }
+
+    const arrayBuffer = await resp.arrayBuffer();
+    const audioBuffer = Buffer.from(arrayBuffer);
+    const durationS = parseFloat(resp.headers.get("X-Audio-Duration-S") || "0");
+
+    console.log(
+      `🔊 [PodTTS] ${(audioBuffer.length / 1024).toFixed(0)}KB WAV, ` +
+      `${durationS.toFixed(1)}s, brand=${opts.brand || "ace_richie"}`
     );
+
+    return { audioBuffer, durationS };
   }
 
-  const arrayBuffer = await resp.arrayBuffer();
-  const audioBuffer = Buffer.from(arrayBuffer);
-  const durationS = parseFloat(resp.headers.get("X-Audio-Duration-S") || "0");
-
-  console.log(
-    `🔊 [PodTTS] ${(audioBuffer.length / 1024).toFixed(0)}KB WAV, ` +
-    `${durationS.toFixed(1)}s, brand=${opts.brand || "ace_richie"}`
-  );
-
-  return { audioBuffer, durationS };
+  // Should never reach here, but TypeScript needs it
+  throw new PodContractError("pod POST /tts: exhausted retries", 0);
 }
 
 

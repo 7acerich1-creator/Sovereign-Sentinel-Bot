@@ -800,10 +800,24 @@ def _run_short_pipeline(job_id: str, req: ProduceShortRequest) -> None:
         import subprocess as _sp
         # SESSION 100: Use explicit opener with no caching to avoid stale downloads
         # when downloading multiple presigned URLs in the same pod session.
+        # SESSION 105: Retry with backoff — RunPod pods intermittently lose DNS.
         _opener = urllib.request.build_opener()
         _opener.addheaders = [("Cache-Control", "no-cache"), ("Pragma", "no-cache")]
-        with _opener.open(req.audio_url) as _resp, open(audio_path, "wb") as _f:
-            _f.write(_resp.read())
+        _dl_ok = False
+        for _dl_attempt in range(1, 4):
+            try:
+                with _opener.open(req.audio_url, timeout=60) as _resp, open(audio_path, "wb") as _f:
+                    _f.write(_resp.read())
+                _dl_ok = True
+                break
+            except Exception as _dl_err:
+                log.warning("short_pipeline_audio_retry",
+                            job_id=job_id, attempt=_dl_attempt, error=str(_dl_err)[:200])
+                if _dl_attempt < 3:
+                    import time as _time_mod
+                    _time_mod.sleep(_dl_attempt * 3)
+        if not _dl_ok:
+            raise RuntimeError(f"Audio download failed after 3 attempts: {req.audio_url[:100]}")
         if not os.path.isfile(audio_path) or os.path.getsize(audio_path) < 1000:
             raise RuntimeError(f"Audio download failed or too small: {req.audio_url[:100]}")
 

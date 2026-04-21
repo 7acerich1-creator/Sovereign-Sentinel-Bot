@@ -1713,24 +1713,25 @@ def compose_short(
                 f":y=(h-text_h)/2-40"
                 f":line_spacing=20"
             )
+            # SESSION 105: Match CTA card encoding to caption burn output exactly
+            # (same preset, CRF, audio codec+bitrate+sample_rate) so -c copy concat
+            # never fails on profile/level mismatch.
             card_cmd = [
                 "ffmpeg", "-y",
                 "-f", "lavfi", "-i", card_filter,
                 "-f", "lavfi", "-i", f"anullsrc=channel_layout=stereo:sample_rate=48000",
                 "-t", str(CTA_CARD_DUR),
-                "-c:v", VIDEO_CODEC, "-preset", "fast", "-crf", SHORT_CRF,
-                "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE,
+                "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET_FINAL, "-crf", VIDEO_CRF,
+                "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE, "-ar", "48000",
                 "-pix_fmt", "yuv420p",
                 "-movflags", "+faststart",
                 cta_card,
             ]
+            log.info("compose_short_cta_card_gen", cta_text=cta_text[:60])
             card_result = subprocess.run(card_cmd, capture_output=True, text=True, timeout=30)
 
             if card_result.returncode == 0 and os.path.isfile(cta_card):
-                # Concat main video + CTA card
-                # SESSION 101: Use -c copy (stream copy) instead of re-encoding.
-                # Both files use identical codec params (libx264/aac, same res/fps/pix_fmt).
-                # Re-encoding a 2-min video was hitting the 120s timeout and failing.
+                # Concat main video + CTA card via stream copy
                 cta_concat_list = os.path.join(job_dir, "cta_concat.txt")
                 with open(cta_concat_list, "w") as f:
                     f.write(f"file '{final_path}'\nfile '{cta_card}'\n")
@@ -1748,8 +1749,25 @@ def compose_short(
                     log.info("compose_short_cta_card_appended", cta_text=cta_text[:60],
                              card_dur_s=CTA_CARD_DUR)
                 else:
-                    log.warning("compose_short_cta_concat_failed",
-                                stderr=cta_result.stderr[:300] if cta_result.stderr else "")
+                    # SESSION 105: Fallback — re-encode concat if stream copy fails
+                    log.warning("compose_short_cta_copy_failed_trying_reencode",
+                                stderr=cta_result.stderr[:200] if cta_result.stderr else "")
+                    reencode_cmd = [
+                        "ffmpeg", "-y",
+                        "-f", "concat", "-safe", "0", "-i", cta_concat_list,
+                        "-c:v", VIDEO_CODEC, "-preset", "fast", "-crf", VIDEO_CRF,
+                        "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE, "-ar", "48000",
+                        "-pix_fmt", "yuv420p",
+                        "-movflags", "+faststart",
+                        cta_out,
+                    ]
+                    re_result = subprocess.run(reencode_cmd, capture_output=True, text=True, timeout=180)
+                    if re_result.returncode == 0 and os.path.isfile(cta_out):
+                        final_path = cta_out
+                        log.info("compose_short_cta_card_appended_reencode", cta_text=cta_text[:60])
+                    else:
+                        log.warning("compose_short_cta_reencode_also_failed",
+                                    stderr=re_result.stderr[:300] if re_result.stderr else "")
             else:
                 log.warning("compose_short_cta_card_gen_failed",
                             stderr=card_result.stderr[:300] if card_result.stderr else "")

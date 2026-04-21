@@ -2530,23 +2530,19 @@ async function main() {
     diag.tcf_groq_dedicated = !!process.env.GROQ_API_KEY_TCF;
 
     // ── TTS chain verification ──
-    diag.tts_chain = [];
-    if (process.env.ELEVENLABS_API_KEY) (diag.tts_chain as string[]).push("elevenlabs");
-    (diag.tts_chain as string[]).push("edge"); // Always available
-    if (process.env.OPENAI_API_KEY) (diag.tts_chain as string[]).push("openai");
+    diag.tts_chain = ["xtts"]; // SESSION 106: XTTS only. ElevenLabs + Edge purged.
+    diag.xtts_server_url_set = !!process.env.XTTS_SERVER_URL;
 
     // ── API key status ──
-    const geminiKey = process.env.GEMINI_IMAGEN_KEY; // SESSION 35: diagnose uses the IMAGEN key, not the old text-gen key
+    const geminiKey = process.env.GEMINI_IMAGEN_KEY;
     const geminiTextKey = process.env.GEMINI_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
-    const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
     diag.gemini_imagen_key_set = !!geminiKey;
     diag.gemini_imagen_key_length = geminiKey?.length || 0;
     diag.gemini_text_key_set = !!geminiTextKey;
     diag.gemini_keys_same = geminiKey === geminiTextKey;
     diag.openai_key_set = !!openaiKey;
     diag.openai_key_length = openaiKey?.length || 0;
-    diag.elevenlabs_key_set = !!elevenLabsKey;
 
     // Test Pollinations.ai (FREE primary)
     try {
@@ -2605,27 +2601,6 @@ async function main() {
         }
       } catch (err: any) {
         diag.dalle_error = err.message;
-      }
-    }
-
-    // Test ElevenLabs TTS (check account status)
-    if (elevenLabsKey) {
-      try {
-        const res = await fetch("https://api.elevenlabs.io/v1/user/subscription", {
-          headers: { "xi-api-key": elevenLabsKey },
-        });
-        diag.elevenlabs_status = res.status;
-        if (res.ok) {
-          const data = (await res.json()) as any;
-          diag.elevenlabs_tier = data.tier;
-          diag.elevenlabs_chars_remaining = data.character_count !== undefined
-            ? data.character_limit - data.character_count
-            : "unknown";
-        } else {
-          diag.elevenlabs_error = (await res.text()).slice(0, 200);
-        }
-      } catch (err: any) {
-        diag.elevenlabs_error = err.message;
       }
     }
 

@@ -1735,8 +1735,6 @@ export async function executeFullPipeline(
         clips = [];
 
         // SESSION 105: Single pod session for TTS (XTTS) + render — everything on GPU.
-        // Old flow: Railway edge-tts/ElevenLabs → upload WAV → pod render.
-        // New flow: pod XTTS → upload WAV → pod render. Zero Railway TTS dependency.
         try {
           await withPodSession(async (handle) => {
             // Build a podTTS-backed ttsFn for renderAudio

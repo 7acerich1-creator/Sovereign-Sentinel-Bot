@@ -66,8 +66,7 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-// Ensure production TTS always routes through ElevenLabs (skip edge-tts probe)
-process.env.FORCE_ELEVENLABS = "true";
+// SESSION 106: TTS is XTTS-only. No ElevenLabs/Edge to configure.
 
 // ─────────────────────────────────────────────────────────────
 // OUTPUT PATHS

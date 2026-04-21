@@ -1009,8 +1009,8 @@ export async function renderAudio(
     return textToSpeech(text, { speed: isLongForm ? 0.90 : undefined, brand });
   });
 
-  // For long-form (many segments), TTS APIs have character limits
-  // (OpenAI: 4096, ElevenLabs: 5000). Chunk per segment and concatenate.
+  // For long-form (many segments), chunk per segment and concatenate.
+  // XTTS handles up to 10000 chars per call.
   const allSegmentTexts = [
     ...script.segments.map(s => s.voiceover),
     script.cta

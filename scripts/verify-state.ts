@@ -144,50 +144,16 @@ function inspectTts(): string {
     return header("TTS Routing") + `⚠️ Could not read \`src/voice/tts.ts\`.\n`;
   }
 
-  const chainBlock = extractBlock(
-    src,
-    /const chain: TTSProvider\[\] = \[\]/,
-    /for \(const provider of chain\)/,
-    30
-  );
-
-  const voiceIdMatch = src.match(/const voiceId = config\.voice\.elevenLabsVoiceId \|\| "([^"]+)"/);
-  const voiceId = voiceIdMatch ? voiceIdMatch[1] : "(not found)";
-
-  const edgeVoiceMatch = src.match(/const EDGE_VOICE = "([^"]+)"/);
-  const edgeVoice = edgeVoiceMatch ? edgeVoiceMatch[1] : "(not found)";
-
-  const forceElevenLabs = envStatus("FORCE_ELEVENLABS");
-  const elKey = envStatus("ELEVENLABS_API_KEY");
-  const elKeyAlt = envStatus("ELEVENLABS_API_KEY_ALT");
-
-  // Determine actual runtime priority based on the chain logic + env vars
-  // Rule from tts.ts lines 41-51: edge is always pushed; elevenlabs is first only if FORCE_ELEVENLABS=true
-  let runtimePriority: string;
-  const elAvailable = elKey !== "UNSET" || elKeyAlt !== "UNSET";
-  if (process.env.FORCE_ELEVENLABS === "true" && elAvailable) {
-    runtimePriority = "**elevenlabs → edge → openai** (FORCE_ELEVENLABS=true)";
-  } else if (elAvailable) {
-    runtimePriority = "**edge → elevenlabs → openai** (FORCE_ELEVENLABS unset/false — Edge fires first)";
-  } else {
-    runtimePriority = "**edge → openai** (no ElevenLabs key available)";
-  }
+  // SESSION 106: XTTS only. ElevenLabs + Edge TTS purged.
+  const xttsUrl = envStatus("XTTS_SERVER_URL");
 
   let out = header("TTS Routing — src/voice/tts.ts");
-  out += `### Runtime Priority (computed from env vars + code)\n${runtimePriority}\n\n`;
-  out += `### Voice Identifiers\n`;
-  out += `- **ElevenLabs voice ID (source-coded default):** \`${voiceId}\`\n`;
-  out += `- **Edge TTS voice (source-coded):** \`${edgeVoice}\`\n\n`;
+  out += `### Runtime Priority\n**XTTS only** (ElevenLabs + Edge TTS purged S106)\n\n`;
   out += `### Environment\n`;
-  out += `- \`FORCE_ELEVENLABS\`: ${forceElevenLabs}\n`;
-  out += `- \`ELEVENLABS_API_KEY\`: ${elKey}\n`;
-  out += `- \`ELEVENLABS_API_KEY_ALT\`: ${elKeyAlt}\n\n`;
-  out += `### Source Block (verbatim quote of the chain assembly)\n`;
-  if (chainBlock) {
-    out += codeBlock("typescript", chainBlock);
-  } else {
-    out += `⚠️ Could not extract chain block from src/voice/tts.ts — the file structure may have changed. Read the file manually.\n`;
-  }
+  out += `- \`XTTS_SERVER_URL\`: ${xttsUrl}\n`;
+  out += `- \`XTTS_SPEAKER_WAV_ACE\`: ${envStatus("XTTS_SPEAKER_WAV_ACE")}\n`;
+  out += `- \`XTTS_SPEAKER_WAV_TCF\`: ${envStatus("XTTS_SPEAKER_WAV_TCF")}\n`;
+  out += `- \`XTTS_SPEAKER_ID\`: ${envStatus("XTTS_SPEAKER_ID")}\n\n`;
   return out;
 }
 

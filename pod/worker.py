@@ -542,22 +542,15 @@ def _image_to_branded_video(
 
 
 # ---------------------------------------------------------------------------
-# SESSION 104: Image Batch Generation — Content Engine FLUX images
+# SESSION 104→105: Image Batch Generation — Content Engine FLUX images
+# Now async (fire-and-forget + poll) to avoid RunPod proxy 524 timeout.
 # ---------------------------------------------------------------------------
-@app.post(
-    "/generate-images",
-    response_model=ImageBatchResult,
-    tags=["pipeline"],
-)
-def generate_images(
-    req: ImageBatchRequest,
-    _: None = Depends(require_bearer),
-) -> ImageBatchResult:
-    """
-    Synchronous batch image generation via FLUX.
-    Takes up to 50 prompts, generates images, uploads to R2, returns URLs.
-    Used by Content Engine to replace Imagen 4 ($3/day → ~$0.07/batch).
-    """
+_IMAGE_JOBS: dict[str, dict] = {}  # job_id → {"status": ..., "result": ...}
+
+
+def _run_image_batch(job_id: str, req: ImageBatchRequest) -> None:
+    """Background worker for image batch generation."""
+    _IMAGE_JOBS[job_id] = {"status": "running", "result": None}
     from pipelines.flux import generate_scene_images
     from pipelines.r2 import is_configured as r2_configured, _get_client
 
@@ -670,7 +663,41 @@ def generate_images(
 
     elapsed = time.monotonic() - t0
     log.info("image_batch_done", generated=generated, failed=failed, elapsed_s=round(elapsed, 1))
-    return ImageBatchResult(generated=generated, failed=failed, results=results)
+    result = ImageBatchResult(generated=generated, failed=failed, results=results)
+    _IMAGE_JOBS[job_id] = {"status": "done", "result": result.model_dump()}
+
+
+@app.post(
+    "/generate-images",
+    response_model=ProduceAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["pipeline"],
+)
+def generate_images(
+    req: ImageBatchRequest,
+    background: BackgroundTasks,
+    _: None = Depends(require_bearer),
+) -> ProduceAccepted:
+    """
+    Async batch image generation via FLUX.
+    Returns job_id immediately; poll GET /image-jobs/{job_id} for results.
+    Eliminates RunPod proxy 524 timeout on large batches.
+    """
+    job_id = f"imgbatch_{uuid.uuid4().hex[:12]}"
+    now = time.time()
+    _IMAGE_JOBS[job_id] = {"status": "queued", "result": None}
+    log.info("image_batch_accepted", job_id=job_id, count=len(req.items), brand=req.brand.value)
+    background.add_task(_run_image_batch, job_id, req)
+    return ProduceAccepted(job_id=job_id, queued_at=now)
+
+
+@app.get("/image-jobs/{job_id}", tags=["pipeline"])
+def image_job_status(job_id: str, _: None = Depends(require_bearer)):
+    """Poll for image batch job status. Returns status + results when done."""
+    if job_id not in _IMAGE_JOBS:
+        raise HTTPException(status_code=404, detail="unknown image job_id")
+    entry = _IMAGE_JOBS[job_id]
+    return {"job_id": job_id, "status": entry["status"], "result": entry.get("result")}
 
 
 # ---------------------------------------------------------------------------

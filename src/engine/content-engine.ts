@@ -1159,22 +1159,14 @@ export async function fluxBatchImageGen(): Promise<number> {
 
   let patched = 0;
 
-  // Chunk helper — RunPod proxy (Cloudflare) times out at ~100s.
-  // With video_mode each image takes ~50s (FLUX + ffmpeg), so max 2 per call.
-  const CHUNK_SIZE = 2;
-  function chunk<T>(arr: T[], size: number): T[][] {
-    const out: T[][] = [];
-    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-    return out;
-  }
-
   try {
     await withPodSession(async (handle) => {
-      // Process Ace Richie in chunks of CHUNK_SIZE
-      for (const batch of chunk(aceItems, CHUNK_SIZE)) {
+      // SESSION 105: Async job pattern — POST returns instantly, poll for results.
+      // No more proxy timeout. Send full batch in one call.
+      if (aceItems.length > 0) {
         const aceResult = await generateImageBatch(
           handle,
-          batch.map((r: any) => ({
+          aceItems.map((r: any) => ({
             id: r.id,
             prompt: r.image_prompt,
             hook_text: (r.content || "").split("\n")[0].slice(0, 200) || undefined,
@@ -1189,11 +1181,10 @@ export async function fluxBatchImageGen(): Promise<number> {
         }
       }
 
-      // Process Containment Field in chunks of CHUNK_SIZE
-      for (const batch of chunk(cfItems, CHUNK_SIZE)) {
+      if (cfItems.length > 0) {
         const cfResult = await generateImageBatch(
           handle,
-          batch.map((r: any) => ({
+          cfItems.map((r: any) => ({
             id: r.id,
             prompt: r.image_prompt,
             hook_text: (r.content || "").split("\n")[0].slice(0, 200) || undefined,

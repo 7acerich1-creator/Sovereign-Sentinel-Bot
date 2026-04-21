@@ -707,28 +707,28 @@ export interface ImageBatchResult {
 }
 
 /**
- * POST /generate-images — batch FLUX image generation on the pod.
- * Synchronous call (not poll-based like /produce). Times out at 10 min
- * which allows ~50 images at ~10-12s each.
+ * POST /generate-images — async batch FLUX image generation on the pod.
+ * SESSION 105: Now fire-and-forget + poll to avoid RunPod proxy 524 timeout.
+ * POST returns job_id immediately; we poll GET /image-jobs/{job_id} until done.
  */
 export async function generateImageBatch(
   handle: PodHandle,
   items: ImageBatchItem[],
   brand: string = "ace_richie",
 ): Promise<ImageBatchResult> {
-  // Retry up to 3 times for proxy stabilization (same pattern as produceVideo)
-  let result: ImageBatchResult | undefined;
+  // Step 1: Submit the batch — returns immediately with job_id
+  let accepted: { job_id: string } | undefined;
   let lastErr: unknown;
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      result = await podFetchJson<ImageBatchResult>(
+      accepted = await podFetchJson<{ job_id: string }>(
         handle,
         "POST",
         "/generate-images",
         {
           body: { items, brand, video_mode: true },
-          signal: AbortSignal.timeout(10 * 60 * 1000), // 10 min for batch
+          signal: AbortSignal.timeout(30_000), // 30s — should return instantly
         },
       );
       break;
@@ -743,10 +743,48 @@ export async function generateImageBatch(
     }
   }
 
-  if (!result) throw lastErr;
+  if (!accepted) throw lastErr;
 
-  console.log(`🎨 [RunPod] Image batch done: ${result.generated} generated, ${result.failed} failed`);
-  return result;
+  const jobId = accepted.job_id;
+  console.log(`🎨 [RunPod] Image batch job ${jobId} accepted (${items.length} items). Polling...`);
+
+  // Step 2: Poll until done/failed — up to 10 min
+  const POLL_INTERVAL_MS = 5_000;
+  const MAX_POLL_MS = 10 * 60 * 1000;
+  const deadline = Date.now() + MAX_POLL_MS;
+
+  while (Date.now() < deadline) {
+    await sleep(POLL_INTERVAL_MS);
+
+    try {
+      const poll = await podFetchJson<{ job_id: string; status: string; result: ImageBatchResult | null }>(
+        handle,
+        "GET",
+        `/image-jobs/${jobId}`,
+        { signal: AbortSignal.timeout(15_000) },
+      );
+
+      if (poll.status === "done" && poll.result) {
+        console.log(`🎨 [RunPod] Image batch ${jobId} done: ${poll.result.generated} generated, ${poll.result.failed} failed`);
+        return poll.result;
+      }
+
+      if (poll.status === "failed") {
+        throw new Error(`Image batch ${jobId} failed on pod`);
+      }
+
+      // Still running/queued — keep polling
+    } catch (err) {
+      // Transient proxy errors during poll — just retry
+      if (err instanceof PodContractError && (err.httpStatus === 502 || err.httpStatus === 524)) {
+        console.warn(`⚠️ [RunPod] Poll ${jobId} got ${err.httpStatus}, retrying...`);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw new Error(`Image batch ${jobId} timed out after ${MAX_POLL_MS / 1000}s`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1001,6 +1001,7 @@ export async function renderAudio(
   jobId: string,
   ttsFn?: TTSFunction,
 ): Promise<AudioRenderResult> {
+  mkdirSync(FACELESS_DIR, { recursive: true });
   const audioPath = `${FACELESS_DIR}/${jobId}_voiceover.mp3`;
 
   // Resolve TTS function: pod-backed if provided, otherwise legacy chain

@@ -1780,6 +1780,12 @@ async function main() {
   const briefings = new ProactiveBriefings(AGENT_LLM_TEAMS.veritas, memoryProviders, telegram, defaultChatId);
   const heartbeat = new HeartbeatSystem(telegram, defaultChatId);
 
+  // SESSION 104: PAUSE_AUTONOMOUS env var — set to "true" to freeze ALL scheduled agent work.
+  // Briefings, agent dispatches, content engine, stasis checks — everything stops.
+  // The bot still responds to Telegram commands. Only scheduled autonomous ops pause.
+  // Toggle via Railway env vars without redeploying code.
+  const isAutonomousPaused = () => process.env.PAUSE_AUTONOMOUS === "true";
+
   // In-memory guard to prevent briefings from firing every 60s during the matching hour
   const briefingFiredDates = { morning: "", evening: "" };
 
@@ -1790,6 +1796,7 @@ async function main() {
     nextRun: new Date(),
     enabled: true,
     handler: async () => {
+      if (isAutonomousPaused()) return;
       const now = new Date();
       const hour = now.getUTCHours();
       const minute = now.getUTCMinutes();
@@ -1809,6 +1816,7 @@ async function main() {
     nextRun: new Date(),
     enabled: true,
     handler: async () => {
+      if (isAutonomousPaused()) return;
       const now = new Date();
       const hour = now.getUTCHours();
       const minute = now.getUTCMinutes();
@@ -1837,6 +1845,7 @@ async function main() {
     nextRun: new Date(),
     enabled: true,
     handler: async () => {
+      if (isAutonomousPaused()) return;
       const now = new Date();
       const hour = now.getUTCHours();
       const minute = now.getUTCMinutes();
@@ -1873,6 +1882,7 @@ async function main() {
     nextRun: new Date(),
     enabled: true,
     handler: async () => {
+      if (isAutonomousPaused()) return;
       const now = new Date();
       const hour = now.getUTCHours();
       const minute = now.getUTCMinutes();
@@ -1927,6 +1937,7 @@ async function main() {
     nextRun: new Date(),
     enabled: true,
     handler: async () => {
+      if (isAutonomousPaused()) return;
       const now = new Date();
       const hour = now.getUTCHours();
       const minute = now.getUTCMinutes();
@@ -1984,6 +1995,7 @@ async function main() {
     nextRun: new Date(),
     enabled: true,
     handler: async () => {
+      if (isAutonomousPaused()) return;
       const now = new Date();
       const dateKey = now.toDateString();
       if (now.getUTCDay() === 1 && now.getUTCHours() === 17 && now.getUTCMinutes() >= 10 && now.getUTCMinutes() <= 12 && autonomousFiredDates.veritasDirective !== dateKey) {
@@ -2037,6 +2049,7 @@ async function main() {
     nextRun: new Date(Date.now() + 10 * 60 * 1000), // first run 10min after boot (let channels warm)
     enabled: true,
     handler: async () => {
+      if (isAutonomousPaused()) return;
       console.log("🔄 [AutoDrain] 6-hour backlog drain firing...");
       try {
         await drainBacklog();
@@ -2053,6 +2066,7 @@ async function main() {
     nextRun: new Date(),
     enabled: true,
     handler: async () => {
+      if (isAutonomousPaused()) return;
       const now = new Date();
       const hour = now.getUTCHours();
       const minute = now.getUTCMinutes();
@@ -2091,6 +2105,7 @@ async function main() {
     nextRun: new Date(Date.now() + 5 * 60 * 1000), // First run 5 min after boot
     enabled: true,
     handler: async () => {
+      if (isAutonomousPaused()) return;
       try {
         const posted = await distributionSweep();
         if (posted > 0) {
@@ -2113,6 +2128,7 @@ async function main() {
     nextRun: new Date(),
     enabled: true,
     handler: async () => {
+      if (isAutonomousPaused()) return;
       const now = new Date();
       const hour = now.getUTCHours();
       const minute = now.getUTCMinutes();
@@ -2142,6 +2158,7 @@ async function main() {
     nextRun: new Date(),
     enabled: true,
     handler: async () => {
+      if (isAutonomousPaused()) return;
       const now = new Date();
       const hour = now.getUTCHours();
       const minute = now.getUTCMinutes();
@@ -2205,6 +2222,7 @@ async function main() {
     nextRun: new Date(),
     enabled: true,
     handler: async () => {
+      if (isAutonomousPaused()) return;
       const now = new Date();
       const hour = now.getUTCHours();
       const minute = now.getUTCMinutes();

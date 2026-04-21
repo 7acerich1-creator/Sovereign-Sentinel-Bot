@@ -1149,11 +1149,15 @@ export async function fluxBatchImageGen(): Promise<number> {
 
   try {
     await withPodSession(async (handle) => {
-      // Process Ace Richie batch
+      // Process Ace Richie batch (with hook text for branded video)
       if (aceItems.length > 0) {
         const aceResult = await generateImageBatch(
           handle,
-          aceItems.map((r: any) => ({ id: r.id, prompt: r.image_prompt })),
+          aceItems.map((r: any) => ({
+            id: r.id,
+            prompt: r.image_prompt,
+            hook_text: (r.content || "").split("\n")[0].slice(0, 200) || undefined,
+          })),
           "ace_richie"
         );
         for (const r of aceResult.results) {
@@ -1164,11 +1168,15 @@ export async function fluxBatchImageGen(): Promise<number> {
         }
       }
 
-      // Process Containment Field batch
+      // Process Containment Field batch (with hook text for branded video)
       if (cfItems.length > 0) {
         const cfResult = await generateImageBatch(
           handle,
-          cfItems.map((r: any) => ({ id: r.id, prompt: r.image_prompt })),
+          cfItems.map((r: any) => ({
+            id: r.id,
+            prompt: r.image_prompt,
+            hook_text: (r.content || "").split("\n")[0].slice(0, 200) || undefined,
+          })),
           "containment_field"
         );
         for (const r of cfResult.results) {

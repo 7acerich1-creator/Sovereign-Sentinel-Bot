@@ -689,6 +689,7 @@ export async function fetchHealth(handle: PodHandle): Promise<HealthReport> {
 export interface ImageBatchItem {
   id: string;
   prompt: string;
+  hook_text?: string;
   width?: number;
   height?: number;
 }
@@ -726,7 +727,7 @@ export async function generateImageBatch(
         "POST",
         "/generate-images",
         {
-          body: { items, brand },
+          body: { items, brand, video_mode: true },
           signal: AbortSignal.timeout(10 * 60 * 1000), // 10 min for batch
         },
       );

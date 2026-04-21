@@ -208,6 +208,7 @@ class HealthReport(BaseModel):
 class ImageBatchItem(BaseModel):
     id: str = Field(min_length=1, max_length=200)
     prompt: str = Field(min_length=1, max_length=2000)
+    hook_text: Optional[str] = Field(default=None, max_length=300)
     width: int = Field(default=1024, ge=256, le=2048)
     height: int = Field(default=1024, ge=256, le=2048)
 
@@ -215,6 +216,7 @@ class ImageBatchItem(BaseModel):
 class ImageBatchRequest(BaseModel):
     items: list[ImageBatchItem] = Field(min_length=1, max_length=50)
     brand: Brand = Brand.ace_richie
+    video_mode: bool = Field(default=True, description="Convert images to branded videos with music + hook text")
 
 
 class ImageBatchResultItem(BaseModel):
@@ -444,6 +446,102 @@ def produce_short(
 
 
 # ---------------------------------------------------------------------------
+# SESSION 105: Branded Video Conversion (image + hook text + brand music → MP4)
+# ---------------------------------------------------------------------------
+BRAND_MUSIC = {
+    "ace_richie": "/app/brand-assets/music_sovereign.mp3",
+    "containment_field": "/app/brand-assets/ambient_drone.mp3",
+}
+BRAND_FONT = "/app/brand-assets/BebasNeue-Regular.ttf"
+VIDEO_DURATION = 7  # seconds
+
+
+def _image_to_branded_video(
+    img_path: str,
+    out_path: str,
+    brand: str,
+    hook_text: Optional[str] = None,
+) -> bool:
+    """
+    Convert a static image to a 7-second branded video with:
+    - Ken Burns slow zoom (1.0 → 1.08 over 7s)
+    - Brand music (fades in/out)
+    - Hook text burned at bottom (Bebas Neue, white with dark shadow)
+    Returns True on success.
+    """
+    import subprocess
+
+    music_path = BRAND_MUSIC.get(brand, BRAND_MUSIC["ace_richie"])
+    if not os.path.isfile(music_path):
+        log.warning("brand_music_missing", brand=brand, path=music_path)
+        return False
+
+    # Build ffmpeg filter chain
+    # Ken Burns: zoompan from 1.0 to 1.08 over duration, 30fps
+    fps = 30
+    total_frames = VIDEO_DURATION * fps
+    zoom_filter = (
+        f"zoompan=z='1+0.08*on/{total_frames}'"
+        f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+        f":d={total_frames}:s=1080x1080:fps={fps}"
+    )
+
+    # Text overlay if hook_text provided
+    if hook_text:
+        # Escape special chars for ffmpeg drawtext
+        safe_text = hook_text.replace("'", "\u2019").replace(":", "\\:")
+        # Wrap at ~35 chars per line
+        words = safe_text.split()
+        lines = []
+        current = ""
+        for w in words:
+            if len(current) + len(w) + 1 > 35:
+                lines.append(current.strip())
+                current = w
+            else:
+                current = f"{current} {w}" if current else w
+        if current:
+            lines.append(current.strip())
+        wrapped = "\\n".join(lines[:4])  # max 4 lines
+
+        text_filter = (
+            f"drawtext=fontfile={BRAND_FONT}"
+            f":text='{wrapped}'"
+            f":fontsize=42:fontcolor=white"
+            f":shadowcolor=black@0.8:shadowx=2:shadowy=2"
+            f":x=(w-text_w)/2:y=h-text_h-60"
+            f":enable='between(t,0.5,{VIDEO_DURATION - 0.5})'"
+        )
+        vf = f"{zoom_filter},{text_filter}"
+    else:
+        vf = zoom_filter
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-loop", "1", "-i", img_path,
+        "-i", music_path,
+        "-vf", vf,
+        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-c:a", "aac", "-b:a", "128k",
+        "-af", f"afade=t=in:ss=0:d=1,afade=t=out:st={VIDEO_DURATION - 1}:d=1",
+        "-t", str(VIDEO_DURATION),
+        "-pix_fmt", "yuv420p",
+        "-shortest",
+        out_path,
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            log.error("branded_video_ffmpeg_fail", stderr=result.stderr[:300])
+            return False
+        return os.path.isfile(out_path) and os.path.getsize(out_path) > 1000
+    except Exception as e:
+        log.error("branded_video_exception", error=str(e)[:200])
+        return False
+
+
+# ---------------------------------------------------------------------------
 # SESSION 104: Image Batch Generation — Content Engine FLUX images
 # ---------------------------------------------------------------------------
 @app.post(
@@ -510,14 +608,43 @@ def generate_images(
                     continue
 
                 try:
-                    r2_key = f"content-images/{req.brand.value}/{item.id}.png"
-                    client.upload_file(
-                        img_path, thumb_bucket, r2_key,
-                        ExtraArgs={"ContentType": "image/png"},
-                    )
-                    url = f"{public_base}/{r2_key}" if public_base else r2_key
-                    results.append(ImageBatchResultItem(id=item.id, url=url))
-                    generated += 1
+                    # SESSION 105: If video_mode, convert image to branded video
+                    if req.video_mode:
+                        video_path = os.path.join(batch_dir, f"{item.id}.mp4")
+                        ok = _image_to_branded_video(
+                            img_path=img_path,
+                            out_path=video_path,
+                            brand=req.brand.value,
+                            hook_text=item.hook_text,
+                        )
+                        if ok:
+                            r2_key = f"content-videos/{req.brand.value}/{item.id}.mp4"
+                            client.upload_file(
+                                video_path, thumb_bucket, r2_key,
+                                ExtraArgs={"ContentType": "video/mp4"},
+                            )
+                            url = f"{public_base}/{r2_key}" if public_base else r2_key
+                            results.append(ImageBatchResultItem(id=item.id, url=url))
+                            generated += 1
+                        else:
+                            # Video conversion failed, fall back to image upload
+                            r2_key = f"content-images/{req.brand.value}/{item.id}.png"
+                            client.upload_file(
+                                img_path, thumb_bucket, r2_key,
+                                ExtraArgs={"ContentType": "image/png"},
+                            )
+                            url = f"{public_base}/{r2_key}" if public_base else r2_key
+                            results.append(ImageBatchResultItem(id=item.id, url=url))
+                            generated += 1
+                    else:
+                        r2_key = f"content-images/{req.brand.value}/{item.id}.png"
+                        client.upload_file(
+                            img_path, thumb_bucket, r2_key,
+                            ExtraArgs={"ContentType": "image/png"},
+                        )
+                        url = f"{public_base}/{r2_key}" if public_base else r2_key
+                        results.append(ImageBatchResultItem(id=item.id, url=url))
+                        generated += 1
                 except Exception as e:
                     results.append(ImageBatchResultItem(id=item.id, error=str(e)[:200]))
                     failed += 1

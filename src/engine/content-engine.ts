@@ -1145,32 +1145,34 @@ export async function fluxBatchImageGen(): Promise<number> {
 
   console.log(`🎨 [FluxBatch] ${needsImages.length} images pending — starting pod session`);
 
-  // Build batch items
-  const items: ImageBatchItem[] = needsImages.map((row: any) => ({
-    id: row.id,
-    prompt: row.image_prompt,
-    width: 1024,
-    height: 1024,
-  }));
-
   // Group by brand for R2 folder routing
   const aceItems = needsImages.filter((r: any) => r.brand === "ace_richie");
   const cfItems = needsImages.filter((r: any) => r.brand === "containment_field");
 
   let patched = 0;
 
+  // SESSION 105: ONE image per brand, DIFFERENT hook text captions burned on each copy.
+  // Pod deduplicates by prompt — generates FLUX once, creates N branded videos.
+  // This eliminates the "all 12 images look the same" problem: now they share one
+  // high-quality hero image but each has a unique hook text overlay.
+  const buildBrandBatch = (brandItems: any[]): ImageBatchItem[] => {
+    if (brandItems.length === 0) return [];
+    // Use the first item's image_prompt as the shared prompt for the whole brand
+    const sharedPrompt = brandItems[0].image_prompt;
+    return brandItems.map((r: any) => ({
+      id: r.id,
+      prompt: sharedPrompt, // Same prompt → pod deduplicates to 1 FLUX generation
+      hook_text: (r.content || "").split("\n")[0].slice(0, 200) || undefined,
+    }));
+  };
+
   try {
     await withPodSession(async (handle) => {
-      // SESSION 105: Async job pattern — POST returns instantly, poll for results.
-      // No more proxy timeout. Send full batch in one call.
       if (aceItems.length > 0) {
+        console.log(`🎨 [FluxBatch] Ace Richie: 1 FLUX image → ${aceItems.length} branded videos`);
         const aceResult = await generateImageBatch(
           handle,
-          aceItems.map((r: any) => ({
-            id: r.id,
-            prompt: r.image_prompt,
-            hook_text: (r.content || "").split("\n")[0].slice(0, 200) || undefined,
-          })),
+          buildBrandBatch(aceItems),
           "ace_richie"
         );
         for (const r of aceResult.results) {
@@ -1182,13 +1184,10 @@ export async function fluxBatchImageGen(): Promise<number> {
       }
 
       if (cfItems.length > 0) {
+        console.log(`🎨 [FluxBatch] Containment Field: 1 FLUX image → ${cfItems.length} branded videos`);
         const cfResult = await generateImageBatch(
           handle,
-          cfItems.map((r: any) => ({
-            id: r.id,
-            prompt: r.image_prompt,
-            hook_text: (r.content || "").split("\n")[0].slice(0, 200) || undefined,
-          })),
+          buildBrandBatch(cfItems),
           "containment_field"
         );
         for (const r of cfResult.results) {

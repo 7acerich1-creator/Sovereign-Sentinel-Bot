@@ -988,8 +988,25 @@ export interface AudioRenderResult {
   segmentDurations: number[];
 }
 
-export async function renderAudio(script: FacelessScript, jobId: string): Promise<AudioRenderResult> {
+/**
+ * SESSION 105: Optional TTS function override.
+ * When called from rechop with a pod session open, pass a podTTS-backed function
+ * so TTS runs on the GPU pod (XTTS) instead of the broken Edge TTS fallback chain.
+ * When omitted, falls back to the textToSpeech() chain (legacy, non-pipeline callers).
+ */
+export type TTSFunction = (text: string, brand: Brand) => Promise<Buffer>;
+
+export async function renderAudio(
+  script: FacelessScript,
+  jobId: string,
+  ttsFn?: TTSFunction,
+): Promise<AudioRenderResult> {
   const audioPath = `${FACELESS_DIR}/${jobId}_voiceover.mp3`;
+
+  // Resolve TTS function: pod-backed if provided, otherwise legacy chain
+  const synthesize: TTSFunction = ttsFn || (async (text, brand) => {
+    return textToSpeech(text, { speed: isLongForm ? 0.90 : undefined, brand });
+  });
 
   // For long-form (many segments), TTS APIs have character limits
   // (OpenAI: 4096, ElevenLabs: 5000). Chunk per segment and concatenate.
@@ -1010,9 +1027,9 @@ export async function renderAudio(script: FacelessScript, jobId: string): Promis
   // If total text fits in one call (short-form), do it in one shot
   if (totalChars <= 3800) {
     const fullText = allSegmentTexts.join(" ... ");
-    const audioBuffer = await textToSpeech(fullText, { speed: ttsSpeed, brand: script.brand });
+    const audioBuffer = await synthesize(fullText, script.brand);
 
-    const rawPath = `${FACELESS_DIR}/${jobId}_voiceover_raw.opus`;
+    const rawPath = `${FACELESS_DIR}/${jobId}_voiceover_raw.wav`;
     writeFileSync(rawPath, audioBuffer);
 
     try {
@@ -1043,7 +1060,7 @@ export async function renderAudio(script: FacelessScript, jobId: string): Promis
     const segText = allSegmentTexts[i];
     if (!segText.trim()) continue;
 
-    const segRaw = `${FACELESS_DIR}/${jobId}_seg_${i}_raw.opus`;
+    const segRaw = `${FACELESS_DIR}/${jobId}_seg_${i}_raw.wav`;
     const segMp3 = `${FACELESS_DIR}/${jobId}_seg_${i}.mp3`;
 
     // Retry logic: 3 attempts with exponential backoff. NO skipping — every segment is required.
@@ -1053,7 +1070,7 @@ export async function renderAudio(script: FacelessScript, jobId: string): Promis
     for (let attempt = 1; attempt <= MAX_TTS_RETRIES; attempt++) {
       try {
         console.log(`  🗣️ Segment ${i + 1}/${allSegmentTexts.length} (${segText.length} chars) — attempt ${attempt}/${MAX_TTS_RETRIES}...`);
-        segBuffer = await textToSpeech(segText, { speed: ttsSpeed, brand: script.brand });
+        segBuffer = await synthesize(segText, script.brand);
         break; // Success — exit retry loop
       } catch (err: any) {
         console.error(`  ⚠️ TTS attempt ${attempt} failed for segment ${i + 1}: ${err.message?.slice(0, 200)}`);

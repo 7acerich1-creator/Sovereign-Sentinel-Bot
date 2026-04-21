@@ -30,6 +30,7 @@ from typing import Optional
 
 import structlog
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -229,6 +230,15 @@ class ImageBatchResult(BaseModel):
     generated: int
     failed: int
     results: list[ImageBatchResultItem]
+
+
+# ── SESSION 105: TTS endpoint — synthesize text via XTTS on GPU ──
+
+class TTSRequest(BaseModel):
+    """Text-to-speech request. Returns WAV audio."""
+    text: str = Field(min_length=1, max_length=10000)
+    brand: Brand = Brand.ace_richie
+    language: str = Field(default="en", max_length=10)
 
 
 # ---------------------------------------------------------------------------
@@ -567,15 +577,31 @@ def _run_image_batch(job_id: str, req: ImageBatchRequest) -> None:
     failed = 0
 
     try:
-        # Convert items to scene-like dicts for generate_scene_images
-        scenes = [
-            {"index": i, "image_prompt": item.prompt}
-            for i, item in enumerate(req.items)
-        ]
+        # SESSION 105: Deduplicate prompts — if items share a prompt, generate
+        # the image ONCE and reuse it for all items (with different hook_text).
+        # Content Engine sends 6 items per brand with same prompt + different hooks.
+        unique_prompts: dict[str, int] = {}  # prompt → first scene index
+        dedup_scenes: list[dict] = []
+        item_to_scene: list[int] = []  # item index → scene index (for dedup)
 
-        # Generate all images in one batch call
+        for i, item in enumerate(req.items):
+            if item.prompt in unique_prompts:
+                item_to_scene.append(unique_prompts[item.prompt])
+                log.info("image_batch_dedup", item_id=item.id,
+                         reusing_scene=unique_prompts[item.prompt])
+            else:
+                scene_idx = len(dedup_scenes)
+                unique_prompts[item.prompt] = scene_idx
+                dedup_scenes.append({"index": scene_idx, "image_prompt": item.prompt})
+                item_to_scene.append(scene_idx)
+
+        log.info("image_batch_dedup_result",
+                 total_items=len(req.items),
+                 unique_images=len(dedup_scenes))
+
+        # Generate only unique images
         img_result = generate_scene_images(
-            scenes=scenes,
+            scenes=dedup_scenes,
             job_dir=batch_dir,
             width=req.items[0].width,
             height=req.items[0].height,
@@ -591,7 +617,8 @@ def _run_image_batch(job_id: str, req: ImageBatchRequest) -> None:
             scene_images = img_result.get("scene_images", [])
 
             for i, item in enumerate(req.items):
-                img_path = scene_images[i] if i < len(scene_images) else None
+                scene_idx = item_to_scene[i]
+                img_path = scene_images[scene_idx] if scene_idx < len(scene_images) else None
                 if not img_path or not os.path.isfile(img_path):
                     results.append(ImageBatchResultItem(id=item.id, error="generation_failed"))
                     failed += 1
@@ -698,6 +725,57 @@ def image_job_status(job_id: str, _: None = Depends(require_bearer)):
         raise HTTPException(status_code=404, detail="unknown image job_id")
     entry = _IMAGE_JOBS[job_id]
     return {"job_id": job_id, "status": entry["status"], "result": entry.get("result")}
+
+
+# ---------------------------------------------------------------------------
+# SESSION 105: TTS endpoint — synthesize text via XTTS on GPU
+# Used by rechop pipeline + faceless factory for on-pod TTS generation.
+# Returns raw WAV audio file (24kHz mono PCM).
+# ---------------------------------------------------------------------------
+@app.post("/tts", tags=["pipeline"])
+def tts_synthesize(req: TTSRequest, _: None = Depends(require_bearer)):
+    """Synthesize speech from text using XTTS. Returns WAV audio file."""
+    t0 = time.monotonic()
+    job_dir = os.path.join(JOB_WORK_DIR, f"tts_{uuid.uuid4().hex[:8]}")
+    os.makedirs(job_dir, exist_ok=True)
+
+    try:
+        from pipelines.xtts import synthesize_scenes
+        result = synthesize_scenes(
+            scenes=[{"index": 0, "tts_text": req.text}],
+            brand=req.brand.value,
+            job_dir=job_dir,
+            language=req.language,
+        )
+        wav_path = result["concat_wav"]
+        duration_s = result["total_duration_s"]
+        elapsed = time.monotonic() - t0
+
+        log.info(
+            "tts_done",
+            brand=req.brand.value,
+            text_len=len(req.text),
+            duration_s=round(duration_s, 2),
+            elapsed_s=round(elapsed, 1),
+        )
+
+        return FileResponse(
+            wav_path,
+            media_type="audio/wav",
+            headers={
+                "X-Audio-Duration-S": str(round(duration_s, 3)),
+                "X-TTS-Brand": req.brand.value,
+            },
+        )
+    except Exception as exc:
+        elapsed = time.monotonic() - t0
+        log.exception("tts_failed", elapsed_s=round(elapsed, 1))
+        raise HTTPException(
+            status_code=500,
+            detail=f"TTS failed: {type(exc).__name__}: {str(exc)[:500]}",
+        )
+    # Note: job_dir cleanup happens after FileResponse is sent via BackgroundTask
+    # but for simplicity we leave it — /tmp is cleaned on pod stop anyway.
 
 
 # ---------------------------------------------------------------------------

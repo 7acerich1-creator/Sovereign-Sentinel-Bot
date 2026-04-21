@@ -788,6 +788,63 @@ export async function generateImageBatch(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SESSION 105: Pod TTS — synthesize text via XTTS on the GPU pod.
+// Returns raw WAV audio buffer. Used by rechop pipeline + faceless factory
+// now that XTTS_SERVER_URL is retired and TTS lives on the same pod as FLUX.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface PodTTSOptions {
+  text: string;
+  brand?: string;
+  language?: string;
+}
+
+/**
+ * Synthesize speech on the pod via XTTS. Returns WAV audio buffer.
+ * Caller must have a pod session open (withPodSession).
+ */
+export async function podTTS(
+  handle: PodHandle,
+  opts: PodTTSOptions,
+): Promise<{ audioBuffer: Buffer; durationS: number }> {
+  const url = `${handle.workerUrl}/tts`;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${handle.workerToken}`,
+      "Content-Type": "application/json",
+      Accept: "audio/wav",
+    },
+    body: JSON.stringify({
+      text: opts.text,
+      brand: opts.brand || "ace_richie",
+      language: opts.language || "en",
+    }),
+    signal: AbortSignal.timeout(180_000), // 3min — long scripts need time
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "");
+    throw new PodContractError(
+      `pod POST /tts → HTTP ${resp.status}: ${errText.slice(0, 400)}`,
+      resp.status,
+    );
+  }
+
+  const arrayBuffer = await resp.arrayBuffer();
+  const audioBuffer = Buffer.from(arrayBuffer);
+  const durationS = parseFloat(resp.headers.get("X-Audio-Duration-S") || "0");
+
+  console.log(
+    `🔊 [PodTTS] ${(audioBuffer.length / 1024).toFixed(0)}KB WAV, ` +
+    `${durationS.toFixed(1)}s, brand=${opts.brand || "ace_richie"}`
+  );
+
+  return { audioBuffer, durationS };
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SESSION 92: Pod log capture — download logs BEFORE termination.
 // Ring buffer on the pod holds last 2000 lines. We fetch them and store to R2
 // so failures are diagnosable even after the pod is destroyed.

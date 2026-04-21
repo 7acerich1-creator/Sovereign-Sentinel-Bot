@@ -25,11 +25,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlink
 import { S3Client, ListObjectsV2Command, type ListObjectsV2CommandOutput } from "@aws-sdk/client-s3";
 import { detectNiche } from "./whisper-extract";
 import { withPodSession } from "../pod/session";
-import { produceShort } from "../pod/runpod-client";
+import { produceShort, podTTS } from "../pod/runpod-client";
 import { uploadToR2, isR2Configured, getR2PresignedUrl } from "../tools/r2-upload";
 import type { ShortJobSpec, ShortScene } from "../pod/types";
 import type { Brand } from "./faceless-factory";
-import { generateStandaloneShorts, renderAudio, type StandaloneShort } from "./faceless-factory";
+import { generateStandaloneShorts, renderAudio, type StandaloneShort, type TTSFunction } from "./faceless-factory";
 import type { LLMProvider } from "../types";
 import { config } from "../config";
 
@@ -486,7 +486,8 @@ export async function rechopVideo(
 
     // ── Step 4: TTS each standalone short ──
     // SESSION 103b: Each short gets its own TTS — complete fresh audio, no chopping.
-    await log("STEP 4/6", `TTS for ${standaloneShorts.length} standalone shorts...`);
+    // SESSION 105: TTS runs on pod (XTTS) — Edge TTS chain broken since XTTS_SERVER_URL purged.
+    await log("STEP 4/6", `TTS for ${standaloneShorts.length} standalone shorts (XTTS on pod)...`);
     const clipDir = `${jobDir}/clips`;
     if (!existsSync(clipDir)) mkdirSync(clipDir, { recursive: true });
 
@@ -498,18 +499,30 @@ export async function rechopVideo(
     }
     const podQueue: PreparedShort[] = [];
 
-    for (let i = 0; i < standaloneShorts.length; i++) {
-      const standalone = standaloneShorts[i];
-      const shortJobId = `rechop_${video.jobId}_standalone_${i}`;
+    // SESSION 105: Pod TTS function — wraps podTTS for renderAudio's TTSFunction signature
+    const podTTSForRender = async (ttsHandle: import("../pod/types").PodHandle): Promise<TTSFunction> => {
+      return async (text: string, brand: Brand): Promise<Buffer> => {
+        const { audioBuffer } = await podTTS(ttsHandle, { text, brand });
+        return audioBuffer;
+      };
+    };
 
-      // ── Step A: TTS the standalone short script ──
-      await log("STEP 4/6", `TTS short ${i + 1}/${standaloneShorts.length}: "${standalone.script.title.slice(0, 40)}..."`);
-      let ttsAudioPath: string;
-      let audioDuration: number;
-      let segDurations: number[];
-      try {
-        const audioResult = await renderAudio(standalone.script, shortJobId);
-        ttsAudioPath = audioResult.audioPath;
+    // TTS + render share ONE pod session — no double cold-start
+    const runTTSAndRender = async (handle: import("../pod/types").PodHandle) => {
+      const ttsFn = await podTTSForRender(handle);
+
+      for (let i = 0; i < standaloneShorts.length; i++) {
+        const standalone = standaloneShorts[i];
+        const shortJobId = `rechop_${video.jobId}_standalone_${i}`;
+
+        // ── Step A: TTS the standalone short script ──
+        await log("STEP 4/6", `TTS short ${i + 1}/${standaloneShorts.length}: "${standalone.script.title.slice(0, 40)}..."`);
+        let ttsAudioPath: string;
+        let audioDuration: number;
+        let segDurations: number[];
+        try {
+          const audioResult = await renderAudio(standalone.script, shortJobId, ttsFn);
+          ttsAudioPath = audioResult.audioPath;
         segDurations = audioResult.segmentDurations;
         audioDuration = segDurations.reduce((a, b) => a + b, 0);
         console.log(`  🎤 Short ${i} TTS complete: ${audioDuration.toFixed(1)}s (${segDurations.length} segments)`);
@@ -582,43 +595,26 @@ export async function rechopVideo(
         duration: audioDuration,
         hookText: standalone.script.hook || standalone.script.title,
       });
-    }
+      }
 
-    if (podQueue.length === 0) {
-      await log("STEP 5/6", "⚠️ No shorts survived TTS — aborting");
-      return result;
-    }
+      if (podQueue.length === 0) {
+        await log("STEP 5/6", "⚠️ No shorts survived TTS — aborting");
+        return;
+      }
 
-    // ── Step 5: Render all shorts in single pod session ──
-    await log("STEP 5/5", `Rendering ${podQueue.length} shorts on RunPod...`);
+      // ── Step 5: Render all shorts (same pod session as TTS) ──
+      await log("STEP 5/5", `Rendering ${podQueue.length} shorts on RunPod...`);
 
-    // Compute clip folder ONCE — all shorts from this video go in the same folder.
-    // Format: clips/{brand}_{niche}_{title}_{timestamp}/clip_XX.mp4
-    // The folder name includes the original jobId so listR2LongForms() dedup
-    // detects this video as "already chopped" and skips it on re-runs.
-    // extractTitle() pops the last all-digit segment (timestamp), then shifts
-    // the niche — remaining words become the human-readable title.
-    // Clip folder format matches backlog-drainer's extractTitle() expectations:
-    // {brand}_{niche}_{title_words}_{timestamp}
-    // For dedup, we track rechopped videos in Supabase (rechop_completed table)
-    // rather than trying to encode the source jobId in the folder name.
-    const clipFolderName = `${video.brand}_${niche}_${sanitize(title)}_${Date.now()}`;
-
-    // Inner render logic — runs with a PodHandle (either external or freshly created)
-    const renderWithHandle = async (handle: import("../pod/types").PodHandle) => {
       for (const queued of podQueue) {
         try {
           const artifacts = await produceShort(handle, queued.spec);
 
-          // Download rendered short from R2 (pod already uploaded it)
           const renderedClipPath = `${clipDir}/rendered_${queued.index.toString().padStart(2, "0")}.mp4`;
           execSync(`curl -sL -o "${renderedClipPath}" "${artifacts.videoUrl}"`, {
             timeout: 120_000,
             stdio: "pipe",
           });
 
-          // Re-upload to clips/ prefix with proper naming for backlog-drainer.
-          // All shorts from this video share one folder.
           const clipKey = `clips/${clipFolderName}/clip_${queued.index.toString().padStart(2, "0")}.mp4`;
           const clipBuf = readFileSync(renderedClipPath);
           const clipR2 = await uploadToR2(R2_BUCKET, clipKey, clipBuf, "video/mp4");
@@ -634,18 +630,18 @@ export async function rechopVideo(
           result.shortsFailed++;
           result.errors.push(`Short ${queued.index} pod render: ${podErr.message?.slice(0, 150)}`);
           console.error(`[Rechop] Short ${queued.index} FAILED: ${podErr.message?.slice(0, 300)}`);
-          // Non-fatal — continue with next short in SAME pod session
         }
       }
-    };
+    }; // end runTTSAndRender
+
+    // Clip folder for backlog-drainer — format: {brand}_{niche}_{title}_{timestamp}
+    const clipFolderName = `${video.brand}_${niche}_${sanitize(title)}_${Date.now()}`;
 
     try {
       if (externalPodHandle) {
-        // Batch mode — caller owns the pod session, just render
-        await renderWithHandle(externalPodHandle);
+        await runTTSAndRender(externalPodHandle);
       } else {
-        // Standalone mode — open our own pod session
-        await withPodSession(renderWithHandle);
+        await withPodSession(runTTSAndRender);
       }
     } catch (sessionErr: any) {
       result.errors.push(`Pod session failed: ${sessionErr.message?.slice(0, 200)}`);
@@ -921,23 +917,34 @@ async function rechopVideoPrepOnly(
   }
 
   // Step 4: TTS each standalone short + upload audio to R2
-  await log("PREP 4/5", `TTS for ${standaloneShorts.length} standalone shorts...`);
+  // SESSION 105: TTS runs on the GPU pod (XTTS) via withPodSession.
+  // XTTS_SERVER_URL was purged — the fallback chain (Edge TTS) crashes on Railway.
+  // Pod session manager reuses the same pod for the render phase that follows.
+  await log("PREP 4/5", `TTS for ${standaloneShorts.length} standalone shorts (XTTS on pod)...`);
   const clipDir = `${jobDir}/clips`;
   if (!existsSync(clipDir)) mkdirSync(clipDir, { recursive: true });
 
   const podQueue: any[] = [];
 
-  for (let i = 0; i < standaloneShorts.length; i++) {
-    const standalone = standaloneShorts[i];
-    const shortJobId = `rechop_${video.jobId}_standalone_${i}`;
+  // Open pod session for TTS — session manager reuses this pod for render phase
+  await withPodSession(async (ttsHandle) => {
+    // Build a TTSFunction that routes through the pod's /tts endpoint
+    const podTTSFn: TTSFunction = async (text, brand) => {
+      const { audioBuffer } = await podTTS(ttsHandle, { text, brand });
+      return audioBuffer;
+    };
 
-    // ── TTS the standalone short script ──
-    let ttsAudioPath: string;
-    let audioDuration: number;
-    let segDurations: number[];
-    try {
-      const audioResult = await renderAudio(standalone.script, shortJobId);
-      ttsAudioPath = audioResult.audioPath;
+    for (let i = 0; i < standaloneShorts.length; i++) {
+      const standalone = standaloneShorts[i];
+      const shortJobId = `rechop_${video.jobId}_standalone_${i}`;
+
+      // ── TTS the standalone short script ──
+      let ttsAudioPath: string;
+      let audioDuration: number;
+      let segDurations: number[];
+      try {
+        const audioResult = await renderAudio(standalone.script, shortJobId, podTTSFn);
+        ttsAudioPath = audioResult.audioPath;
       segDurations = audioResult.segmentDurations;
       audioDuration = segDurations.reduce((a, b) => a + b, 0);
       console.log(`  🎤 PrepOnly Short ${i} TTS complete: ${audioDuration.toFixed(1)}s (${segDurations.length} segments)`);
@@ -1008,7 +1015,8 @@ async function rechopVideoPrepOnly(
       duration: audioDuration,
       hookText: standalone.script.hook || standalone.script.title,
     });
-  }
+    }
+  }); // end withPodSession for TTS
 
   if (podQueue.length === 0) {
     result.errors.push("No shorts survived TTS");

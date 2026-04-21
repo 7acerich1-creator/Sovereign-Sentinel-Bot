@@ -6,11 +6,16 @@
 //   1. List R2 long-forms → cross-ref with clips/ to find unprocessed
 //   2. Download video from R2
 //   3. Extract audio → Whisper transcribe (Groq primary, OpenAI fallback)
-//   4. Build synthetic FacelessScript from Whisper segments
-//   5. Run shorts-curator → get 3-6 curated short candidates
-//   6. Extract per-short audio → upload to R2
-//   7. Open single pod session → produceShort() for each
-//   8. Rendered shorts land in R2 clips/ prefix → backlog-drainer distributes
+//   4. Generate 4 STANDALONE short scripts from the transcript thesis
+//      (each is a complete self-contained story — NO chopping)
+//   5. TTS each standalone short → upload audio to R2
+//   6. Open single pod session → produceShort() for each
+//   7. Rendered shorts land in R2 clips/ prefix → backlog-drainer distributes
+//
+// SESSION 103b: Replaced curateShorts() chop approach with generateStandaloneShorts().
+// The curator was picking segment ranges that cut mid-thought, producing incoherent
+// shorts. Standalone generation creates each short as a complete narrative from the
+// same thesis — one LLM call, 4 perfect shorts, no chopping math.
 //
 // Does NOT touch the running batch pipeline. Standalone entry point.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -18,13 +23,13 @@
 import { execSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync, statSync } from "fs";
 import { S3Client, ListObjectsV2Command, type ListObjectsV2CommandOutput } from "@aws-sdk/client-s3";
-import { curateShorts, type CuratorResult, type VerticalScene } from "./shorts-curator";
 import { detectNiche } from "./whisper-extract";
 import { withPodSession } from "../pod/session";
 import { produceShort } from "../pod/runpod-client";
 import { uploadToR2, isR2Configured, getR2PresignedUrl } from "../tools/r2-upload";
 import type { ShortJobSpec, ShortScene } from "../pod/types";
-import type { FacelessScript, ScriptSegment, Brand } from "./faceless-factory";
+import type { Brand } from "./faceless-factory";
+import { generateStandaloneShorts, renderAudio, type StandaloneShort } from "./faceless-factory";
 import type { LLMProvider } from "../types";
 import { config } from "../config";
 
@@ -410,74 +415,7 @@ async function transcribeVideo(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Step 4: Build synthetic FacelessScript from Whisper output
-// ─────────────────────────────────────────────────────────────────────────────
-
-function buildSyntheticScript(
-  whisperSegments: WhisperSegment[],
-  brand: Brand,
-  title: string,
-  niche: string,
-): { script: FacelessScript; segmentDurations: number[] } {
-  // Group Whisper segments into ~20-30s logical chunks (matching typical scene durations)
-  // This produces segments similar to what faceless-factory generates
-  const TARGET_CHUNK_DURATION = 25; // seconds
-  const chunks: { text: string; visual: string; duration: number }[] = [];
-  let currentText = "";
-  let currentStart = 0;
-  let currentDuration = 0;
-
-  for (const seg of whisperSegments) {
-    const segDuration = seg.end - seg.start;
-    currentText += (currentText ? " " : "") + seg.text;
-    currentDuration += segDuration;
-
-    if (currentDuration >= TARGET_CHUNK_DURATION) {
-      chunks.push({
-        text: currentText.trim(),
-        visual: `Cinematic documentary scene illustrating: ${currentText.trim().slice(0, 150)}`,
-        duration: currentDuration,
-      });
-      currentText = "";
-      currentStart = seg.end;
-      currentDuration = 0;
-    }
-  }
-
-  // Flush remaining
-  if (currentText.trim()) {
-    chunks.push({
-      text: currentText.trim(),
-      visual: `Cinematic documentary scene illustrating: ${currentText.trim().slice(0, 150)}`,
-      duration: currentDuration || 10,
-    });
-  }
-
-  const segments: ScriptSegment[] = chunks.map((c) => ({
-    voiceover: c.text,
-    visual_direction: c.visual,
-    duration_hint: c.duration,
-  }));
-
-  const segmentDurations = chunks.map((c) => c.duration);
-
-  // Extract hook from first segment
-  const hook = segments[0]?.voiceover?.split(/[.!?]/)[0]?.trim() || title;
-
-  const script: FacelessScript = {
-    title,
-    niche,
-    brand,
-    hook,
-    segments,
-    cta: brand === "containment_field" ? "Exit the field — @TheContainmentField" : "The protocol is live — @ace_richie77",
-  };
-
-  return { script, segmentDurations };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Step 5-8: Rechop a single video end-to-end
+// Rechop a single video end-to-end
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -522,165 +460,86 @@ export async function rechopVideo(
       return result;
     }
 
-    // ── Step 3: Build synthetic script + run shorts curator ──
-    await log("STEP 3/5", "Running shorts curator...");
+    // ── Step 3: Generate standalone shorts from transcript thesis ──
+    // SESSION 103b: Replaced curateShorts() chopping with generateStandaloneShorts().
+    // Each short is a complete self-contained story — no mid-thought cuts.
+    await log("STEP 3/6", "Generating standalone shorts from thesis...");
     const niche = detectNiche(whisper.transcript);
     const title = humanizeTitle(video.jobId, video.brand);
 
-    const { script, segmentDurations } = buildSyntheticScript(
-      whisper.segments,
-      video.brand,
-      title,
+    // Use the Whisper transcript as source intelligence for standalone generation.
+    // The LLM draws INSPIRATION from the long-form content but writes 4 complete,
+    // self-contained short scripts — each one a standalone story.
+    const standaloneShorts = await generateStandaloneShorts(
+      llm,
+      whisper.transcript,
       niche,
+      video.brand as Brand,
     );
+    console.log(`🎬 [Rechop] Generated ${standaloneShorts.length} standalone shorts for ${video.jobId}`);
 
-    const curatorResult: CuratorResult = await curateShorts(llm, script, segmentDurations);
-    console.log(`🎬 [Rechop] Curator found ${curatorResult.shorts.length} shorts for ${video.jobId}`);
-
-    if (curatorResult.shorts.length === 0) {
-      await log("STEP 3/5", "⚠️ Curator found 0 worthy shorts — skipping");
-      result.errors.push("Curator returned 0 shorts");
+    if (standaloneShorts.length === 0) {
+      await log("STEP 3/6", "⚠️ Standalone generation returned 0 shorts — skipping");
+      result.errors.push("Standalone shorts generation failed");
       return result;
     }
 
-    // ── Step 4: Extract audio per-short + upload to R2 ──
-    // SESSION 101b: DIAGNOSTIC TAG — if this line appears in Telegram, the new code is running.
-    await log("STEP 4/5", `[S101b] Extracting audio for ${curatorResult.shorts.length} shorts (two-step WAV method)...`);
+    // ── Step 4: TTS each standalone short ──
+    // SESSION 103b: Each short gets its own TTS — complete fresh audio, no chopping.
+    await log("STEP 4/6", `TTS for ${standaloneShorts.length} standalone shorts...`);
     const clipDir = `${jobDir}/clips`;
     if (!existsSync(clipDir)) mkdirSync(clipDir, { recursive: true });
-
-    // SESSION 101: Two-step audio extraction — ROOT CAUSE FIX for silent shorts.
-    // Extract the FULL audio track once, then seek within the WAV per-short.
-    const fullAudioPath = `${jobDir}/full_audio.wav`;
-    if (!existsSync(fullAudioPath)) {
-      try {
-        execSync(
-          `ffmpeg -i "${videoPath}" -vn -acodec pcm_s16le -ar 48000 -ac 2 -y "${fullAudioPath}"`,
-          { timeout: FFMPEG_TIMEOUT_MS, stdio: "pipe" },
-        );
-        const fullSize = statSync(fullAudioPath).size;
-        console.log(`📦 [Rechop] Full audio extracted: ${(fullSize / 1024 / 1024).toFixed(1)}MB`);
-
-        // DIAGNOSTIC: Verify the full WAV has audio, not silence
-        try {
-          const fullVol = execSync(
-            `ffmpeg -i "${fullAudioPath}" -af volumedetect -f null /dev/null 2>&1 | grep mean_volume || true`,
-            { timeout: 60_000, encoding: "utf-8" },
-          );
-          const fullVolMatch = fullVol.match(/mean_volume:\s*(-?\d+\.?\d*)/);
-          const fullDb = fullVolMatch ? parseFloat(fullVolMatch[1]) : null;
-          await log("STEP 4/5", `🔊 Full audio WAV: ${(fullSize / 1024 / 1024).toFixed(1)}MB, ${fullDb !== null ? fullDb.toFixed(1) + " dB" : "level unknown"}`);
-          if (fullDb !== null && fullDb < -70) {
-            result.errors.push(`Full audio WAV is SILENT (${fullDb.toFixed(1)} dB) — source video may have no audio`);
-            return result;
-          }
-        } catch (fullVolErr: any) {
-          // SESSION 103: Log but continue — per-short checks below will catch individual failures.
-          console.warn(`[Rechop] Full audio volumedetect failed (non-fatal): ${fullVolErr?.message?.slice(0, 120) || "unknown"}`);
-        }
-      } catch (err: any) {
-        console.error(`[Rechop] Full audio extraction FAILED: ${err.message?.slice(0, 300)}`);
-        result.errors.push("Full audio extraction failed — cannot produce shorts");
-        return result;
-      }
-    } else {
-      await log("STEP 4/5", `📦 Using cached full_audio.wav (${(statSync(fullAudioPath).size / 1024 / 1024).toFixed(1)}MB)`);
-    }
 
     interface PreparedShort {
       index: number;
       spec: ShortJobSpec;
-      paddedStart: number;
       duration: number;
       hookText: string;
     }
     const podQueue: PreparedShort[] = [];
 
-    // SESSION 103: Hard 4.0s intro skip — Ace confirmed music-only intro is
-    // always exactly 4 seconds on both brands. Whisper segment[0].start was
-    // always 0 (useless), so we use a hard constant instead.
-    // ONLY shorts starting within the first 4s get advanced — later clips untouched.
-    const BRAND_INTRO_DUR = 4.0;
+    for (let i = 0; i < standaloneShorts.length; i++) {
+      const standalone = standaloneShorts[i];
+      const shortJobId = `rechop_${video.jobId}_standalone_${i}`;
 
-    for (let i = 0; i < curatorResult.shorts.length; i++) {
-      const short = curatorResult.shorts[i];
-
-      // Extract audio segment with fade
-      const PAD_BEFORE = 0.3;
-      const PAD_AFTER = 1.5;
-      const MAX_DURATION = 179;
-
-      // SESSION 103: Skip intro music — only if this short starts within the
-      // 4s branded intro. Shorts starting later are NOT affected.
-      let effectiveStart = short.start_ts;
-      if (effectiveStart < BRAND_INTRO_DUR) {
-        console.log(`  ⏩ Short ${i}: advancing start from ${effectiveStart.toFixed(1)}s → ${BRAND_INTRO_DUR}s (skip 4s intro music)`);
-        effectiveStart = BRAND_INTRO_DUR;
+      // ── Step A: TTS the standalone short script ──
+      await log("STEP 4/6", `TTS short ${i + 1}/${standaloneShorts.length}: "${standalone.script.title.slice(0, 40)}..."`);
+      let ttsAudioPath: string;
+      let audioDuration: number;
+      let segDurations: number[];
+      try {
+        const audioResult = await renderAudio(standalone.script, shortJobId);
+        ttsAudioPath = audioResult.audioPath;
+        segDurations = audioResult.segmentDurations;
+        audioDuration = segDurations.reduce((a, b) => a + b, 0);
+        console.log(`  🎤 Short ${i} TTS complete: ${audioDuration.toFixed(1)}s (${segDurations.length} segments)`);
+      } catch (ttsErr: any) {
+        console.error(`[Rechop] Short ${i} TTS FAILED: ${ttsErr.message?.slice(0, 200)}`);
+        result.shortsFailed++;
+        result.errors.push(`Short ${i} TTS failed: ${ttsErr.message?.slice(0, 100)}`);
+        continue;
       }
 
-      const paddedStart = Math.max(0, effectiveStart - PAD_BEFORE);
-      const rawPaddedEnd = Math.min(whisper.totalDuration, short.end_ts + PAD_AFTER);
-      const duration = Math.min(rawPaddedEnd - paddedStart, MAX_DURATION);
-
-      const audioPath = `${clipDir}/audio_${i.toString().padStart(2, "0")}.wav`;
-      // SESSION 102 FIX: Railway ffmpeg -ss on WAV produces silence for seek>0.
-      // Use atrim filter instead — trims audio inside the filter graph, no seeking.
-      const trimFilter = `atrim=start=${paddedStart.toFixed(2)}:duration=${duration.toFixed(2)},asetpts=PTS-STARTPTS`;
-      const fadeFilter = `afade=t=in:st=0:d=0.3,afade=t=out:st=${Math.max(0, duration - 0.5).toFixed(2)}:d=0.5`;
-      const audioFilter = `${trimFilter},${fadeFilter}`;
-
+      // ── Step B: Convert to WAV (pod expects WAV) and upload to R2 ──
+      await log("STEP 5/6", `Uploading short ${i + 1} audio to R2...`);
+      const wavPath = `${clipDir}/standalone_audio_${i.toString().padStart(2, "0")}.wav`;
       try {
-        // SESSION 102: atrim filter replaces -ss/-t seeking which was broken on Railway.
-        // atrim operates entirely in the filter graph — no WAV seek bugs.
         execSync(
-          `ffmpeg -i "${fullAudioPath}" -af "${audioFilter}" ` +
-          `-acodec pcm_s16le -ar 48000 -ac 2 -y "${audioPath}"`,
-          { timeout: FFMPEG_TIMEOUT_MS, stdio: "pipe" },
+          `ffmpeg -i "${ttsAudioPath}" -vn -acodec pcm_s16le -ar 48000 -ac 2 -y "${wavPath}"`,
+          { timeout: 30_000, stdio: "pipe" },
         );
-      } catch (err: any) {
-        console.error(`[Rechop] Short ${i} audio extraction failed: ${err.message?.slice(0, 200)}`);
+      } catch (convErr: any) {
+        console.error(`[Rechop] Short ${i} WAV conversion failed: ${convErr.message?.slice(0, 200)}`);
         result.shortsFailed++;
-        result.errors.push(`Short ${i} audio extraction failed`);
+        result.errors.push(`Short ${i} WAV conversion failed`);
         continue;
       }
 
-      // Post-extraction audio sanity check — detect silent extracts
-      // BEFORE uploading to R2 and burning GPU render time on the pod.
-      // SESSION 101b: Push diagnostics to Telegram (await log) so we can see ALL shorts.
-      try {
-        const volOut = execSync(
-          `ffmpeg -i "${audioPath}" -af volumedetect -f null /dev/null 2>&1 | grep mean_volume || true`,
-          { timeout: 30_000, encoding: "utf-8" },
-        );
-        const meanMatch = volOut.match(/mean_volume:\s*(-?\d+\.?\d*)/);
-        const meanDb = meanMatch ? parseFloat(meanMatch[1]) : null;
-        const fileSize = statSync(audioPath).size;
-        // Log to BOTH console AND Telegram so we can see every short's status
-        const shortDiag = `Short ${i}: ${(fileSize / 1024).toFixed(0)}KB, ${meanDb !== null ? meanDb.toFixed(1) + " dB" : "level?"}, seek=${paddedStart.toFixed(1)}s, dur=${duration.toFixed(1)}s`;
-        console.log(`  🔊 ${shortDiag}`);
-        await log("STEP 4/5", `🔊 ${shortDiag}`);
-        if (meanDb !== null && meanDb < -70) {
-          console.error(`[Rechop] ⚠️ Short ${i} audio is essentially SILENT (${meanDb.toFixed(1)} dB) — skipping`);
-          result.shortsFailed++;
-          result.errors.push(`Short ${i} audio silent at ${meanDb.toFixed(1)} dB (seek=${paddedStart.toFixed(1)}s)`);
-          continue;
-        }
-      } catch (volErr: any) {
-        // SESSION 103: Previously swallowed — this let silent/corrupt audio reach the pod
-        // where it burned GPU time and failed with "Audio is silent (-91.0 dB)".
-        // If we can't even measure volume, the audio file is suspect. Skip it.
-        console.error(`[Rechop] ⚠️ Short ${i} volumedetect FAILED — skipping (${volErr?.message?.slice(0, 120) || "unknown"})`);
-        result.shortsFailed++;
-        result.errors.push(`Short ${i} volumedetect failed — audio suspect`);
-        continue;
-      }
-
-      // Upload audio to R2
       let audioUrl: string | null = null;
       try {
-        const r2Key = `rechop-audio/${video.jobId}/audio_${i.toString().padStart(2, "0")}.wav`;
-        const audioBuf = readFileSync(audioPath);
-        const r2Result = await uploadToR2(R2_BUCKET, r2Key, audioBuf, "audio/wav");
+        const r2Key = `rechop-audio/${video.jobId}/standalone_${i.toString().padStart(2, "0")}.wav`;
+        const audioBuf = readFileSync(wavPath);
+        await uploadToR2(R2_BUCKET, r2Key, audioBuf, "audio/wav");
         audioUrl = await getR2PresignedUrl(R2_BUCKET, r2Key, 3600);
         console.log(`  📤 Short ${i} audio → R2 (presigned)`);
       } catch (err: any) {
@@ -690,16 +549,22 @@ export async function rechopVideo(
         continue;
       }
 
-      // Normalize scene durations to actual audio duration
-      const rawSceneDurs = short.vertical_scenes.map((vs: VerticalScene) => vs.duration_s);
-      const rawSum = rawSceneDurs.reduce((a: number, b: number) => a + b, 0);
-      const driftRatio = rawSum > 0 ? duration / rawSum : 1;
-      const normalizedDurs = rawSceneDurs.map((d: number) => Math.max(0.5, d * driftRatio));
+      if (!audioUrl) {
+        console.warn(`  ⚠️ Short ${i}: no R2 audio URL — skipping`);
+        result.shortsFailed++;
+        continue;
+      }
 
-      const vScenes: ShortScene[] = short.vertical_scenes.map((vs: VerticalScene, idx: number) => ({
+      // ── Step C: Build pod job spec ──
+      // Normalize vertical_scene durations to match actual TTS audio duration
+      const rawSceneDurs = standalone.vertical_scenes.map(vs => vs.duration_s);
+      const rawSum = rawSceneDurs.reduce((a, b) => a + b, 0);
+      const driftRatio = rawSum > 0 ? audioDuration / rawSum : 1;
+
+      const vScenes: ShortScene[] = standalone.vertical_scenes.map((vs, idx) => ({
         index: vs.index,
         image_prompt: vs.image_prompt,
-        duration_s: normalizedDurs[idx],
+        duration_s: Math.max(0.5, rawSceneDurs[idx] * driftRatio),
       }));
 
       podQueue.push({
@@ -707,22 +572,20 @@ export async function rechopVideo(
         spec: {
           brand: video.brand,
           audio_url: audioUrl,
-          audio_duration_s: duration,
+          audio_duration_s: audioDuration,
           scenes: vScenes,
-          hook_text: short.hook_text?.slice(0, 200),
-          cta_text: short.cta_overlay?.slice(0, 300),
-          // Audio from rendered video (has music already) — pod should NOT add another music bed
-          audio_is_raw_tts: false,
-          client_job_id: `rechop_${video.jobId}_short_${i}`,
+          hook_text: standalone.script.hook?.slice(0, 200),
+          cta_text: standalone.cta_overlay?.slice(0, 300),
+          audio_is_raw_tts: true, // Standalone shorts = fresh TTS, pod adds music bed
+          client_job_id: shortJobId,
         },
-        paddedStart,
-        duration,
-        hookText: short.hook_text,
+        duration: audioDuration,
+        hookText: standalone.script.hook || standalone.script.title,
       });
     }
 
     if (podQueue.length === 0) {
-      await log("STEP 4/5", "⚠️ No shorts survived audio extraction — aborting");
+      await log("STEP 5/6", "⚠️ No shorts survived TTS — aborting");
       return result;
     }
 
@@ -873,7 +736,7 @@ export async function rechopAll(
 
 /**
  * Rechop multiple videos sharing a SINGLE pod session.
- * Steps 1-4 (download, Whisper, curator, audio extract) run per-video BEFORE
+ * Steps 1-4 (download, Whisper, standalone generation, TTS) run per-video BEFORE
  * the pod spins up. Then ONE withPodSession wraps ALL renders across all videos.
  * This eliminates cold-start waste: 1 pod spin-up instead of N.
  *
@@ -886,7 +749,7 @@ export async function rechopBatch(
 ): Promise<RechopResult[]> {
   const log = progress || (async (s: string, d: string) => console.log(`[RechopBatch] ${s}: ${d}`));
 
-  // Phase 1: prep all videos (download + Whisper + curator + audio extraction)
+  // Phase 1: prep all videos (download + Whisper + standalone generation + TTS)
   // This happens BEFORE any pod is started, so no GPU time is wasted on I/O.
   interface PreppedVideo {
     video: R2LongForm;
@@ -994,8 +857,9 @@ export async function rechopBatch(
 }
 
 /**
- * Internal: Run steps 1-4 of rechopVideo (download, Whisper, curator, audio extract)
+ * Internal: Run steps 1-4 of rechopVideo (download, Whisper, standalone generation, TTS)
  * WITHOUT starting a pod. Returns the prepped data for batch rendering.
+ * SESSION 103b: Uses generateStandaloneShorts() — same as main rechopVideo.
  */
 async function rechopVideoPrepOnly(
   video: R2LongForm,
@@ -1037,105 +901,96 @@ async function rechopVideoPrepOnly(
     return null;
   }
 
-  // Step 3: Curator
-  await log("PREP 3/4", `Running curator for ${video.jobId.slice(0, 40)}...`);
+  // Step 3: Generate standalone shorts from transcript thesis
+  // SESSION 103b: Same standalone approach as main rechopVideo — no curator chopping.
+  await log("PREP 3/5", `Generating standalone shorts for ${video.jobId.slice(0, 40)}...`);
   const niche = detectNiche(whisper.transcript);
   const title = humanizeTitle(video.jobId, video.brand);
-  const { script, segmentDurations } = buildSyntheticScript(whisper.segments, video.brand, title, niche);
-  const curatorResult: CuratorResult = await curateShorts(llm, script, segmentDurations);
 
-  if (curatorResult.shorts.length === 0) {
-    result.errors.push("Curator returned 0 shorts");
+  const standaloneShorts = await generateStandaloneShorts(
+    llm,
+    whisper.transcript,
+    niche,
+    video.brand as Brand,
+  );
+  console.log(`🎬 [RechopPrep] Generated ${standaloneShorts.length} standalone shorts for ${video.jobId}`);
+
+  if (standaloneShorts.length === 0) {
+    result.errors.push("Standalone shorts generation failed");
     return null;
   }
 
-  // Step 4: Audio extraction per short
-  await log("PREP 4/4", `Extracting audio for ${curatorResult.shorts.length} shorts...`);
+  // Step 4: TTS each standalone short + upload audio to R2
+  await log("PREP 4/5", `TTS for ${standaloneShorts.length} standalone shorts...`);
   const clipDir = `${jobDir}/clips`;
   if (!existsSync(clipDir)) mkdirSync(clipDir, { recursive: true });
 
   const podQueue: any[] = [];
 
-  // SESSION 103: Same 4s intro skip as primary rechop path
-  const BRAND_INTRO_DUR_PREP = 4.0;
+  for (let i = 0; i < standaloneShorts.length; i++) {
+    const standalone = standaloneShorts[i];
+    const shortJobId = `rechop_${video.jobId}_standalone_${i}`;
 
-  for (let i = 0; i < curatorResult.shorts.length; i++) {
-    const short = curatorResult.shorts[i];
-    const PAD_BEFORE = 0.3;
-    const PAD_AFTER = 1.5;
-    const MAX_DURATION = 179;
-
-    // SESSION 103: Skip 4s intro music for shorts starting within the intro
-    let effectiveStart = short.start_ts;
-    if (effectiveStart < BRAND_INTRO_DUR_PREP) {
-      console.log(`  ⏩ PrepOnly Short ${i}: advancing start from ${effectiveStart.toFixed(1)}s → ${BRAND_INTRO_DUR_PREP}s (skip intro music)`);
-      effectiveStart = BRAND_INTRO_DUR_PREP;
-    }
-
-    const paddedStart = Math.max(0, effectiveStart - PAD_BEFORE);
-    const rawPaddedEnd = Math.min(whisper.totalDuration, short.end_ts + PAD_AFTER);
-    const duration = Math.min(rawPaddedEnd - paddedStart, MAX_DURATION);
-
-    const audioPath = `${clipDir}/audio_${i.toString().padStart(2, "0")}.wav`;
-    // SESSION 103: Use atrim filter (same as primary path) — -ss seeking on WAV is broken on Railway.
-    const trimFilter = `atrim=start=${paddedStart.toFixed(2)}:duration=${duration.toFixed(2)},asetpts=PTS-STARTPTS`;
-    const fadeFilter = `afade=t=in:st=0:d=0.3,afade=t=out:st=${Math.max(0, duration - 0.5).toFixed(2)}:d=0.5`;
-    const audioFilter = `${trimFilter},${fadeFilter}`;
-
+    // ── TTS the standalone short script ──
+    let ttsAudioPath: string;
+    let audioDuration: number;
+    let segDurations: number[];
     try {
-      execSync(
-        `ffmpeg -i "${videoPath}" -af "${audioFilter}" ` +
-        `-acodec pcm_s16le -ar 48000 -ac 2 -y "${audioPath}"`,
-        { timeout: FFMPEG_TIMEOUT_MS, stdio: "pipe" },
-      );
-    } catch (err: any) {
+      const audioResult = await renderAudio(standalone.script, shortJobId);
+      ttsAudioPath = audioResult.audioPath;
+      segDurations = audioResult.segmentDurations;
+      audioDuration = segDurations.reduce((a, b) => a + b, 0);
+      console.log(`  🎤 PrepOnly Short ${i} TTS complete: ${audioDuration.toFixed(1)}s (${segDurations.length} segments)`);
+    } catch (ttsErr: any) {
+      console.error(`[RechopPrep] Short ${i} TTS FAILED: ${ttsErr.message?.slice(0, 200)}`);
       result.shortsFailed++;
-      result.errors.push(`Short ${i} audio extraction failed`);
+      result.errors.push(`Short ${i} TTS failed: ${ttsErr.message?.slice(0, 100)}`);
       continue;
     }
 
-    // SESSION 103: Silence check (was completely missing in prep path)
+    // ── Convert to WAV (pod expects WAV) and upload to R2 ──
+    const wavPath = `${clipDir}/standalone_audio_${i.toString().padStart(2, "0")}.wav`;
     try {
-      const volOut = execSync(
-        `ffmpeg -i "${audioPath}" -af volumedetect -f null /dev/null 2>&1 | grep mean_volume || true`,
-        { timeout: 30_000, encoding: "utf-8" },
+      execSync(
+        `ffmpeg -i "${ttsAudioPath}" -vn -acodec pcm_s16le -ar 48000 -ac 2 -y "${wavPath}"`,
+        { timeout: 30_000, stdio: "pipe" },
       );
-      const meanMatch = volOut.match(/mean_volume:\s*(-?\d+\.?\d*)/);
-      const meanDb = meanMatch ? parseFloat(meanMatch[1]) : null;
-      if (meanDb !== null && meanDb < -70) {
-        console.error(`[RechopPrep] ⚠️ Short ${i} audio SILENT (${meanDb.toFixed(1)} dB) — skipping`);
-        result.shortsFailed++;
-        result.errors.push(`Short ${i} audio silent at ${meanDb.toFixed(1)} dB`);
-        continue;
-      }
-    } catch (volErr: any) {
-      console.error(`[RechopPrep] ⚠️ Short ${i} volumedetect FAILED — skipping (${volErr?.message?.slice(0, 120) || "unknown"})`);
+    } catch (convErr: any) {
+      console.error(`[RechopPrep] Short ${i} WAV conversion failed: ${convErr.message?.slice(0, 200)}`);
       result.shortsFailed++;
-      result.errors.push(`Short ${i} volumedetect failed`);
+      result.errors.push(`Short ${i} WAV conversion failed`);
       continue;
     }
 
     let audioUrl: string | null = null;
     try {
-      const r2Key = `rechop-audio/${video.jobId}/audio_${i.toString().padStart(2, "0")}.wav`;
-      const audioBuf = readFileSync(audioPath);
-      const r2Result = await uploadToR2(R2_BUCKET, r2Key, audioBuf, "audio/wav");
+      const r2Key = `rechop-audio/${video.jobId}/standalone_${i.toString().padStart(2, "0")}.wav`;
+      const audioBuf = readFileSync(wavPath);
+      await uploadToR2(R2_BUCKET, r2Key, audioBuf, "audio/wav");
       audioUrl = await getR2PresignedUrl(R2_BUCKET, r2Key, 3600);
+      console.log(`  📤 PrepOnly Short ${i} audio → R2 (presigned)`);
     } catch (err: any) {
+      console.error(`[RechopPrep] Short ${i} R2 audio upload failed: ${err.message?.slice(0, 200)}`);
       result.shortsFailed++;
       result.errors.push(`Short ${i} R2 audio upload failed`);
       continue;
     }
 
-    const rawSceneDurs = short.vertical_scenes.map((vs: VerticalScene) => vs.duration_s);
-    const rawSum = rawSceneDurs.reduce((a: number, b: number) => a + b, 0);
-    const driftRatio = rawSum > 0 ? duration / rawSum : 1;
-    const normalizedDurs = rawSceneDurs.map((d: number) => Math.max(0.5, d * driftRatio));
+    if (!audioUrl) {
+      console.warn(`  ⚠️ PrepOnly Short ${i}: no R2 audio URL — skipping`);
+      result.shortsFailed++;
+      continue;
+    }
 
-    const vScenes: ShortScene[] = short.vertical_scenes.map((vs: VerticalScene, idx: number) => ({
+    // ── Build pod job spec ──
+    const rawSceneDurs = standalone.vertical_scenes.map(vs => vs.duration_s);
+    const rawSum = rawSceneDurs.reduce((a, b) => a + b, 0);
+    const driftRatio = rawSum > 0 ? audioDuration / rawSum : 1;
+
+    const vScenes: ShortScene[] = standalone.vertical_scenes.map((vs, idx) => ({
       index: vs.index,
       image_prompt: vs.image_prompt,
-      duration_s: normalizedDurs[idx],
+      duration_s: Math.max(0.5, rawSceneDurs[idx] * driftRatio),
     }));
 
     podQueue.push({
@@ -1143,21 +998,20 @@ async function rechopVideoPrepOnly(
       spec: {
         brand: video.brand,
         audio_url: audioUrl,
-        audio_duration_s: duration,
+        audio_duration_s: audioDuration,
         scenes: vScenes,
-        hook_text: short.hook_text?.slice(0, 200),
-        cta_text: short.cta_overlay?.slice(0, 300),
-        audio_is_raw_tts: false,
-        client_job_id: `rechop_${video.jobId}_short_${i}`,
+        hook_text: standalone.script.hook?.slice(0, 200),
+        cta_text: standalone.cta_overlay?.slice(0, 300),
+        audio_is_raw_tts: true, // Standalone shorts = fresh TTS, pod adds music bed
+        client_job_id: shortJobId,
       },
-      paddedStart,
-      duration,
-      hookText: short.hook_text,
+      duration: audioDuration,
+      hookText: standalone.script.hook || standalone.script.title,
     });
   }
 
   if (podQueue.length === 0) {
-    result.errors.push("No shorts survived audio extraction");
+    result.errors.push("No shorts survived TTS");
     return null;
   }
 

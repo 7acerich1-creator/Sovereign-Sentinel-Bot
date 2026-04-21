@@ -1165,7 +1165,7 @@ export async function fluxBatchImageGen(): Promise<number> {
     return brandItems.map((r: any) => ({
       id: r.id,
       prompt: sharedPrompt, // Same prompt → pod deduplicates to 1 FLUX generation
-      hook_text: (r.content || "").split("\n")[0].slice(0, 200) || undefined,
+      hook_text: (r.universal_text || "").split("\n")[0].slice(0, 200) || undefined,
     }));
   };
 

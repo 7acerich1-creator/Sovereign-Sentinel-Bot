@@ -1317,7 +1317,7 @@ async function main() {
 
           // Step 1: Generate new drafts
           await telegram.sendMessage(message.chatId, "📝 Step 1/3: Generating content drafts...");
-          const drafted = await dailyContentProduction();
+          const drafted = await dailyContentProduction(failoverLLM);
           await telegram.sendMessage(message.chatId, `✅ Drafts: ${drafted} new posts generated`);
 
           // Step 2: FLUX batch images for any drafts with image_prompt but no media_url

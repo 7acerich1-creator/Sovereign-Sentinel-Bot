@@ -44,7 +44,6 @@ RUN npm ci --omit=dev || npm install --omit=dev
 COPY --from=builder /app/dist ./dist
 
 # Copy identity, config, and support files
-COPY soul.md ./soul.md
 COPY claude.md ./claude.md
 COPY skills ./skills
 

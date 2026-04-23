@@ -5,7 +5,7 @@ Loads XTTSv2 once at module level (lazy, first call), then synthesizes speech
 for each scene's tts_text using the brand-appropriate speaker reference WAV.
 
 Speaker WAVs are baked into the Docker image at:
-    /app/brand-assets/ace_ref.wav
+    /app/brand-assets/ace_ref.wav   (Sovereign Synthesis voice)
     /app/brand-assets/tcf_ref.wav
 
 Returns a list of per-scene WAV paths + a concatenated final audio WAV.
@@ -95,7 +95,7 @@ def synthesize_scenes(
 
     Args:
         scenes: List of scene dicts with 'index' and 'tts_text' keys.
-        brand: 'ace_richie' or 'containment_field'.
+        brand: 'sovereign_synthesis' or 'containment_field'.
         job_dir: Directory to write output WAVs into.
         language: XTTS language code.
 

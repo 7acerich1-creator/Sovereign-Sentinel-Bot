@@ -11,7 +11,7 @@
 //   npx tsx scripts/ingest-idea.ts "The concept of biological drag in corporate environments"
 //
 // Optional flags:
-//   --brand=ace_richie | --brand=containment_field   (default: ace_richie)
+//   --brand=sovereign_synthesis | --brand=containment_field   (default: sovereign_synthesis)
 //   --brand=both                                       (run both sequentially)
 //   --niche=dark_psychology|self_improvement|burnout|quantum   (override auto-detection)
 //   --dry                                              (use dryrun mode — stubs all APIs)
@@ -59,24 +59,24 @@ for (const arg of args) {
 const rawIdea = positional.join(" ").trim();
 
 if (!rawIdea) {
-  console.error("❌ Usage: npx tsx scripts/ingest-idea.ts \"<your thesis here>\" [--brand=ace_richie|containment_field|both] [--niche=...] [--dry]");
+  console.error("❌ Usage: npx tsx scripts/ingest-idea.ts \"<your thesis here>\" [--brand=sovereign_synthesis|containment_field|both] [--niche=...] [--dry]");
   console.error("");
   console.error("Example:");
   console.error("  npx tsx scripts/ingest-idea.ts \"The concept of biological drag in corporate environments\"");
   process.exit(1);
 }
 
-const brandFlag = (flagValues.brand || "ace_richie").toLowerCase();
+const brandFlag = (flagValues.brand || "sovereign_synthesis").toLowerCase();
 const validBrands: Record<string, Brand[]> = {
-  ace_richie: ["ace_richie"],
+  sovereign_synthesis: ["sovereign_synthesis"],
   containment_field: ["containment_field"],
   tcf: ["containment_field"],
-  both: ["ace_richie", "containment_field"],
-  dual: ["ace_richie", "containment_field"],
+  both: ["sovereign_synthesis", "containment_field"],
+  dual: ["sovereign_synthesis", "containment_field"],
 };
 const brandsToRun: Brand[] | undefined = validBrands[brandFlag];
 if (!brandsToRun) {
-  console.error(`❌ Invalid --brand value: "${brandFlag}". Use ace_richie | containment_field | both`);
+  console.error(`❌ Invalid --brand value: "${brandFlag}". Use sovereign_synthesis | containment_field | both`);
   process.exit(1);
 }
 
@@ -130,7 +130,7 @@ async function main() {
 
   for (let i = 0; i < brandsToRun!.length; i++) {
     const brand = brandsToRun![i];
-    const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
+    const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "SOVEREIGN SYNTHESIS";
 
     if (i > 0) {
       const cooldownMs = parseInt(process.env.PIPELINE_COOLDOWN_MS || "180000", 10);

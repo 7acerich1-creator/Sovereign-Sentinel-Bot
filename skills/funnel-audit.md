@@ -19,7 +19,7 @@ Deep strategic audit of the entire Sovereign Synthesis conversion funnel — fro
 6. **ASCEND** — T2→T6 upsell ladder through continued relationship
 
 ### Two Brands Feed the Top
-- **Ace Richie / Sovereign Synthesis** — personal brand, all 5 niches, primary revenue driver
+- **Sovereign Synthesis** — personal brand, all 5 niches, primary revenue driver
 - **The Containment Field** — anonymous dark psychology feeder, top-of-funnel only, creates curiosity → funnels to sovereign-synthesis.com
 
 ### Product Ladder (Stripe — LOCKED)
@@ -47,7 +47,7 @@ When activated, run ALL of the following checks systematically:
 Use `social_scheduler_list_profiles` and `social_scheduler_pending_posts` to check:
 - [ ] How many Buffer channels are active and connected?
 - [ ] Are posts actually scheduling and publishing? Any failed posts?
-- [ ] Is content going to BOTH Ace Richie AND Containment Field channels?
+- [ ] Is content going to BOTH Sovereign Synthesis AND Containment Field channels?
 - [ ] What's the posting frequency? Target: 250+ pieces/week across all platforms
 - [ ] Are video clips (TikTok/IG/YouTube Shorts) getting public URLs from Supabase storage?
 
@@ -78,15 +78,15 @@ Flag for Architect attention:
 Query Supabase for recent activity:
 - [ ] How many videos produced in the last 7 days?
 - [ ] How many clips generated and distributed?
-- [ ] Are both brands (ace_richie + containment_field) producing content?
+- [ ] Are both brands (sovereign_synthesis + containment_field) producing content?
 - [ ] Any pipeline failures in the last 7 days?
 - [ ] Is Alfred's daily trend scan finding and triggering pipelines?
 
-### Stage 6: The Containment Field → Ace Richie Handoff
+### Stage 6: The Containment Field → Sovereign Synthesis Handoff
 - [ ] Does TCF content have CTAs that lead to sovereign-synthesis.com?
 - [ ] Is TCF YouTube channel getting long-form uploads? (Requires YOUTUBE_REFRESH_TOKEN_TCF)
 - [ ] Are TCF clips distributing to TCF-specific Buffer channels?
-- [ ] Is the TCF voice/brand distinct from Ace Richie? (Anonymous, dark psych only, no face)
+- [ ] Is the TCF voice/brand distinct from Sovereign Synthesis? (Anonymous, dark psych only, no face)
 
 ## Output Format
 Present findings as a strategic brief, NOT a checklist. Lead with the most critical blocker. Group issues by severity:

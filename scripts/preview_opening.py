@@ -16,7 +16,7 @@ TYPEWRITER_DUR = 3.7
 TAIL_FRAC = 0.25  # hold fully typed for last 25% of typewriter window
 
 STYLES = {
-    "ace_richie": {
+    "sovereign_synthesis": {
         "card": os.path.join(ASSETS, "brand_card_ace.mp4"),
         "font": "Montserrat SemiBold",
         "fontsize": 54,
@@ -157,7 +157,7 @@ Dialogue: 0,{_ts(0.0)},{_ts(TYPEWRITER_DUR)},Typewriter,,0,0,0,,{karaoke_text}
 
 
 if __name__ == "__main__":
-    ok1 = build_preview("ace_richie")
+    ok1 = build_preview("sovereign_synthesis")
     ok2 = build_preview("containment_field")
     if ok1 and ok2:
         print("\nBoth previews ready.")

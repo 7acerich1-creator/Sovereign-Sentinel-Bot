@@ -72,7 +72,7 @@ async function getRecentTitles(limit: number = 20): Promise<string[]> {
 
 // ── Types ──
 
-export type Brand = "ace_richie" | "containment_field";
+export type Brand = "sovereign_synthesis" | "containment_field";
 export type Orientation = "horizontal" | "vertical";
 
 /**
@@ -130,7 +130,7 @@ export interface FacelessScript {
   segments: ScriptSegment[];
   cta: string;
   frequency_activations?: FrequencyActivation[]; // 2 per long-form — mid-video consciousness CTAs
-  thumbnail_text?: string;      // 2-5 words, ALL CAPS, for thumbnail overlay — the scroll-stopper
+  thumbnail_text?: string;      // 6-10 words, ALL CAPS, for thumbnail overlay — the scroll-stopper
   thumbnail_visual?: string;    // Cinematographer direction for the thumbnail base image
 }
 
@@ -293,7 +293,7 @@ The voiceover should sound like a human speaking — conversational, with natura
 }
 
 const SCRIPT_VOICE: Record<Brand, string> = {
-  ace_richie: buildScriptVoice("ace_richie"),
+  sovereign_synthesis: buildScriptVoice("sovereign_synthesis"),
   containment_field: buildScriptVoice("containment_field"),
 };
 
@@ -511,16 +511,22 @@ Generate as JSON:
   "cta": "Organic closing directing to sovereign-synthesis.com"
 }
 
-VISUAL DIRECTION RULES (v3 — HBO PRESTIGE DOCUMENTARY):
+VISUAL DIRECTION RULES (v4 — BRAND-SPECIFIC CINEMATIC):
 - Write like a documentary DP's shot list — specific, concrete, tangible. NOT symbolic. NOT abstract.
-- Every visual_direction MUST describe: (1) a real specific subject (a person doing a specific action, or a tangible object/room), (2) the physical environment with real tangible props, (3) a visible motivated practical light source, (4) camera angle and framing
 - Each segment's visual should MATCH the emotional beat of the voiceover with a CONCRETE scene
 - FORMAT: ${orientation === "horizontal" ? "LANDSCAPE 16:9 — wide establishing shots, negative space, cinematic framing" : "VERTICAL 9:16 — center subject, close crops, portrait framing"}
-- HARD BANS (never write these — Imagen refuses them): silhouette, silhouetted, sacred geometry, concentric light rings, cosmic void, particles dissolving, chains shattering into light, abstract light tendrils, symbolic figure, wireframe hologram, converging perspective lines to nothing, stock-photo descriptions, corporate poses
-- REQUIRED: "shot on ARRI Alexa 65, 35mm prime, f/2.0, Kodak Vision3 500T, practical tungsten lighting, shallow depth of field, tangible skin texture" or equivalent language in the spirit of a prestige HBO/A24 frame (Succession, Severance, Oppenheimer, The Banshees of Inisherin, Mr. Robot, Tinker Tailor)
-- PEOPLE: Show real specific humans with real tangible imperfections — stubble, pores, fatigue, sweat, worn clothing, real hands doing real things. Never silhouetted. Never symbolic. Never dwarfed-by-environment clichés.
-- COLOR: deep blacks grounded by a single practical warm (amber/tungsten) or cool (fluorescent/window) source. The palette comes from real light in real rooms, not color-graded gradients.
-- EXAMPLES of good visual_direction: "Close-up of a man's hands wrapping around a chipped ceramic mug at a worn wooden table, single tungsten bulb overhead, visible stubble on his forearm, Kodak Vision3 500T, f/2.0" / "Medium shot of a woman sitting on the edge of an unmade bed at dawn, window light raking across her face, phone dark on the nightstand, tangible fabric texture, ARRI Alexa 65 35mm prime"
+- HARD BANS (never write these): sacred geometry, concentric light rings, cosmic void, particles dissolving, chains shattering into light, abstract light tendrils, wireframe hologram, converging perspective lines to nothing, stock-photo descriptions, corporate poses
+${brand === "sovereign_synthesis" ? `- BRAND: SOVEREIGN SYNTHESIS — warm sovereign gold/amber/tungsten palette. Truth energy.
+- SUBJECTS: ENVIRONMENTS and OBJECTS ONLY. Absolutely NO people, NO human figures, NO faces, NO hands, NO skin, NO body parts of any kind. Every scene must be an empty environment or a close-up of tangible objects that TELL the story without a person in frame.
+- Every visual_direction MUST describe: (1) a specific tangible environment or object arrangement, (2) real physical props and textures (leather, wood, metal, glass, paper, stone), (3) warm practical light source (tungsten bulb, amber desk lamp, golden hour window light, candle), (4) camera angle and framing
+- REQUIRED: "shot on ARRI Alexa 65, 35mm prime, f/2.0, warm tungsten lighting, shallow depth of field, tangible material texture" — the aesthetic of a Gregory Crewdson photograph or a Terrence Malick establishing shot, but with NO people in frame
+- COLOR: deep blacks grounded by warm amber/tungsten/golden light. Sovereign gold as accent. The palette is warm, intentional, sovereign — never cold, never clinical.
+- EXAMPLES of good visual_direction: "Close-up of a worn leather journal open on a dark mahogany desk, single tungsten desk lamp casting warm amber light across handwritten diagrams, brass pen resting on the page, Kodak Vision3 500T, f/2.0, shallow depth of field" / "Wide shot of an empty architect's office at golden hour, floor-to-ceiling windows flooding warm light across scattered blueprints and a cold cup of coffee on a concrete desk, ARRI Alexa 65 35mm prime, tangible dust particles in the light beam"` : `- BRAND: THE CONTAINMENT FIELD — cold blue/steel/teal palette. Surveillance and oppression energy.
+- SUBJECTS: Institutional environments, surveillance infrastructure, cold clinical spaces. Human SILHOUETTES permitted (always small, dwarfed by oppressive architecture, never detailed faces or skin). Figures should feel CONTAINED by the environment.
+- Every visual_direction MUST describe: (1) an oppressive institutional environment or surveillance apparatus, (2) cold industrial materials (concrete, steel, glass, fluorescent tubes, security cameras), (3) cold practical light source (fluorescent, blue LED, security light, monitor glow), (4) camera angle suggesting surveillance or claustrophobia
+- REQUIRED: "security camera angle, cold fluorescent lighting, institutional architecture, clinical atmosphere" — the aesthetic of a Fincher film (Se7en, Zodiac) or Blade Runner's dystopian interiors
+- COLOR: desaturated cold blue (#5A9CF5) and teal (#00e5c7) accents on concrete gray and void black. Never warm, never gold, never amber.
+- EXAMPLES of good visual_direction: "High-angle security camera view of an empty industrial corridor, fluorescent tubes flickering cold blue light on rain-slicked concrete floor, steel door ajar at the far end, institutional oppression, clinical atmosphere" / "Close-up of a wall of surveillance monitors showing empty office cubicles, cold blue LED glow reflecting off steel desk surface, oppressive corporate architecture beyond the glass partition"`}
 
 duration_hint MUST be 25-40 seconds per segment. Total for these 9 segments: 225-360 seconds.
 Return ONLY valid JSON, no code fences, no explanation.`;
@@ -600,13 +606,10 @@ Generate as JSON:
   ]
 }
 
-VISUAL DIRECTION RULES (v3 — HBO PRESTIGE DOCUMENTARY, same as Part 1):
+VISUAL DIRECTION RULES (v4 — same brand rules as Part 1, repeated for LLM context):
 - Documentary DP shot list — concrete, tangible, specific. NOT symbolic. NOT abstract.
-- Every visual_direction describes a REAL scene: a real person doing a real action in a real room with real props and a real motivated practical light source
-- HARD BANS: silhouette, sacred geometry, concentric rings, cosmic void, abstract particles, chains shattering into light, wireframe holograms, symbolic figures, stock-photo poses
-- REQUIRED LANGUAGE: "shot on ARRI Alexa 65, 35mm prime, f/2.0, Kodak Vision3 500T, practical tungsten lighting, tangible skin texture" — aim for Succession / Severance / Oppenheimer / Mr. Robot / A24 documentary frame
-- PEOPLE: real humans with real imperfections — stubble, pores, sweat, worn clothing, hands doing specific physical things. NEVER silhouetted, NEVER symbolic, NEVER dwarfed-by-environment.
-- COLOR grounded in real practical light sources, not color-graded gradients. Deep blacks + single warm or cool motivated source.
+- HARD BANS: sacred geometry, concentric rings, cosmic void, abstract particles, chains shattering into light, wireframe holograms, stock-photo poses
+${brand === "sovereign_synthesis" ? `- SOVEREIGN SYNTHESIS BRAND: Warm sovereign gold/amber/tungsten palette. ENVIRONMENTS and OBJECTS ONLY — absolutely NO people, NO human figures, NO faces, NO hands, NO skin. Every scene is an empty environment or close-up of tangible objects. Gregory Crewdson / Terrence Malick establishing shot aesthetic. "shot on ARRI Alexa 65, 35mm prime, f/2.0, warm tungsten lighting, tangible material texture"` : `- CONTAINMENT FIELD BRAND: Cold blue/steel/teal palette. Institutional environments, surveillance infrastructure. Human SILHOUETTES permitted (small, contained by architecture, never detailed faces or skin). Fincher / Blade Runner aesthetic. "security camera angle, cold fluorescent lighting, institutional architecture, clinical atmosphere"`}
 
 duration_hint: 30-45 seconds each. Total for these ${pass2SegCount} segments: ${pass2SegCount * 30}-${pass2SegCount * 45} seconds.
 Return ONLY valid JSON, no code fences.`;
@@ -646,7 +649,7 @@ Return ONLY valid JSON, no code fences.`;
 - "THE MICRO-COMPLIANCE ENDS TODAY."
 - "I NAME THE MACHINE."
 - "THE CONDITIONING LOOP IS BROKEN."`
-        : `EXAMPLES of great CONSCIOUSNESS ACTIVATION DECLARATIONS (ace_richie):
+        : `EXAMPLES of great CONSCIOUSNESS ACTIVATION DECLARATIONS (sovereign_synthesis):
 - "I AM STARTING TO SEE."
 - "MY FREQUENCY SIGNATURE IS SHIFTING."
 - "I ACCEPT THIS TIMELINE COLLAPSE."
@@ -660,7 +663,7 @@ Return ONLY valid JSON, no code fences.`;
 
 You are writing 2 ${activationLabel} for a documentary-style video on this channel. Every rule in the FREQUENCY BIFURCATION PROTOCOL block above is non-negotiable. Declarations that drift into the OTHER brand's vocabulary are a hard failure.
 
-These are NOT traditional calls to action. These are first-person declarations the viewer types in the comments — a moment of recognition for containment_field, a moment of frequency re-selection for ace_richie.
+These are NOT traditional calls to action. These are first-person declarations the viewer types in the comments — a moment of recognition for containment_field, a moment of frequency re-selection for sovereign_synthesis.
 
 VIDEO CONTEXT:
 - Title: "${parsed.title}"
@@ -677,7 +680,7 @@ RULES:
 - Declarations must be TOPIC-SPECIFIC — tied to THIS video's thesis, not generic.
 - First-person, present tense ONLY ("I am..." / "I choose..." / "I see...").
 - Max 8 words per declaration — punchy, declarative.
-- The context_line must be voiced in the VOICE MANDATE of this brand — clinical and low-cadence for containment_field, hypnotic and oracular for ace_richie.
+- The context_line must be voiced in the VOICE MANDATE of this brand — clinical and low-cadence for containment_field, hypnotic and oracular for sovereign_synthesis.
 - NO begging ("please subscribe"), NO manipulation ("smash that like button").
 - Zero cross-contamination. Scan for the BANNED LEXICON above before emitting.
 
@@ -742,7 +745,7 @@ Generate as JSON:
 {
   "title": "CTR-optimized title (max 60 chars). FORMULA: [Bold Claim] + [Specificity — numbers, time frames, or named mechanisms]. Good: 'The 3 Frequency Shifts That Change Everything'. Bad: 'Wake Up Call' (vague). MUST be different from all previously used titles.${recentTitles.length > 0 ? " BANNED: " + recentTitles.slice(0, 5).map(t => `'${t}'`).join(", ") : ""}",
   "hook": "Opening line that stops the scroll — a STATEMENT, not a question",
-  "thumbnail_text": "A 3-6 word MEMETIC TRIGGER in ALL CAPS. Write a protest sign — a complete standalone statement a stranger reads on a wall and FEELS something with zero context. DECLARATIONS: 'THEY DESIGNED YOUR CAGE', 'YOUR COMFORT IS THE TRAP'. COMMANDS: 'DELETE YOUR OLD SELF', 'BURN THE INSTRUCTION MANUAL'. REVELATIONS: 'NOBODY IS COMING FOR YOU', 'YOUR MEMORIES ARE INSTALLED'. Every word carries weight. The thought is FINISHED.",
+  "thumbnail_text": "A 6-10 word HOOK in ALL CAPS. Write the line that makes someone STOP scrolling — a complete standalone statement a stranger reads and FEELS something with zero context. Can span 2 lines on a thumbnail. DECLARATIONS: 'YOU ARE LOYAL TO THE WRONG THINGS AND IT SHOWS', 'THEY DESIGNED YOUR CAGE AND YOU DECORATED IT'. COMMANDS: 'DELETE YOUR OLD SELF BEFORE IT DELETES YOU', 'BURN THE INSTRUCTION MANUAL THEY GAVE YOU'. REVELATIONS: 'NOBODY IS COMING FOR YOU AND THAT IS THE GIFT', 'YOUR MEMORIES ARE INSTALLED NOT REMEMBERED'. The thought is COMPLETE — no trailing ellipsis, no cliffhangers.",
   "thumbnail_visual": "A MOVIE POSTER frame. HIGH CONTRAST, 50% dark/empty for text. Pick ONE: (A) EXTREME face close-up — eyes filling the frame, single hard light, rest pitch black. (B) SINGLE powerful object against darkness — shattered mirror, burning letter, door cracked open with blinding light behind it. (C) Abstract energy — golden particles in void, electric arcs, god-rays cutting through darkness. Frame it like a Fincher title card.",
   "segments": [
     { "voiceover": "2-4 spoken sentences (30-50 words)", "visual_direction": "REAL specific scene: who, what room, what props, what motivated practical light, what physical action", "duration_hint": ${durationHintExample} }
@@ -835,7 +838,7 @@ export interface StandaloneShort {
 }
 
 const STANDALONE_CTA: Record<Brand, string> = {
-  ace_richie: "The protocol is live — @ace_richie77",
+  sovereign_synthesis: "The protocol is live — @sovereign_synthesis77",
   containment_field: "Exit the field — @TheContainmentField",
 };
 
@@ -850,7 +853,7 @@ export async function generateStandaloneShorts(
   brand: Brand,
 ): Promise<StandaloneShort[]> {
   const voice = SCRIPT_VOICE[brand];
-  const channelCta = STANDALONE_CTA[brand] || STANDALONE_CTA.ace_richie;
+  const channelCta = STANDALONE_CTA[brand] || STANDALONE_CTA.sovereign_synthesis;
   const recentTitles = await getRecentTitles(20);
   const titleBan = recentTitles.length > 0
     ? `\nBANNED TITLES (already used): ${recentTitles.slice(0, 10).map(t => `"${t}"`).join(", ")}`
@@ -880,9 +883,9 @@ RULES:
 7. FORMAT: VERTICAL 9:16 (all visual compositions for portrait framing).
 8. duration_hint per segment ~6-12s, total ~40-55s.
 
-VISUAL DNA v3 (HBO prestige documentary):
-Every visual_direction describes a concrete real scene — a real person doing a real thing in a real room with real props and a real motivated practical light source. Shot on ARRI Alexa 65, 35mm prime, f/2.0, Kodak Vision3 500T, tangible skin texture.
-HARD BANS: silhouette, sacred geometry (unless ace_richie brand), cosmic void, abstract particles, chains shattering into light, wireframe holograms, stock-photo poses.
+VISUAL DNA v4 (brand-specific cinematic):
+${brand === "sovereign_synthesis" ? `Every visual_direction describes ENVIRONMENTS and OBJECTS ONLY — absolutely NO people, NO human figures, NO faces, NO hands, NO skin. Warm sovereign gold/amber/tungsten palette. Tangible materials (leather, wood, metal, glass, paper). Shot on ARRI Alexa 65, 35mm prime, f/2.0, warm tungsten lighting, tangible material texture. Gregory Crewdson / Terrence Malick aesthetic.` : `Every visual_direction describes oppressive institutional environments with cold blue/steel/teal palette. Human silhouettes permitted (small, dwarfed by architecture, no detailed faces). Security camera angles, fluorescent lighting, concrete and steel. Fincher / Blade Runner aesthetic.`}
+HARD BANS: sacred geometry, cosmic void, abstract particles, chains shattering into light, wireframe holograms, stock-photo poses${brand === "sovereign_synthesis" ? ", people, human figures, faces, hands, skin, body parts" : ""}.
 
 BANNED PHRASES: "Imagine...", "But here's the thing...", "Now pay attention...", "Let that sink in", "Think about it", "Here's the truth", "Are you ready?"
 
@@ -895,7 +898,7 @@ Return ONLY a JSON array of 4 objects (no markdown, no explanation):
       { "voiceover": "2-4 spoken sentences (30-50 words)", "visual_direction": "9:16 portrait scene description", "duration_hint": 10 }
     ],
     "cta": "Organic closing line (1 sentence, sovereign tone)",
-    "thumbnail_text": "3-5 word ALL CAPS memetic trigger",
+    "thumbnail_text": "6-10 word ALL CAPS hook — complete standalone statement",
     "thumbnail_visual": "Movie poster 9:16 composition"
   }
 ]
@@ -973,7 +976,9 @@ Each object must have exactly 5 segments. Highest-impact short first.`;
     // Build vertical scenes from segment visual directions
     const vertical_scenes = segments.map((seg, idx) => ({
       index: idx,
-      image_prompt: `9:16 portrait cinematic composition. ${seg.visual_direction}. Shot on 35mm kodak portra 400, f/2.8 shallow depth of field, chiaroscuro lighting, tangible texture`,
+      image_prompt: brand === "sovereign_synthesis"
+        ? `9:16 portrait cinematic composition. ${seg.visual_direction}. Shot on 35mm kodak portra 400, f/2.8 shallow depth of field, warm tungsten lighting, tangible material texture, NO people NO faces NO skin`
+        : `9:16 portrait cinematic composition. ${seg.visual_direction}. Shot on 35mm kodak portra 400, f/2.8 shallow depth of field, cold fluorescent lighting, surveillance aesthetic, clinical atmosphere`,
       duration_s: seg.duration_hint,
     }));
 
@@ -1340,7 +1345,9 @@ export async function produceFacelessVideo(
   // Map script segments to pod scene format, auto-splitting any >4000 char scenes (S91)
   const rawScenes: PodScene[] = script.segments.map((seg, i) => ({
     index: i,
-    image_prompt: seg.visual_direction,
+    image_prompt: brand === "sovereign_synthesis"
+      ? `${seg.visual_direction}. NO people NO faces NO skin`
+      : seg.visual_direction,
     tts_text: seg.voiceover,
     duration_hint_s: seg.duration_hint || undefined,
   }));
@@ -1351,7 +1358,7 @@ export async function produceFacelessVideo(
   const hookText = (script.hook || script.segments[0]?.voiceover || "").trim();
 
   const podJobSpec: JobSpec = {
-    brand: brand as "ace_richie" | "containment_field",
+    brand: brand as "sovereign_synthesis" | "containment_field",
     niche,
     seed: sourceIntelligence.slice(0, 500),
     script: script.segments.map(s => s.voiceover).join("\n\n"),
@@ -1535,7 +1542,7 @@ export async function produceFacelessBatch(
   llm: LLMProvider,
   sourceIntelligence: string,
   niche: string,
-  brands: Brand[] = ["ace_richie", "containment_field"]
+  brands: Brand[] = ["sovereign_synthesis", "containment_field"]
 ): Promise<FacelessResult[]> {
   const results: FacelessResult[] = [];
 

@@ -23,6 +23,68 @@ import torch
 log = structlog.get_logger("pipeline.flux")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# NSFW Safety Gate — NudeNet v3 post-generation classifier (S107)
+# Catches nudity/near-nudity BEFORE images enter the video pipeline.
+# Threshold: 0.65 = flag for regeneration. YouTube channel ban prevention.
+# ─────────────────────────────────────────────────────────────────────────────
+NSFW_THRESHOLD = 0.65
+NSFW_MAX_RETRIES = 1  # One retry with safety-appended prompt, then fallback
+_nsfw_detector = None
+
+
+def _load_nsfw_detector():
+    """Lazy-load NudeNet classifier. ~200ms per image inference."""
+    global _nsfw_detector
+    if _nsfw_detector is not None:
+        return _nsfw_detector
+    try:
+        from nudenet import NudeDetector
+        _nsfw_detector = NudeDetector()
+        log.info("nudenet_loaded")
+    except ImportError:
+        log.warning("nudenet_not_installed", msg="pip install nudenet>=3.4.2 — NSFW gate disabled")
+        _nsfw_detector = False  # Sentinel: tried and failed
+    except Exception as e:
+        log.error("nudenet_load_failed", error=str(e))
+        _nsfw_detector = False
+    return _nsfw_detector
+
+
+def _check_nsfw(image_path: str) -> tuple[bool, float]:
+    """
+    Check an image for NSFW content using NudeNet.
+    Returns (is_nsfw: bool, max_score: float).
+    """
+    detector = _load_nsfw_detector()
+    if detector is False:
+        return False, 0.0  # Detector unavailable — pass through
+
+    try:
+        detections = detector.detect(image_path)
+        # NudeNet returns list of dicts with 'class' and 'score'
+        # Unsafe classes: anything involving exposed body parts
+        unsafe_classes = {
+            "FEMALE_BREAST_EXPOSED", "FEMALE_GENITALIA_EXPOSED",
+            "MALE_GENITALIA_EXPOSED", "BUTTOCKS_EXPOSED",
+            "ANUS_EXPOSED", "BELLY_EXPOSED",
+        }
+        max_score = 0.0
+        for det in detections:
+            cls = det.get("class", "")
+            score = det.get("score", 0.0)
+            if cls in unsafe_classes and score > max_score:
+                max_score = score
+
+        is_nsfw = max_score >= NSFW_THRESHOLD
+        if is_nsfw:
+            log.warning("nsfw_detected", path=image_path, max_score=round(max_score, 3),
+                        detections=[d for d in detections if d.get("class") in unsafe_classes])
+        return is_nsfw, max_score
+    except Exception as e:
+        log.error("nsfw_check_failed", path=image_path, error=str(e))
+        return False, 0.0  # Fail open — don't block pipeline on classifier errors
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Lazy model singleton
 # ─────────────────────────────────────────────────────────────────────────────
 _pipe = None
@@ -167,6 +229,49 @@ def generate_scene_images(
 
         image = result.images[0]
         image.save(out_path, format="PNG")
+
+        # ── NSFW Safety Gate (S107) ──
+        is_nsfw, nsfw_score = _check_nsfw(out_path)
+        if is_nsfw:
+            log.warning("nsfw_retry", index=idx, score=round(nsfw_score, 3))
+            # Retry with clothing/safety suffix appended
+            safe_prompt = prompt + ", fully clothed professional setting, no exposed skin, safe for all audiences"
+            safe_prompt = " ".join(safe_prompt.split()[:400])
+            retry_result = _pipe(
+                prompt=safe_prompt,
+                width=width,
+                height=height,
+                num_inference_steps=num_steps,
+                guidance_scale=guidance_scale,
+                generator=generator,
+                num_images_per_prompt=1,
+            )
+            retry_image = retry_result.images[0]
+            retry_image.save(out_path, format="PNG")
+
+            is_nsfw_2, nsfw_score_2 = _check_nsfw(out_path)
+            if is_nsfw_2:
+                log.error("nsfw_hard_fail", index=idx, score=round(nsfw_score_2, 3),
+                          msg="2nd attempt still NSFW — generating environment-only fallback")
+                # Generate a safe environment-only image as fallback
+                fallback_prompt = (
+                    "Cinematic wide shot of an empty room with warm tungsten lighting, "
+                    "architectural interior, no people, no figures, no faces, no skin, "
+                    "dark void background, photorealistic, ARRI Alexa 65, shallow depth of field"
+                )
+                fb_result = _pipe(
+                    prompt=fallback_prompt,
+                    width=width,
+                    height=height,
+                    num_inference_steps=num_steps,
+                    guidance_scale=guidance_scale,
+                    generator=generator,
+                    num_images_per_prompt=1,
+                )
+                fb_result.images[0].save(out_path, format="PNG")
+                log.info("nsfw_fallback_used", index=idx)
+            else:
+                log.info("nsfw_retry_passed", index=idx, score=round(nsfw_score_2, 3))
 
         elapsed = time.monotonic() - t1
         log.info("flux_scene_done", index=idx, elapsed_s=round(elapsed, 2))

@@ -285,7 +285,7 @@ export class InstagramReelsPublishTool implements Tool {
 // 3. YOUTUBE SHORTS — Data API v3
 //    Flow: resumable upload → set metadata
 //    Requires: YOUTUBE_REFRESH_TOKEN + YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET
-//    Dual-channel: YOUTUBE_REFRESH_TOKEN = Ace Richie 77, YOUTUBE_REFRESH_TOKEN_TCF = The Containment Field
+//    Dual-channel: YOUTUBE_REFRESH_TOKEN = Sovereign Synthesis 77, YOUTUBE_REFRESH_TOKEN_TCF = The Containment Field
 //    Shorts = any vertical video ≤60s uploaded normally
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -296,7 +296,7 @@ export class YouTubeShortsPublishTool implements Tool {
       "Upload a Short to YouTube via the Data API v3. " +
       "Requires a public video URL. Shorts are vertical videos ≤60 seconds. " +
       "Include #Shorts in the title or description for YouTube to classify it as a Short. " +
-      "Use brand parameter to choose channel: 'ace_richie' (default) or 'containment_field'.",
+      "Use brand parameter to choose channel: 'sovereign_synthesis' (default) or 'containment_field'.",
     parameters: {
       video_url: {
         type: "string",
@@ -320,19 +320,19 @@ export class YouTubeShortsPublishTool implements Tool {
       },
       brand: {
         type: "string",
-        description: "Which brand/channel to publish to: 'ace_richie' (Ace Richie 77 channel) or 'containment_field' (The Containment Field channel). Defaults to 'ace_richie'.",
+        description: "Which brand/channel to publish to: 'sovereign_synthesis' (Sovereign Synthesis 77 channel) or 'containment_field' (The Containment Field channel). Defaults to 'sovereign_synthesis'.",
       },
     },
     required: ["video_url", "title", "description"],
   };
 
-  private async getAccessToken(brand: string = "ace_richie"): Promise<string | null> {
+  private async getAccessToken(brand: string = "sovereign_synthesis"): Promise<string | null> {
     // Try direct access token first (legacy fallback)
     const directToken = process.env.YOUTUBE_ACCESS_TOKEN;
     if (directToken) return directToken;
 
     // Select refresh token based on brand
-    // YOUTUBE_REFRESH_TOKEN = Ace Richie 77 (empoweredservices2013@gmail.com)
+    // YOUTUBE_REFRESH_TOKEN = Sovereign Synthesis 77 (empoweredservices2013@gmail.com)
     // YOUTUBE_REFRESH_TOKEN_TCF = The Containment Field (7ace.rich1@gmail.com)
     const refreshToken = brand === "containment_field"
       ? process.env.YOUTUBE_REFRESH_TOKEN_TCF
@@ -363,8 +363,8 @@ export class YouTubeShortsPublishTool implements Tool {
   }
 
   async execute(args: Record<string, unknown>): Promise<string> {
-    const brand = args.brand ? String(args.brand) : "ace_richie";
-    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Ace Richie 77";
+    const brand = args.brand ? String(args.brand) : "sovereign_synthesis";
+    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis 77";
     const token = await this.getAccessToken(brand);
     if (!token) {
       const envHint = brand === "containment_field"
@@ -490,7 +490,7 @@ export class YouTubeLongFormPublishTool implements Tool {
     description:
       "Upload a LONG-FORM video to YouTube via the Data API v3. " +
       "For full-length content (5-20 minutes). Does NOT add #Shorts. " +
-      "Use brand parameter to choose channel: 'ace_richie' (default) or 'containment_field'.",
+      "Use brand parameter to choose channel: 'sovereign_synthesis' (default) or 'containment_field'.",
     parameters: {
       video_url: {
         type: "string",
@@ -518,7 +518,7 @@ export class YouTubeLongFormPublishTool implements Tool {
       },
       brand: {
         type: "string",
-        description: "Which brand/channel: 'ace_richie' (default) or 'containment_field'.",
+        description: "Which brand/channel: 'sovereign_synthesis' (default) or 'containment_field'.",
       },
       thumbnail_path: {
         type: "string",
@@ -532,7 +532,7 @@ export class YouTubeLongFormPublishTool implements Tool {
     required: ["title", "description"],
   };
 
-  private async getAccessToken(brand: string = "ace_richie"): Promise<string | null> {
+  private async getAccessToken(brand: string = "sovereign_synthesis"): Promise<string | null> {
     const directToken = process.env.YOUTUBE_ACCESS_TOKEN;
     if (directToken) return directToken;
 
@@ -564,8 +564,8 @@ export class YouTubeLongFormPublishTool implements Tool {
   }
 
   async execute(args: Record<string, unknown>): Promise<string> {
-    const brand = args.brand ? String(args.brand) : "ace_richie";
-    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Ace Richie 77";
+    const brand = args.brand ? String(args.brand) : "sovereign_synthesis";
+    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis 77";
     const token = await this.getAccessToken(brand);
     if (!token) {
       const envHint = brand === "containment_field"
@@ -815,7 +815,7 @@ export class VideoPublisherTool implements Tool {
       },
       brand: {
         type: "string",
-        description: "Which brand to publish as: 'ace_richie' (default) or 'containment_field'. Routes to the correct channel/account per platform.",
+        description: "Which brand to publish as: 'sovereign_synthesis' (default) or 'containment_field'. Routes to the correct channel/account per platform.",
       },
     },
     required: ["video_url", "platforms", "caption"],
@@ -827,7 +827,7 @@ export class VideoPublisherTool implements Tool {
     const title = args.title ? String(args.title) : caption.split("\n")[0].slice(0, 100);
     const tags = args.tags ? String(args.tags) : "";
     const niche = args.niche ? String(args.niche) : "unknown";
-    const brand = args.brand ? String(args.brand) : "ace_richie";
+    const brand = args.brand ? String(args.brand) : "sovereign_synthesis";
 
     // Determine which platforms to target
     const platformInput = String(args.platforms).toLowerCase();

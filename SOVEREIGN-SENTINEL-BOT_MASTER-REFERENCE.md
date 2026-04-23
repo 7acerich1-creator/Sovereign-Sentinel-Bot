@@ -135,7 +135,7 @@ When changing the status of ANY system component, update every section that refe
 
 ## 1. THE ARCHITECT
 
-- **Name:** Richard Gonzales — sovereign identity "Ace Richie"
+- **Name:** Richard Gonzales — sovereign identity "Sovereign Synthesis"
 - **Email:** 7ace.rich1@gmail.com (canonical) / empoweredservices2013@gmail.com (secondary, YouTube auth)
 - **GitHub:** `7acerich1-creator`
 - **Telegram:** user id `8593700720` (authorized user)
@@ -334,27 +334,27 @@ scripts/
 
 ## 8. TWO-BRAND ACCOUNT MAP (CANONICAL)
 
-**Brand 1: Ace Richie / Sovereign Synthesis** (personal, primary revenue driver)
+**Brand 1: Sovereign Synthesis** (personal, primary revenue driver)
 **Brand 2: The Containment Field** (anonymous dark-psych top-of-funnel feeder)
 
 | Platform | Brand | Handle | Google Account | Buffer |
 |---|---|---|---|---|
-| YouTube | Ace Richie | Ace Richie 77 (`UCbj9a6brDL9hNIY1BpxOJfQ`) | empoweredservices2013 | Yes |
+| YouTube | Sovereign Synthesis | Ace Richie 77 (`UCbj9a6brDL9hNIY1BpxOJfQ`) | empoweredservices2013 | Yes |
 | YouTube | Containment Field | The Containment Field (`UCLHJIIEjavmrS3R70xnCD1Q`) | 7ace.rich1 | Yes |
-| Instagram | Ace Richie | `ace_richie_77` | empoweredservices2013 | Yes |
+| Instagram | Sovereign Synthesis | `ace_richie_77` | empoweredservices2013 | Yes |
 | Instagram | Containment Field | `the_containment_field` | empoweredservices2013 | Yes |
-| **TikTok** | Ace Richie | `acerichie77` | **7ace.rich1** (CROSSED) | Yes |
+| **TikTok** | Sovereign Synthesis | `acerichie77` | **7ace.rich1** (CROSSED) | Yes |
 | **TikTok** | Containment Field | `the_containment_field` | **empoweredservices2013** (CROSSED) | Yes |
-| X (Twitter) | Ace Richie | `AceRichie77` | 7ace.rich1 | Yes |
+| X (Twitter) | Sovereign Synthesis | `AceRichie77` | 7ace.rich1 | Yes |
 | X (Twitter) | Containment Field | `ContainmentFld` | empoweredservices2013 | Yes |
-| Threads | Ace Richie | `ace_richie_77` | via IG login | Yes |
+| Threads | Sovereign Synthesis | `ace_richie_77` | via IG login | Yes |
 | Reddit | Sovereign Synthesis | `sovereign_synthesis` | 7ace.rich1 | No (manual) |
 
-**Channel math (verified):** Ace Richie = 5 channels, Containment Field = 4 channels, **total = 9 Buffer channels**. LinkedIn/Pinterest/Reddit NOT in Buffer.
+**Channel math (verified):** Sovereign Synthesis = 5 channels, Containment Field = 4 channels, **total = 9 Buffer channels**. LinkedIn/Pinterest/Reddit NOT in Buffer.
 
-**CRITICAL — TikTok accounts are CROSSED** vs other platforms. Every other platform: `empoweredservices2013` = Ace Richie, `7ace.rich1` = Containment Field. TikTok ONLY: `7ace.rich1` = Ace Richie, `empoweredservices2013` = Containment Field.
+**CRITICAL — TikTok accounts are CROSSED** vs other platforms. Every other platform: `empoweredservices2013` = Sovereign Synthesis, `7ace.rich1` = Containment Field. TikTok ONLY: `7ace.rich1` = Sovereign Synthesis, `empoweredservices2013` = Containment Field.
 
-**YouTube OAuth tokens (Railway):** `YOUTUBE_REFRESH_TOKEN` (Ace Richie) + `YOUTUBE_REFRESH_TOKEN_TCF` (Containment Field). Both PERMANENT (app published).
+**YouTube OAuth tokens (Railway):** `YOUTUBE_REFRESH_TOKEN` (Sovereign Synthesis) + `YOUTUBE_REFRESH_TOKEN_TCF` (Containment Field). Both PERMANENT (app published).
 
 **Buffer scope:** image+text only. Video goes through the direct video publisher tools. Yuki is the SOLE Buffer posting authority.
 

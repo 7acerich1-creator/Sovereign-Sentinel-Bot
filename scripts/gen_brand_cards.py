@@ -42,7 +42,7 @@ def ease_in_out_quad(t):
 
 
 # ==================================================
-#  ACE RICHIE -- Sovereign Synthesis
+#  SOVEREIGN SYNTHESIS
 # ==================================================
 
 def _draw_starburst(draw, cx, cy, n_rays, max_len, thickness, color_rgba, t_bloom):
@@ -74,7 +74,7 @@ def _draw_geometry_ring(draw, cx, cy, radius, sides, rotation, color_rgba, alpha
 
 
 def gen_ace():
-    print("Generating Ace Richie brand card (v2 -- multi-layer bloom + geometry)...")
+    print("Generating Sovereign Synthesis brand card (v2 -- multi-layer bloom + geometry)...")
     bg = Image.open(os.path.join(ASSETS, "bg_long_ss.png")).convert("RGB").resize((W, H), Image.LANCZOS)
 
     # Load fonts
@@ -216,7 +216,7 @@ def gen_ace():
 
         frame.save(os.path.join(frame_dir, f"frame_{i:04d}.png"))
         if i % 10 == 0:
-            print(f"  Ace frame {i}/{N_FRAMES}")
+            print(f"  SS frame {i}/{N_FRAMES}")
 
     out_path = os.path.join(ASSETS, "brand_card_ace.mp4")
     cmd = [

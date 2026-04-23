@@ -14,7 +14,7 @@ export interface SocialOptimizationContext {
   sourceTitle: string;
   niche: string;
   transcript: string;
-  brand: "ace_richie" | "containment_field";
+  brand: "sovereign_synthesis" | "containment_field";
 }
 
 /**
@@ -49,7 +49,7 @@ ${ctx.targetAudience}
 SOURCE VIDEO TITLE: "${ctx.sourceTitle}"
 NICHE: ${ctx.niche.replace(/_/g, " ")}
 TRANSCRIPT EXCERPT: ${ctx.transcript.slice(0, 2000)}
-BRAND: ${ctx.brand === "ace_richie" ? "Sovereign Synthesis (Ace Richie) — personal brand, liberation framework, dark psychology transmuted into sovereignty" : "The Containment Field — anonymous dark psychology top-of-funnel feeder brand"}
+BRAND: ${ctx.brand === "sovereign_synthesis" ? "Sovereign Synthesis (Sovereign Synthesis) — personal brand, liberation framework, dark psychology transmuted into sovereignty" : "The Containment Field — anonymous dark psychology top-of-funnel feeder brand"}
 
 Your task is to provide comprehensive best practices for uploading and optimizing this content to maximize reach and viral potential. Consider the following key areas in your analysis:
 
@@ -159,7 +159,7 @@ export interface AudienceAngle {
 // These people aren't broken — they're remembering.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export const ACE_ANGLES: readonly AudienceAngle[] = [
+export const SS_ANGLES: readonly AudienceAngle[] = [
   {
     id: "spiritual_awakening",
     name: "Spiritual Awakening / Consciousness Shift",
@@ -494,17 +494,17 @@ export const TCF_ANGLES: readonly AudienceAngle[] = [
 ] as const;
 
 // Legacy compat: flat array for any code still referencing AUDIENCE_ANGLES
-export const AUDIENCE_ANGLES: readonly AudienceAngle[] = [...ACE_ANGLES, ...TCF_ANGLES] as const;
+export const AUDIENCE_ANGLES: readonly AudienceAngle[] = [...SS_ANGLES, ...TCF_ANGLES] as const;
 
 /**
  * SESSION 86: Brand-separated angle pools.
- * Ace Richie angles = quantum, ascension, sovereignty, builder frequency.
+ * Sovereign Synthesis angles = quantum, ascension, sovereignty, builder frequency.
  * TCF angles = dark psychology, extraction patterns, matrix trap mechanics.
  * Each brand now has its OWN dedicated angle array — no cross-contamination.
  */
 function getAnglesForBrand(brand?: string): readonly AudienceAngle[] {
   if (brand === "containment_field") return TCF_ANGLES;
-  return ACE_ANGLES;
+  return SS_ANGLES;
 }
 
 /**
@@ -514,7 +514,7 @@ function getAnglesForBrand(brand?: string): readonly AudienceAngle[] {
  * collide and different source videos start from different angles.
  *
  * SESSION 86: Now brand-aware. Pass brand to filter angles appropriately.
- * Without brand param, defaults to Ace pool for backward compatibility.
+ * Without brand param, defaults to SS pool for backward compatibility.
  */
 export function angleForClipIndex(globalIndex: number, offset = 0, brand?: string): AudienceAngle {
   const pool = getAnglesForBrand(brand);
@@ -591,7 +591,7 @@ export function hashStringToAngleOffset(s: string): number {
 // LLM prompt injection site in the pipeline.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export type BrandFrequency = "ace_richie" | "containment_field";
+export type BrandFrequency = "sovereign_synthesis" | "containment_field";
 
 export interface BrandFrequencyProfile {
   brandLabel: string;
@@ -668,10 +668,10 @@ export const BRAND_FREQUENCY_PROFILES: Record<BrandFrequency, BrandFrequencyProf
     voiceMandate:
       "You speak like a whistleblower reading a declassified brief at a quiet table. Measured, low-cadence, zero dramatics. Every claim is tactical and falsifiable. The viewer should feel SEEN in their exhaustion and then ARMED with a specific countermeasure — never 'uplifted' or 'expanded'.",
   },
-  ace_richie: {
-    brandLabel: "Ace Richie / Sovereign Synthesis",
+  sovereign_synthesis: {
+    brandLabel: "Sovereign Synthesis",
     frequencyLayer: "HIGHER",
-    identity: "Ace Richie speaking as the System Architect. Personal brand. Master-level sovereign transmission for souls who have already outgrown the 'how do I survive my manager' layer. The audience is a mind that already suspects reality is self-authored and is hunting for the vocabulary to confirm it. Never speak in hacks, tips, numbered lists, or workplace analogies.",
+    identity: "Sovereign Synthesis speaking as the System Architect. Personal brand. Master-level sovereign transmission for souls who have already outgrown the 'how do I survive my manager' layer. The audience is a mind that already suspects reality is self-authored and is hunting for the vocabulary to confirm it. Never speak in hacks, tips, numbered lists, or workplace analogies.",
     theme: "Master-Level Sovereign Synthesis. Quantum mechanics of the soul. Timeline jumping as a daily practice. Solipsism as operating system — the viewer is authoring the universe by the frequency signature they are broadcasting. Event horizons of identity. The collapse of the old self as a prerequisite for the monad to re-select its timeline.",
     tone: "Hypnotic, esoteric, deeply philosophical, absolute. Speak in edicts, not suggestions. Do not offer hacks, tips, tricks, numbered steps, or frameworks the viewer can 'try'. Deliver universal laws the way an oracle delivers them — as though the viewer was always meant to hear this, and the only variable is whether they are ready. Warmth is allowed; concession is not.",
     style: "Slow, mesmerizing pacing. Long, breath-driven sentences that loop back on themselves. Pauses. Repetition as incantation. Speaking directly to the soul's architecture and the illusion of separation between the viewer and the universe they believe is happening TO them. Every line should feel like it was spoken into existence, not written into a doc.",

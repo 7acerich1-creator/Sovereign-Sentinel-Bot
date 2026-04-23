@@ -48,7 +48,7 @@ const POLL_TIMEOUT_MS = 10 * 60 * 1000; // 10 min hard stop per job
 const TERMINAL: readonly JobStatus[] = ["done", "failed"] as const;
 
 const SAMPLE_SPEC: JobSpec = {
-  brand: "ace_richie",
+  brand: "sovereign_synthesis",
   niche: "phase2-contract-test",
   seed: "contract-test-seed",
   script:

@@ -6,7 +6,7 @@
 > `shared-context.ts` value on the bot.**
 >
 > **Locked:** 2026-04-14 (Strategy Meeting, Session 56)
-> **Author:** Ace Richie. Claude served as scribe.
+> **Author:** Sovereign Synthesis. Claude served as scribe.
 
 ---
 
@@ -22,7 +22,7 @@ If this is landing against something already inside you, this was for you.
 
 ## The Sovereign Content Rule (canonical, governs all downstream copy)
 
-> **"If what's understood don't have to be explained."** — Ace Richie, 2026-04-14
+> **"If what's understood don't have to be explained."** — Sovereign Synthesis, 2026-04-14
 
 Every piece of copy, every video script, every thumbnail, every email, every
 agent system prompt that produces user-facing content must respect this rule.

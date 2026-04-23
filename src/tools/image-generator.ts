@@ -18,37 +18,38 @@ import type { Tool, ToolDefinition } from "../types";
 // ── Niche × Brand prompt prefixes ──
 // SESSION 35: Upgraded from generic one-liners to cinematic brand-aligned prompts.
 // Matches the visual DNA in design-tokens.json:
-// Ace Richie = gold (#d4a843) + teal (#00e5c7) on void (#0a0a0f), warm sovereign energy
+// Sovereign Synthesis = gold (#d4a843) + teal (#00e5c7) on void (#0a0a0f), warm sovereign energy
 // Containment Field = cold blue (#5A9CF5) + teal (#00e5c7) on void (#0a0a0f), clinical surveillance energy
 // NO blood red for TCF. NO warm tones for TCF.
+// Updated S107: NO human figures for Sovereign Synthesis brand — environments and objects only.
 const NICHE_PREFIXES: Record<string, string> = {
   dark_psychology:
     "Cinematic noir photograph, deep shadows with single amber light source cutting through darkness, " +
-    "silhouette against brutalist geometric structure, gold (#d4a843) and midnight blue palette, " +
+    "brutalist geometric structure, gold (#d4a843) and midnight blue palette, " +
     "volumetric haze, tension and revelation, photorealistic cinematic quality, dark void (#0a0a0f) background, " +
-    "NO text NO words NO letters NO watermarks, ",
+    "NO people NO faces NO skin, NO text NO words NO letters NO watermarks, ",
   self_improvement:
-    "Golden hour cinematic photograph, figure ascending toward bright horizon, " +
+    "Golden hour cinematic photograph, wide establishing shot of an empty sovereign environment, " +
     "warm amber (#d4a843) and teal (#00e5c7) sky, architectural grandeur, columns and open space, " +
     "elevation and breakthrough energy, sovereign and majestic, photorealistic, " +
-    "NO text NO words NO letters NO watermarks, ",
+    "NO people NO faces NO skin, NO text NO words NO letters NO watermarks, ",
   burnout:
-    "Cinematic photograph of chains dissolving into golden particles, " +
-    "figure walking from industrial space into open landscape at dawn, " +
+    "Cinematic photograph of chains dissolved into golden particles on a concrete floor, " +
+    "open landscape at dawn beyond an industrial doorway, " +
     "muted grays transitioning to warm amber (#d4a843), liberation energy, " +
     "dark void (#0a0a0f) background, photorealistic cinematic quality, " +
-    "NO text NO words NO letters NO watermarks, ",
+    "NO people NO faces NO skin, NO text NO words NO letters NO watermarks, ",
   quantum:
-    "Abstract cosmic photograph, human figure in field of geometric light patterns, " +
+    "Abstract cosmic photograph, geometric light patterns in deep space, " +
     "deep space indigo and electric gold (#d4a843), sacred geometry, observer effect, " +
     "reality bending at edges, teal (#00e5c7) accent refractions, cinematic, " +
-    "NO text NO words NO letters NO watermarks, ",
+    "NO people NO faces NO skin, NO text NO words NO letters NO watermarks, ",
   brand:
     "Sovereign Synthesis brand photograph, midnight void (#0a0a0f) background, " +
     "amber (#d4a843) and teal (#00e5c7) accent lighting, architectural sovereignty, " +
-    "throne-like composition, gold geometric accents, sacred geometry elements, " +
+    "gold geometric accents, sacred geometry elements, " +
     "master architect energy, photorealistic cinematic quality, " +
-    "NO text NO words NO letters NO watermarks, ",
+    "NO people NO faces NO skin, NO text NO words NO letters NO watermarks, ",
 };
 
 // ── Aspect ratio → DALL-E 3 size mapping ──

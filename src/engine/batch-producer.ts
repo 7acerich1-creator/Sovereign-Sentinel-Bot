@@ -1,7 +1,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // PROJECT_POD_MIGRATION Phase 7 Task 7.5 — Batch Producer
 //
-// Produces up to 6 videos (3 Ace Richie + 3 TCF) in a single GPU session.
+// Produces up to 6 videos (3 Sovereign Synthesis + 3 TCF) in a single GPU session.
 //
 // Architecture:
 //   1. PRE-POD: Generate all scripts on Railway (LLM calls only, 10s pacing).
@@ -117,7 +117,7 @@ async function preGenerateScripts(
 
   for (const brand of brands) {
     const niches = await selectNichesForBrand(brand, perBrand);
-    const brandLabel = brand === "ace_richie" ? "Ace Richie" : "TCF";
+    const brandLabel = brand === "sovereign_synthesis" ? "Sovereign Synthesis" : "TCF";
 
     // Fetch previously used angle IDs for this brand (cross-batch dedup)
     const usedAngleIds = await getUsedAngleIds(brand);
@@ -247,7 +247,7 @@ function buildSourceIntelligence(
   niche: string,
   usedAngleIds: Set<string>,
 ): { text: string; angleId: string | null } {
-  const brandName = brand === "ace_richie" ? "Ace Richie / Sovereign Synthesis" : "The Containment Field";
+  const brandName = brand === "sovereign_synthesis" ? "Sovereign Synthesis / Sovereign Synthesis" : "The Containment Field";
 
   const angle = pickUnusedAngle(brand, niche, usedAngleIds);
 
@@ -295,7 +295,7 @@ async function produceBatchOnPod(
   await withPodSession(async (handle) => {
     for (let i = 0; i < scripts.length; i++) {
       const { brand, niche, script } = scripts[i];
-      const label = `${brand === "ace_richie" ? "ACE" : "TCF"}/${niche}`;
+      const label = `${brand === "sovereign_synthesis" ? "SS" : "TCF"}/${niche}`;
 
       try {
         await onProgress?.(`🎬 [${i + 1}/${scripts.length}] Producing ${label}: "${script.title.slice(0, 50)}"`);
@@ -406,7 +406,7 @@ async function distributeVideo(
   onProgress?: (msg: string) => Promise<void>,
   scheduledPublishAt?: string,
 ): Promise<{ success: boolean; error?: string; distMs: number }> {
-  const label = `${video.brand === "ace_richie" ? "ACE" : "TCF"}/${video.niche}`;
+  const label = `${video.brand === "sovereign_synthesis" ? "SS" : "TCF"}/${video.niche}`;
   const t0 = Date.now();
 
   try {
@@ -499,7 +499,7 @@ export async function produceBatch(
   config: BatchConfig = {},
 ): Promise<BatchResult> {
   const perBrand = config.perBrand ?? BATCH_SIZE_PER_BRAND;
-  const brands = config.brands ?? ["ace_richie", "containment_field"];
+  const brands = config.brands ?? ["sovereign_synthesis", "containment_field"];
   const dryRun = config.dryRun ?? false;
   const onProgress = config.onProgress;
   const batchStart = Date.now();
@@ -536,7 +536,7 @@ export async function produceBatch(
 
   await onProgress?.(
     `\n✅ SCRIPTS READY: ${valid.length}/${brands.length * perBrand} passed validation\n` +
-    valid.map((s, i) => `  ${i + 1}. [${s.brand === "ace_richie" ? "ACE" : "TCF"}] ${s.niche}: "${s.script.title.slice(0, 60)}"`).join("\n"),
+    valid.map((s, i) => `  ${i + 1}. [${s.brand === "sovereign_synthesis" ? "SS" : "TCF"}] ${s.niche}: "${s.script.title.slice(0, 60)}"`).join("\n"),
   );
 
   if (dryRun) {
@@ -571,7 +571,7 @@ export async function produceBatch(
     `📅 YouTube publish schedule (3h stagger):\n` +
     produced.map((v, i) => {
       const t = new Date(publishBaseTime + i * PUBLISH_STAGGER_MS);
-      return `  ${i + 1}. ${v.brand === "ace_richie" ? "ACE" : "TCF"}/${v.niche} → ${t.toISOString().slice(0, 16)}Z`;
+      return `  ${i + 1}. ${v.brand === "sovereign_synthesis" ? "SS" : "TCF"}/${v.niche} → ${t.toISOString().slice(0, 16)}Z`;
     }).join("\n"),
   );
 

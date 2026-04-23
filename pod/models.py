@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, field_validator
 class Brand(str, Enum):
     """Brand routing — mirrors `Brand` union in src/pod/types.ts."""
 
-    ace_richie = "ace_richie"
+    sovereign_synthesis = "sovereign_synthesis"
     containment_field = "containment_field"
 
 
@@ -48,8 +48,8 @@ class ProduceRequest(BaseModel):
         description="Opening typewriter text (first 8-9 words of hook). Falls back to first ~9 words of script.",
     )
     thumbnail_text: Optional[str] = Field(
-        default=None, max_length=100,
-        description="3-6 word ALL CAPS memetic trigger for thumbnail overlay. Complete standalone statement.",
+        default=None, max_length=150,
+        description="6-10 word ALL CAPS hook for thumbnail overlay. Complete standalone statement.",
     )
     client_job_id: Optional[str] = Field(default=None, max_length=200)
 
@@ -107,7 +107,7 @@ class ImageBatchItem(BaseModel):
 class ImageBatchRequest(BaseModel):
     """POST /generate-images — batch FLUX image generation for Content Engine."""
     items: list[ImageBatchItem] = Field(min_length=1, max_length=50)
-    brand: Brand = Brand.ace_richie
+    brand: Brand = Brand.sovereign_synthesis
 
 
 class ImageBatchResultItem(BaseModel):

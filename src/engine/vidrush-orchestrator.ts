@@ -4,7 +4,7 @@
 //
 // 1. Whisper extraction (extract universal truths from source)
 // 2. Faceless Factory LONG (10-15 min video in Anita's Protocol 77 voice)
-// 3. YouTube long-form upload (to Ace Richie 77 channel)
+// 3. YouTube long-form upload (to Sovereign Synthesis 77 channel)
 // 4. Curate 0-4 surgical shorts via shorts-curator (LLM + ffmpeg)
 // 5. Generate platform-specific copy per short (LLM)
 // 6. Distribute shorts to all platforms (TikTok, IG, YouTube Shorts)
@@ -165,7 +165,7 @@ export function cleanupPipelineJob(jobId: string): void {
 
 // ── Types ──
 
-type Brand = "ace_richie" | "containment_field";
+type Brand = "sovereign_synthesis" | "containment_field";
 
 interface ClipMeta {
   index: number;
@@ -635,7 +635,7 @@ async function uploadClipsToStorage(clips: ClipMeta[], jobId: string, meta?: { b
   const useR2 = isR2Configured();
   if (!useR2 && (!SUPABASE_URL || !SUPABASE_KEY)) return;
 
-  // Build a human-readable folder name: clips/ace_richie_quantum_firmware_update_1775430704664/
+  // Build a human-readable folder name: clips/sovereign_synthesis_quantum_firmware_update_1775430704664/
   const slugParts = [
     meta?.brand || "unknown",
     meta?.niche || "general",
@@ -809,7 +809,7 @@ async function generatePlatformCopy(
     // Session 36: Enhanced with social-optimization-prompt intelligence.
     // Deployment 4: Now wrapped with the Audience Rotation Protocol block.
     // Session 48: Now ALSO wrapped with the FREQUENCY BIFURCATION PROTOCOL block
-    // so Yuki can NEVER bleed Ace Richie vocabulary into Containment Field copy
+    // so Yuki can NEVER bleed Sovereign Synthesis vocabulary into Containment Field copy
     // or vice versa, regardless of which demographic angle is assigned.
     const brandBlock = buildBrandFrequencyBlock(brand);
     const brandLabel = BRAND_FREQUENCY_PROFILES[brand].brandLabel;
@@ -819,7 +819,7 @@ async function generatePlatformCopy(
 You are Yuki, an elite social media distribution engine for ${brandLabel}. Every rule in the FREQUENCY BIFURCATION PROTOCOL block above overrides any generic distribution advice that follows.
 
 BRAND-CONTEXT RECONCILIATION (how FREQUENCY BIFURCATION and AUDIENCE ROTATION compose):
-The FREQUENCY BIFURCATION block locks the CHANNEL voice. The AUDIENCE ROTATION block locks the DEMOGRAPHIC angle. They compose; they do not collide. For ace_richie: translate every demographic's pain into the quantum/monad/timeline/frequency vocabulary of the REQUIRED LEXICON above — a corporate-burnout clip on Ace Richie becomes an edict about the timeline the viewer has been broadcasting, not a listicle about their manager. For containment_field: translate every demographic's pain into the clinical extraction-loop/micro-compliance/behavioral-program vocabulary — a spiritual-awakening clip on Containment Field becomes a clinical exposure of the nervous-system conditioning loop that manufactured the "awakening", never a cosmological edict. The demographic angle changes WHO the content lands on; the frequency profile changes WHAT vocabulary it lands in. Both are non-negotiable, and the bifurcation wins any tie.
+The FREQUENCY BIFURCATION block locks the CHANNEL voice. The AUDIENCE ROTATION block locks the DEMOGRAPHIC angle. They compose; they do not collide. For sovereign_synthesis: translate every demographic's pain into the quantum/monad/timeline/frequency vocabulary of the REQUIRED LEXICON above — a corporate-burnout clip on Sovereign Synthesis becomes an edict about the timeline the viewer has been broadcasting, not a listicle about their manager. For containment_field: translate every demographic's pain into the clinical extraction-loop/micro-compliance/behavioral-program vocabulary — a spiritual-awakening clip on Containment Field becomes a clinical exposure of the nervous-system conditioning loop that manufactured the "awakening", never a cosmological edict. The demographic angle changes WHO the content lands on; the frequency profile changes WHAT vocabulary it lands in. Both are non-negotiable, and the bifurcation wins any tie.
 
 SOURCE VIDEO TITLE: "${sourceTitle}"
 NICHE: ${niche.replace(/_/g, " ")}
@@ -965,7 +965,7 @@ TRANSCRIPT EXCERPT: ${transcript.slice(0, 2000)}
 ${rotationBlock}
 
 VOICE HIERARCHY (SESSION 83 — NON-NEGOTIABLE):
-1. BRAND VOICE IS THE FLOOR. For ace_richie: write in the Sovereign Synthesis frequency — timelines, quantum resets, frequency shifts, the architecture of liberation. For containment_field: write in clinical dark psychology extraction vocabulary. The brand voice is NEVER diluted.
+1. BRAND VOICE IS THE FLOOR. For sovereign_synthesis: write in the Sovereign Synthesis frequency — timelines, quantum resets, frequency shifts, the architecture of liberation. For containment_field: write in clinical dark psychology extraction vocabulary. The brand voice is NEVER diluted.
 2. DEMOGRAPHIC TARGETING IS THE LENS. Use the assigned angle to determine WHO you're speaking to and WHAT specific pain point you lead with. But the VOCABULARY stays in-brand.
 3. If it reads like a generic self-help blog post, a LinkedIn motivation post, or a corporate burnout article — you have FAILED. Rewrite until it sounds like nobody else on YouTube.
 
@@ -979,7 +979,7 @@ LINE 1 — THE GLITCH (1 sentence, max 15 words)
 
 Paragraph 2 — THE MECHANISM (3-4 sentences)
   Name the specific mechanism this video exposes. Use the assigned demographic's situation as the ENTRY POINT but describe it through the brand's lens.
-  For ace_richie: quantum resets, timeline collapses, frequency architecture, sovereign synthesis.
+  For sovereign_synthesis: quantum resets, timeline collapses, frequency architecture, sovereign synthesis.
   For containment_field: extraction loops, micro-compliance patterns, behavioral programs, dark psychology mechanics.
   This paragraph must contain at least ONE concept the viewer has never heard framed this way before.
 
@@ -1055,7 +1055,7 @@ No prose outside the JSON. No code fences.`;
           tags = [
             ...angle.keywordSeeds.slice(0, 6),
             niche.replace(/_/g, " "),
-            brand === "ace_richie" ? "sovereign synthesis" : "containment field",
+            brand === "sovereign_synthesis" ? "sovereign synthesis" : "containment field",
           ].join(",");
         }
         console.log(`✅ [Orchestrator] Long-form description generated via Viral Brain — angle="${angle.name}" (${description.length} chars)`);
@@ -1072,9 +1072,9 @@ No prose outside the JSON. No code fences.`;
   const seedsList = angle.keywordSeeds.slice(0, 6).join(", ");
   const hashtagFooter = angle.keywordSeeds.slice(0, 5)
     .map(s => "#" + s.replace(/[^a-z0-9]+/gi, ""))
-    .concat([brand === "ace_richie" ? "#SovereignSynthesis" : "#ContainmentField"])
+    .concat([brand === "sovereign_synthesis" ? "#SovereignSynthesis" : "#ContainmentField"])
     .join(" ");
-  const brandLine = brand === "ace_richie"
+  const brandLine = brand === "sovereign_synthesis"
     ? "If this lands, the full framework is at https://sovereign-synthesis.com."
     : "More pattern-decoded at https://sovereign-synthesis.com.";
   const fallbackDescription = [
@@ -1091,7 +1091,7 @@ No prose outside the JSON. No code fences.`;
   const fallbackTags = [
     ...angle.keywordSeeds.slice(0, 6),
     niche.replace(/_/g, " "),
-    brand === "ace_richie" ? "sovereign synthesis" : "containment field",
+    brand === "sovereign_synthesis" ? "sovereign synthesis" : "containment field",
   ].join(",");
 
   return {
@@ -1184,7 +1184,7 @@ async function scheduleBufferWeek(
   clips: ClipMeta[],
   copyMap: Map<number, PlatformCopy>,
   niche: string,
-  brand: Brand = "ace_richie"
+  brand: Brand = "sovereign_synthesis"
 ): Promise<number> {
   // SESSION 87: Pre-flight — don't attempt scheduling if quota is already blown
   if (isBufferQuotaExhausted()) {
@@ -1308,18 +1308,18 @@ async function scheduleBufferWeek(
 
     // ── SESSION 97: Facebook direct publish (not a Buffer channel) ──
     // Posts clip text + thumbnail to the correct FB Page via Graph API.
-    // Routes to ace_richie or containment_field page based on brand param.
+    // Routes to sovereign_synthesis or containment_field page based on brand param.
     {
       const fbCopyKey = "facebook";
       const fbText = (copy as any)[fbCopyKey] || copy.threads ||
-        (brand === "ace_richie"
+        (brand === "sovereign_synthesis"
           ? `Firmware Update incoming. sovereign-synthesis.com #SovereignSynthesis #${niche.replace(/_/g, "")}`
           : `The containment field runs deeper than you think. sovereign-synthesis.com #TheContainmentField #${niche.replace(/_/g, "")}`);
       try {
         const fbResult = await publishToFacebook(fbText, {
           imageUrl: clip.thumbnailUrl || undefined,
           link: clip.publicUrl || undefined,
-          brand: brand as "ace_richie" | "containment_field",
+          brand: brand as "sovereign_synthesis" | "containment_field",
         });
         if (fbResult.success) {
           scheduledCount++;
@@ -1460,7 +1460,7 @@ export interface PipelineOptions {
 export async function executeFullPipeline(
   youtubeUrl: string,
   llm: LLMProvider,
-  brand: Brand = "ace_richie",
+  brand: Brand = "sovereign_synthesis",
   onProgress?: (step: string, detail: string) => Promise<void>,
   options?: PipelineOptions
 ): Promise<OrchestratorResult> {
@@ -1738,7 +1738,7 @@ export async function executeFullPipeline(
         try {
           await withPodSession(async (handle) => {
             // Build a podTTS-backed ttsFn for renderAudio
-            const xttsForBrand = async (text: string, b: "ace_richie" | "containment_field"): Promise<Buffer> => {
+            const xttsForBrand = async (text: string, b: "sovereign_synthesis" | "containment_field"): Promise<Buffer> => {
               const result = await podTTS(handle, { text, brand: b });
               return result.audioBuffer;
             };
@@ -1805,7 +1805,7 @@ export async function executeFullPipeline(
               }));
 
               const spec: ShortJobSpec = {
-                brand: brand as "ace_richie" | "containment_field",
+                brand: brand as "sovereign_synthesis" | "containment_field",
                 audio_url: audioUrl,
                 audio_duration_s: audioDuration,
                 scenes: vScenes,

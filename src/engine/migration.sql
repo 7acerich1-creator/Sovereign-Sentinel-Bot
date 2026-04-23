@@ -5,7 +5,7 @@
 
 CREATE TABLE IF NOT EXISTS content_engine_queue (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  brand TEXT NOT NULL CHECK (brand IN ('ace_richie', 'containment_field')),
+  brand TEXT NOT NULL CHECK (brand IN ('sovereign_synthesis', 'containment_field')),
   niche TEXT NOT NULL,
   time_slot TEXT NOT NULL,
   scheduled_date DATE NOT NULL,

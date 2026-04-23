@@ -53,10 +53,10 @@ export interface CaptionOptions {
    * Session 48 Brand Routing Matrix: when set, the caption engine switches its
    * visual grammar (font, BorderStyle, casing, shadow) to match the brand.
    *   - "containment_field" → Bebas Neue, uppercase, BorderStyle 3 opaque box (current look)
-   *   - "ace_richie"        → Montserrat, mixed case, BorderStyle 1 soft outline + shadow
+   *   - "sovereign_synthesis"        → Montserrat, mixed case, BorderStyle 1 soft outline + shadow
    * If unset, defaults to the legacy TCF look so existing callers don't regress.
    */
-  brand?: "ace_richie" | "containment_field";
+  brand?: "sovereign_synthesis" | "containment_field";
 }
 
 export interface CaptionResult {
@@ -333,18 +333,18 @@ export function writeAssFile(chunks: CaptionChunk[], opts: CaptionOptions): stri
   // Two distinct caption aesthetics:
   //   TCF   → Bebas Neue display caps, BorderStyle 3 OPAQUE BOX plate (current).
   //           Reads like surveillance-footage chyron. High-stakes corporate noir.
-  //   Ace   → Montserrat semi-bold mixed-case, BorderStyle 1 soft outline + drop
+  //   SS   → Montserrat semi-bold mixed-case, BorderStyle 1 soft outline + drop
   //           shadow. Reads like elegant cosmic transmission. No box plate — the
   //           luminous quantum background stays visible.
   // The `brand` option drives every downstream knob: fontName, casing, border
   // geometry, back-color alpha. Unset → legacy TCF look (no regression).
-  const isAceRichie = opts.brand === "ace_richie";
-  const defaultFont = isAceRichie ? "Montserrat" : "Bebas Neue";
+  const isSS = opts.brand === "sovereign_synthesis";
+  const defaultFont = isSS ? "Montserrat" : "Bebas Neue";
   const fontName = opts.fontName || defaultFont;
 
   // Kinetic caption style (Session 47/48 — Brand Routing Matrix):
   //   TCF: BorderStyle 3 OPAQUE BOX, Bold -1, uppercase, heavy dark plate.
-  //   Ace: BorderStyle 1 outline+shadow, lighter weight, mixed case, translucent back.
+  //   SS: BorderStyle 1 outline+shadow, lighter weight, mixed case, translucent back.
   //
   //   - Alignment 2 = bottom-center. MarginV lifts it off the absolute bottom.
   //   - Font size scales with video height (vertical Shorts need bigger text).
@@ -357,23 +357,23 @@ export function writeAssFile(chunks: CaptionChunk[], opts: CaptionOptions): stri
   const PRIMARY = "&H00FFFFFF"; // white fill, fully opaque
   const SECONDARY = "&H000000FF"; // unused (karaoke)
   const OUTLINE_TCF = "&H00000000"; // opaque black — box bleed for BorderStyle 3
-  const OUTLINE_ACE = "&H00000000"; // thin opaque black outline for legibility
+  const OUTLINE_SS = "&H00000000"; // thin opaque black outline for legibility
   const BACK_TCF = "&H50000000"; // ~69% opaque black plate
-  const BACK_ACE = "&HFF000000"; // fully transparent — NO plate, luminous bg survives
+  const BACK_SS = "&HFF000000"; // fully transparent — NO plate, luminous bg survives
 
   // Brand-routed style parameters:
-  //   borderStyle: 3 = opaque box (TCF), 1 = outline+shadow (Ace)
+  //   borderStyle: 3 = opaque box (TCF), 1 = outline+shadow (SS)
   //   outline: thickness of the border/box bleed
   //   shadow: drop shadow distance (only visible under BorderStyle 1)
   //   bold: -1 = full bold for Bebas display face; 0 = regular for Montserrat (semi-bold is already bold in the TTF)
   //   spacing: 2 = extra tracking for Bebas, 0 = natural for Montserrat
-  const borderStyle = isAceRichie ? 1 : 3;
-  const outline     = isAceRichie ? 2 : 4;
-  const shadow      = isAceRichie ? 3 : 0;
-  const bold        = isAceRichie ? -1 : -1; // semi-bold montserrat still benefits from -1 synth-bold
-  const spacing     = isAceRichie ? 0 : 2;
-  const outlineColor = isAceRichie ? OUTLINE_ACE : OUTLINE_TCF;
-  const backColor    = isAceRichie ? BACK_ACE : BACK_TCF;
+  const borderStyle = isSS ? 1 : 3;
+  const outline     = isSS ? 2 : 4;
+  const shadow      = isSS ? 3 : 0;
+  const bold        = isSS ? -1 : -1; // semi-bold montserrat still benefits from -1 synth-bold
+  const spacing     = isSS ? 0 : 2;
+  const outlineColor = isSS ? OUTLINE_SS : OUTLINE_TCF;
+  const backColor    = isSS ? BACK_SS : BACK_TCF;
 
   const header = `[Script Info]
 ScriptType: v4.00+
@@ -394,12 +394,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   for (const chunk of chunks) {
     // Brand-routed casing:
     //   TCF uppercase → Bebas Neue display caps (corporate noir chyron)
-    //   Ace mixed case → Montserrat elegant sentence case (cosmic transmission)
-    const textBody = isAceRichie ? chunk.text : chunk.text.toUpperCase();
+    //   SS mixed case → Montserrat elegant sentence case (cosmic transmission)
+    const textBody = isSS ? chunk.text : chunk.text.toUpperCase();
     const escaped = assEscape(textBody);
     // Visible pop-in: scale 85% → 100% over the first 150ms.
-    // Ace adds a subtle blur fade-in for the ethereal cosmic feel; TCF keeps the hard snap.
-    const popIn = isAceRichie
+    // SS adds a subtle blur fade-in for the ethereal cosmic feel; TCF keeps the hard snap.
+    const popIn = isSS
       ? `{\\blur1\\fscx90\\fscy90\\t(0,180,\\blur0\\fscx100\\fscy100)}`
       : `{\\fscx85\\fscy85\\t(0,150,\\fscx100\\fscy100)}`;
     lines.push(

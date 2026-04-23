@@ -13,7 +13,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
 // ── Shared OAuth helper (same pattern as video-publisher.ts) ──
-async function getYouTubeToken(brand: string = "ace_richie"): Promise<string | null> {
+async function getYouTubeToken(brand: string = "sovereign_synthesis"): Promise<string | null> {
   const directToken = process.env.YOUTUBE_ACCESS_TOKEN;
   if (directToken) return directToken;
 
@@ -138,7 +138,7 @@ export class YouTubeUpdateMetadataTool implements Tool {
       },
       brand: {
         type: "string",
-        description: "Which channel: 'ace_richie' (default) or 'containment_field'.",
+        description: "Which channel: 'sovereign_synthesis' (default) or 'containment_field'.",
       },
     },
     required: ["video_id"],
@@ -146,8 +146,8 @@ export class YouTubeUpdateMetadataTool implements Tool {
 
   async execute(args: Record<string, unknown>): Promise<string> {
     const videoId = String(args.video_id);
-    const brand = args.brand ? String(args.brand) : "ace_richie";
-    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Ace Richie 77";
+    const brand = args.brand ? String(args.brand) : "sovereign_synthesis";
+    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis 77";
     const token = await getYouTubeToken(brand);
 
     if (!token) {
@@ -248,7 +248,7 @@ export class YouTubePinCommentTool implements Tool {
       },
       brand: {
         type: "string",
-        description: "Which channel: 'ace_richie' (default) or 'containment_field'.",
+        description: "Which channel: 'sovereign_synthesis' (default) or 'containment_field'.",
       },
     },
     required: ["video_id", "comment_text"],
@@ -258,8 +258,8 @@ export class YouTubePinCommentTool implements Tool {
     const videoId = String(args.video_id);
     const commentText = String(args.comment_text);
     const shouldPin = String(args.pin || "true") === "true";
-    const brand = args.brand ? String(args.brand) : "ace_richie";
-    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Ace Richie 77";
+    const brand = args.brand ? String(args.brand) : "sovereign_synthesis";
+    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis 77";
     const token = await getYouTubeToken(brand);
 
     if (!token) {
@@ -346,7 +346,7 @@ export class YouTubeCTAAuditTool implements Tool {
     parameters: {
       brand: {
         type: "string",
-        description: "Which channel to audit: 'ace_richie' (default) or 'containment_field'.",
+        description: "Which channel to audit: 'sovereign_synthesis' (default) or 'containment_field'.",
       },
       top_n: {
         type: "string",
@@ -361,10 +361,10 @@ export class YouTubeCTAAuditTool implements Tool {
   };
 
   async execute(args: Record<string, unknown>): Promise<string> {
-    const brand = args.brand ? String(args.brand) : "ace_richie";
+    const brand = args.brand ? String(args.brand) : "sovereign_synthesis";
     const topN = parseInt(String(args.top_n || "5"), 10);
     const landingUrl = String(args.landing_url || "sovereign-landing.com");
-    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Ace Richie 77";
+    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis 77";
     const token = await getYouTubeToken(brand);
 
     if (!token) {

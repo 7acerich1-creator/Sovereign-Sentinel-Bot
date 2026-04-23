@@ -138,7 +138,7 @@ export async function getNicheCooldownSnapshot(brand: Brand): Promise<NicheCoold
  * kept tight — this goes into a prompt that already has a niche allowlist.
  *
  * Example:
- *   ACE_RICHIE cooldown: fresh=[authority|architecture] relax=[sovereignty] blocked=[system-mastery(3d)|wealth-frequency(7d)]
+ *   SOVEREIGN_SYNTHESIS cooldown: fresh=[authority|architecture] relax=[sovereignty] blocked=[system-mastery(3d)|wealth-frequency(7d)]
  */
 export function cooldownSummaryLine(snapshot: NicheCooldownSnapshot): string {
   const groups: Record<CooldownStatus, string[]> = { fresh: [], relax: [], blocked: [] };

@@ -71,12 +71,12 @@ MUTE-AUTOPLAY SCROLL TRAP: First 5 seconds MUST have aggressive, high-contrast, 
 
 PATTERN INTERRUPT BASELINE:
 - The Containment Field: Visual interrupt every 3-4 seconds
-- Ace Richie: Visual interrupt every 5-7 seconds
+- Sovereign Synthesis: Visual interrupt every 5-7 seconds
 
 THUMBNAIL 3-ELEMENT RULE: Every thumbnail = (1) face/figure with strong emotion, (2) large readable text 3-5 words legible at phone size, (3) contrasting visual element. 1280x720 min. NEVER repeat exact title on thumbnail. Create 2 variants per video. Swap if CTR below 4% after 48h.
 
 BRAND VISUAL IDENTITY:
-- Ace Richie: Dark backgrounds, gold/amber accent, clean typography
+- Sovereign Synthesis: Dark backgrounds, gold/amber accent, clean typography
 - Containment Field: Noir/clinical, green-on-black data overlays, glitch effects
 
 SHORTS FORMAT: Vertical 9:16, text overlay first 2 seconds, hard cut opening, cliffhanger ending. 30-45 seconds optimal.`,

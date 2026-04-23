@@ -17,9 +17,9 @@ export interface ThesisAngle {
 
 export const THESIS_ANGLES: Record<Brand, Record<string, ThesisAngle[]>> = {
   // ═══════════════════════════════════════════════════
-  // ACE RICHIE / SOVEREIGN SYNTHESIS
+  // SOVEREIGN SYNTHESIS
   // ═══════════════════════════════════════════════════
-  ace_richie: {
+  sovereign_synthesis: {
     // ─────────────────────────────────────────────────
     // SOVEREIGNTY
     // ─────────────────────────────────────────────────

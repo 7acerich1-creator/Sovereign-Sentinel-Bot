@@ -22,7 +22,7 @@ T7 $12,000 "Inner Circle: Sovereign Licensing": /tier-7/inner-circle.html - Appl
 Journey = Shield (defend) > Map (navigate) > Architect (build in 3 phases) > Inner Circle (license mastery).
 Homepage / = email+name capture > Supabase initiates > nurture email > redirect to /tier-1/diagnostic.
 Stripe P77 checkout: buy.stripe.com/eVq5kFcwy8sX4N0eD9fYY00. Full product data: query product_tiers table in Supabase.
-Two brands: Ace Richie (personal) + The Containment Field (anonymous dark psych - NEVER cross-reference).
+Two brands: Sovereign Synthesis (personal) + The Containment Field (anonymous dark psych - NEVER cross-reference).
 Architecture: Bot runs on Railway. Dashboard on Vercel. Supabase is the ONLY bridge.
 Tables you write to: crew_dispatch, tasks, activity_log, content_drafts, content_transmissions.
 
@@ -55,15 +55,15 @@ Tables you write to: crew_dispatch, tasks, activity_log, content_drafts, content
 //
 // Why the split: S48 Brand Routing Matrix (commits 67fe042 + 7761363) fixed
 // the RENDER layers (aesthetic/terminal/thumbnail/captions/stingers/TTS).
-// It did NOT fix Alfred's shared seed producing "burnout" for Ace Richie.
+// It did NOT fix Alfred's shared seed producing "burnout" for Sovereign Synthesis.
 // This allowlist is the intake-side fix.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/** Niches Ace Richie 77 (personal brand, sovereign architect) is allowed to produce.
+/** Niches Sovereign Synthesis (personal brand, sovereign architect) is allowed to produce.
  *  S66 widen-pass: +3 niches to support 5-7/week cadence without cooldown starvation.
  *  The added axes (exit-velocity, memetic-engineering, signal-discipline) all sit inside
  *  the sovereign-architect frame — no brand drift. */
-export const ACE_RICHIE_NICHES = [
+export const SOVEREIGN_SYNTHESIS_NICHES = [
   "sovereignty",
   "authority",
   "architecture",
@@ -105,13 +105,13 @@ export const CONTAINMENT_FIELD_NICHES = [
 ] as const;
 
 /** Allowed-niche string literal unions for type-level brand safety. */
-export type AceRichieNiche = (typeof ACE_RICHIE_NICHES)[number];
+export type SovereignSynthesisNiche = (typeof SOVEREIGN_SYNTHESIS_NICHES)[number];
 export type ContainmentFieldNiche = (typeof CONTAINMENT_FIELD_NICHES)[number];
-export type AllowedNiche = AceRichieNiche | ContainmentFieldNiche;
+export type AllowedNiche = SovereignSynthesisNiche | ContainmentFieldNiche;
 
 /** Canonical allowlist mapping, keyed by the Phase 4 Brand contract. */
 export const BRAND_NICHE_ALLOWLIST: Readonly<Record<Brand, readonly string[]>> = {
-  ace_richie: ACE_RICHIE_NICHES,
+  sovereign_synthesis: SOVEREIGN_SYNTHESIS_NICHES,
   containment_field: CONTAINMENT_FIELD_NICHES,
 } as const;
 
@@ -154,7 +154,7 @@ export function isAllowedNiche(brand: Brand, niche: string): boolean {
  * callers that inline it do not blow the per-persona token budget.
  *
  * Example output:
- *   "ACE_RICHIE allowed niches: sovereignty | authority | architecture | ..."
+ *   "SOVEREIGN_SYNTHESIS allowed niches: sovereignty | authority | architecture | ..."
  */
 export function nicheAllowlistLine(brand: Brand): string {
   const niches = getAllowedNiches(brand).join(" | ");

@@ -11,7 +11,7 @@
 
 const FB_API = "https://graph.facebook.com/v25.0";
 
-export type FacebookBrand = "ace_richie" | "containment_field";
+export type FacebookBrand = "sovereign_synthesis" | "containment_field";
 
 interface FacebookPostResult {
   success: boolean;
@@ -26,7 +26,7 @@ function getPageCredentials(brand: FacebookBrand): { token: string; pageId: stri
     if (!token || !pageId) return null;
     return { token, pageId };
   }
-  // Default: ace_richie / Sovereign Synthesis
+  // Default: sovereign_synthesis / Sovereign Synthesis
   const token = process.env.FACEBOOK_PAGE_ACCESS_TOKEN;
   const pageId = process.env.FACEBOOK_PAGE_ID;
   if (!token || !pageId) return null;
@@ -35,13 +35,13 @@ function getPageCredentials(brand: FacebookBrand): { token: string; pageId: stri
 
 /**
  * Publish a text post (with optional link) to a Facebook Page.
- * Brand parameter selects the target page (defaults to ace_richie).
+ * Brand parameter selects the target page (defaults to sovereign_synthesis).
  */
 export async function publishToFacebook(
   text: string,
   options?: { link?: string; imageUrl?: string; brand?: FacebookBrand }
 ): Promise<FacebookPostResult> {
-  const brand = options?.brand || "ace_richie";
+  const brand = options?.brand || "sovereign_synthesis";
   const creds = getPageCredentials(brand);
 
   if (!creds) {

@@ -26,22 +26,22 @@ const R2_BUCKET = process.env.R2_BUCKET_VIDEOS || "sovereign-videos";
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
-// Brand detection from clip path: clips/ace_richie_*  or  clips/containment_field_*
-function detectBrand(key: string): "ace_richie" | "containment_field" {
+// Brand detection from clip path: clips/sovereign_synthesis_*  or  clips/containment_field_*
+function detectBrand(key: string): "sovereign_synthesis" | "containment_field" {
   if (key.includes("containment_field")) return "containment_field";
-  return "ace_richie";
+  return "sovereign_synthesis";
 }
 
 // Extract a human-readable title from the clip folder name
-// e.g. "clips/ace_richie_sovereignty_collapse_your_old_self_in_48_hours_1776469555753/clip_00.mp4"
+// e.g. "clips/sovereign_synthesis_sovereignty_collapse_your_old_self_in_48_hours_1776469555753/clip_00.mp4"
 // → "Collapse Your Old Self in 48 Hours"
 function extractTitle(key: string): string {
   const parts = key.split("/");
   if (parts.length < 2) return "Sovereign Synthesis";
-  const folder = parts[1]; // ace_richie_sovereignty_collapse_your_old_self_in_48_hours_1776469555753
+  const folder = parts[1]; // sovereign_synthesis_sovereignty_collapse_your_old_self_in_48_hours_1776469555753
   // Remove brand prefix, niche, and trailing timestamp
   const withoutBrand = folder
-    .replace(/^ace_richie_/, "")
+    .replace(/^sovereign_synthesis_/, "")
     .replace(/^containment_field_/, "");
   // Remove niche prefix (first segment before the actual title words)
   // Pattern: niche_actual_title_words_timestamp
@@ -78,7 +78,7 @@ const TIME_SLOTS = ["09:00:00", "11:00:00", "13:00:00", "15:00:00", "17:00:00", 
 interface R2Clip {
   key: string;
   publicUrl: string;
-  brand: "ace_richie" | "containment_field";
+  brand: "sovereign_synthesis" | "containment_field";
   batchFolder: string;
   clipIndex: number;
   title: string;

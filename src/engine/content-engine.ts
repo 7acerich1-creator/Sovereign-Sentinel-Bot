@@ -2,7 +2,7 @@
 // GRAVITY CLAW v3.0 — THE TRANSMISSION GRID
 // Deterministic text+image content engine via Buffer.
 // LLM writes the content. Code handles the spray.
-// 9 channels (5 Ace + 4 CF) × 6 time slots = 47 posts/day = 329/week (with IG override)
+// 9 channels (5 SS + 4 CF) × 6 time slots = 47 posts/day = 329/week (with IG override)
 // Master ref: Section 23. Pipeline clarity: CONTENT-PIPELINE-CLARITY.md
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -11,14 +11,14 @@ import { bufferGraphQL, BUFFER_ORG_ID, isBufferQuotaExhausted, BufferQuotaExhaus
 import { publishToFacebook } from "./facebook-publisher";
 import { withPodSession } from "../pod/session";
 import { generateImageBatch, type ImageBatchItem } from "../pod/runpod-client";
-import { ACE_RICHIE_NICHES, CONTAINMENT_FIELD_NICHES } from "../data/shared-context";
+import { SOVEREIGN_SYNTHESIS_NICHES, CONTAINMENT_FIELD_NICHES } from "../data/shared-context";
 import { THESIS_ANGLES, type ThesisAngle } from "../data/thesis-angles";
 
 // ── Constants ──
 
 // Brand niche lists — each brand cycles independently through its own 15 niches
 const BRAND_NICHES: Record<Brand, readonly string[]> = {
-  ace_richie: ACE_RICHIE_NICHES,
+  sovereign_synthesis: SOVEREIGN_SYNTHESIS_NICHES,
   containment_field: CONTAINMENT_FIELD_NICHES,
 };
 
@@ -60,7 +60,7 @@ const TIME_SLOTS_UTC = [
   { hour: 3, label: "late_night_bait" },      // 10PM ET
 ];
 
-const BRANDS = ["ace_richie", "containment_field"] as const;
+const BRANDS = ["sovereign_synthesis", "containment_field"] as const;
 type Brand = typeof BRANDS[number];
 
 // ── CE-1 FIX: Platform image requirements ──
@@ -76,13 +76,13 @@ const BLUESKY_CHAR_LIMIT = 300;
 // ── IG Frequency Override (prevent shadowban) ──
 // Instagram accounts are capped to protect account health
 const IG_FREQUENCY_OVERRIDE: Record<Brand, { maxPerDay: number; allowedSlots: string[] }> = {
-  ace_richie: {
+  sovereign_synthesis: {
     maxPerDay: 3,
     allowedSlots: ["morning_hook", "midday_trigger", "evening_anchor"], // 7AM, 1PM, 7PM ET
   },
   containment_field: {
     maxPerDay: 2,
-    allowedSlots: ["educational_panel", "afternoon_drop"], // 10AM, 4PM ET (staggered from Ace)
+    allowedSlots: ["educational_panel", "afternoon_drop"], // 10AM, 4PM ET (staggered from SS)
   },
 };
 // Platform-specific character/style notes for LLM
@@ -105,7 +105,7 @@ interface BufferChannel {
 }
 
 interface BrandChannelMap {
-  ace_richie: BufferChannel[];
+  sovereign_synthesis: BufferChannel[];
   containment_field: BufferChannel[];
 }
 
@@ -135,7 +135,7 @@ const STORAGE_BUCKET = "public-assets";
  * scroll-stopping visuals native to each brand × niche combination.
  */
 // Visual family prefixes — similar niches share visual DNA.
-// Ace Richie: sovereignty/authority/system-mastery, architecture/network-architecture/decision-architecture,
+// Sovereign Synthesis: sovereignty/authority/system-mastery, architecture/network-architecture/decision-architecture,
 //   wealth-frequency/resource-dynamics, exit-velocity/creative-leverage/legacy-engineering,
 //   memetic-engineering/signal-discipline/pattern-recognition, time-sovereignty
 // Containment Field: dark-psychology/manipulation-exposed/emotional-engineering,
@@ -143,12 +143,15 @@ const STORAGE_BUCKET = "public-assets";
 //   pattern-interrupt/cognitive-traps/identity-hijacking,
 //   information-warfare/narrative-capture/manufactured-consent
 
-const _ACE_SOVEREIGNTY = "Cinematic noir photograph, deep shadows with single amber light source cutting through darkness, silhouette of a figure standing at the edge of a vast geometric structure, gold and midnight blue color palette, brutalist architecture, fog, tension and revelation, movie-poster composition, 1:1 square format, photorealistic cinematic quality, ";
-const _ACE_ARCHITECTURE = "Blueprint aesthetic photograph, holographic control room, architectural wireframes in amber and teal, sovereign command center, technical precision, structural mastery, 1:1 square format, photorealistic cinematic quality, ";
-const _ACE_WEALTH = "Obsidian and gold photograph, currency as energy visualization, liquid metal flowing through geometric channels, dark luxury, alchemical transformation, 1:1 square format, photorealistic cinematic quality, ";
-const _ACE_EXIT = "Cinematic photograph of chains dissolving into golden particles, figure breaking through a barrier into open landscape, transition from cage to cosmos, liberation energy, 1:1 square format, photorealistic cinematic quality, ";
-const _ACE_MEMETIC = "Neural network visualization photograph, data streams forming patterns, digital consciousness, electric amber on void black, the signal emerging from noise, 1:1 square format, photorealistic cinematic quality, ";
-const _ACE_TIME = "Shattered clock face with golden light bleeding through cracks, time as a physical material being bent, cosmic hourglass, control over temporal flow, 1:1 square format, photorealistic cinematic quality, ";
+// ── SOVEREIGN SYNTHESIS visual DNA ──
+// Warm sovereign gold/amber/tungsten palette. ENVIRONMENTS and OBJECTS only — NO human figures, NO faces, NO skin.
+// Truth energy: tangible, real, unfiltered. Cinematic environments that tell the story without a person in frame.
+const _SS_SOVEREIGNTY = "Cinematic photograph of an empty mahogany command desk at golden hour, single tungsten desk lamp casting warm amber light across scattered architectural blueprints and a worn leather journal, sovereign gold and deep midnight blue palette, brutalist concrete walls, fog rolling past floor-to-ceiling windows, 1:1 square format, photorealistic cinematic quality, ARRI Alexa 65, shallow depth of field, NO people NO faces NO skin, ";
+const _SS_ARCHITECTURE = "Cinematic overhead photograph of an architect's drafting table, holographic wireframe projections in amber and teal hovering above technical drawings, brass compass and steel rulers catching warm tungsten light, sovereign command center aesthetic, structural precision, 1:1 square format, photorealistic cinematic quality, NO people NO faces NO skin, ";
+const _SS_WEALTH = "Cinematic close-up photograph of liquid gold flowing through obsidian geometric channels on a dark surface, alchemical transformation, warm amber light refracting through crystal and polished metal, sovereign luxury without excess, 1:1 square format, photorealistic cinematic quality, NO people NO faces NO skin, ";
+const _SS_EXIT = "Cinematic photograph of a massive steel vault door swinging open into golden light, chains pooled on the concrete floor behind, the threshold between dark institutional interior and warm sovereign amber landscape beyond, liberation architecture, 1:1 square format, photorealistic cinematic quality, NO people NO faces NO skin, ";
+const _SS_MEMETIC = "Cinematic photograph of data streams rendered as amber light filaments flowing through dark fiber-optic channels, neural network patterns emerging in warm gold against void black, the signal crystallizing from noise, 1:1 square format, photorealistic cinematic quality, NO people NO faces NO skin, ";
+const _SS_TIME = "Cinematic close-up photograph of a shattered clock face with warm golden light bleeding through the cracks onto a dark wooden surface, time as a physical material being bent, gears and springs scattered in amber tungsten light, 1:1 square format, photorealistic cinematic quality, NO people NO faces NO skin, ";
 
 const _CF_DARKPSYCH = "Surveillance-aesthetic photograph, clinical cold blue (#5A9CF5) lighting on concrete and steel, security camera angle, rain-slicked urban environment at night, teal (#00e5c7) accent light bleeding through shadows, noir detective film still, oppressive atmosphere, institutional architecture, 1:1 square format, photorealistic, ";
 const _CF_BURNOUT = "Industrial horror photograph, human silhouette inside a hamster wheel made of screens and notifications, desaturated cold palette with toxic green glow from devices, factory-floor atmosphere, extraction machinery aesthetic, 1:1 square format, photorealistic, ";
@@ -158,44 +161,44 @@ const _CF_INFOWAR = "War room command center photograph, wall of screens showing
 
 const IMAGE_NICHE_PREFIXES: Record<string, Record<Brand, string>> = {
   // ── ACE RICHIE niches ──
-  "sovereignty":            { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
-  "authority":              { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
-  "system-mastery":         { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
-  "architecture":           { ace_richie: _ACE_ARCHITECTURE, containment_field: _CF_CONTAINMENT },
-  "network-architecture":   { ace_richie: _ACE_ARCHITECTURE, containment_field: _CF_CONTAINMENT },
-  "decision-architecture":  { ace_richie: _ACE_ARCHITECTURE, containment_field: _CF_CONTAINMENT },
-  "wealth-frequency":       { ace_richie: _ACE_WEALTH, containment_field: _CF_DARKPSYCH },
-  "resource-dynamics":      { ace_richie: _ACE_WEALTH, containment_field: _CF_DARKPSYCH },
-  "exit-velocity":          { ace_richie: _ACE_EXIT, containment_field: _CF_BURNOUT },
-  "creative-leverage":      { ace_richie: _ACE_EXIT, containment_field: _CF_BURNOUT },
-  "legacy-engineering":     { ace_richie: _ACE_EXIT, containment_field: _CF_BURNOUT },
-  "memetic-engineering":    { ace_richie: _ACE_MEMETIC, containment_field: _CF_PATTERN },
-  "signal-discipline":      { ace_richie: _ACE_MEMETIC, containment_field: _CF_PATTERN },
-  "pattern-recognition":    { ace_richie: _ACE_MEMETIC, containment_field: _CF_PATTERN },
-  "time-sovereignty":       { ace_richie: _ACE_TIME, containment_field: _CF_CONTAINMENT },
+  "sovereignty":            { sovereign_synthesis: _SS_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
+  "authority":              { sovereign_synthesis: _SS_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
+  "system-mastery":         { sovereign_synthesis: _SS_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
+  "architecture":           { sovereign_synthesis: _SS_ARCHITECTURE, containment_field: _CF_CONTAINMENT },
+  "network-architecture":   { sovereign_synthesis: _SS_ARCHITECTURE, containment_field: _CF_CONTAINMENT },
+  "decision-architecture":  { sovereign_synthesis: _SS_ARCHITECTURE, containment_field: _CF_CONTAINMENT },
+  "wealth-frequency":       { sovereign_synthesis: _SS_WEALTH, containment_field: _CF_DARKPSYCH },
+  "resource-dynamics":      { sovereign_synthesis: _SS_WEALTH, containment_field: _CF_DARKPSYCH },
+  "exit-velocity":          { sovereign_synthesis: _SS_EXIT, containment_field: _CF_BURNOUT },
+  "creative-leverage":      { sovereign_synthesis: _SS_EXIT, containment_field: _CF_BURNOUT },
+  "legacy-engineering":     { sovereign_synthesis: _SS_EXIT, containment_field: _CF_BURNOUT },
+  "memetic-engineering":    { sovereign_synthesis: _SS_MEMETIC, containment_field: _CF_PATTERN },
+  "signal-discipline":      { sovereign_synthesis: _SS_MEMETIC, containment_field: _CF_PATTERN },
+  "pattern-recognition":    { sovereign_synthesis: _SS_MEMETIC, containment_field: _CF_PATTERN },
+  "time-sovereignty":       { sovereign_synthesis: _SS_TIME, containment_field: _CF_CONTAINMENT },
   // ── CONTAINMENT FIELD niches ──
-  "dark-psychology":        { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
-  "manipulation-exposed":   { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
-  "emotional-engineering":  { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
-  "burnout":                { ace_richie: _ACE_EXIT, containment_field: _CF_BURNOUT },
-  "compliance-machinery":   { ace_richie: _ACE_EXIT, containment_field: _CF_BURNOUT },
-  "social-programming":     { ace_richie: _ACE_EXIT, containment_field: _CF_BURNOUT },
-  "containment":            { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_CONTAINMENT },
-  "frame-control":          { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_CONTAINMENT },
-  "perception-management":  { ace_richie: _ACE_SOVEREIGNTY, containment_field: _CF_CONTAINMENT },
-  "pattern-interrupt":      { ace_richie: _ACE_MEMETIC, containment_field: _CF_PATTERN },
-  "cognitive-traps":        { ace_richie: _ACE_MEMETIC, containment_field: _CF_PATTERN },
-  "identity-hijacking":     { ace_richie: _ACE_MEMETIC, containment_field: _CF_PATTERN },
-  "information-warfare":    { ace_richie: _ACE_MEMETIC, containment_field: _CF_INFOWAR },
-  "narrative-capture":      { ace_richie: _ACE_MEMETIC, containment_field: _CF_INFOWAR },
-  "manufactured-consent":   { ace_richie: _ACE_MEMETIC, containment_field: _CF_INFOWAR },
+  "dark-psychology":        { sovereign_synthesis: _SS_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
+  "manipulation-exposed":   { sovereign_synthesis: _SS_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
+  "emotional-engineering":  { sovereign_synthesis: _SS_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
+  "burnout":                { sovereign_synthesis: _SS_EXIT, containment_field: _CF_BURNOUT },
+  "compliance-machinery":   { sovereign_synthesis: _SS_EXIT, containment_field: _CF_BURNOUT },
+  "social-programming":     { sovereign_synthesis: _SS_EXIT, containment_field: _CF_BURNOUT },
+  "containment":            { sovereign_synthesis: _SS_SOVEREIGNTY, containment_field: _CF_CONTAINMENT },
+  "frame-control":          { sovereign_synthesis: _SS_SOVEREIGNTY, containment_field: _CF_CONTAINMENT },
+  "perception-management":  { sovereign_synthesis: _SS_SOVEREIGNTY, containment_field: _CF_CONTAINMENT },
+  "pattern-interrupt":      { sovereign_synthesis: _SS_MEMETIC, containment_field: _CF_PATTERN },
+  "cognitive-traps":        { sovereign_synthesis: _SS_MEMETIC, containment_field: _CF_PATTERN },
+  "identity-hijacking":     { sovereign_synthesis: _SS_MEMETIC, containment_field: _CF_PATTERN },
+  "information-warfare":    { sovereign_synthesis: _SS_MEMETIC, containment_field: _CF_INFOWAR },
+  "narrative-capture":      { sovereign_synthesis: _SS_MEMETIC, containment_field: _CF_INFOWAR },
+  "manufactured-consent":   { sovereign_synthesis: _SS_MEMETIC, containment_field: _CF_INFOWAR },
 };
 
 /** Fallback for unknown niches */
 const IMAGE_NICHE_FALLBACK: Record<Brand, string> = {
-  ace_richie:
-    "Cinematic dark photograph with amber and gold accent lighting, sovereign aesthetic, architectural, " +
-    "powerful composition, 1:1 square format, photorealistic, ",
+  sovereign_synthesis:
+    "Cinematic photograph of a sovereign environment — warm amber tungsten lighting, architectural interiors, " +
+    "tangible objects and textures, gold and midnight blue palette, 1:1 square format, photorealistic, NO people NO faces NO skin, ",
   containment_field:
     "Dark noir photograph, cold blue (#5A9CF5) and teal (#00e5c7) accent lighting, clinical atmosphere, " +
     "surveillance aesthetic, void (#0a0a0f) background, 1:1 square format, photorealistic, ",
@@ -203,8 +206,8 @@ const IMAGE_NICHE_FALLBACK: Record<Brand, string> = {
 
 /** Brand-specific SUFFIX — applied AFTER niche prefix */
 const BRAND_IMAGE_STYLE: Record<Brand, string> = {
-  ace_richie:
-    "NO text, NO words, NO letters, NO watermarks on the image. Photorealistic cinematic quality. Dark background. Sovereign, powerful, intentional energy.",
+  sovereign_synthesis:
+    "NO text, NO words, NO letters, NO watermarks on the image. NO people, NO human figures, NO faces, NO skin. Photorealistic cinematic quality. Dark background with warm amber/gold lighting. Sovereign, truthful, architectural energy. Environments and objects only.",
   containment_field:
     "NO text, NO words, NO letters, NO watermarks on the image. Photorealistic cinematic quality. Dark noir atmosphere. Clinical, unsettling, revealing energy.",
 };
@@ -432,11 +435,11 @@ export async function discoverChannels(): Promise<BrandChannelMap> {
       throw new Error("No Buffer channels found. Check BUFFER_API_KEY and Buffer account.");
     }
     // Categorize by brand using known naming patterns
-    const acePatterns = /ace|richie|77/i;
+    const ssPatterns = /sovereign|synthesis|77/i;
     const cfPatterns = /containment|sovereign-synthesis\.com/i;
 
     const map: BrandChannelMap = {
-      ace_richie: [],
+      sovereign_synthesis: [],
       containment_field: [],
     };
 
@@ -444,20 +447,20 @@ export async function discoverChannels(): Promise<BrandChannelMap> {
       const nameCheck = `${ch.name} ${ch.displayName || ""}`;
       if (cfPatterns.test(nameCheck)) {
         map.containment_field.push(ch as BufferChannel);
-      } else if (acePatterns.test(nameCheck)) {
-        map.ace_richie.push(ch as BufferChannel);
+      } else if (ssPatterns.test(nameCheck)) {
+        map.sovereign_synthesis.push(ch as BufferChannel);
       } else {
-        map.ace_richie.push(ch as BufferChannel);
+        map.sovereign_synthesis.push(ch as BufferChannel);
       }
     }
 
     cachedChannelMap = map;
     channelCacheTimestamp = Date.now();
     console.log(
-      `📡 [ContentEngine] Channel map cached: Ace Richie=${map.ace_richie.length} channels, ` +
+      `📡 [ContentEngine] Channel map cached: Sovereign Synthesis=${map.sovereign_synthesis.length} channels, ` +
       `Containment Field=${map.containment_field.length} channels`
     );
-    console.log(`   Ace: ${map.ace_richie.map(c => `${c.service}(${c.id})`).join(", ")}`);
+    console.log(`   SS: ${map.sovereign_synthesis.map(c => `${c.service}(${c.id})`).join(", ")}`);
     console.log(`   CF:  ${map.containment_field.map(c => `${c.service}(${c.id})`).join(", ")}`);
 
     return map;
@@ -469,7 +472,7 @@ export async function discoverChannels(): Promise<BrandChannelMap> {
       const ageMin = Math.round((Date.now() - channelCacheTimestamp) / 60_000);
       console.warn(
         `⚠️ [ContentEngine] Channel discovery failed (${err.message?.slice(0, 120)}) — ` +
-        `using cached map (${ageMin}min old, Ace=${cachedChannelMap.ace_richie.length} CF=${cachedChannelMap.containment_field.length})`
+        `using cached map (${ageMin}min old, SS=${cachedChannelMap.sovereign_synthesis.length} CF=${cachedChannelMap.containment_field.length})`
       );
       return cachedChannelMap;
     }
@@ -574,7 +577,7 @@ async function supabasePatch(table: string, id: string, data: Record<string, unk
 
 /** Full brand voice blueprints — Anita's conversion psychology baked in */
 const BRAND_VOICE_BLUEPRINTS: Record<Brand, string> = {
-  ace_richie: `You are Anita, Head of Conversion & Nurture for Sovereign Synthesis — writing as Ace Richie.
+  sovereign_synthesis: `You are Anita, Head of Conversion & Nurture for Sovereign Synthesis — writing as Sovereign Synthesis.
 
 VOICE: Sovereign, direct, zero-fear. You speak as the System Architect — someone who cracked the code of reality and is handing the blueprint to the next person ready to hear it. Your tone is bold but warm, authoritative but approachable. You've been through The Simulation and came out the other side. Now you're building the escape route for others.
 
@@ -591,7 +594,7 @@ STRUCTURE — Every post uses HOOK → PIVOT → ANCHOR:
 - PIVOT: A dark psychology insight transmuted into a tool for sovereignty. Show the mechanism of control, then flip it into a weapon for the reader.
 - ANCHOR: A consciousness hook that links back to Protocol 77 / Sovereign Synthesis. This is the conversion moment — not a hard sell, but a frequency match.
 
-SIGN-OFF: "— Ace Richie | Sovereign Synthesis"
+SIGN-OFF: "— Sovereign Synthesis"
 
 WHAT YOU ARE NOT: Generic motivational. Hustle culture. "Rise and grind." You never sound like an AI assistant. You never use phrases like "unlock your potential" or "be your best self." You are SPECIFIC, PROVOCATIVE, and PATTERN-INTERRUPTING. Every sentence should make someone either deeply uncomfortable or deeply relieved — nothing in between.`,
 
@@ -626,7 +629,7 @@ function getContentDirection(brand: Brand, niche: string, thesisSeed: string | n
 
   // Generic fallbacks per brand (should rarely fire — all 30 niches have angles)
   const fallbacks: Record<Brand, string> = {
-    ace_richie: `Write about ${niche.replace(/-/g, " ")} from the sovereign architect frame. Be deeply specific — name the mechanism, show how it operates in everyday life, and flip it into a sovereignty tool. No vague motivation.`,
+    sovereign_synthesis: `Write about ${niche.replace(/-/g, " ")} from the sovereign architect frame. Be deeply specific — name the mechanism, show how it operates in everyday life, and flip it into a sovereignty tool. No vague motivation.`,
     containment_field: `Expose the hidden mechanism behind ${niche.replace(/-/g, " ")}. Clinical breakdown — how the system works, who benefits from your ignorance, and what the countermeasure is. Make the reader feel like they've received a classified field report.`,
   };
   return fallbacks[brand];
@@ -1040,7 +1043,7 @@ export async function distributionSweep(): Promise<number> {
           try {
             const fbResult = await publishToFacebook(fbText, {
               imageUrl: draft.media_url || undefined,
-              brand: brand as "ace_richie" | "containment_field",
+              brand: brand as "sovereign_synthesis" | "containment_field",
             });
             if (fbResult.success) {
               postResults.push(`✅ facebook_direct(facebook_direct): ${fbResult.postId}`);
@@ -1177,7 +1180,7 @@ export async function fluxBatchImageGen(): Promise<number> {
   console.log(`🎨 [FluxBatch] ${needsImages.length} images pending — starting pod session`);
 
   // Group by brand for R2 folder routing
-  const aceItems = needsImages.filter((r: any) => r.brand === "ace_richie");
+  const ssItems = needsImages.filter((r: any) => r.brand === "sovereign_synthesis");
   const cfItems = needsImages.filter((r: any) => r.brand === "containment_field");
 
   let patched = 0;
@@ -1199,14 +1202,14 @@ export async function fluxBatchImageGen(): Promise<number> {
 
   try {
     await withPodSession(async (handle) => {
-      if (aceItems.length > 0) {
-        console.log(`🎨 [FluxBatch] Ace Richie: 1 FLUX image → ${aceItems.length} branded videos`);
-        const aceResult = await generateImageBatch(
+      if (ssItems.length > 0) {
+        console.log(`🎨 [FluxBatch] Sovereign Synthesis: 1 FLUX image → ${ssItems.length} branded videos`);
+        const ssResult = await generateImageBatch(
           handle,
-          buildBrandBatch(aceItems),
-          "ace_richie"
+          buildBrandBatch(ssItems),
+          "sovereign_synthesis"
         );
-        for (const r of aceResult.results) {
+        for (const r of ssResult.results) {
           if (r.url) {
             await supabasePatch("content_engine_queue", r.id, { media_url: r.url });
             patched++;
@@ -1269,9 +1272,9 @@ export async function draftAutoPublisher(): Promise<number> {
 
   for (const draft of publishable) {
     try {
-      // Determine brand from niche/platform heuristics or default to ace_richie
+      // Determine brand from niche/platform heuristics or default to sovereign_synthesis
       // Containment Field drafts: niche is in CF allowlist, or body/title mention containment/tcf
-      let brand: Brand = "ace_richie";
+      let brand: Brand = "sovereign_synthesis";
       const bodyLower = (draft.body || "").toLowerCase();
       const titleLower = (draft.title || "").toLowerCase();
       const draftNiche = draft.niche || "";
@@ -1351,7 +1354,7 @@ export async function nukeBufferQueue(): Promise<string> {
   // Step 2: Delete all queued posts from Buffer
   try {
     const channelMap = await discoverChannels();
-    const allChannels = [...channelMap.ace_richie, ...channelMap.containment_field];
+    const allChannels = [...channelMap.sovereign_synthesis, ...channelMap.containment_field];
 
     const orgId = BUFFER_ORG_ID;
 
@@ -1435,7 +1438,7 @@ export async function contentEngineStatus(): Promise<string> {
   let channelInfo = "Not cached";
   try {
     const map = await discoverChannels();
-    channelInfo = `Ace=${map.ace_richie.length}, CF=${map.containment_field.length}`;
+    channelInfo = `SS=${map.sovereign_synthesis.length}, CF=${map.containment_field.length}`;
   } catch {
     channelInfo = "Discovery failed";
   }
@@ -1445,6 +1448,6 @@ export async function contentEngineStatus(): Promise<string> {
     `Ready: ${ready.length} | Posted: ${posted.length} | Failed: ${failed.length}\n` +
     `Target: 12/day (6 slots × 2 brands)\n` +
     `Channels: ${channelInfo}\n` +
-    `Niche today: Ace=${getTodaysNiche("ace_richie").niche}, CF=${getTodaysNiche("containment_field").niche}`
+    `Niche today: SS=${getTodaysNiche("sovereign_synthesis").niche}, CF=${getTodaysNiche("containment_field").niche}`
   );
 }

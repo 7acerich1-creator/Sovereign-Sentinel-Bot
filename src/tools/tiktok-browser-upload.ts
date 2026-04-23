@@ -61,7 +61,7 @@ export class TikTokBrowserUploadTool implements Tool {
       },
       brand: {
         type: "string",
-        description: "Which brand account to use: 'ace_richie' (default) or 'containment_field'. Maps to the correct cookie set.",
+        description: "Which brand account to use: 'sovereign_synthesis' (default) or 'containment_field'. Maps to the correct cookie set.",
       },
     },
     required: ["video_url", "caption"],
@@ -80,7 +80,7 @@ export class TikTokBrowserUploadTool implements Tool {
     const videoUrl = String(args.video_url);
     const caption = String(args.caption);
     const niche = args.niche ? String(args.niche) : "unknown";
-    const brand = args.brand ? String(args.brand) : "ace_richie";
+    const brand = args.brand ? String(args.brand) : "sovereign_synthesis";
     const account = TikTokBrowserUploadTool.brandToAccount(brand);
     let tmpPath = "";
 

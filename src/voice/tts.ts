@@ -8,7 +8,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export type TTSProvider = "xtts";
-export type TTSBrand = "ace_richie" | "containment_field";
+export type TTSBrand = "sovereign_synthesis" | "containment_field";
 
 export interface TTSOptions {
   provider?: TTSProvider;
@@ -34,12 +34,12 @@ export async function textToSpeech(
 // XTTS — Sovereign TTS Engine (RunPod GPU, zero per-character cost)
 // Voice cloning from reference WAV files stored on the pod's /workspace volume.
 // Brand routing:
-//   ace_richie         → XTTS_SPEAKER_WAV_ACE
-//   containment_field  → XTTS_SPEAKER_WAV_TCF
-//   (no brand)         → XTTS_SPEAKER_WAV_TCF or built-in speaker
+//   sovereign_synthesis → XTTS_SPEAKER_WAV_ACE
+//   containment_field   → XTTS_SPEAKER_WAV_TCF
+//   (no brand)          → XTTS_SPEAKER_WAV_TCF or built-in speaker
 // Env vars:
 //   XTTS_SERVER_URL      — RunPod proxy URL
-//   XTTS_SPEAKER_WAV_ACE — server-side path to Ace Richie voice ref on pod
+//   XTTS_SPEAKER_WAV_ACE — server-side path to Sovereign Synthesis voice ref on pod
 //   XTTS_SPEAKER_WAV_TCF — server-side path to TCF voice ref on pod
 //   XTTS_SPEAKER_ID      — fallback built-in speaker name (default: "Marcos Rudaski")
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -51,14 +51,14 @@ async function xttsTTS(text: string, _speed?: number, brand?: TTSBrand): Promise
   const url = new URL("/api/tts", baseUrl);
 
   // Brand-routed voice reference
-  const aceWav = process.env.XTTS_SPEAKER_WAV_ACE;
+  const ssWav = process.env.XTTS_SPEAKER_WAV_ACE;
   const tcfWav = process.env.XTTS_SPEAKER_WAV_TCF;
   const speakerId = process.env.XTTS_SPEAKER_ID || "Marcos Rudaski";
 
   // Resolve speaker: prefer cloned voice WAV, fall back to built-in speaker
   let useSpeakerWav: string | undefined;
-  if (brand === "ace_richie" && aceWav) {
-    useSpeakerWav = aceWav;
+  if (brand === "sovereign_synthesis" && ssWav) {
+    useSpeakerWav = ssWav;
   } else if (brand === "containment_field" && tcfWav) {
     useSpeakerWav = tcfWav;
   } else if (tcfWav) {

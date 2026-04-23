@@ -79,13 +79,13 @@ FONT_MONTSERRAT = os.path.join(BRAND_ASSETS_DIR, "Montserrat-SemiBold.ttf")
 
 # Brand card animation files (generated in S70, baked into Docker)
 BRAND_CARD_FILES = {
-    "ace_richie": os.path.join(BRAND_ASSETS_DIR, "brand_card_ace.mp4"),
+    "sovereign_synthesis": os.path.join(BRAND_ASSETS_DIR, "brand_card_ace.mp4"),
     "containment_field": os.path.join(BRAND_ASSETS_DIR, "brand_card_tcf.mp4"),
 }
 
 # ASS color format: &HAABBGGRR (alpha, blue, green, red — NOT RGB)
 # TCF: clean silver/white text, monospace terminal
-# Ace: warm gold accent, premium sans-serif
+# SS: warm gold accent, premium sans-serif
 TYPEWRITER_STYLES = {
     "containment_field": {
         "font": "JetBrains Mono",
@@ -96,7 +96,7 @@ TYPEWRITER_STYLES = {
         "shadow_depth": 0,
         "bold": 0,
     },
-    "ace_richie": {
+    "sovereign_synthesis": {
         "font": "Montserrat SemiBold",
         "fontsize": 54,
         "primary_color": "&H0080CFFF",   # warm amber-gold (BGR: FF CF 80)
@@ -116,7 +116,7 @@ TYPEWRITER_STYLES = {
 # Green opaque-box captions are DEAD. New style: premium editorial, no box plate.
 #
 # TCF:  Bebas Neue uppercase, thin dark outline only, crisp white/silver.
-# Ace:  Montserrat SemiBold mixed-case, warm outline, soft shadow.
+# SS:   Montserrat SemiBold mixed-case, warm outline, soft shadow.
 
 CAPTION_WORDS_PER_BURST = (2, 4)
 CAPTION_MIN_DURATION_S = 0.25
@@ -138,7 +138,7 @@ CAPTION_STYLES = {
         "anim_in_ms": 120,
         "anim_scale_start": 95,
     },
-    "ace_richie": {
+    "sovereign_synthesis": {
         "font": "Montserrat SemiBold",
         "fontsize": 68,
         "primary_color": "&H0080CFFF",
@@ -217,7 +217,7 @@ def _generate_caption_ass(
         audio_end_s: Hard ceiling -- no subtitle event may extend past this
                      timestamp.  Prevents ghost captions in dead-air padding.
     """
-    style = CAPTION_STYLES.get(brand, CAPTION_STYLES["ace_richie"])
+    style = CAPTION_STYLES.get(brand, CAPTION_STYLES["sovereign_synthesis"])
 
     def _ts(seconds: float) -> str:
         h = int(seconds // 3600)
@@ -392,7 +392,7 @@ def generate_and_burn_captions(
 
 # Brand-specific music beds (baked into Docker at BRAND_ASSETS_DIR)
 MUSIC_BED_FILES = {
-    "ace_richie": os.path.join(BRAND_ASSETS_DIR, "music_sovereign.mp3"),
+    "sovereign_synthesis": os.path.join(BRAND_ASSETS_DIR, "music_sovereign.mp3"),
     "containment_field": os.path.join(BRAND_ASSETS_DIR, "music_urgent.mp3"),
 }
 MUSIC_BED_DB = -8  # dB attenuation for music underneath narration (S86: was -12, barely audible. -8 = present but not competing)
@@ -400,11 +400,11 @@ MUSIC_BED_DB = -8  # dB attenuation for music underneath narration (S86: was -12
 # Brand stings
 TYPING_SOUND = os.path.join(BRAND_ASSETS_DIR, "typing.mp3")
 SIGNATURE_INTRO_FILES = {
-    "ace_richie": os.path.join(BRAND_ASSETS_DIR, "signature_long.mp3"),
+    "sovereign_synthesis": os.path.join(BRAND_ASSETS_DIR, "signature_long.mp3"),
     "containment_field": os.path.join(BRAND_ASSETS_DIR, "signature_long_tcf.mp3"),
 }
 SIGNATURE_OUTRO_FILES = {
-    "ace_richie": os.path.join(BRAND_ASSETS_DIR, "signature_outro.mp3"),
+    "sovereign_synthesis": os.path.join(BRAND_ASSETS_DIR, "signature_outro.mp3"),
     "containment_field": os.path.join(BRAND_ASSETS_DIR, "signature_outro_tcf.mp3"),
 }
 STING_INTRO_DB = -8   # intro sting slightly louder than music bed
@@ -617,7 +617,7 @@ def _generate_typewriter_ass(
 
     Returns the path to the written .ass file.
     """
-    style = TYPEWRITER_STYLES.get(brand, TYPEWRITER_STYLES["ace_richie"])
+    style = TYPEWRITER_STYLES.get(brand, TYPEWRITER_STYLES["sovereign_synthesis"])
 
     # Timing: chars reveal over the active window, then hold for tail
     active_dur = duration_s * (1.0 - TYPEWRITER_TAIL_FRAC)
@@ -909,7 +909,7 @@ def compose_video(
         scene_wavs: Ordered list of WAV paths (one per scene).
         durations_s: Per-scene audio durations in seconds.
         job_dir: Working directory for intermediate files.
-        brand: 'ace_richie' or 'containment_field'.
+        brand: 'sovereign_synthesis' or 'containment_field'.
         thumbnail_scene_idx: Which scene image to use for the thumbnail.
         hook_text: Opening typewriter text. Falls back to first ~9 words of script.
         script: Full script text (used as fallback for hook_text extraction).
@@ -1263,7 +1263,7 @@ SHORT_CAPTION_STYLES = {
         "anim_in_ms": 100,
         "anim_scale_start": 92,
     },
-    "ace_richie": {
+    "sovereign_synthesis": {
         "font": "Montserrat SemiBold",
         "fontsize": 88,
         "primary_color": "&H0080CFFF",
@@ -1312,7 +1312,7 @@ def _generate_caption_ass_vertical(
     audio_end_s: Optional[float] = None,
 ) -> str:
     """Generate ASS subtitle file for vertical shorts — larger text, no skip offset."""
-    style = SHORT_CAPTION_STYLES.get(brand, SHORT_CAPTION_STYLES["ace_richie"])
+    style = SHORT_CAPTION_STYLES.get(brand, SHORT_CAPTION_STYLES["sovereign_synthesis"])
 
     def _ts(seconds: float) -> str:
         h = int(seconds // 3600)
@@ -1409,7 +1409,7 @@ def compose_short(
         audio_duration_s: Total audio duration in seconds.
         scene_durations_s: How long each scene should last (matches audio pacing).
         job_dir: Working directory for intermediate files.
-        brand: 'ace_richie' or 'containment_field'.
+        brand: 'sovereign_synthesis' or 'containment_field'.
         hook_text: Short hook for thumbnail overlay.
         cta_text: Call-to-action overlay for the last 3 seconds (e.g.,
                   "Full video on the channel — @TheContainmentField").
@@ -1703,8 +1703,8 @@ def compose_short(
             _cta_display = f"{_line1}%{{eol}}{_line2}" if _line2 else _safe_cta
 
             # Brand-specific card background colors (dark, premium feel)
-            _bg_color = "0x0A1628" if brand == "ace_richie" else "0x0D0D1A"
-            _accent = "0xFFCF80" if brand == "ace_richie" else "0xF0F0F0"
+            _bg_color = "0x0A1628" if brand == "sovereign_synthesis" else "0x0D0D1A"
+            _accent = "0xFFCF80" if brand == "sovereign_synthesis" else "0xF0F0F0"
 
             # Generate a solid-color card with centered CTA text
             cta_card = os.path.join(job_dir, "cta_card.mp4")

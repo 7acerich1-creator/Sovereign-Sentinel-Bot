@@ -44,7 +44,7 @@ process.on("SIGTERM", emergencyShutdown);
 // Config
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BRANDS_TO_TEST: Brand[] = ["ace_richie"];
+const BRANDS_TO_TEST: Brand[] = ["sovereign_synthesis"];
 // Test both brands if explicitly requested
 if (process.env.TEST_BOTH_BRANDS === "1") {
   BRANDS_TO_TEST.push("containment_field");

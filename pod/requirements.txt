@@ -49,6 +49,11 @@ Pillow==10.4.0
 soundfile==0.12.1
 librosa==0.10.2.post1
 
+# --- NSFW Safety Gate (S107) ---
+# NudeNet v3 — post-generation classifier to prevent nudity leaking to YouTube.
+# Lightweight (~200ms/image), runs on same GPU alongside FLUX.
+nudenet>=3.4.2
+
 # --- Logging + observability ---
 structlog==24.4.0
 tenacity==9.0.0

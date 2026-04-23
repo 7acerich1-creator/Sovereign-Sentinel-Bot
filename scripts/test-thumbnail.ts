@@ -7,7 +7,7 @@
  *
  * Usage (from repo root):
  *   GEMINI_IMAGEN_KEY=xxx npx ts-node scripts/test-thumbnail.ts
- *   GEMINI_IMAGEN_KEY=xxx npx ts-node scripts/test-thumbnail.ts "YOUR TEXT" "ace_richie"
+ *   GEMINI_IMAGEN_KEY=xxx npx ts-node scripts/test-thumbnail.ts "YOUR TEXT" "sovereign_synthesis"
  *   GEMINI_IMAGEN_KEY=xxx npx ts-node scripts/test-thumbnail.ts "DELETE IT" "containment_field" "a shattered clock face with golden light bleeding through the cracks"
  *
  * Output: ./test_thumbnail_output.jpg
@@ -25,7 +25,7 @@ if (!GEMINI_KEY) {
 
 // ── Args ──
 const thumbnailText = (process.argv[2] || "QUANTUM RESET").toUpperCase().slice(0, 35);
-const brand = (process.argv[3] || "ace_richie") as "ace_richie" | "containment_field";
+const brand = (process.argv[3] || "sovereign_synthesis") as "sovereign_synthesis" | "containment_field";
 const customVisual = process.argv[4] || "";
 
 // ── Same prompts as the updated faceless-factory.ts ──

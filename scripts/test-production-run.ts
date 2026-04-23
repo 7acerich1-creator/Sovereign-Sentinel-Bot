@@ -2,7 +2,7 @@
 /**
  * scripts/test-production-run.ts — S76 Production Quality Gate
  *
- * Fires one REAL Ace Richie video and one REAL TCF video through the pod
+ * Fires one REAL Sovereign Synthesis video and one REAL TCF video through the pod
  * pipeline. These are production-grade scripts — not stubs. The output
  * videos are the FINISHED product (brand card + typewriter + scenes +
  * kinetic captions + composite audio). If they pass the quality gate,
@@ -13,7 +13,7 @@
  *
  * Optional env:
  *   POD_CLOUD_TYPE=COMMUNITY   (default: tries SECURE first, falls back)
- *   POD_BRAND=ace_richie        (run only one brand instead of both)
+ *   POD_BRAND=sovereign_synthesis        (run only one brand instead of both)
  */
 
 import "dotenv/config";
@@ -40,9 +40,9 @@ async function gracefulShutdown(signal: string) {
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
-// ─── Ace Richie Job Spec — "sovereignty" niche ────────────────────────────
-const ACE_RICHIE_JOB: JobSpec = {
-  brand: "ace_richie",
+// ─── Sovereign Synthesis Job Spec — "sovereignty" niche ────────────────────────────
+const SOVEREIGN_SYNTHESIS_JOB: JobSpec = {
+  brand: "sovereign_synthesis",
   niche: "sovereignty",
   seed: "Real sovereignty is architectural — you design the system that feeds you, protects you, and compounds while you sleep. The difference between free and sovereign is infrastructure.",
   hook_text: "Freedom is the first trap they sell you.",
@@ -237,8 +237,8 @@ async function main() {
   const brandFilter = process.env.POD_BRAND;
   const jobs: Array<{ name: string; spec: JobSpec }> = [];
 
-  if (!brandFilter || brandFilter === "ace_richie") {
-    jobs.push({ name: "Ace Richie — Sovereignty", spec: ACE_RICHIE_JOB });
+  if (!brandFilter || brandFilter === "sovereign_synthesis") {
+    jobs.push({ name: "Sovereign Synthesis — Sovereignty", spec: SOVEREIGN_SYNTHESIS_JOB });
   }
   if (!brandFilter || brandFilter === "containment_field") {
     jobs.push({ name: "The Containment Field — Dark Psychology", spec: TCF_JOB });

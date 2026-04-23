@@ -2,7 +2,7 @@
 // GRAVITY CLAW v3.0 — YouTube Comment Alert Layer
 // Session 58 (2026-04-14) — first real audience signal response infrastructure.
 //
-// Polls both YouTube channels (Ace Richie + The Containment Field) on a 5-minute
+// Polls both YouTube channels (Sovereign Synthesis + The Containment Field) on a 5-minute
 // cadence via the Data API v3 commentThreads endpoint (allThreadsRelatedToChannel
 // requires channel-owner OAuth — we have refresh tokens for both).
 //
@@ -20,11 +20,11 @@ import type { Channel } from "../types";
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
-type Brand = "ace_richie" | "containment_field";
+type Brand = "sovereign_synthesis" | "containment_field";
 
 const BRAND_CONFIG: Record<Brand, { label: string; channelId: string }> = {
-  ace_richie: {
-    label: "Ace Richie",
+  sovereign_synthesis: {
+    label: "Sovereign Synthesis",
     channelId: "UCbj9a6brDL9hNIY1BpxOJfQ",
   },
   containment_field: {
@@ -107,10 +107,10 @@ async function recordCommentAsSeen(row: Record<string, unknown>): Promise<void> 
 
 // ── Process-local fallback dedup (when Supabase is unreachable) ──
 const inMemorySeen: Record<Brand, Set<string>> = {
-  ace_richie: new Set(),
+  sovereign_synthesis: new Set(),
   containment_field: new Set(),
 };
-let firstRunPerBrand: Record<Brand, boolean> = { ace_richie: true, containment_field: true };
+let firstRunPerBrand: Record<Brand, boolean> = { sovereign_synthesis: true, containment_field: true };
 
 // ── Main poll function — call once per tick ──
 export async function pollYouTubeComments(

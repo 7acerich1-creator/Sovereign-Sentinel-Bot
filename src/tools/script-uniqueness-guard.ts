@@ -4,7 +4,7 @@
 // Closes the "every long-form sounds the same" failure mode. Before a script
 // enters the render pipeline we embed it and query Pinecone in the brand's
 // namespace:
-//   • scripts-ace_richie
+//   • scripts-sovereign_synthesis
 //   • scripts-containment_field
 // If ANY existing shipped script has cosine similarity >= UNIQUENESS_THRESHOLD,
 // reject with `ScriptTooSimilarError`. The writer has 2 retries before halt —

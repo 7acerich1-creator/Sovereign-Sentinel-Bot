@@ -83,11 +83,11 @@ import { drainBacklog } from "./engine/backlog-drainer";
 
 // ── Brand Niche Allowlist (Phase 3 Task 3.2) ──
 // Intake-layer guard: Alfred's seeds and the pipeline entry both consume these
-// helpers to keep burnout-on-Ace-Richie (and sovereignty-on-TCF) from ever
+// helpers to keep burnout-on-Sovereign-Synthesis (and sovereignty-on-TCF) from ever
 // reaching the render layer. The S48 Brand Routing Matrix fixed RENDER; this
 // fixes INTAKE. See src/data/shared-context.ts for the canonical allowlist.
 import {
-  ACE_RICHIE_NICHES,
+  SOVEREIGN_SYNTHESIS_NICHES,
   CONTAINMENT_FIELD_NICHES,
   normalizeNiche,
   isAllowedNiche,
@@ -347,13 +347,13 @@ async function main() {
   // Anthropic credits exhausted. Gemini handles bulk pipeline work (script gen, social copy,
   // clip generation — 30-50+ calls per video). Groq free tier as first fallback.
   // Anthropic parked as emergency-only last resort.
-  const pipelineLLM = buildTeamLLM(["gemini", "groq", "anthropic"], 1, false);     // Key A — Ace pipeline
+  const pipelineLLM = buildTeamLLM(["gemini", "groq", "anthropic"], 1, false);     // Key A — SS pipeline
   const tcfPipelineLLM = buildTeamLLM(["gemini", "groq", "anthropic"], 1, true);   // Key B — TCF pipeline
 
   if (groqTcfKey) {
     console.log(`🔑 [LLM Teams] Session 93 routing: ALL agents+pipelines Gemini-first. Groq fallback. Anthropic emergency-only. Key A: pipeline. Key B: tcf-pipeline.`);
   } else {
-    console.warn(`⚠️ [LLM Teams] GROQ_API_KEY_TCF not set — TCF pipeline shares Groq Key A with Ace pipeline.`);
+    console.warn(`⚠️ [LLM Teams] GROQ_API_KEY_TCF not set — TCF pipeline shares Groq Key A with SS pipeline.`);
   }
 
   console.log("🔀 [LLM Teams] Provider split active:");
@@ -552,11 +552,11 @@ async function main() {
       //
       // Patterns (case-insensitive):
       //   IDEA: <thesis>                → dual-brand (ACE + TCF)
-      //   IDEA: ace only: <thesis>      → ACE RICHIE only
+      //   IDEA: ss only: <thesis>       → SOVEREIGN SYNTHESIS only
       //   IDEA: tcf only: <thesis>      → THE CONTAINMENT FIELD only
-      const ideaPrefixMatch = message.content.match(/^\s*IDEA:\s*(?:(ace|tcf)\s*only:\s*)?(.+)$/is);
+      const ideaPrefixMatch = message.content.match(/^\s*IDEA:\s*(?:(ace|ss|tcf)\s*only:\s*)?(.+)$/is);
       if (ideaPrefixMatch) {
-        const ideaBrandHint = ideaPrefixMatch[1]?.toLowerCase(); // "ace" | "tcf" | undefined
+        const ideaBrandHint = ideaPrefixMatch[1]?.toLowerCase(); // "ace"|"ss" | "tcf" | undefined
         const rawIdeaText = ideaPrefixMatch[2].trim();
         if (rawIdeaText.length < 10) {
           await telegram.sendMessage(message.chatId,
@@ -574,7 +574,7 @@ async function main() {
             .slice(0, 10);
           const syntheticId = `raw_${ideaHash}`;
           const ideaPreview = rawIdeaText.length > 120 ? rawIdeaText.slice(0, 120) + "…" : rawIdeaText;
-          const ideaMode = ideaBrandHint === "ace" ? "ACE RICHIE only" : ideaBrandHint === "tcf" ? "THE CONTAINMENT FIELD only" : "Dual-brand";
+          const ideaMode = (ideaBrandHint === "ace" || ideaBrandHint === "ss") ? "SOVEREIGN SYNTHESIS only" : ideaBrandHint === "tcf" ? "THE CONTAINMENT FIELD only" : "Dual-brand";
           console.log(`🌱 [IDEA:] Manual native seed ingested [${syntheticId}] [${ideaMode}]: "${ideaPreview}"`);
 
           await telegram.sendMessage(message.chatId,
@@ -588,9 +588,9 @@ async function main() {
           // Same loop + cooldown pattern as /pipeline and the bridge auto-trigger, but the brand
           // list is filtered by the IDEA: prefix hint so single-brand runs skip the other lane.
           const manualEnqueue = (globalThis as any).__enqueuePipeline;
-          const allBrands: Array<"ace_richie" | "containment_field"> = ["ace_richie", "containment_field"];
-          const manualBrands: Array<"ace_richie" | "containment_field"> = ideaBrandHint === "ace"
-            ? ["ace_richie"]
+          const allBrands: Array<"sovereign_synthesis" | "containment_field"> = ["sovereign_synthesis", "containment_field"];
+          const manualBrands: Array<"sovereign_synthesis" | "containment_field"> = (ideaBrandHint === "ace" || ideaBrandHint === "ss")
+            ? ["sovereign_synthesis"]
             : ideaBrandHint === "tcf"
             ? ["containment_field"]
             : allBrands;
@@ -598,7 +598,7 @@ async function main() {
           const manualPos = manualEnqueue ? manualEnqueue(`idea-${syntheticId}-${queueTag}`, async () => {
             for (let bIdx = 0; bIdx < manualBrands.length; bIdx++) {
               const brand = manualBrands[bIdx];
-              const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
+              const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "SOVEREIGN SYNTHESIS";
 
               if (bIdx > 0) {
                 const cooldownMs = parseInt(process.env.PIPELINE_COOLDOWN_MS || "180000", 10);
@@ -740,7 +740,7 @@ async function main() {
   // Phase 3 Task 3.3 (2026-04-15): DUAL-SEED CONTRACT.
   // Alfred now emits TWO brand-bound seeds per run, one per brand, each constrained
   // to the brand's niche allowlist (src/data/shared-context.ts). This closes the
-  // Alfred-shared-seed cross-contamination bug where Ace Richie 77 was producing
+  // Alfred-shared-seed cross-contamination bug where Sovereign Synthesis 77 was producing
   // burnout-themed content (which belongs exclusively to The Containment Field).
   // S48 Brand Routing Matrix fixed RENDER layers; this fixes INTAKE.
   //
@@ -752,15 +752,15 @@ async function main() {
   async function buildAlfredDailyScanDirective(): Promise<string> {
     // Query both brands in parallel; each call is graceful-degrading (returns
     // permissive "all fresh" snapshot if Supabase is unreachable).
-    const [aceSnap, tcfSnap] = await Promise.all([
-      getNicheCooldownSnapshot("ace_richie"),
+    const [ssSnap, tcfSnap] = await Promise.all([
+      getNicheCooldownSnapshot("sovereign_synthesis"),
       getNicheCooldownSnapshot("containment_field"),
     ]);
-    const aceCooldownLine = cooldownSummaryLine(aceSnap);
+    const ssCooldownLine = cooldownSummaryLine(ssSnap);
     const tcfCooldownLine = cooldownSummaryLine(tcfSnap);
     return STATIC_ALFRED_DIRECTIVE_HEAD +
       "\n\nCOOLDOWN LEDGER (live — respect this, it is not advisory):\n" +
-      `  • ${aceCooldownLine}\n` +
+      `  • ${ssCooldownLine}\n` +
       `  • ${tcfCooldownLine}\n` +
       "  Rules: prefer `fresh` niches. Only use `relax` niches if every `fresh` slot for that brand is empty. " +
       "NEVER pick a `blocked` niche — the factory will reject it and the day's run will abstain. " +
@@ -774,12 +774,12 @@ async function main() {
     "Your job is to PROJECT the Sovereign frequency outward, not to react to the simulation's noise.\n\n" +
     "BRAND SEPARATION IS NON-NEGOTIABLE. You generate TWO distinct theses today — one per brand — " +
     "each constrained to that brand's niche allowlist. A single shared thesis is a hard failure.\n\n" +
-    "BRAND 1 — ACE RICHIE 77 (@ace_richie77)\n" +
+    "BRAND 1 — SOVEREIGN SYNTHESIS (@sovereign_synthesis77)\n" +
     "  Voice: sovereign architect, builder of systems, wealth-frequency, authority. Never victim-coded.\n" +
-    `  ${nicheAllowlistLine("ace_richie")}\n` +
+    `  ${nicheAllowlistLine("sovereign_synthesis")}\n` +
     "  Allowed topics: architecture of the one-person empire, monk mode / frame control, sovereign wealth mechanics, " +
     "system mastery, the Firmware Update, escape velocity from consensus reality.\n" +
-    "  FORBIDDEN for Ace Richie: burnout, manipulation-exposed, narcissist defense, dark psychology, recovery framing. " +
+    "  FORBIDDEN for Sovereign Synthesis: burnout, manipulation-exposed, narcissist defense, dark psychology, recovery framing. " +
     "Those belong to Brand 2.\n\n" +
     "BRAND 2 — THE CONTAINMENT FIELD (@TheContainmentField)\n" +
     "  Voice: anonymous, dark-positioned, pattern-interrupt, exposes covert manipulation. Feeder channel.\n" +
@@ -800,17 +800,17 @@ async function main() {
     "1. A short brief to the Architect (2-4 sentences explaining why each thesis hits today and how the two contrast).\n" +
     "2. The hook line for each brand in 4-Part Copy Architecture (GLITCH → PIVOT → BRIDGE → ANCHOR). Label them [ACE] and [TCF].\n" +
     "3. Two final lines, each with format: `PIPELINE_IDEA_<BRAND>: <niche-tag> :: <thesis sentence>`\n" +
-    "   • `PIPELINE_IDEA_ACE: wealth-frequency :: <thesis>` — niche MUST be one of Ace Richie's allowed niches above.\n" +
+    "   • `PIPELINE_IDEA_SS: wealth-frequency :: <thesis>` — niche MUST be one of Sovereign Synthesis's allowed niches above.\n" +
     "   • `PIPELINE_IDEA_TCF: burnout :: <thesis>` — niche MUST be one of The Containment Field's allowed niches above.\n" +
     "   • The `::` separator is literal. No quotes, no markdown, no trailing punctuation after the thesis.\n\n" +
     "EXAMPLE (for shape only — do NOT copy the content):\n" +
-    "  PIPELINE_IDEA_ACE: architecture :: The one-person empire is not a hustle, it's a lattice — every system you build subtracts a boss from your life until there's only you and the code.\n" +
+    "  PIPELINE_IDEA_SS: architecture :: The one-person empire is not a hustle, it's a lattice — every system you build subtracts a boss from your life until there's only you and the code.\n" +
     "  PIPELINE_IDEA_TCF: burnout :: Your Monday dread isn't laziness — it's your nervous system correctly identifying the building as a Faraday cage disguised as a career.\n\n" +
-    "If for any reason you cannot generate a thesis for one brand, write `PIPELINE_IDEA_ACE: NONE` (or `_TCF: NONE`). " +
+    "If for any reason you cannot generate a thesis for one brand, write `PIPELINE_IDEA_SS: NONE` (or `_TCF: NONE`). " +
     "Both NONE means the autonomous scan abstains today — preferable to a contaminated seed.\n\n" +
     "CRITICAL — TOOL USAGE CONTRACT:\n" +
     "• DO NOT call the crew_dispatch tool. Your FINAL assistant text message IS your deliverable.\n" +
-    "• The bridge parses PIPELINE_IDEA_ACE and PIPELINE_IDEA_TCF from your final text response. " +
+    "• The bridge parses PIPELINE_IDEA_SS and PIPELINE_IDEA_TCF from your final text response. " +
     "If you put them inside a crew_dispatch result field, they WILL be lost and the pipeline will not fire.\n" +
     "• You may call read_protocols ONCE if you need to refresh context, but after that your next output must be the final text containing both PIPELINE_IDEA_* lines.\n" +
     "• No tool calls in your final turn. Just the brief, the two 4-part hooks, and the two PIPELINE_IDEA_* lines.";
@@ -979,7 +979,7 @@ async function main() {
             description: "Automated test upload. Safe to delete.",
             tags: "test,delete",
             niche: "test",
-            brand: "ace_richie",
+            brand: "sovereign_synthesis",
           });
           await telegram.sendMessage(message.chatId, `YouTube test result:\n${result.slice(0, 500)}`);
         } catch (err: any) {
@@ -1015,7 +1015,7 @@ async function main() {
           }
 
           const dryBrandMatch = message.content.match(/\b(containment[_ ]?field|tcf)\b/i);
-          const dryBrand = dryBrandMatch ? "containment_field" as const : "ace_richie" as const;
+          const dryBrand = dryBrandMatch ? "containment_field" as const : "sovereign_synthesis" as const;
 
           // Session 40: Enqueue via pipeline queue — serializes with live runs
           const enqueue = (globalThis as any).__enqueuePipeline;
@@ -1090,22 +1090,22 @@ async function main() {
           } catch { /* guaranteed plain text fallback above */ }
 
           // Session 26: Dual-brand pipeline — every URL fires BOTH brands sequentially.
-          // Ace Richie first (niche rotation, personal brand), then TCF (dark psych perspective).
-          // Use "ace only" or "tcf only" to force single-brand.
-          const onlyAce = /\bace\s*only\b/i.test(message.content);
+          // Sovereign Synthesis first (niche rotation, personal brand), then TCF (dark psych perspective).
+          // Use "ss only" or "ace only" or "tcf only" to force single-brand.
+          const onlySS = /\b(?:ace|ss)\s*only\b/i.test(message.content);
           const onlyTcf = /\btcf\s*only\b/i.test(message.content);
-          const brands: Array<"ace_richie" | "containment_field"> = onlyTcf
+          const brands: Array<"sovereign_synthesis" | "containment_field"> = onlyTcf
             ? ["containment_field"]
-            : onlyAce
-            ? ["ace_richie"]
-            : ["ace_richie", "containment_field"];
+            : onlySS
+            ? ["sovereign_synthesis"]
+            : ["sovereign_synthesis", "containment_field"];
 
           // Session 40: Enqueue via pipeline queue — serializes concurrent requests
           const pipelineEnqueue = (globalThis as any).__enqueuePipeline;
           const pipelinePos = pipelineEnqueue ? pipelineEnqueue(`pipeline-${liveVideoId}-${brands.join("+")}`, async () => {
             for (let bIdx = 0; bIdx < brands.length; bIdx++) {
               const brand = brands[bIdx];
-              const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
+              const brandLabel = brand === "containment_field" ? "THE CONTAINMENT FIELD" : "SOVEREIGN SYNTHESIS";
 
               // Inter-brand cooldown: even with a dedicated TCF Groq key, other shared resources
               // (TTS, image gen, Supabase) need breathing room between 50-min pipeline runs.
@@ -1130,7 +1130,7 @@ async function main() {
               } catch { /* non-critical */ }
 
               // Use brand-dedicated LLM: TCF gets its own Groq key (GROQ_API_KEY_TCF) to avoid
-              // rate limit contention after Ace Richie burns through the primary Groq quota.
+              // rate limit contention after Sovereign Synthesis burns through the primary Groq quota.
               const activePipelineLLM = brand === "containment_field" ? tcfPipelineLLM : pipelineLLM;
 
               try {
@@ -1186,16 +1186,16 @@ async function main() {
         //
         // Optional brand modifiers (same keywords as /pipeline):
         //   /alfred              → dual-brand (ACE + TCF, default)
-        //   /alfred ace only     → ACE RICHIE only
+        //   /alfred ss only      → SOVEREIGN SYNTHESIS only
         //   /alfred tcf only     → THE CONTAINMENT FIELD only
         //
         // Brand hint is passed to the bridge via payload.brand_override — the auto-pipeline
         // trigger reads it and filters the autoBrands array before fanning out.
-        const alfredOnlyAce = /\bace\s*only\b/i.test(message.content);
+        const alfredOnlySS = /\b(?:ace|ss)\s*only\b/i.test(message.content);
         const alfredOnlyTcf = /\btcf\s*only\b/i.test(message.content);
-        const alfredBrandOverride: "ace_richie" | "containment_field" | undefined =
-          alfredOnlyAce ? "ace_richie" : alfredOnlyTcf ? "containment_field" : undefined;
-        const alfredMode = alfredBrandOverride === "ace_richie" ? "ACE RICHIE only"
+        const alfredBrandOverride: "sovereign_synthesis" | "containment_field" | undefined =
+          alfredOnlySS ? "sovereign_synthesis" : alfredOnlyTcf ? "containment_field" : undefined;
+        const alfredMode = alfredBrandOverride === "sovereign_synthesis" ? "SOVEREIGN SYNTHESIS only"
           : alfredBrandOverride === "containment_field" ? "THE CONTAINMENT FIELD only"
           : "Dual-brand";
 
@@ -1245,12 +1245,12 @@ async function main() {
       }
 
       // ── Phase 7 Task 7.5a: BATCH PRODUCER ──
-      // /batch           → 6 videos (3 Ace + 3 TCF), full production + distribution
-      // /batch ace       → 3 Ace Richie videos only
+      // /batch           → 6 videos (3 SS + 3 TCF), full production + distribution
+      // /batch ss        → 3 Sovereign Synthesis videos only
       // /batch tcf       → 3 TCF videos only
       // /batch dry       → Script generation only, no pod
       // /batch 2         → 2 videos per brand (4 total)
-      // /batch ace 2 dry → 2 Ace videos, dry run
+      // /batch ss 2 dry  → 2 SS videos, dry run
       case "/batch": {
         try {
           const { produceBatch } = await import("./engine/batch-producer");
@@ -1258,20 +1258,20 @@ async function main() {
           // Parse args: brand filter, count, dry flag
           const argLower = arg.toLowerCase();
           const isDry = argLower.includes("dry");
-          const aceOnly = /\bace\b/.test(argLower);
+          const ssOnly = /\b(?:ace|ss)\b/.test(argLower);
           const tcfOnly = /\btcf\b/.test(argLower);
           const countMatch = argLower.match(/\b(\d+)\b/);
           const perBrand = countMatch ? Math.min(parseInt(countMatch[1], 10), 5) : 3;
 
-          let brands: Array<"ace_richie" | "containment_field">;
-          if (aceOnly) brands = ["ace_richie"];
+          let brands: Array<"sovereign_synthesis" | "containment_field">;
+          if (ssOnly) brands = ["sovereign_synthesis"];
           else if (tcfOnly) brands = ["containment_field"];
-          else brands = ["ace_richie", "containment_field"];
+          else brands = ["sovereign_synthesis", "containment_field"];
 
           const total = brands.length * perBrand;
           await telegram.sendMessage(message.chatId,
             `🔥 BATCH PRODUCER — ${total} videos\n` +
-            `Brands: ${brands.map(b => b === "ace_richie" ? "Ace Richie" : "TCF").join(" + ")}\n` +
+            `Brands: ${brands.map(b => b === "sovereign_synthesis" ? "Sovereign Synthesis" : "TCF").join(" + ")}\n` +
             `Per brand: ${perBrand}\n` +
             `Mode: ${isDry ? "DRY RUN (scripts only)" : "LIVE (full production)"}\n` +
             `\nStarting...`
@@ -1599,12 +1599,12 @@ async function main() {
               return true;
             }
 
-            const aceUnchopped = unchopped.filter(v => v.brand === "ace_richie").length;
+            const ssUnchopped = unchopped.filter(v => v.brand === "sovereign_synthesis").length;
             const cfUnchopped = unchopped.filter(v => v.brand === "containment_field").length;
 
             const list = allVideos.map((v, i) => {
               const done = !unchoppedJobIds.has(v.jobId);
-              const emoji = v.brand === "ace_richie" ? "🔴" : "🟣";
+              const emoji = v.brand === "sovereign_synthesis" ? "🔴" : "🟣";
               const status = done ? " ✅" : "";
               const dateStr = v.lastModified ? v.lastModified.toISOString().slice(0, 10) : "???";
               return `[${i}]${status} ${emoji} ${dateStr} ${v.jobId.slice(0, 40)} (${(v.sizeBytes / 1024 / 1024).toFixed(0)}MB)`;
@@ -1612,7 +1612,7 @@ async function main() {
 
             const gateNote = forceMode ? "" : `\n⚠️ Quality gate ON — pre-XTTS videos hidden. Add --force to see all.\n`;
             const msg = `📦 LONG-FORMS: ${allVideos.length} eligible, ${unchopped.length} need shorts\n` +
-              `🔴 Ace: ${aceUnchopped} unchopped\n🟣 TCF: ${cfUnchopped} unchopped\n${gateNote}\n` +
+              `🔴 SS: ${ssUnchopped} unchopped\n🟣 TCF: ${cfUnchopped} unchopped\n${gateNote}\n` +
               `${list}\n\n` +
               `Indices are STABLE — they never shift after rechop.\n` +
               `Commands:\n` +
@@ -1891,7 +1891,7 @@ async function main() {
 
   // YouTube Analytics — Daily Stats Fetch (9:00 AM CDT = 14:00 UTC — before Alfred trend scan)
   // Calls the fetch-youtube-stats Supabase Edge Function to pull real video stats from
-  // YouTube Data API v3 for both channels (Ace Richie + The Containment Field), calculate
+  // YouTube Data API v3 for both channels (Sovereign Synthesis + The Containment Field), calculate
   // outlier scores, and upsert into youtube_analytics table. No auth required.
   scheduler.add({
     name: "YouTube Analytics — Daily Stats Fetch",
@@ -2260,7 +2260,7 @@ async function main() {
         console.log(`📋 [AutoOps] CTA audit firing for ${dateKey}`);
         try {
           const ctaTool = new YouTubeCTAAuditTool();
-          const result = await ctaTool.execute({ brand: "ace_richie", top_n: "5" });
+          const result = await ctaTool.execute({ brand: "sovereign_synthesis", top_n: "5" });
           console.log(`✅ [AutoOps] CTA audit complete: ${result.slice(0, 200)}`);
         } catch (err: any) {
           console.error(`[AutoOps] CTA audit failed: ${err.message}`);
@@ -2679,7 +2679,7 @@ async function main() {
         return JSON.stringify({ status: "error", message: "No source_intelligence or cached transcript found" });
       }
 
-      const brandList = brands || ["ace_richie", "containment_field"];
+      const brandList = brands || ["sovereign_synthesis", "containment_field"];
       console.log(`📡 [FacelessFactory] Manual trigger — niche: ${detectedNiche}, brands: ${brandList.join(", ")}`);
 
       const results = await produceFacelessBatch(pipelineLLM, sourceIntel.slice(0, 3000), detectedNiche, brandList);
@@ -2740,8 +2740,8 @@ async function main() {
       const results: Array<{ id: string; title: string; status: string; detail: string }> = [];
 
       for (const clip of clips) {
-        // Determine brand from metadata or default to ace_richie
-        const brand = clip.metadata?.brand || "ace_richie";
+        // Determine brand from metadata or default to sovereign_synthesis
+        const brand = clip.metadata?.brand || "sovereign_synthesis";
         const niche = clip.niche || clip.topic || "dark_psychology";
         const caption = clip.script || clip.title || `Sovereign Synthesis — ${niche}`;
         const title = clip.title || `${caption.slice(0, 80)} #Shorts`;
@@ -3862,7 +3862,7 @@ async function main() {
                 content_for_distribution: `EXECUTION ORDER: You (Yuki) are the SOLE distribution authority. You MUST use the social_scheduler_create_post tool to post this content to Buffer channels. ` +
                   `Step 1: Call social_scheduler_list_profiles to get channel IDs. ` +
                   `Step 2: Take the content from the payload and call social_scheduler_create_post with appropriate channel_ids and the text. ` +
-                  `Post to ALL relevant channels (both Ace Richie and Containment Field accounts). ` +
+                  `Post to ALL relevant channels (both Sovereign Synthesis and Containment Field accounts). ` +
                   `Respect IG frequency override: Ace IG max 3/day (7AM/1PM/7PM), CF IG max 2/day (10AM/4PM). ` +
                   `If the payload contains video content, use publish_video instead. ` +
                   `Step 3: After posting, call save_content_draft to log what you posted. ` +
@@ -3986,44 +3986,44 @@ async function main() {
                 // SESSION 47b — NATIVE SEED GENERATOR PIVOT.
                 // Phase 3 Task 3.3 (2026-04-15) — DUAL-SEED CONTRACT.
                 // Alfred emits TWO brand-bound seeds per run with format:
-                //   PIPELINE_IDEA_ACE: <niche> :: <thesis>
+                //   PIPELINE_IDEA_SS: <niche> :: <thesis>
                 //   PIPELINE_IDEA_TCF: <niche> :: <thesis>
                 // The bridge parses both, validates each niche against the brand's allowlist
                 // (shared-context.ts BRAND_NICHE_ALLOWLIST), and feeds each brand its OWN
                 // seed + niche into executeFullPipeline. Closes the cross-contamination bug
-                // where Ace Richie 77 was receiving burnout-themed seeds (S48 matrix fixed
+                // where Sovereign Synthesis 77 was receiving burnout-themed seeds (S48 matrix fixed
                 // render, this fixes intake).
                 if (agentName === "alfred" && task.task_type === "daily_trend_scan") {
                   try {
                     // Dual-brand regex parser. Niche + thesis separated by literal `::`.
                     // Each pattern is anchored to a line; greedy to end-of-line for thesis.
-                    const aceMatch = response.match(/PIPELINE_IDEA_ACE:\s*([^\r\n:]+?)\s*::\s*([^\r\n]+?)\s*$/m);
+                    const ssMatch = response.match(/PIPELINE_IDEA_SS:\s*([^\r\n:]+?)\s*::\s*([^\r\n]+?)\s*$/m);
                     const tcfMatch = response.match(/PIPELINE_IDEA_TCF:\s*([^\r\n:]+?)\s*::\s*([^\r\n]+?)\s*$/m);
 
-                    // Also tolerate "PIPELINE_IDEA_ACE: NONE" (no thesis) to abstain per-brand.
-                    const aceNoneMatch = response.match(/PIPELINE_IDEA_ACE:\s*NONE\s*$/m);
+                    // Also tolerate "PIPELINE_IDEA_SS: NONE" (no thesis) to abstain per-brand.
+                    const ssNoneMatch = response.match(/PIPELINE_IDEA_SS:\s*NONE\s*$/m);
                     const tcfNoneMatch = response.match(/PIPELINE_IDEA_TCF:\s*NONE\s*$/m);
 
-                    type Seed = { brand: "ace_richie" | "containment_field"; niche: string; thesis: string };
+                    type Seed = { brand: "sovereign_synthesis" | "containment_field"; niche: string; thesis: string };
                     const seeds: Seed[] = [];
                     const rejections: string[] = [];
 
                     // ── ACE seed ingest ──
-                    if (aceMatch && !aceNoneMatch) {
-                      const rawNiche = aceMatch[1].trim();
-                      const thesis = aceMatch[2].trim();
+                    if (ssMatch && !ssNoneMatch) {
+                      const rawNiche = ssMatch[1].trim();
+                      const thesis = ssMatch[2].trim();
                       const normalized = normalizeNiche(rawNiche);
                       if (thesis.length === 0) {
-                        rejections.push(`ACE: empty thesis`);
-                      } else if (!isAllowedNiche("ace_richie", rawNiche)) {
-                        rejections.push(`ACE: niche "${rawNiche}" (normalized "${normalized}") not in Ace Richie allowlist [${ACE_RICHIE_NICHES.join("|")}]`);
+                        rejections.push(`SS: empty thesis`);
+                      } else if (!isAllowedNiche("sovereign_synthesis", rawNiche)) {
+                        rejections.push(`SS: niche "${rawNiche}" (normalized "${normalized}") not in Sovereign Synthesis allowlist [${SOVEREIGN_SYNTHESIS_NICHES.join("|")}]`);
                       } else {
-                        seeds.push({ brand: "ace_richie", niche: normalized, thesis });
+                        seeds.push({ brand: "sovereign_synthesis", niche: normalized, thesis });
                       }
-                    } else if (aceNoneMatch) {
-                      console.log(`🔍 [AutoPipeline] Alfred abstained on Ace Richie (PIPELINE_IDEA_ACE: NONE)`);
+                    } else if (ssNoneMatch) {
+                      console.log(`🔍 [AutoPipeline] Alfred abstained on Sovereign Synthesis (PIPELINE_IDEA_SS: NONE)`);
                     } else {
-                      rejections.push(`ACE: missing PIPELINE_IDEA_ACE line`);
+                      rejections.push(`SS: missing PIPELINE_IDEA_SS line`);
                     }
 
                     // ── TCF seed ingest ──
@@ -4047,8 +4047,8 @@ async function main() {
                     // Session 47d: brand_override lets /alfred [ace only | tcf only] constrain
                     // the fan-out. Filter seeds after parse so forbidden combos still raise.
                     const brandOverrideRaw = (task.payload as any)?.brand_override;
-                    const autoBrandOverride: "ace_richie" | "containment_field" | undefined =
-                      brandOverrideRaw === "ace_richie" || brandOverrideRaw === "containment_field"
+                    const autoBrandOverride: "sovereign_synthesis" | "containment_field" | undefined =
+                      brandOverrideRaw === "sovereign_synthesis" || brandOverrideRaw === "containment_field"
                         ? brandOverrideRaw
                         : undefined;
                     const activeSeeds = autoBrandOverride
@@ -4067,7 +4067,7 @@ async function main() {
                     }
 
                     if (activeSeeds.length > 0) {
-                      const autoMode = autoBrandOverride === "ace_richie" ? "ACE RICHIE only"
+                      const autoMode = autoBrandOverride === "sovereign_synthesis" ? "SOVEREIGN SYNTHESIS only"
                         : autoBrandOverride === "containment_field" ? "THE CONTAINMENT FIELD only"
                         : `Dual-brand (${activeSeeds.length}/2)`;
 
@@ -4080,7 +4080,7 @@ async function main() {
                       const syntheticRunId = `raw_${runHash}`;
 
                       const seedPreview = activeSeeds.map(s => {
-                        const brandShort = s.brand === "ace_richie" ? "ACE" : "TCF";
+                        const brandShort = s.brand === "sovereign_synthesis" ? "SS" : "TCF";
                         const t = s.thesis.length > 100 ? s.thesis.slice(0, 100) + "…" : s.thesis;
                         return `[${brandShort} · ${s.niche}] ${t}`;
                       }).join("\n\n");
@@ -4098,13 +4098,13 @@ async function main() {
                       // gets its own executeFullPipeline call with its own rawIdea + niche.
                       const autoEnqueue = (globalThis as any).__enqueuePipeline;
                       const autoChatId = task.chat_id || defaultChatId;
-                      const autoQueueTag = autoBrandOverride === "ace_richie" ? "ace"
+                      const autoQueueTag = autoBrandOverride === "sovereign_synthesis" ? "ss"
                         : autoBrandOverride === "containment_field" ? "tcf"
                         : "dual";
                       const autoPos = autoEnqueue ? autoEnqueue(`auto-${syntheticRunId}-${autoQueueTag}`, async () => {
                         for (let bIdx = 0; bIdx < activeSeeds.length; bIdx++) {
                           const seed = activeSeeds[bIdx];
-                          const brandLabel = seed.brand === "containment_field" ? "THE CONTAINMENT FIELD" : "ACE RICHIE";
+                          const brandLabel = seed.brand === "containment_field" ? "THE CONTAINMENT FIELD" : "SOVEREIGN SYNTHESIS";
 
                           // Per-brand synthetic id derived from that brand's thesis — keeps
                           // downstream queue/dedupe working even though we have two theses.

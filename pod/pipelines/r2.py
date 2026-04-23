@@ -69,12 +69,12 @@ def upload_artifacts(
         video_path: Path to the final MP4.
         thumbnail_path: Path to the thumbnail JPG/PNG.
         job_id: Unique job identifier (used in R2 key).
-        brand: 'ace_richie' or 'containment_field'.
+        brand: 'sovereign_synthesis' or 'containment_field'.
 
     Returns:
         {
-            "video_url": "https://pub-xxx.r2.dev/videos/ace_richie/fv_..._final.mp4",
-            "thumbnail_url": "https://pub-xxx.r2.dev/thumbs/ace_richie/fv_..._thumb.jpg",
+            "video_url": "https://pub-xxx.r2.dev/videos/sovereign_synthesis/fv_..._final.mp4",
+            "thumbnail_url": "https://pub-xxx.r2.dev/thumbs/sovereign_synthesis/fv_..._thumb.jpg",
         }
     """
     client = _get_client()

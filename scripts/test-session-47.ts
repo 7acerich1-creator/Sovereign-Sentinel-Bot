@@ -104,7 +104,7 @@ const SEG1_DUR = 6.0;  // scene 1 displays for 6s (plus xfade overlap)
 const SCRIPT: FacelessScript = {
   title: "SESSION 47 VERIFICATION RUN",
   niche: "brand",
-  brand: "ace_richie",
+  brand: "sovereign_synthesis",
   hook: "SESSION FORTY SEVEN TIMELINE VERIFIED.",
   segments: [
     {

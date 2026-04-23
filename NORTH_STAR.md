@@ -29,14 +29,14 @@ These are the only numbers that matter. If the dial is at zero on any of these, 
 
 | Metric | Target/wk | Last reading (2026-04-10) | Notes |
 |---|---|---|---|
-| **1. Top-of-funnel attention** | 10,000/wk | ~930/wk combined | Ace Richie YT: 3.7K views/28d (~925/wk). The Containment Field: 20 views/28d (~5/wk). Buffer: 322 impressions TOTAL. |
+| **1. Top-of-funnel attention** | 10,000/wk | ~930/wk combined | Sovereign Synthesis YT: 3.7K views/28d (~925/wk). The Containment Field: 20 views/28d (~5/wk). Buffer: 322 impressions TOTAL. |
 | **2. Landing page visitors** | 500/wk | Unknown — re-measure required | Domain is `sovereign-synthesis.com`. Vercel Insights script IS installed and firing on all three funnel pages (verified via fetch 2026-04-14). Data exists in Vercel dashboard — needs to be pulled into this file. |
 | **3. Email signups** | 50/wk | 0 confirmed | Supabase `initiates` table needs to be queried. Re-measure. |
 | **4. Paid conversions** | 1/wk | 0 | Stripe: $0.00 gross. |
 | **5. Revenue** | $77/wk → $7,700/wk | $0/wk | Stripe shows no activity. |
 
 **Channel snapshot (2026-04-10, last-known — re-measure required):**
-- **Ace Richie YT** — 44 subs (+12/28d, organic), 3.7K views/28d, 10.6 watch hrs, top video "OUTDATED CODE" at **14.3% CTR** (strong). **Brightest signal in the entire stack. Do not abandon.**
+- **Sovereign Synthesis YT** — 44 subs (+12/28d, organic), 3.7K views/28d, 10.6 watch hrs, top video "OUTDATED CODE" at **14.3% CTR** (strong). **Brightest signal in the entire stack. Do not abandon.**
 - **The Containment Field YT** — 3 subs (+2/28d), 20 views/28d, 0.8 watch hrs. Pre-escape-velocity.
   - **HOWEVER:** first real human signal (Session 56, 2026-04-14) came from this channel — @noemicsafordi5626 commented *"Who are you? Thank you for the message."* The anonymous dark-positioned brand pulled a stranger out of lurking with 20 views/month. Punching above audience size in signal-per-viewer.
 - **Buffer** — 322 impressions total, 9 engagements, 0 audience.
@@ -55,7 +55,7 @@ Session 46 said the bottleneck was "nothing connects attention to the funnel." T
 
 **Action:** **Execute `PROJECT_POD_MIGRATION.md` at repo root — the big project that rewrites content production onto the pod, fixes the audio-drop / OpenAI-fallback / brand-contamination / TikTok-silent / Shorts-broken bugs as one coherent ship, and re-routes Railway as pure orchestrator. Read that file's STATUS block first every session. Phase 0 (Diagnosis + Plan Lock) is the active phase.**
 
-Justification: S60 measurement said `initiates` = 0 lifetime and the funnel is unvisited. Architect's deeper diagnosis (Telegram screenshot 2026-04-14 10:07 AM) showed the real revenue blocker: the content producer is broken. Ace Richie 77 fires on TCF's burnout topic (Alfred seed cross-contamination, S48 Brand Routing Matrix only fixes render not intake), TTS falls through to OpenAI instead of XTTS (`OpenAI TTS error 429: quota exceeded`), audio likely drops mid-video killing retention, TikTok uploads silent, Shorts pipeline broken. Driving attention to a front door works only when the attention source — the videos — plays cleanly end-to-end with correct brand. Fixing CTAs or Vercel Insights before this is patching downstream of a broken producer. **No code ships outside PROJECT_POD_MIGRATION.md until it retires.**
+Justification: S60 measurement said `initiates` = 0 lifetime and the funnel is unvisited. Architect's deeper diagnosis (Telegram screenshot 2026-04-14 10:07 AM) showed the real revenue blocker: the content producer is broken. Sovereign Synthesis 77 fires on TCF's burnout topic (Alfred seed cross-contamination, S48 Brand Routing Matrix only fixes render not intake), TTS falls through to OpenAI instead of XTTS (`OpenAI TTS error 429: quota exceeded`), audio likely drops mid-video killing retention, TikTok uploads silent, Shorts pipeline broken. Driving attention to a front door works only when the attention source — the videos — plays cleanly end-to-end with correct brand. Fixing CTAs or Vercel Insights before this is patching downstream of a broken producer. **No code ships outside PROJECT_POD_MIGRATION.md until it retires.**
 
 ---
 
@@ -73,7 +73,7 @@ Justification: S60 measurement said `initiates` = 0 lifetime and the funnel is u
 | Query | Result |
 |---|---|
 | Total rows | **0** |
-| Ace Richie rows | 0 |
+| Sovereign Synthesis rows | 0 |
 | Containment Field rows | 0 |
 
 **Live page verification (web_fetch to `www.sovereign-synthesis.com/diagnostic`):**
@@ -90,7 +90,7 @@ Justification: S60 measurement said `initiates` = 0 lifetime and the funnel is u
 3. **The S57 ship is verified infrastructurally but unproven commercially.** It passes the "does it work" test. It fails the "does it move the metric" test — because no attention has been routed through it yet.
 
 **Where the Architect's action matters more than any build:**
-The next revenue-relevant step is a 15-minute YouTube Studio task, not a code ship — add `https://sovereign-synthesis.com/diagnostic` as the first line of every Ace Richie video description, pin a top comment with the link, add an end-screen card on "OUTDATED CODE". This is the attention→landing bridge the S57 restructure was built to receive, but the bridge has no on-ramp.
+The next revenue-relevant step is a 15-minute YouTube Studio task, not a code ship — add `https://sovereign-synthesis.com/diagnostic` as the first line of every Sovereign Synthesis video description, pin a top comment with the link, add an end-screen card on "OUTDATED CODE". This is the attention→landing bridge the S57 restructure was built to receive, but the bridge has no on-ramp.
 
 ---
 
@@ -157,7 +157,7 @@ The S58 comment alert layer is step 1 of 3. The full evolution target is a **com
 
 **Step 2 — 🚧 NEXT (medium scope, S59).** Mission Control `/signals` page. Dedicated at-a-glance surface. Shows:
 - Every comment ordered by `published_at DESC`
-- Per-channel filter (Ace Richie vs Containment Field badges)
+- Per-channel filter (Sovereign Synthesis vs Containment Field badges)
 - Per-video grouping + text search
 - Reply deep-link (`watch?v=VIDEO&lc=COMMENT`)
 - Replaces the "it's only in Telegram" blind spot.

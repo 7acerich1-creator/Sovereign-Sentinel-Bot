@@ -714,7 +714,7 @@ export interface ImageBatchResult {
 export async function generateImageBatch(
   handle: PodHandle,
   items: ImageBatchItem[],
-  brand: string = "ace_richie",
+  brand: string = "sovereign_synthesis",
 ): Promise<ImageBatchResult> {
   // Step 1: Submit the batch — returns immediately with job_id
   let accepted: { job_id: string } | undefined;
@@ -820,7 +820,7 @@ export async function podTTS(
       },
       body: JSON.stringify({
         text: opts.text,
-        brand: opts.brand || "ace_richie",
+        brand: opts.brand || "sovereign_synthesis",
         language: opts.language || "en",
       }),
       signal: AbortSignal.timeout(180_000), // 3min — long scripts need time
@@ -846,7 +846,7 @@ export async function podTTS(
 
     console.log(
       `🔊 [PodTTS] ${(audioBuffer.length / 1024).toFixed(0)}KB WAV, ` +
-      `${durationS.toFixed(1)}s, brand=${opts.brand || "ace_richie"}`
+      `${durationS.toFixed(1)}s, brand=${opts.brand || "sovereign_synthesis"}`
     );
 
     return { audioBuffer, durationS };
@@ -1306,7 +1306,7 @@ function validateJobSpec(spec: JobSpec): void {
   if (!spec || typeof spec !== "object") {
     throw new PodContractError("JobSpec must be an object");
   }
-  if (spec.brand !== "ace_richie" && spec.brand !== "containment_field") {
+  if (spec.brand !== "sovereign_synthesis" && spec.brand !== "containment_field") {
     throw new PodContractError(`JobSpec.brand invalid: ${String(spec.brand)}`);
   }
   if (!spec.niche || spec.niche.length < 1 || spec.niche.length > 120) {

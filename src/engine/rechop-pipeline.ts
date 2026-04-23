@@ -205,9 +205,9 @@ export async function listR2LongForms(opts?: { onlyUnchopped?: boolean; force?: 
       if (!obj.Key?.endsWith(".mp4")) continue;
       if ((obj.Size || 0) < 50_000) continue; // Skip tiny/corrupt files
 
-      // Parse brand + jobId from key: videos/ace_richie/fv_ace_richie_xyz_123.mp4
+      // Parse brand + jobId from key: videos/sovereign_synthesis/fv_sovereign_synthesis_xyz_123.mp4
       const parts = obj.Key.split("/");
-      const brand = (parts[1] as Brand) || "ace_richie";
+      const brand = (parts[1] as Brand) || "sovereign_synthesis";
       const filename = parts[parts.length - 1].replace(".mp4", "");
 
       videos.push({
@@ -1034,7 +1034,7 @@ async function rechopVideoPrepOnly(
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Convert R2 filename like fv_ace_richie_architecture_collapse_your_1776477930087 into a readable title */
+/** Convert R2 filename like fv_sovereign_synthesis_architecture_collapse_your_1776477930087 into a readable title */
 function humanizeTitle(jobId: string, brand: Brand): string {
   let clean = jobId
     .replace(/^fv_/, "")

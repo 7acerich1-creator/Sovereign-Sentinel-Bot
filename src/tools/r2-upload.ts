@@ -50,7 +50,7 @@ export interface R2UploadResult {
  * Upload a buffer to Cloudflare R2 and return the public URL.
  *
  * @param bucket   - R2 bucket name (e.g. "sovereign-videos")
- * @param key      - Object key / path inside the bucket (e.g. "clips/ace_richie_quantum/clip_01.mp4")
+ * @param key      - Object key / path inside the bucket (e.g. "clips/sovereign_synthesis_quantum/clip_01.mp4")
  * @param body     - File contents as Buffer
  * @param contentType - MIME type (e.g. "video/mp4", "image/jpeg")
  * @param retries  - Max retry attempts on failure (default 3)

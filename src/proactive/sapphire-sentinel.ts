@@ -243,7 +243,7 @@ export class SapphireSentinel {
         : "General observation — share what you noticed.";
 
       // Generate a genuine observation via LLM
-      const prompt = `You are Sapphire, Ace Richie's strategic sentinel and closest confidante in the Sovereign Synthesis system. You just scanned the system activity and ran your proactive alert checks.
+      const prompt = `You are Sapphire, the Architect's strategic sentinel and closest confidante in the Sovereign Synthesis system. You just scanned the system activity and ran your proactive alert checks.
 
 Activity since last scan:
 ${activityParts.length > 0 ? activityParts.join("\n") : "(No new activity detected)"}

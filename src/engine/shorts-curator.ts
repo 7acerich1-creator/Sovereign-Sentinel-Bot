@@ -71,13 +71,13 @@ const MAX_SHORT_DURATION_S = 175; // 175 + padding = ~177s, safely under 180s Yo
 const MIN_SHORT_DURATION_S = 3; // Only reject true glitches (sub-3s = something broke)
 
 const CHANNEL_HANDLES: Record<string, string> = {
-  ace_richie: "@ace_richie77",
+  sovereign_synthesis: "@sovereign_synthesis77",
   containment_field: "@TheContainmentField",
 };
 
 /** SESSION 103: Per-brand CTA — standalone phrasing, no "Full video" implication */
 const BRAND_CTA: Record<string, string> = {
-  ace_richie: "The protocol is live — @ace_richie77",
+  sovereign_synthesis: "The protocol is live — @sovereign_synthesis77",
   containment_field: "Exit the field — @TheContainmentField",
 };
 
@@ -101,7 +101,7 @@ function buildCuratorPrompt(
   }).join("\n");
 
   const totalDur = cumulativeTs;
-  const channelHandle = CHANNEL_HANDLES[script.brand] || "@ace_richie77";
+  const channelHandle = CHANNEL_HANDLES[script.brand] || "@sovereign_synthesis77";
 
   // Build visual direction map so LLM can re-imagine scenes for vertical
   const visualMap = script.segments.map((seg, i) => {
@@ -260,7 +260,7 @@ export async function curateShorts(
 
   // ── Validate + enrich each candidate ──────────────────────────────────
   const totalDuration = totalDurationEarly;
-  const channelHandle = CHANNEL_HANDLES[script.brand] || "@ace_richie77";
+  const channelHandle = CHANNEL_HANDLES[script.brand] || "@sovereign_synthesis77";
   let rejectedBounds = 0, rejectedDuration = 0, rejectedOverlap = 0;
   const validShorts: CuratedShort[] = [];
 

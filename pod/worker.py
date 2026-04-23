@@ -112,7 +112,7 @@ def _safe_eq(a: str, b: str) -> bool:
 # Job spec schema — shared contract with Railway runpod-client.ts
 # ---------------------------------------------------------------------------
 class Brand(str, Enum):
-    ace_richie = "ace_richie"
+    sovereign_synthesis = "sovereign_synthesis"
     containment_field = "containment_field"
 
 
@@ -224,7 +224,7 @@ class ImageBatchItem(BaseModel):
 
 class ImageBatchRequest(BaseModel):
     items: list[ImageBatchItem] = Field(min_length=1, max_length=50)
-    brand: Brand = Brand.ace_richie
+    brand: Brand = Brand.sovereign_synthesis
     video_mode: bool = Field(default=True, description="Convert images to branded videos with music + hook text")
 
 
@@ -245,7 +245,7 @@ class ImageBatchResult(BaseModel):
 class TTSRequest(BaseModel):
     """Text-to-speech request. Returns WAV audio."""
     text: str = Field(min_length=1, max_length=10000)
-    brand: Brand = Brand.ace_richie
+    brand: Brand = Brand.sovereign_synthesis
     language: str = Field(default="en", max_length=10)
 
 
@@ -467,7 +467,7 @@ def produce_short(
 # SESSION 105: Branded Video Conversion (image + hook text + brand music → MP4)
 # ---------------------------------------------------------------------------
 BRAND_MUSIC = {
-    "ace_richie": "/app/brand-assets/music_sovereign.mp3",
+    "sovereign_synthesis": "/app/brand-assets/music_sovereign.mp3",
     "containment_field": "/app/brand-assets/ambient_drone.mp3",
 }
 BRAND_FONT = "/app/brand-assets/BebasNeue-Regular.ttf"
@@ -489,7 +489,7 @@ def _image_to_branded_video(
     """
     import subprocess
 
-    music_path = BRAND_MUSIC.get(brand, BRAND_MUSIC["ace_richie"])
+    music_path = BRAND_MUSIC.get(brand, BRAND_MUSIC["sovereign_synthesis"])
     if not os.path.isfile(music_path):
         log.warning("brand_music_missing", brand=brand, path=music_path)
         return False

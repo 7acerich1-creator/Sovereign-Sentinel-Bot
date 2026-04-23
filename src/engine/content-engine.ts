@@ -160,7 +160,7 @@ const _CF_PATTERN = "Glitch aesthetic photograph, reality fragmenting into pixel
 const _CF_INFOWAR = "War room command center photograph, wall of screens showing conflicting narratives, cold blue light, information as weaponry, classified document aesthetic, 1:1 square format, photorealistic, ";
 
 const IMAGE_NICHE_PREFIXES: Record<string, Record<Brand, string>> = {
-  // ── ACE RICHIE niches ──
+  // ── SOVEREIGN SYNTHESIS niches ──
   "sovereignty":            { sovereign_synthesis: _SS_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
   "authority":              { sovereign_synthesis: _SS_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },
   "system-mastery":         { sovereign_synthesis: _SS_SOVEREIGNTY, containment_field: _CF_DARKPSYCH },

@@ -235,11 +235,11 @@ export async function drainBacklog(): Promise<void> {
     return;
   }
 
-  const acePatterns = /ace|richie|77/i;
-  const cfPatterns = /containment|sovereign-synthesis\.com/i;
+  const ssPatterns = /sovereign|synthesis|ace|richie|77/i;
+  const cfPatterns = /containment/i;
 
   type ChannelWithService = { id: string; service: string; name: string; displayName?: string };
-  const aceChannels: ChannelWithService[] = [];
+  const ssChannels: ChannelWithService[] = [];
   const cfChannels: ChannelWithService[] = [];
 
   for (const ch of channels) {
@@ -247,14 +247,14 @@ export async function drainBacklog(): Promise<void> {
     if (cfPatterns.test(nameCheck)) {
       cfChannels.push(ch);
     } else {
-      aceChannels.push(ch);
+      ssChannels.push(ch);
     }
   }
 
-  console.log(`📡 [BacklogDrainer] Channels: Ace=${aceChannels.length}, CF=${cfChannels.length}`);
+  console.log(`📡 [BacklogDrainer] Channels: SS=${ssChannels.length}, CF=${cfChannels.length}`);
 
   // Only post to media-required channels for shorts (video platforms)
-  const aceMediaChannels = aceChannels.filter(c => MEDIA_REQUIRED_SERVICES.has(c.service));
+  const ssMediaChannels = ssChannels.filter(c => MEDIA_REQUIRED_SERVICES.has(c.service));
   const cfMediaChannels = cfChannels.filter(c => MEDIA_REQUIRED_SERVICES.has(c.service));
 
   const postTool = new SocialSchedulerPostTool();
@@ -273,7 +273,7 @@ export async function drainBacklog(): Promise<void> {
 
   for (const [batchFolder, clips] of batchMap) {
     const brand = clips[0].brand;
-    const mediaChannels = brand === "containment_field" ? cfMediaChannels : aceMediaChannels;
+    const mediaChannels = brand === "containment_field" ? cfMediaChannels : ssMediaChannels;
 
     if (mediaChannels.length === 0) {
       console.warn(`⚠️ [BacklogDrainer] No media channels for brand ${brand} — skipping ${batchFolder}`);

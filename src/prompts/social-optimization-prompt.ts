@@ -154,7 +154,7 @@ export interface AudienceAngle {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// ACE RICHIE ANGLES — Quantum / Ascension / Sovereignty frequency.
+// SOVEREIGN SYNTHESIS ANGLES — Quantum / Ascension / Sovereignty frequency.
 // Written from the ARCHITECT position, not the pain-point.
 // These people aren't broken — they're remembering.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

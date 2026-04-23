@@ -258,6 +258,8 @@ src/
 │   ├── content-engine.ts             — Deterministic Content Engine (text+image distribution)
 │   ├── faceless-factory.ts           — Faceless video pipeline (script→Imagen→TTS→ffmpeg Ken Burns)
 │   ├── vidrush-orchestrator.ts       — VidRush: 1 URL → long-form → chop → distribute → Buffer week
+│   ├── facebook-publisher.ts         — Direct FB Graph API v25.0 publisher, dual-page (ace + CF) (S97)
+│   ├── backlog-drainer.ts            — R2 clip backlog → Buffer + FB direct, runs at boot (S90)
 │   └── migration.sql                 — content_engine_queue DDL
 ├── voice/
 │   └── tts.ts                        — TTS routing (edge→elevenlabs, FORCE_ELEVENLABS=true to flip)
@@ -402,6 +404,8 @@ Archived (do not reuse): `prod_UAWwRgKTgeF6wj`, `prod_UAX3zxKjJiCYtO`, `prod_UAX
 | `WEBHOOKS_ENABLED` | Must be "true" for `/api/*` endpoints |
 | `MCP_JSON_B64` | MCP server config (base64) |
 | `ELEVENLABS_API_KEY` | ElevenLabs TTS (Adam Brooding). **Reloaded by Ace 2026-04-10.** See `project_edge_tts_primary.md`. |
+| `FACEBOOK_PAGE_ACCESS_TOKEN` / `FACEBOOK_PAGE_ID` | Sovereign Synthesis FB page (ID `1064072003457963`). Graph API v25.0 direct publish. System user token, never-expire. |
+| `FACEBOOK_CF_PAGE_ACCESS_TOKEN` / `FACEBOOK_CF_PAGE_ID` | The Containment Field FB page (ID `987809164425935`). Graph API v25.0 direct publish. System user token, never-expire. S97. |
 
 ### OPTIONAL — defaulted
 `NODE_ENV=production` · `SQLITE_PATH=./gravity-claw.db` · `TZ` · `PORT` (Railway sets) · `LLM_DEFAULT_PROVIDER=anthropic` · `LLM_FAILOVER_ORDER=groq,gemini,anthropic,openai` · `FORCE_ELEVENLABS=false` (flip to `true` to force ElevenLabs) · `MCP_ENABLED=false` (OOM prevention) · `BROWSER_ENABLED=false`

@@ -2,27 +2,32 @@ node_modules/
 dist/
 .env
 .env.local
-run-production-test.bat
-run-test.bat
-git-commit.bat
-test-out/
 .DS_Store
-npm-debug.log
-yarn-debug.log
-yarn-error.log
-.idea/
-.vscode/
-mission-control/
-mcp.json
-credentials_vault.json
 *.pyc
 __pycache__/
 
-# Temp files
+# IDE / editor
+.idea/
+.vscode/
+
+# Temp / build artifacts
+*.patch
+*.log
+tsc_*.txt
+.commit_msg*.txt
 commitmsg.txt
 commit_msg.txt
-restore_crlf.bat
-*.patch
+
+# Test output (regenerable)
+test-out/
+voice-test-out/
+imagen-test-out/
+sample_thumb_*
+
+# Scripts intermediate output (regenerable)
+scripts/_brand_frames/
+scripts/_preview/
+scripts/_inpaint_frames/
 
 # Development artifacts
 voice-samples/
@@ -30,3 +35,11 @@ voice-samples/
 
 # Legacy — fully migrated to TypeScript
 _legacy/
+
+# Unused bat files
+*.bat
+
+# Other
+mission-control/
+mcp.json
+credentials_vault.json

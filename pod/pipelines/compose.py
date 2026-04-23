@@ -899,6 +899,7 @@ def compose_video(
     thumbnail_scene_idx: int = 1,
     hook_text: Optional[str] = None,
     script: str = "",
+    thumbnail_text: Optional[str] = None,
 ) -> dict:
     """
     Assemble a full long-form video from per-scene images + audio.
@@ -1164,14 +1165,19 @@ def compose_video(
     thumb_idx = min(thumbnail_scene_idx, n_scenes - 1)
     thumb_src = scene_images[thumb_idx] if thumb_idx < len(scene_images) else scene_images[0]
 
-    # Extract 2-3 word uppercase hook for drawtext overlay
+    # Thumbnail overlay text — prefer the LLM-generated memetic trigger
+    # (complete standalone statement like "THEY DESIGNED YOUR CAGE").
+    # Falls back to first 5 words of hook_text or script if thumbnail_text
+    # was not provided.
     _thumb_hook = ""
-    if hook_text:
+    if thumbnail_text and thumbnail_text.strip():
+        _thumb_hook = thumbnail_text.strip().upper()
+    elif hook_text:
         _words = hook_text.upper().split()
-        _thumb_hook = " ".join(_words[:3])
+        _thumb_hook = " ".join(_words[:5])
     elif script:
         _words = script.split("\n")[0].upper().split()
-        _thumb_hook = " ".join(_words[:3])
+        _thumb_hook = " ".join(_words[:5])
 
     try:
         # Build vf chain: scale + vignette + optional drawtext
@@ -1385,6 +1391,7 @@ def compose_short(
     hook_text: Optional[str] = None,
     cta_text: Optional[str] = None,
     audio_is_raw_tts: bool = False,
+    thumbnail_text: Optional[str] = None,
 ) -> dict:
     """
     Assemble a native 9:16 vertical short from scene images + pre-extracted audio.
@@ -1782,10 +1789,13 @@ def compose_short(
     # Use the first scene image (most visually impactful for shorts)
     thumb_src = scene_images[0] if scene_images else ""
 
+    # Thumbnail overlay — prefer LLM memetic trigger, fall back to hook
     _thumb_hook = ""
-    if hook_text:
+    if thumbnail_text and thumbnail_text.strip():
+        _thumb_hook = thumbnail_text.strip().upper()
+    elif hook_text:
         _words = hook_text.upper().split()
-        _thumb_hook = " ".join(_words[:3])
+        _thumb_hook = " ".join(_words[:5])
 
     try:
         _vf_parts = [f"scale={SHORT_WIDTH}:{SHORT_HEIGHT}:flags=lanczos", "vignette=PI/3"]

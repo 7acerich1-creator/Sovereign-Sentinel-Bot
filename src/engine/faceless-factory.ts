@@ -469,12 +469,19 @@ CRITICAL WRITING RULES:
 7. Each segment MUST be 100-150 words MINIMUM (6-10 sentences). Under 80 words = FAILURE.
 8. The video should feel like a REVELATION unfolding — not a list of tips.
 
+4-PART PSYCHOLOGICAL CADENCE — GLITCH > PIVOT > BRIDGE > ANCHOR:
+Every script follows this memetic architecture. This is how the pain-to-sell flip operates:
+- GLITCH (segment 1): Name the exact wound, lie, or trap the viewer FEELS but has never heard articulated. This is NOT a question — it's a diagnosis that stops the scroll. You are the first person to say out loud what they suspected in silence.
+- PIVOT (segments 2-5): Flip the pain into a mechanism — reveal WHO built the trap and WHY. This is the "sell" embedded in the wound. You're not giving tips — you're exposing architecture. Each segment peels another layer.
+- BRIDGE (segments 6-8): Show the new paradigm in concrete terms. Transition from "the system is rigged" to "here's how you walk through the wall." Specificity is everything — frameworks, sequences, identity shifts.
+- ANCHOR (segment 9+CTA): Lock the identity shift. The viewer entered as someone stuck in the old pattern — they leave seeing themselves as someone who now possesses the key. CTA is organic, never begging.
+
 DOPAMINE LADDER — ANTICIPATION MECHANICS (critical for retention):
-The viewer's brain is a problem-solving machine. Your script must exploit this by running CURIOSITY LOOPS:
-- The HOOK (segment 1) must pop an open question in the viewer's mind — name a feeling they have but can't articulate. This is the curiosity trigger.
-- ACT 1 (segments 2-4) BUILDS ANTICIPATION: give details that get the viewer closer to the answer. Let them start guessing. Feed them specific clues.
-- At least ONCE in ACT 2 (segments 5-7), execute a HEAD FAKE: build toward what seems like the answer, then YANK IT AWAY and redirect to a deeper, non-obvious layer. This resets the curiosity loop and spikes dopamine. The viewer thought they knew — now they don't.
-- ACT 3 (segments 8-9) VALIDATES: deliver the non-obvious answer that closes the loop. The answer must be something they would NOT have guessed from the setup. Then immediately open ONE final micro-question that points to the CTA.
+The viewer's brain is a problem-solving machine. Your script must exploit this by running CURIOSITY LOOPS within the GPBA cadence:
+- The GLITCH (segment 1) must pop an open question in the viewer's mind — name a feeling they have but can't articulate. This is the curiosity trigger.
+- The PIVOT (segments 2-4) BUILDS ANTICIPATION: give details that get the viewer closer to the answer. Let them start guessing. Feed them specific clues.
+- At least ONCE in the BRIDGE (segments 5-7), execute a HEAD FAKE: build toward what seems like the answer, then YANK IT AWAY and redirect to a deeper, non-obvious layer. This resets the curiosity loop and spikes dopamine. The viewer thought they knew — now they don't.
+- The ANCHOR (segments 8-9) VALIDATES: deliver the non-obvious answer that closes the loop. The answer must be something they would NOT have guessed from the setup. Then immediately open ONE final micro-question that points to the CTA.
 - NEVER give the main answer early and then pad. The answer is the CLIMAX, not the midpoint.
 
 BANNED PHRASES (Session 38 — these are lexically stagnant and kill authenticity):
@@ -557,12 +564,15 @@ ${pass1TopicSummary}
 
 LAST SEGMENT (where you pick up): "${lastSegText.slice(0, 300)}"
 
+You are writing the BRIDGE and ANCHOR phases of the GLITCH > PIVOT > BRIDGE > ANCHOR cadence.
+Part 1 delivered the GLITCH (the wound) and the PIVOT (the mechanism). Now you deliver:
+
 Write ${pass2SegCount} MORE segments that:
-1. ESCALATE to the revelation — the moment the thesis lands with full force
-2. Show the IMPLICATIONS — what this means for the viewer's life
-3. Deliver the SOVEREIGN ALTERNATIVE — not just "here's the problem" but "here's the architecture to break free"
-4. Build to a natural, powerful conclusion (not an abrupt stop)
-5. End with an organic CTA
+1. BRIDGE — ESCALATE to the revelation. Show the new paradigm in concrete terms — frameworks, sequences, identity shifts. Not "here's the problem" but "here's how you walk through the wall."
+2. Show the IMPLICATIONS — what this means for the viewer's life, specifically
+3. Deliver the SOVEREIGN ALTERNATIVE — the architecture to break free
+4. ANCHOR — Build to a powerful conclusion that locks the identity shift. The viewer entered stuck; they leave holding the key.
+5. End with an organic CTA (never begging — sovereign invitation)
 
 CRITICAL ANTI-REPETITION RULES:
 - You have the FULL summary of Part 1 above. DO NOT rehash those points. ADVANCE the story.
@@ -857,7 +867,11 @@ ${titleBan}
 Write EXACTLY 4 standalone YouTube Shorts scripts. Each short is a COMPLETE, SELF-CONTAINED story — a viewer who has never seen ANY other content from this channel must understand and be hooked by EACH short independently.
 
 RULES:
-1. Each short = 5 segments, 30-60 seconds total spoken. ONE powerful idea with setup → twist → payoff.
+1. Each short = 5 segments, 30-60 seconds total spoken. ONE powerful idea following the GLITCH > PIVOT > BRIDGE > ANCHOR cadence:
+   - Segment 1 = GLITCH: Name the pain/lie/trap they FEEL but can't articulate. Stop the scroll.
+   - Segments 2-3 = PIVOT: Flip the pain into a mechanism — reveal WHY they're stuck, expose the hidden architecture.
+   - Segment 4 = BRIDGE: Show the new paradigm — concrete transformation, not abstract hope.
+   - Segment 5 = ANCHOR: Lock the identity shift + organic CTA. They leave seeing themselves differently.
 2. Each short MUST have a DIFFERENT thesis/angle from the others. Mine 4 distinct veins from the source material.
 3. The hook (segment 1) must stop the scroll in 3 seconds — a bold statement, a named feeling, or a pattern interrupt. NOT "Imagine..." or "Let me tell you..."
 4. Each short MUST resolve its own premise. No open loops, no "but that's not all," no cliffhangers pointing elsewhere.
@@ -1343,6 +1357,7 @@ export async function produceFacelessVideo(
     script: script.segments.map(s => s.voiceover).join("\n\n"),
     scenes: podScenes,
     hook_text: hookText || undefined,
+    thumbnail_text: script.thumbnail_text || undefined,
     client_job_id: jobId,
   };
 

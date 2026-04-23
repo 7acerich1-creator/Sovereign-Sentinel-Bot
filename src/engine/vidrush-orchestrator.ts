@@ -1810,6 +1810,7 @@ export async function executeFullPipeline(
                 audio_duration_s: audioDuration,
                 scenes: vScenes,
                 hook_text: standalone.script.hook?.slice(0, 200),
+                thumbnail_text: standalone.script.thumbnail_text || undefined,
                 cta_text: standalone.cta_overlay?.slice(0, 300),
                 audio_is_raw_tts: true,
                 client_job_id: `${jobId}_standalone_${i}`,

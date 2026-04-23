@@ -47,6 +47,10 @@ class ProduceRequest(BaseModel):
         default=None, max_length=500,
         description="Opening typewriter text (first 8-9 words of hook). Falls back to first ~9 words of script.",
     )
+    thumbnail_text: Optional[str] = Field(
+        default=None, max_length=100,
+        description="3-6 word ALL CAPS memetic trigger for thumbnail overlay. Complete standalone statement.",
+    )
     client_job_id: Optional[str] = Field(default=None, max_length=200)
 
     @field_validator("scenes")

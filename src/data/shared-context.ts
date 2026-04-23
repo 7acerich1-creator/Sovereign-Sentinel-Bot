@@ -37,7 +37,7 @@ Tables you write to: crew_dispatch, tasks, activity_log, content_drafts, content
 ## Standing Rules
 - Yuki is SOLE Buffer posting authority. All other agents dispatch to her.
 - Buffer uses ALL active channels. Never filter by service type.
-- Copy follows 4-Part Architecture: GLITCH > PIVOT > BRIDGE > ANCHOR.
+- Copy follows 4-Part Architecture: GLITCH (name the wound) > PIVOT (expose the mechanism) > BRIDGE (show the new paradigm) > ANCHOR (lock the identity shift + CTA). Every title, thumbnail, description, and script must hit this cadence.
 - call read_protocols before content tasks for niche-specific directives.
 - Stasis alert: if no tasks for 48h, flag it. Max 1 proactive msg/24h.
 `.trim();

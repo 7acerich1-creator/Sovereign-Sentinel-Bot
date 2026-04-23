@@ -135,6 +135,10 @@ class ProduceRequest(BaseModel):
         default=None, max_length=500,
         description="Opening typewriter text. Falls back to first ~9 words of script.",
     )
+    thumbnail_text: Optional[str] = Field(
+        default=None, max_length=100,
+        description="3-6 word ALL CAPS memetic trigger for thumbnail overlay.",
+    )
     client_job_id: Optional[str] = Field(default=None, max_length=200)
 
     @field_validator("scenes")
@@ -161,6 +165,10 @@ class ProduceShortRequest(BaseModel):
     audio_duration_s: float = Field(gt=0, le=180)
     scenes: list[ShortScene] = Field(min_length=1, max_length=12)
     hook_text: Optional[str] = Field(default=None, max_length=200)
+    thumbnail_text: Optional[str] = Field(
+        default=None, max_length=100,
+        description="3-6 word ALL CAPS memetic trigger for thumbnail overlay.",
+    )
     cta_text: Optional[str] = Field(default=None, max_length=300,
                                     description="CTA overlay for last 3s of the short.")
     audio_is_raw_tts: bool = Field(default=False,
@@ -879,6 +887,7 @@ def _run_short_pipeline(job_id: str, req: ProduceShortRequest) -> None:
             hook_text=req.hook_text,
             cta_text=req.cta_text,
             audio_is_raw_tts=req.audio_is_raw_tts,
+            thumbnail_text=req.thumbnail_text,
         )
         video_path = compose_result["video_path"]
         thumb_path = compose_result["thumbnail_path"]
@@ -1033,6 +1042,7 @@ def _run_pipeline(job_id: str, req: ProduceRequest) -> None:
             brand=brand,
             hook_text=req.hook_text,
             script=req.script,
+            thumbnail_text=req.thumbnail_text,
         )
         video_path = compose_result["video_path"]
         thumb_path = compose_result["thumbnail_path"]

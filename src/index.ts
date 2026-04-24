@@ -1825,15 +1825,25 @@ async function main() {
         return true;
       }
 
-      // SESSION 109: /comment <videoId> [brand] — post diagnostic link comment on a YouTube video
+      // SESSION 109/110: /comment <videoId|URL> [brand] — post diagnostic link comment on a YouTube video
       case "/comment": {
         try {
-          const videoId = args[0];
-          if (!videoId) {
-            await telegram.sendMessage(message.chatId, "Usage: /comment <videoId> [sovereign_synthesis|containment_field]");
+          const rawArg = args[0];
+          if (!rawArg) {
+            await telegram.sendMessage(message.chatId, "Usage: /comment <videoId or YouTube URL> [sovereign_synthesis|containment_field]");
             return true;
           }
+          // Extract video ID from full URLs or raw IDs
+          let videoId = rawArg;
+          const urlMatch = rawArg.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/);
+          if (urlMatch) {
+            videoId = urlMatch[1];
+          } else if (rawArg.length > 11 && rawArg.includes("&")) {
+            // Strip URL parameters like &lc=... if someone pasted partial URL params
+            videoId = rawArg.split("&")[0];
+          }
           const brand = (args[1] as "sovereign_synthesis" | "containment_field") || "sovereign_synthesis";
+          console.log(`[/comment] videoId="${videoId}" brand="${brand}" rawArg="${rawArg.slice(0, 80)}"`);
           await telegram.sendMessage(message.chatId, `📝 Posting diagnostic comment on ${videoId} (${brand})...`);
           const result = await postDiagnosticComment(videoId, brand);
           if (result.success) {

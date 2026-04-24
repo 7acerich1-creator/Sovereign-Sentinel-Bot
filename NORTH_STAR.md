@@ -149,6 +149,14 @@ If the dual-rotation introduces a regression (e.g. an aesthetic modifier breaks 
 
 No schema migrations to undo. No orphaned tables. Revert commit = clean rollback.
 
+### Ship record (S113+, 2026-04-24)
+
+- **Commit:** `74da963` on `origin/main` (push: 2026-04-24, 10 files, +2089 / -1993).
+- **Railway deploy:** auto-triggered, check build logs if producer stalls.
+- **Pod Docker build:** GitHub Actions `pod-build.yml` workflow run `24910773427` triggered by this push. Pod picks up the new image on next wake. Previous pod builds took ~7min.
+- **Supabase migration:** `add_aesthetic_style_to_niche_cooldown` applied to project `wzthxohtgojenukmdubz`. Column `niche_cooldown.aesthetic_style text NULL` + index `idx_niche_cooldown_brand_created_at`.
+- **Known post-deploy task:** Mission Control `aesthetic-performance` tile. Data source: `SELECT aesthetic_style, brand, COUNT(*), AVG(...) FROM niche_cooldown JOIN youtube_analytics ON job_id GROUP BY 1,2`. Belongs in MC repo (`Sovereign-Mission-Control`), not Sentinel. Surface in a separate session once ~10 videos have shipped.
+
 ---
 
 ## The Current Highest-Leverage Action (UPDATE EVERY SESSION)

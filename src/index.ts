@@ -2689,13 +2689,65 @@ async function main() {
   // ── /api/inbound-email — Resend inbound email webhook ──
   // Session 109: Receives lead replies to nurture emails. Dispatches to Anita for
   // plain-English draft → Telegram approval → send via Resend.
-  // Payload: { from, to, subject, text, html? }
+  // Session 110: Updated to parse Resend's email.received webhook format.
+  // Resend sends { type: "email.received", data: { email_id, from, to, subject } }
+  // — body is NOT included, must be fetched via Received Emails API.
   webhookServer.register("/api/inbound-email", async (incoming: any) => {
     if (!defaultChatId || !telegram) {
       return JSON.stringify({ status: "error", message: "Telegram not configured" });
     }
     try {
-      const result = await handleInboundEmail(incoming, telegram, defaultChatId);
+      // Parse Resend webhook format
+      const eventType = incoming?.type;
+      if (eventType && eventType !== "email.received") {
+        // Ignore non-inbound events (bounced, delivered, etc.)
+        console.log(`[InboundEmail] Ignoring event type: ${eventType}`);
+        return JSON.stringify({ status: "ignored", event: eventType });
+      }
+
+      let payload: { from: string; to?: string; subject: string; text: string; html?: string };
+
+      if (eventType === "email.received" && incoming?.data?.email_id) {
+        // Resend webhook format — extract metadata from data, fetch body from API
+        const d = incoming.data;
+        const emailId = d.email_id;
+        const fromAddr = typeof d.from === "string" ? d.from : (Array.isArray(d.from) ? d.from[0] : "");
+        const toAddr = Array.isArray(d.to) ? d.to[0] : (d.to || "");
+        const subject = d.subject || "(no subject)";
+
+        // Fetch email body from Resend Received Emails API
+        let bodyText = "";
+        const resendKey = process.env.RESEND_API_KEY;
+        if (resendKey && emailId) {
+          try {
+            const contentResp = await fetch(
+              `https://api.resend.com/received-emails/${emailId}/content`,
+              { headers: { Authorization: `Bearer ${resendKey}` } }
+            );
+            if (contentResp.ok) {
+              const contentData = (await contentResp.json()) as any;
+              bodyText = contentData.text || contentData.html || contentData.body || "";
+              // Strip HTML tags if we only got HTML
+              if (!contentData.text && contentData.html) {
+                bodyText = contentData.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+              }
+            } else {
+              console.error(`[InboundEmail] Failed to fetch body for ${emailId}: ${contentResp.status}`);
+              bodyText = "(email body could not be retrieved)";
+            }
+          } catch (fetchErr: any) {
+            console.error(`[InboundEmail] Body fetch error: ${fetchErr.message}`);
+            bodyText = "(email body fetch failed)";
+          }
+        }
+
+        payload = { from: fromAddr, to: toAddr, subject, text: bodyText };
+      } else {
+        // Direct/manual payload format: { from, to, subject, text }
+        payload = incoming as any;
+      }
+
+      const result = await handleInboundEmail(payload, telegram, defaultChatId);
       return JSON.stringify(result);
     } catch (err: any) {
       console.error(`[InboundEmail] Webhook error: ${err.message}`);

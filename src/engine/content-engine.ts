@@ -875,9 +875,12 @@ export async function dailyContentProduction(llm: LLMProvider, force = false): P
 }
 
 /**
- * DISTRIBUTION JOB — runs every 5 minutes.
+ * DISTRIBUTION JOB — runs twice daily at 12:00 UTC and 19:00 UTC.
+ * Scheduler: src/index.ts → "Content Engine — Distribution Sweep (2x daily)"
  * Posts "ready" content whose scheduled_time has arrived.
  * Also retries "partial" items (some channels succeeded, others failed).
+ * Twice-daily cadence is intentional: keeps Meta/Buffer fraud detectors quiet
+ * by avoiding velocity spikes. Do NOT raise frequency without explicit approval.
  */
 export async function distributionSweep(): Promise<number> {
   // SESSION 87+97: Buffer quota check — skip Buffer channels but still run Facebook direct.

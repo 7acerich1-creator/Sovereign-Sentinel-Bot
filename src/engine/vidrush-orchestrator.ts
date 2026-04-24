@@ -1571,6 +1571,7 @@ export async function executeFullPipeline(
       brand,
       duration: 600,
       segmentCount: 20,
+      jobId: `fv_dryrun_${brand}_${Date.now()}`, // S114 — synthetic for dry run; not persisted
     };
     await progress("STEP 2/8", `✅ [DRY RUN] Faceless simulated — "${facelessResult.title}" (${facelessResult.duration}s, ${facelessResult.segmentCount} scenes)`);
   } else {
@@ -2025,6 +2026,52 @@ export async function executeFullPipeline(
         }),
       });
     } catch { /* non-critical */ }
+  }
+
+  // ── S114: Aesthetic Performance tile join key ──
+  // Patch niche_cooldown row produced by faceless-factory with the YouTube videoId
+  // returned by publish, so MC's Aesthetic Performance tile can join
+  // niche_cooldown (which has the aesthetic_style A/B/C) against youtube_analytics
+  // (which has CTR + retention). One UPDATE per published pipeline run.
+  // Skips dry runs and unpublished pipelines.
+  if (
+    SUPABASE_URL &&
+    SUPABASE_KEY &&
+    youtubeVideoId &&
+    !youtubeVideoId.startsWith("DRYRUN_") &&
+    facelessResult.jobId &&
+    !facelessResult.jobId.startsWith("fv_dryrun_")
+  ) {
+    try {
+      const ncResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/niche_cooldown?job_id=eq.${encodeURIComponent(
+          facelessResult.jobId,
+        )}&youtube_video_id=is.null`,
+        {
+          method: "PATCH",
+          headers: {
+            apikey: SUPABASE_KEY,
+            Authorization: `Bearer ${SUPABASE_KEY}`,
+            "Content-Type": "application/json",
+            Prefer: "return=minimal",
+          },
+          body: JSON.stringify({ youtube_video_id: youtubeVideoId }),
+        },
+      );
+      if (ncResp.ok) {
+        console.log(
+          `🎯 [Orchestrator] niche_cooldown.youtube_video_id linked: ${facelessResult.jobId} → ${youtubeVideoId}`,
+        );
+      } else {
+        console.warn(
+          `[Orchestrator] niche_cooldown PATCH non-fatal: status=${ncResp.status} body=${(await ncResp
+            .text()
+            .catch(() => ""))?.slice(0, 200)}`,
+        );
+      }
+    } catch (err: any) {
+      console.warn(`[Orchestrator] niche_cooldown PATCH non-fatal: ${err?.message}`);
+    }
   }
 
   const result: OrchestratorResult = {

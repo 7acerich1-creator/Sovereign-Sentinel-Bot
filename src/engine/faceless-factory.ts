@@ -154,6 +154,11 @@ export interface FacelessResult {
   segmentDurations?: number[];
   /** SESSION 92: R2 URL of raw TTS narration (no music) for clean shorts audio. */
   rawNarrationUrl?: string;
+  /** S114: the internal faceless-factory jobId (fv_{brand}_{niche}_{timestamp}).
+   * Passed through so vidrush-orchestrator can PATCH niche_cooldown.youtube_video_id
+   * back after YouTube publish, enabling the 30-video A/B/C performance tile join
+   * on Mission Control. */
+  jobId?: string;
 }
 
 // ── Brand voice for script generation (reuses Anita's Protocol 77 voice) ──
@@ -1556,6 +1561,9 @@ export async function produceFacelessVideo(
     segmentCount: script.segments.length,
     script,
     segmentDurations: segDurations,
+    // S114 — exposed so vidrush-orchestrator can PATCH niche_cooldown.youtube_video_id
+    // back after publish (Aesthetic Performance tile join key).
+    jobId,
     // SESSION 99 FIX: Was missing — pod returns raw TTS narration URL but it
     // never reached the orchestrator. Shorts always used the rendered long-form
     // audio (with music already baked in) instead of clean TTS. Now the

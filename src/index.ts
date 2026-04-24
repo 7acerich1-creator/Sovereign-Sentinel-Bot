@@ -76,6 +76,7 @@ import { textToSpeech } from "./voice/tts";
 import { ProactiveBriefings } from "./proactive/briefings";
 import { HeartbeatSystem } from "./proactive/heartbeat";
 import { pollYouTubeComments } from "./proactive/youtube-comment-watcher";
+import { pollYouTubeStats } from "./proactive/youtube-stats-fetcher";
 import { handleInboundEmail, sendApprovedReply, getPendingReplies } from "./proactive/email-reply-handler";
 import { YouTubeCommentTool, postDiagnosticComment } from "./tools/youtube-comment-tool";
 
@@ -2408,6 +2409,30 @@ async function main() {
   });
 
   console.log("🟡 [YTCommentWatcher] Scheduled: every 5min across both YT channels");
+
+  // ── YouTube Analytics Stats — Fix B for the 30-Video A/B/C Test ──
+  // S114 (2026-04-24). Existing fetch-youtube-stats edge function populates
+  // views/likes/comments via Data API v3 + API key. CTR + retention need
+  // YouTube Analytics API v2 + OAuth, which the bot has (via the same refresh
+  // tokens used by the comment watcher). This task PATCHes ctr/retention/
+  // impressions onto existing youtube_analytics rows. 6h cadence — Analytics
+  // has ~24-48h reporting lag, polling more often is wasteful. See
+  // src/proactive/youtube-stats-fetcher.ts.
+  scheduler.add({
+    name: "YouTube Analytics Stats Fetch",
+    intervalMs: 6 * 60 * 60_000,
+    nextRun: new Date(Date.now() + 60_000), // first run 1 min after boot
+    enabled: true,
+    handler: async () => {
+      try {
+        await pollYouTubeStats();
+      } catch (err: any) {
+        console.error(`[YTStatsFetcher] poll failed: ${err.message}`);
+      }
+    },
+  });
+
+  console.log("🟡 [YTStatsFetcher] Scheduled: every 6h, both YT channels via OAuth");
 
   // ── Stasis Detection — DISABLED Session 108 ──
   // Was dispatching stasis_self_check to ALL 6 agents daily = 6 API calls/day.

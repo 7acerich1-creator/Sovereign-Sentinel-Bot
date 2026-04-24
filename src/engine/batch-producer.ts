@@ -317,6 +317,12 @@ async function produceBatchOnPod(
 
         const t0 = Date.now();
 
+        // S114 — deterministic per-video jobId, threaded through both the
+        // niche_cooldown insert (production time) and the eventual FacelessResult
+        // (publish time) so the Aesthetic Performance tile can join YT analytics
+        // back to the aesthetic_style row.
+        const videoJobId = `fv_${brand}_${niche}_${Date.now()}_${i}`;
+
         // Session 113+ — pick aesthetic A/B/C via LRU, inject into every
         // scene's image prompt. All scenes in a given video share the same
         // aesthetic; next video rotates.
@@ -358,6 +364,7 @@ async function produceBatchOnPod(
           durationS: artifacts.durationS ?? 0,
           podMs,
           rawNarrationUrl: artifacts.rawNarrationUrl,
+          jobId: videoJobId,
         });
 
         await onProgress?.(
@@ -367,12 +374,15 @@ async function produceBatchOnPod(
 
         // Record niche cooldown + angle consumption + aesthetic style
         // (S113+ — aesthetic logged for the 30-video A/B/C performance test)
+        // (S114 — jobId threaded through so vidrush-orchestrator can patch
+        //  niche_cooldown.youtube_video_id back after publish)
         try {
           const { angleId } = scripts[i];
           await recordNicheRun({
             brand,
             niche,
             thesis: script.title,
+            jobId: videoJobId,
             source: angleId ? `angle:${angleId}` : "batch_generic",
             aestheticStyle,
           });
@@ -404,6 +414,11 @@ interface ProducedVideo {
   durationS: number;
   podMs: number;
   rawNarrationUrl?: string;  // SESSION 92: clean TTS narration from pod
+  /** S114: per-video deterministic jobId. Same value goes into both
+   * niche_cooldown.job_id (production-time INSERT) and FacelessResult.jobId
+   * (publish-time, so vidrush-orchestrator's PATCH can link niche_cooldown
+   * → youtube_video_id for the Aesthetic Performance tile join). */
+  jobId: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -477,6 +492,9 @@ async function distributeVideo(
       script: video.script,
       segmentDurations: video.script.segments.map(() => actualPerSeg),
       rawNarrationUrl: video.rawNarrationUrl,
+      // S114 — same jobId that batch-producer wrote into niche_cooldown,
+      // so vidrush-orchestrator's post-publish PATCH lands on the right row.
+      jobId: video.jobId,
     };
 
     // Feed into orchestrator Steps 3-8 via preProduced bypass

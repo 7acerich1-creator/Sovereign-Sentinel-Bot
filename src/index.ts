@@ -2700,8 +2700,10 @@ async function main() {
   // Session 109: Receives lead replies to nurture emails. Dispatches to Anita for
   // plain-English draft → Telegram approval → send via Resend.
   // Session 110: Updated to parse Resend's email.received webhook format.
-  // Resend sends { type: "email.received", data: { email_id, from, to, subject } }
-  // — body is NOT included, must be fetched via Received Emails API.
+  // Session 111: FIXED API endpoint. Correct endpoint is GET /emails/receiving/:email_id
+  //   (NOT /received-emails/:email_id/content — that was a hallucinated URL).
+  //   Response has { id, from, to, subject, text, html, headers, attachments, raw }.
+  //   MX record REQUIRED on sovereign-synthesis.com pointing to Resend's inbound server.
   webhookServer.register("/api/inbound-email", async (incoming: any) => {
     if (!defaultChatId || !telegram) {
       return JSON.stringify({ status: "error", message: "Telegram not configured" });
@@ -2718,35 +2720,41 @@ async function main() {
       let payload: { from: string; to?: string; subject: string; text: string; html?: string };
 
       if (eventType === "email.received" && incoming?.data?.email_id) {
-        // Resend webhook format — extract metadata from data, fetch body from API
+        // Resend webhook format — extract metadata from data, fetch full email from API
         const d = incoming.data;
         const emailId = d.email_id;
+        // Webhook data.from can be string or array
         const fromAddr = typeof d.from === "string" ? d.from : (Array.isArray(d.from) ? d.from[0] : "");
         const toAddr = Array.isArray(d.to) ? d.to[0] : (d.to || "");
         const subject = d.subject || "(no subject)";
 
-        // Fetch email body from Resend Received Emails API
+        // Fetch full email from Resend Received Emails API
+        // Correct endpoint: GET https://api.resend.com/emails/receiving/:email_id
+        // Returns { id, from, to, subject, text, html, headers, attachments, raw }
         let bodyText = "";
         const resendKey = process.env.RESEND_API_KEY;
         if (resendKey && emailId) {
           try {
             const contentResp = await fetch(
-              `https://api.resend.com/received-emails/${emailId}/content`,
+              `https://api.resend.com/emails/receiving/${emailId}`,
               { headers: { Authorization: `Bearer ${resendKey}` } }
             );
             if (contentResp.ok) {
-              const contentData = (await contentResp.json()) as any;
-              bodyText = contentData.text || contentData.html || contentData.body || "";
-              // Strip HTML tags if we only got HTML
-              if (!contentData.text && contentData.html) {
-                bodyText = contentData.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+              const emailData = (await contentResp.json()) as any;
+              // text field has plain text body, html field has HTML body
+              bodyText = emailData.text || "";
+              // If no plain text, strip HTML
+              if (!bodyText && emailData.html) {
+                bodyText = emailData.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
               }
+              console.log(`[InboundEmail] Fetched email ${emailId}: from=${emailData.from}, subject=${emailData.subject}, bodyLen=${bodyText.length}`);
             } else {
-              console.error(`[InboundEmail] Failed to fetch body for ${emailId}: ${contentResp.status}`);
+              const errText = await contentResp.text().catch(() => "");
+              console.error(`[InboundEmail] Failed to fetch email ${emailId}: ${contentResp.status} ${errText.slice(0, 200)}`);
               bodyText = "(email body could not be retrieved)";
             }
           } catch (fetchErr: any) {
-            console.error(`[InboundEmail] Body fetch error: ${fetchErr.message}`);
+            console.error(`[InboundEmail] Email fetch error: ${fetchErr.message}`);
             bodyText = "(email body fetch failed)";
           }
         }
@@ -3726,6 +3734,46 @@ async function main() {
 
               message.content = `[CLIP RIPPER ACTIVATED] Cutting source video clips for: ${youtubeUrl}\n` +
                 `The clip ripper is running in background. Original message: ${message.content}`;
+            }
+
+            // ── SESSION 111: /comment — deterministic handler for ALL crew bots ──
+            // Previously only existed in Veritas handleCommand(). Crew bots (especially Yuki)
+            // bypassed it entirely, sending /comment to the LLM agent loop. Now handled here
+            // deterministically — extracts videoId, calls postDiagnosticComment() directly.
+            else if (/^\/comment\b/i.test(message.content)) {
+              const commentArgs = message.content.replace(/^\/comment\s*/i, "").trim().split(/\s+/);
+              const rawArg = commentArgs[0];
+              if (!rawArg) {
+                await agentChannel.sendMessage(message.chatId,
+                  "Usage: /comment <videoId or YouTube URL> [sovereign_synthesis|containment_field]"
+                );
+                return;
+              }
+              let videoId = rawArg;
+              const urlMatch = rawArg.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/);
+              if (urlMatch) {
+                videoId = urlMatch[1];
+              } else if (rawArg.length > 11 && rawArg.includes("&")) {
+                videoId = rawArg.split("&")[0];
+              }
+              const commentBrand = (commentArgs[1] as "sovereign_synthesis" | "containment_field") || "sovereign_synthesis";
+              console.log(`[/comment@${agentCfg.name}] videoId="${videoId}" brand="${commentBrand}" rawArg="${rawArg.slice(0, 80)}"`);
+              await agentChannel.sendMessage(message.chatId, `📝 Posting diagnostic comment on ${videoId} (${commentBrand})...`);
+              try {
+                const result = await postDiagnosticComment(videoId, commentBrand);
+                if (result.success) {
+                  await agentChannel.sendMessage(message.chatId,
+                    `✅ Comment posted!\nVideo: https://youtube.com/watch?v=${videoId}\nComment ID: ${result.commentId}`
+                  );
+                } else {
+                  await agentChannel.sendMessage(message.chatId,
+                    `❌ Comment failed: ${result.error}`
+                  );
+                }
+              } catch (err: any) {
+                await agentChannel.sendMessage(message.chatId, `❌ Comment error: ${err.message}`);
+              }
+              return;
             }
 
             // ── /dryrun, /pipeline, /alfred commands are handled by Veritas handleCommand() ──

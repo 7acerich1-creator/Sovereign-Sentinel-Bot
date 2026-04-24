@@ -35,6 +35,7 @@ import { withPodSession } from "../pod/session";
 import { produceShort, podTTS } from "../pod/runpod-client";
 import type { ShortJobSpec, ShortScene } from "../pod/types";
 import { YouTubeLongFormPublishTool } from "../tools/video-publisher";
+import { postDiagnosticComment } from "../tools/youtube-comment-tool";
 import {
   AUDIENCE_ANGLES,
   angleForClipIndex,
@@ -1671,6 +1672,27 @@ export async function executeFullPipeline(
       await progress("STEP 3/8", ytResult.includes("✅")
         ? `✅ YouTube upload complete — ${youtubeUrl2}`
         : `⚠️ YouTube upload issue: ${ytResult.slice(0, 200)}`);
+
+      // SESSION 111: Auto-comment with diagnostic link on every successful upload.
+      // Ace's direct demand: "every time a video was uploaded Yuki knows to go comment on that video."
+      // Non-fatal — if comment fails (e.g. OAuth scope), log it but don't block pipeline.
+      if (youtubeVideoId && !dryRun) {
+        try {
+          console.log(`💬 [Orchestrator] Auto-commenting on ${youtubeVideoId} (${brand})...`);
+          const commentResult = await postDiagnosticComment(youtubeVideoId, brand);
+          if (commentResult.success) {
+            console.log(`✅ [Orchestrator] Diagnostic comment posted on ${youtubeVideoId}`);
+            await progress("STEP 3/8", `💬 Diagnostic comment posted on ${youtubeVideoId}`);
+          } else {
+            console.warn(`⚠️ [Orchestrator] Auto-comment failed: ${commentResult.error}`);
+            errors.push(`Auto-comment failed: ${commentResult.error}`);
+            await progress("STEP 3/8", `⚠️ Auto-comment failed: ${commentResult.error?.slice(0, 100)}`);
+          }
+        } catch (commentErr: any) {
+          console.warn(`⚠️ [Orchestrator] Auto-comment error (non-fatal): ${commentErr.message}`);
+          errors.push(`Auto-comment error: ${commentErr.message}`);
+        }
+      }
     } catch (err: any) {
       errors.push(`YouTube upload failed: ${err.message}`);
       await progress("STEP 3/8", `❌ YouTube long-form upload FAILED — halting downstream (foundation gate)`);

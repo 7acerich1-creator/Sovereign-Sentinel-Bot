@@ -53,9 +53,11 @@ Session 46 said the bottleneck was "nothing connects attention to the funnel." T
 ## The Current Highest-Leverage Action (UPDATE EVERY SESSION)
 *If this field says the same thing two sessions in a row, the last session didn't earn its keep.*
 
-**Action:** **Execute `PROJECT_POD_MIGRATION.md` at repo root — the big project that rewrites content production onto the pod, fixes the audio-drop / OpenAI-fallback / brand-contamination / TikTok-silent / Shorts-broken bugs as one coherent ship, and re-routes Railway as pure orchestrator. Read that file's STATUS block first every session. Phase 0 (Diagnosis + Plan Lock) is the active phase.**
+**Action:** **Measure conversion. The funnel is live, the on-ramp is live, the lead capture trigger is fixed. Wait 7 days (through 2026-05-01), then re-measure: `SELECT COUNT(*) FROM initiates WHERE created_at >= '2026-04-24'`. If >0 leads, optimize the nurture sequence. If 0 leads, the problem is video retention (not routing) — pull per-video retention curves and diagnose.**
 
-Justification: S60 measurement said `initiates` = 0 lifetime and the funnel is unvisited. Architect's deeper diagnosis (Telegram screenshot 2026-04-14 10:07 AM) showed the real revenue blocker: the content producer is broken. Sovereign Synthesis fires on TCF's burnout topic (Alfred seed cross-contamination, S48 Brand Routing Matrix only fixes render not intake), TTS falls through to OpenAI instead of XTTS (`OpenAI TTS error 429: quota exceeded`), audio likely drops mid-video killing retention, TikTok uploads silent, Shorts pipeline broken. Driving attention to a front door works only when the attention source — the videos — plays cleanly end-to-end with correct brand. Fixing CTAs or Vercel Insights before this is patching downstream of a broken producer. **No code ships outside PROJECT_POD_MIGRATION.md until it retires.**
+**Secondary:** Wire Yuki for automated pinned comments on YouTube videos (immediate reach lift). Wire Anita for email reply monitoring (5-min response to lead replies). Both are approved and scoped.
+
+Justification: Pod migration is COMPLETE (Phase 6 shipped S79). S107 shipped 53-file brand overhaul. S109 fixed the silent trigger crash that was killing ALL lead captures. The diagnostic link is now in all video descriptions. For the first time in 109 sessions, the full path from viewer → description link → diagnostic → lead capture → nurture email is LIVE and functional. The highest-leverage action is now measurement + engagement automation, not more building.
 
 ---
 
@@ -85,12 +87,12 @@ Justification: S60 measurement said `initiates` = 0 lifetime and the funnel is u
 **Vercel Insights (metric #2):** Not accessible via MCP (no Analytics endpoint in the Vercel tool). Dashboard pull required — Ace to pull and paste numbers into NORTH_STAR. URLs to pull: `/`, `/diagnostic`, `/about`, `/manual`, `/tier-0/links` — unique visitors since 2026-04-14 00:00 UTC vs previous-7d baseline.
 
 **Interpretation (Session 60):**
-1. **The funnel is not broken. It is unvisited.** Zero rows lifetime in `initiates` is not a form bug — the form wiring is correct and the page serves. It is the absence of humans reaching the end of the page. The 44-subscriber YT channel and the 3-sub TCF channel are producing 930 views/wk but none of those views are landing on `/diagnostic` because nothing in-video routes them there.
+1. **The funnel is wired and the on-ramp is live.** Diagnostic link is now in ALL video descriptions (confirmed 2026-04-24). Lead capture trigger was broken (pg_net schema error silently rolling back all INSERTs) — fixed Session 109. First successful end-to-end test: form submission → `initiates` row → nurture email fired. Funnel is now measuring real traffic. Re-measure `initiates` count after 7 days of live descriptions.
 2. **S58 watcher shows zero output — regression risk.** Commit 51d1d9f deployed earlier today. Even a first-run-per-brand seed should have written historical comments to `youtube_comments_seen`. Zero rows 6h later means either (a) Railway did not restart after the push, (b) the OAuth refresh token path failed silently, (c) the scheduler did not register the job, or (d) the seed-without-alert path has a write bug. Needs a live Railway-log check next session.
 3. **The S57 ship is verified infrastructurally but unproven commercially.** It passes the "does it work" test. It fails the "does it move the metric" test — because no attention has been routed through it yet.
 
-**Where the Architect's action matters more than any build:**
-The next revenue-relevant step is a 15-minute YouTube Studio task, not a code ship — add `https://sovereign-synthesis.com/diagnostic` as the first line of every Sovereign Synthesis video description, pin a top comment with the link, add an end-screen card on "OUTDATED CODE". This is the attention→landing bridge the S57 restructure was built to receive, but the bridge has no on-ramp.
+**Architect action completed (confirmed 2026-04-24, Session 109):**
+`https://sovereign-synthesis.com/diagnostic` is now in ALL Sovereign Synthesis video descriptions. The attention→landing bridge has an on-ramp. Next high-leverage step: automate pinned comments on every video (Yuki) and wire email reply monitoring (Anita) so leads that respond to nurture emails get a human-sounding reply within 5 minutes.
 
 ---
 
@@ -127,9 +129,9 @@ Supabase migration applied: `initiates.dominant_pattern text` column live on pro
 2. Supabase `initiates` WHERE `source LIKE 'diagnostic-%'` — count post-result signups.
 3. Pattern distribution: `SELECT dominant_pattern, COUNT(*) FROM initiates GROUP BY dominant_pattern` — informs content weighting.
 
-**Last updated:** 2026-04-14 22:30 UTC (Session 60 — PROJECT_POD_MIGRATION.md scoped + committed to repo root. 6 phases, bite-sized tasks w/ file paths + verification, Open Decisions table, Session Resume Protocol. Highest-Leverage Action pivoted from "traffic routing" to "fix the broken producer." Next session reads PROJECT_POD_MIGRATION.md STATUS block and resumes at Phase 0.)
+**Last updated:** 2026-04-24 (Session 109 — Lead capture trigger fixed (pg_net schema error), agent personas overhauled to match reality, Vector→Anita/Yuki token-waste dispatch chain killed, NORTH_STAR updated to reflect live funnel + diagnostic in all descriptions. Highest-Leverage Action pivoted from "fix broken producer" to "measure conversion + engagement automation.")
 
-**Updated by:** Session 60 (Claude, Sentinel Bot cowork).
+**Updated by:** Session 109 (Claude, Sentinel Bot cowork).
 
 ---
 

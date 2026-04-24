@@ -1969,11 +1969,8 @@ async function main() {
                 "4) Use buffer_analytics (channel_breakdown) to compare channel performance — which platforms drive reach vs clicks. " +
                 "5) Cross-reference: revenue signals (Stripe) vs content signals (Buffer) — is content driving conversions? " +
                 "6) Identify the #1 bottleneck and recommend one specific optimization. " +
-                "CRITICAL — FEEDBACK LOOP: After analysis, use crew_dispatch to send optimization tasks:\n" +
-                "• Dispatch to 'anita' (task_type: 'copy_optimization') with your top 3 copy findings — what hooks worked, what flopped, and ONE specific rewrite recommendation for the weakest-performing copy pattern.\n" +
-                "• Dispatch to 'yuki' (task_type: 'distribution_optimization') with channel performance data — which platforms are underperforming, optimal posting times from the data, and ONE specific creative/scheduling change to test.\n" +
-                "This closes the loop: you analyze → they optimize → next sweep measures the impact. " +
-                "Report findings to the Architect. Keep it actionable — numbers, not narratives.",
+                "Report findings to the Architect via Telegram. Keep it actionable — numbers, not narratives. " +
+                "Do NOT dispatch tasks to other agents — report directly.",
               triggered_at: new Date().toISOString(),
               sweep_type: "daily",
             },

@@ -64,7 +64,7 @@ import { join } from "path";
 import { ProposeTaskTool, SaveContentDraftTool, FileBriefingTool, CheckApprovedTasksTool } from "./tools/action-surface";
 import { StripeMetricsTool } from "./tools/stripe-metrics";
 import { BufferAnalyticsTool } from "./tools/buffer-analytics";
-import { YouTubeAnalyticsReaderTool, LandingAnalyticsReaderTool } from "./tools/analytics-readers";
+import { YouTubeAnalyticsReaderTool, LandingAnalyticsReaderTool, EmailTrackingTool } from "./tools/analytics-readers";
 import { VideoPublisherTool, TikTokPublishTool, InstagramReelsPublishTool, YouTubeShortsPublishTool, YouTubeLongFormPublishTool } from "./tools/video-publisher";
 import { YouTubeUpdateMetadataTool, YouTubePinCommentTool, YouTubeCTAAuditTool } from "./tools/youtube-cta-tools";
 
@@ -2773,6 +2773,78 @@ async function main() {
     }
   });
 
+  // ── /api/email-tracking — Resend email tracking webhook ──
+  // Session 111: Stores delivered/opened/clicked/bounced/complained events in Supabase.
+  // Vector reads this data via the email_tracking tool.
+  // Webhook must be configured in Resend with events: email.delivered, email.opened,
+  // email.clicked, email.bounced, email.complained.
+  webhookServer.register("/api/email-tracking", async (incoming: any) => {
+    try {
+      const eventType = incoming?.type;
+      if (!eventType) {
+        return JSON.stringify({ status: "ignored", reason: "no event type" });
+      }
+
+      // Map Resend event types to our simplified names
+      const EVENT_MAP: Record<string, string> = {
+        "email.delivered": "delivered",
+        "email.opened": "opened",
+        "email.clicked": "clicked",
+        "email.bounced": "bounced",
+        "email.complained": "complained",
+      };
+
+      const mappedType = EVENT_MAP[eventType];
+      if (!mappedType) {
+        console.log(`[EmailTracking] Ignoring event type: ${eventType}`);
+        return JSON.stringify({ status: "ignored", event: eventType });
+      }
+
+      const d = incoming.data || {};
+      const fromAddr = typeof d.from === "string" ? d.from : (Array.isArray(d.from) ? d.from[0] : "");
+      const toAddr = Array.isArray(d.to) ? d.to[0] : (typeof d.to === "string" ? d.to : "");
+      const subject = d.subject || "";
+      const emailId = d.email_id || d.id || "";
+      // For click events, Resend includes the clicked URL in data.click.link
+      const linkUrl = d.click?.link || d.link || "";
+
+      // Store in Supabase
+      const sbUrl = process.env.SUPABASE_URL;
+      const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+      if (sbUrl && sbKey) {
+        const insertResp = await fetch(`${sbUrl}/rest/v1/email_events`, {
+          method: "POST",
+          headers: {
+            apikey: sbKey,
+            Authorization: `Bearer ${sbKey}`,
+            "Content-Type": "application/json",
+            Prefer: "return=minimal",
+          },
+          body: JSON.stringify({
+            event_type: mappedType,
+            email_id: emailId,
+            from_addr: fromAddr,
+            to_addr: toAddr,
+            subject,
+            link_url: linkUrl || null,
+            raw_payload: incoming,
+          }),
+        });
+        if (!insertResp.ok) {
+          const errText = await insertResp.text();
+          console.error(`[EmailTracking] Supabase insert failed: ${insertResp.status} ${errText.slice(0, 200)}`);
+        } else {
+          console.log(`[EmailTracking] ${mappedType} event stored — to=${toAddr} subject="${subject.slice(0, 50)}"`);
+        }
+      }
+
+      return JSON.stringify({ status: "stored", event: mappedType });
+    } catch (err: any) {
+      console.error(`[EmailTracking] Webhook error: ${err.message}`);
+      return JSON.stringify({ status: "error", message: err.message });
+    }
+  });
+
   // ── /api/faceless/produce — Manual trigger for faceless video production ──
   // POST body: { source_intelligence: string, niche?: string, brands?: string[] }
   // Or: { youtube_url: string } — will fetch transcript from cache if available
@@ -3588,12 +3660,13 @@ async function main() {
           agentTools.push(new YouTubeCommentTool());
         }
 
-        // Vector gets full CRO visibility: Stripe + Buffer + YouTube + Landing
+        // Vector gets full CRO visibility: Stripe + Buffer + YouTube + Landing + Email
         if (agentCfg.name === "vector") {
           agentTools.push(new StripeMetricsTool());
           agentTools.push(new BufferAnalyticsTool());
           agentTools.push(new YouTubeAnalyticsReaderTool());
           agentTools.push(new LandingAnalyticsReaderTool());
+          agentTools.push(new EmailTrackingTool()); // Session 111: email open/click/bounce tracking
         }
 
         // Pinecone KnowledgeWriter — agent-specific namespaces

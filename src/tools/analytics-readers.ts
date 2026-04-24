@@ -300,3 +300,155 @@ export class LandingAnalyticsReaderTool implements Tool {
     }
   }
 }
+
+// ── Email Tracking Analytics Reader (Session 111) ──
+// Reads email delivery/open/click/bounce events from email_events table.
+// Populated by Resend webhooks (email.delivered, email.opened, email.clicked, email.bounced).
+export class EmailTrackingTool implements Tool {
+  definition: ToolDefinition = {
+    name: "email_tracking",
+    description:
+      "Read email engagement data from the email_events table. " +
+      "Shows delivery, open, click, and bounce events for nurture emails " +
+      "sent from ace@sovereign-synthesis.com. " +
+      "Use to measure email funnel health and identify which subjects/content drive engagement.",
+    parameters: {
+      report: {
+        type: "string",
+        description:
+          "Report type: 'summary' (aggregate counts by event type), " +
+          "'opens' (recent email opens with subjects), " +
+          "'clicks' (recent link clicks with URLs), " +
+          "'bounces' (bounced emails — delivery issues), " +
+          "'timeline' (all events chronologically). Default: summary",
+      },
+      days: {
+        type: "number",
+        description: "Look-back period in days (default 7, max 30)",
+      },
+      limit: {
+        type: "number",
+        description: "Number of events to return for non-summary reports (default 20, max 50)",
+      },
+    },
+    required: [],
+  };
+
+  async execute(args: Record<string, unknown>): Promise<string> {
+    if (!SUPABASE_URL || !SUPABASE_KEY) {
+      return "❌ Supabase not configured. Cannot read email tracking.";
+    }
+
+    const report = String(args.report || "summary");
+    const days = Math.min(Number(args.days) || 7, 30);
+    const limit = Math.min(Number(args.limit) || 20, 50);
+    const since = new Date(Date.now() - days * 86400000).toISOString();
+
+    try {
+      switch (report) {
+        case "summary": {
+          const rows = await supabaseQuery(
+            "email_events",
+            `select=event_type,to_addr,subject&created_at=gte.${since}`
+          );
+          if (rows.length === 0) return `No email events in the last ${days} days.`;
+
+          const counts: Record<string, number> = {};
+          const uniqueRecipients = new Set<string>();
+          for (const r of rows) {
+            counts[r.event_type] = (counts[r.event_type] || 0) + 1;
+            if (r.to_addr) uniqueRecipients.add(r.to_addr);
+          }
+
+          const delivered = counts["delivered"] || 0;
+          const opened = counts["opened"] || 0;
+          const clicked = counts["clicked"] || 0;
+          const bounced = counts["bounced"] || 0;
+          const complained = counts["complained"] || 0;
+
+          const openRate = delivered > 0 ? ((opened / delivered) * 100).toFixed(1) : "N/A";
+          const clickRate = opened > 0 ? ((clicked / opened) * 100).toFixed(1) : "N/A";
+
+          const lines = [
+            `📧 EMAIL TRACKING SUMMARY (last ${days} days)`,
+            `Unique recipients: ${uniqueRecipients.size}`,
+            `Total events: ${rows.length}`,
+            ``,
+            `Delivered: ${delivered}`,
+            `Opened: ${opened} (${openRate}% open rate)`,
+            `Clicked: ${clicked} (${clickRate}% click-through)`,
+            `Bounced: ${bounced}`,
+          ];
+          if (complained > 0) lines.push(`⚠️ Complaints: ${complained}`);
+          return lines.join("\n");
+        }
+
+        case "opens": {
+          const rows = await supabaseQuery(
+            "email_events",
+            `select=to_addr,subject,created_at&event_type=eq.opened&created_at=gte.${since}&order=created_at.desc&limit=${limit}`
+          );
+          if (rows.length === 0) return `No email opens in the last ${days} days.`;
+          const lines = [`👁️ RECENT EMAIL OPENS (last ${days} days)`];
+          for (const r of rows) {
+            const date = new Date(r.created_at).toLocaleString();
+            lines.push(`• ${date} — ${r.to_addr}: "${r.subject || "(no subject)"}"`);
+          }
+          return lines.join("\n");
+        }
+
+        case "clicks": {
+          const rows = await supabaseQuery(
+            "email_events",
+            `select=to_addr,subject,link_url,created_at&event_type=eq.clicked&created_at=gte.${since}&order=created_at.desc&limit=${limit}`
+          );
+          if (rows.length === 0) return `No link clicks in the last ${days} days.`;
+          const lines = [`🔗 RECENT LINK CLICKS (last ${days} days)`];
+          for (const r of rows) {
+            const date = new Date(r.created_at).toLocaleString();
+            lines.push(`• ${date} — ${r.to_addr}`);
+            lines.push(`  Subject: "${r.subject || "(no subject)"}"`);
+            if (r.link_url) lines.push(`  Link: ${r.link_url}`);
+          }
+          return lines.join("\n");
+        }
+
+        case "bounces": {
+          const rows = await supabaseQuery(
+            "email_events",
+            `select=to_addr,subject,created_at,raw_payload&event_type=eq.bounced&created_at=gte.${since}&order=created_at.desc&limit=${limit}`
+          );
+          if (rows.length === 0) return `No bounces in the last ${days} days. ✅`;
+          const lines = [`⚠️ BOUNCED EMAILS (last ${days} days)`];
+          for (const r of rows) {
+            const date = new Date(r.created_at).toLocaleString();
+            lines.push(`• ${date} — ${r.to_addr}: "${r.subject || "(no subject)"}"`);
+          }
+          return lines.join("\n");
+        }
+
+        case "timeline": {
+          const rows = await supabaseQuery(
+            "email_events",
+            `select=event_type,to_addr,subject,link_url,created_at&created_at=gte.${since}&order=created_at.desc&limit=${limit}`
+          );
+          if (rows.length === 0) return `No email events in the last ${days} days.`;
+          const icons: Record<string, string> = { delivered: "📬", opened: "👁️", clicked: "🔗", bounced: "⚠️", complained: "🚨" };
+          const lines = [`📧 EMAIL EVENT TIMELINE (last ${days} days)`];
+          for (const r of rows) {
+            const date = new Date(r.created_at).toLocaleString();
+            const icon = icons[r.event_type] || "•";
+            lines.push(`${icon} ${date} [${r.event_type}] ${r.to_addr} — "${r.subject || ""}"`);
+            if (r.link_url) lines.push(`  → ${r.link_url}`);
+          }
+          return lines.join("\n");
+        }
+
+        default:
+          return `Unknown report type: ${report}. Use: summary, opens, clicks, bounces, timeline`;
+      }
+    } catch (err: any) {
+      return `❌ Email tracking query failed: ${err.message}`;
+    }
+  }
+}

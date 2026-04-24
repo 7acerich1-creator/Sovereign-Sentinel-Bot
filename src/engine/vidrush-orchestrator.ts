@@ -4,7 +4,7 @@
 //
 // 1. Whisper extraction (extract universal truths from source)
 // 2. Faceless Factory LONG (10-15 min video in Anita's Protocol 77 voice)
-// 3. YouTube long-form upload (to Sovereign Synthesis 77 channel)
+// 3. YouTube long-form upload (to Sovereign Synthesis channel)
 // 4. Curate 0-4 surgical shorts via shorts-curator (LLM + ffmpeg)
 // 5. Generate platform-specific copy per short (LLM)
 // 6. Distribute shorts to all platforms (TikTok, IG, YouTube Shorts)

@@ -285,7 +285,7 @@ export class InstagramReelsPublishTool implements Tool {
 // 3. YOUTUBE SHORTS — Data API v3
 //    Flow: resumable upload → set metadata
 //    Requires: YOUTUBE_REFRESH_TOKEN + YOUTUBE_CLIENT_ID + YOUTUBE_CLIENT_SECRET
-//    Dual-channel: YOUTUBE_REFRESH_TOKEN = Sovereign Synthesis 77, YOUTUBE_REFRESH_TOKEN_TCF = The Containment Field
+//    Dual-channel: YOUTUBE_REFRESH_TOKEN = Sovereign Synthesis, YOUTUBE_REFRESH_TOKEN_TCF = The Containment Field
 //    Shorts = any vertical video ≤60s uploaded normally
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -320,7 +320,7 @@ export class YouTubeShortsPublishTool implements Tool {
       },
       brand: {
         type: "string",
-        description: "Which brand/channel to publish to: 'sovereign_synthesis' (Sovereign Synthesis 77 channel) or 'containment_field' (The Containment Field channel). Defaults to 'sovereign_synthesis'.",
+        description: "Which brand/channel to publish to: 'sovereign_synthesis' (Sovereign Synthesis channel) or 'containment_field' (The Containment Field channel). Defaults to 'sovereign_synthesis'.",
       },
     },
     required: ["video_url", "title", "description"],
@@ -332,7 +332,7 @@ export class YouTubeShortsPublishTool implements Tool {
     if (directToken) return directToken;
 
     // Select refresh token based on brand
-    // YOUTUBE_REFRESH_TOKEN = Sovereign Synthesis 77 (empoweredservices2013@gmail.com)
+    // YOUTUBE_REFRESH_TOKEN = Sovereign Synthesis (empoweredservices2013@gmail.com)
     // YOUTUBE_REFRESH_TOKEN_TCF = The Containment Field (7ace.rich1@gmail.com)
     const refreshToken = brand === "containment_field"
       ? process.env.YOUTUBE_REFRESH_TOKEN_TCF
@@ -364,7 +364,7 @@ export class YouTubeShortsPublishTool implements Tool {
 
   async execute(args: Record<string, unknown>): Promise<string> {
     const brand = args.brand ? String(args.brand) : "sovereign_synthesis";
-    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis 77";
+    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis";
     const token = await this.getAccessToken(brand);
     if (!token) {
       const envHint = brand === "containment_field"
@@ -565,7 +565,7 @@ export class YouTubeLongFormPublishTool implements Tool {
 
   async execute(args: Record<string, unknown>): Promise<string> {
     const brand = args.brand ? String(args.brand) : "sovereign_synthesis";
-    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis 77";
+    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis";
     const token = await this.getAccessToken(brand);
     if (!token) {
       const envHint = brand === "containment_field"

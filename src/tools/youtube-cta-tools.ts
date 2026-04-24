@@ -147,7 +147,7 @@ export class YouTubeUpdateMetadataTool implements Tool {
   async execute(args: Record<string, unknown>): Promise<string> {
     const videoId = String(args.video_id);
     const brand = args.brand ? String(args.brand) : "sovereign_synthesis";
-    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis 77";
+    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis";
     const token = await getYouTubeToken(brand);
 
     if (!token) {
@@ -259,7 +259,7 @@ export class YouTubePinCommentTool implements Tool {
     const commentText = String(args.comment_text);
     const shouldPin = String(args.pin || "true") === "true";
     const brand = args.brand ? String(args.brand) : "sovereign_synthesis";
-    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis 77";
+    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis";
     const token = await getYouTubeToken(brand);
 
     if (!token) {
@@ -364,7 +364,7 @@ export class YouTubeCTAAuditTool implements Tool {
     const brand = args.brand ? String(args.brand) : "sovereign_synthesis";
     const topN = parseInt(String(args.top_n || "5"), 10);
     const landingUrl = String(args.landing_url || "sovereign-landing.com");
-    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis 77";
+    const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis";
     const token = await getYouTubeToken(brand);
 
     if (!token) {

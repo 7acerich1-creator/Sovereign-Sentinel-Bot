@@ -838,7 +838,7 @@ export interface StandaloneShort {
 }
 
 const STANDALONE_CTA: Record<Brand, string> = {
-  sovereign_synthesis: "The protocol is live — @sovereign_synthesis77",
+  sovereign_synthesis: "The protocol is live — @sovereign_synthesis",
   containment_field: "Exit the field — @TheContainmentField",
 };
 

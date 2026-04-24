@@ -740,7 +740,7 @@ async function main() {
   // Phase 3 Task 3.3 (2026-04-15): DUAL-SEED CONTRACT.
   // Alfred now emits TWO brand-bound seeds per run, one per brand, each constrained
   // to the brand's niche allowlist (src/data/shared-context.ts). This closes the
-  // Alfred-shared-seed cross-contamination bug where Sovereign Synthesis 77 was producing
+  // Alfred-shared-seed cross-contamination bug where Sovereign Synthesis was producing
   // burnout-themed content (which belongs exclusively to The Containment Field).
   // S48 Brand Routing Matrix fixed RENDER layers; this fixes INTAKE.
   //
@@ -774,7 +774,7 @@ async function main() {
     "Your job is to PROJECT the Sovereign frequency outward, not to react to the simulation's noise.\n\n" +
     "BRAND SEPARATION IS NON-NEGOTIABLE. You generate TWO distinct theses today — one per brand — " +
     "each constrained to that brand's niche allowlist. A single shared thesis is a hard failure.\n\n" +
-    "BRAND 1 — SOVEREIGN SYNTHESIS (@sovereign_synthesis77)\n" +
+    "BRAND 1 — SOVEREIGN SYNTHESIS (@sovereign_synthesis)\n" +
     "  Voice: sovereign architect, builder of systems, wealth-frequency, authority. Never victim-coded.\n" +
     `  ${nicheAllowlistLine("sovereign_synthesis")}\n` +
     "  Allowed topics: architecture of the one-person empire, monk mode / frame control, sovereign wealth mechanics, " +
@@ -3991,7 +3991,7 @@ async function main() {
                 // The bridge parses both, validates each niche against the brand's allowlist
                 // (shared-context.ts BRAND_NICHE_ALLOWLIST), and feeds each brand its OWN
                 // seed + niche into executeFullPipeline. Closes the cross-contamination bug
-                // where Sovereign Synthesis 77 was receiving burnout-themed seeds (S48 matrix fixed
+                // where Sovereign Synthesis was receiving burnout-themed seeds (S48 matrix fixed
                 // render, this fixes intake).
                 if (agentName === "alfred" && task.task_type === "daily_trend_scan") {
                   try {

@@ -435,7 +435,7 @@ export async function discoverChannels(): Promise<BrandChannelMap> {
       throw new Error("No Buffer channels found. Check BUFFER_API_KEY and Buffer account.");
     }
     // Categorize by brand using known naming patterns
-    const ssPatterns = /sovereign|synthesis|77/i;
+    const ssPatterns = /sovereign|synthesis/i;
     const cfPatterns = /containment|sovereign-synthesis\.com/i;
 
     const map: BrandChannelMap = {

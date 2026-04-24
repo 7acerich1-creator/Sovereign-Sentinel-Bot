@@ -235,7 +235,7 @@ export async function drainBacklog(): Promise<void> {
     return;
   }
 
-  const ssPatterns = /sovereign|synthesis|ace|richie|77/i;
+  const ssPatterns = /sovereign|synthesis|ace|richie/i;
   const cfPatterns = /containment/i;
 
   type ChannelWithService = { id: string; service: string; name: string; displayName?: string };

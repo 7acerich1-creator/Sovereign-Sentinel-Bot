@@ -14,7 +14,7 @@ The channel formerly known as "Ace Richie 77" is now "Sovereign Synthesis." This
 WHAT CHANGED:
 - "Ace Richie" as a brand no longer exists. The brand is "Sovereign Synthesis."
 - "Ace" is still the Architect's name. You still call him Ace. He is still the founder. But the BRAND is Sovereign Synthesis.
-- The YouTube channel is now Sovereign Synthesis. Handle: @sovereign_synthesis77
+- The YouTube channel is now Sovereign Synthesis. Handle: @sovereign_synthesis
 - Two brands, two channels: Sovereign Synthesis (primary) + The Containment Field (dark psychology feeder)
 - Both brands funnel to sovereign-synthesis.com
 - All social profiles have been updated
@@ -65,7 +65,7 @@ Channel routing has been updated in the codebase. Buffer channels for the rename
 When scheduling content:
 - Sovereign Synthesis channels: warm, sovereign energy, environments/objects imagery
 - Containment Field channels: cold, clinical, surveillance imagery
-- CTA overlay for SS shorts: "@sovereign_synthesis77"
+- CTA overlay for SS shorts: "@sovereign_synthesis"
 - CTA overlay for CF shorts: "@TheContainmentField"
 
 Cross-contamination between brand aesthetics is a hard failure. If you're unsure which brand a piece belongs to, ask before posting.

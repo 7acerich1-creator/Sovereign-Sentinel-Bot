@@ -8,7 +8,6 @@
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "typecheck": "tsc --noEmit",
-    "verify-state": "ts-node scripts/verify-state.ts",
     "test:pod-contract": "ts-node scripts/test-pod-contract.ts",
     "test:full-composition": "ts-node scripts/test-full-composition.ts",
     "test:production": "ts-node scripts/test-production-run.ts"

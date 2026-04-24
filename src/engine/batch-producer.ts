@@ -36,7 +36,10 @@ import {
 import {
   getNicheCooldownSnapshot,
   recordNicheRun,
+  pickNextAesthetic,
+  type AestheticStyle,
 } from "../tools/niche-cooldown";
+import { AESTHETIC_MODIFIERS } from "./content-engine";
 import { pickUnusedAngle } from "../data/thesis-angles";
 import { withPodSession } from "../pod/session";
 import { produceVideo, splitOversizedScenes } from "../pod/runpod-client";
@@ -88,19 +91,31 @@ interface ValidatedScript {
 // ─────────────────────────────────────────────────────────────────────────────
 async function selectNichesForBrand(brand: Brand, count: number): Promise<string[]> {
   const snapshot = await getNicheCooldownSnapshot(brand);
-  const permitted = snapshot.permitted;
 
-  if (permitted.length >= count) {
-    // Shuffle permitted and take `count`
-    const shuffled = [...permitted].sort(() => Math.random() - 0.5);
-    return shuffled.slice(0, count);
+  // Session 113+ — LRU rotation. snapshot.permittedLRU is permitted niches
+  // sorted by lastRanAt ASC (never-run first, then oldest-used). This replaces
+  // the Math.random() shuffle that landed on the same depleted niche back to
+  // back and caused the S113 ScriptTooSimilarError regression.
+  if (snapshot.permittedLRU.length >= count) {
+    return snapshot.permittedLRU.slice(0, count);
   }
 
-  // Not enough fresh/relax niches — fall back to full allowlist with shuffle
-  // (the cooldown guard will still soft-warn, but won't hard-block)
+  // Not enough fresh/relax niches — fall back to full allowlist, also ordered
+  // LRU by pulling in the full entries list and sorting by lastRanAt.
+  const lruFallback = [...snapshot.entries]
+    .sort((a, b) => {
+      if (a.lastRanAt === null && b.lastRanAt === null) return a.niche.localeCompare(b.niche);
+      if (a.lastRanAt === null) return -1;
+      if (b.lastRanAt === null) return 1;
+      return a.lastRanAt.getTime() - b.lastRanAt.getTime();
+    })
+    .map((e) => e.niche);
+
+  if (lruFallback.length >= count) {
+    return lruFallback.slice(0, count);
+  }
   const allNiches = [...getAllowedNiches(brand)];
-  const shuffled = allNiches.sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, count);
+  return allNiches.slice(0, count);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -302,10 +317,18 @@ async function produceBatchOnPod(
 
         const t0 = Date.now();
 
+        // Session 113+ — pick aesthetic A/B/C via LRU, inject into every
+        // scene's image prompt. All scenes in a given video share the same
+        // aesthetic; next video rotates.
+        const aestheticStyle: AestheticStyle = await pickNextAesthetic(brand);
+        const aestheticMod = AESTHETIC_MODIFIERS[brand]?.[aestheticStyle] ?? "";
+
         // Build pod job spec — auto-split oversized TTS scenes (S91)
         const rawScenes: PodScene[] = script.segments.map((seg, idx) => ({
           index: idx,
-          image_prompt: seg.visual_direction,
+          image_prompt: brand === "sovereign_synthesis"
+            ? `${seg.visual_direction}. ${aestheticMod}NO people NO faces NO skin`
+            : `${seg.visual_direction}. ${aestheticMod}`,
           tts_text: seg.voiceover,
           duration_hint_s: seg.duration_hint || undefined,
         }));
@@ -322,6 +345,7 @@ async function produceBatchOnPod(
           hook_text: hookText,
         };
 
+        await onProgress?.(`[${i + 1}/${scripts.length}] ${label} aesthetic: ${aestheticStyle}`);
         const artifacts = await produceVideo(handle, jobSpec);
         const podMs = Date.now() - t0;
 
@@ -341,7 +365,8 @@ async function produceBatchOnPod(
           `(${Math.round((artifacts.durationS ?? 0))}s video)`,
         );
 
-        // Record niche cooldown + angle consumption
+        // Record niche cooldown + angle consumption + aesthetic style
+        // (S113+ — aesthetic logged for the 30-video A/B/C performance test)
         try {
           const { angleId } = scripts[i];
           await recordNicheRun({
@@ -349,6 +374,7 @@ async function produceBatchOnPod(
             niche,
             thesis: script.title,
             source: angleId ? `angle:${angleId}` : "batch_generic",
+            aestheticStyle,
           });
         } catch { /* non-fatal */ }
 

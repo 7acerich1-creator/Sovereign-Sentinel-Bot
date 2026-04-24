@@ -50,10 +50,111 @@ Session 46 said the bottleneck was "nothing connects attention to the funnel." T
 
 ---
 
+## 🎯 First Real Business Goal — The 30-Video A/B/C Performance Test (locked S113+, 2026-04-24)
+
+**THIS IS THE FIRST BUSINESS GOAL ON MISSION CONTROL.** Not an infrastructure milestone, not a build task — an outcome the system is trying to produce. Every session must keep this visible. If this section has not moved in 10+ sessions, something is wrong with delivery, not with the plan.
+
+### Why this goal exists
+
+Before S113, the image pipeline was `"photorealistic cinematic"` on every prompt and niche selection was `Math.random()`. Two failure modes compounded:
+1. **Random niche selection** kept landing on depleted wells — the S113 TCF failure was `cosine=0.9076` against a previously-shipped `identity-hijacking` script, and the retry loop retried with the same niche/source/prompt so it kept producing the same output.
+2. **12 shared visual prefixes** (6 SS + 5–6 TCF) collapsed ~15 topical niches per brand into a handful of visually identical renders. Topically different videos looked the same.
+
+The fix is dual-rotation: niche rotates LRU round-robin (same logic both brands), AND an orthogonal aesthetic-style axis rotates A/B/C. Every shipped video logs both into Pinecone metadata so the next 30 runs produce real A/B/C performance data.
+
+### The goal statement
+
+**Ship 30 videos across Sovereign Synthesis and The Containment Field with rotating aesthetic + rotating niche, then pull YouTube analytics and determine which aesthetic × brand combination drives the highest CTR and 30-second retention.** First outcome-based decision data the system will ever produce.
+
+### The three aesthetic styles (verbatim modifiers — do not edit without updating the NORTH_STAR)
+
+These are appended between the niche prefix and the brand suffix in `buildImagePrompt`. Full six prompts (3 aesthetics × 2 brands) are in `src/engine/content-engine.ts` as the `AESTHETIC_MODIFIERS` constant.
+
+**A — Macro mechanics + chiaroscuro**
+- SS flavor: *"Extreme macro photograph, 85mm lens at f/2.8, single warm tungsten light from upper right at 45 degrees carving deep hard-edged shadows, amber rim light against pure black void background, micro-scratches and patina visible, editorial magazine quality, Wallpaper* magazine aesthetic, shallow depth of field."*
+- TCF flavor: *"Extreme macro photograph, 85mm lens at f/2.8, single fluorescent cyan light from above carving clinical shadows, forensic documentary aesthetic, institutional matte-black surface, dust and fingerprint texture, pure black void background, cold documentary quality."*
+
+**B — Sacred geometry + kinetic abstract**
+- SS flavor: *"Concentric mandala composed of flowing liquid gold filaments on pure black void, flower-of-life geometry radiating from a glowing tungsten-white core, amber light tracing radial spokes, warm sovereign gold and deep midnight blue palette, particle streams through the geometric lattice, high-frequency alchemical aesthetic, no real-world subject."*
+- TCF flavor: *"Fragmenting geometric grid pattern in cold cyan and teal on void black, sacred mandala breaking apart into corrupt data pixels, glitch sigil with scan-line distortion, surveillance crosshair overlay, fractal decay from center outward, threat-detection aesthetic, no real-world subject."*
+
+**C — Oil-painted cinematic**
+- SS flavor: *"Oil painting in the style of Rembrandt van Rijn, golden hour lighting, visible brushstroke texture, chiaroscuro lighting, deep Golden Age Dutch masters palette of burnt sienna, gold ochre, ivory, and midnight blue, gallery-quality canvas."*
+- TCF flavor: *"Oil painting in the style of Francis Bacon meets Edward Hopper, single bare hanging bulb cold light, visible brushstroke texture with expressionist distortion, desaturated palette of cold gray, fluorescent blue-white, bone, and institutional green, gallery-quality canvas with psychological unease."*
+
+### Architecture — exact implementation plan (shipped S113+)
+
+```
+Image prompt assembly (NEW):
+    [NICHE PREFIX]           +  [AESTHETIC MODIFIER]     +  [BRAND SUFFIX]
+     what is in the image        how it's rendered           hard rules
+     ~15 options (existing)      3 options A/B/C (NEW)       fixed (existing)
+```
+
+**File changes:**
+
+1. **`src/engine/content-engine.ts`**
+   - Add `AESTHETIC_MODIFIERS: Record<Brand, Record<'A'|'B'|'C', string>>` constant — the 6 prompts above, stripped to the "style modifier" substring (no subject, no hard rules).
+   - Add `pickNextAesthetic(brand: Brand): Promise<'A'|'B'|'C'>` — queries Pinecone metadata for last 3 shipped `aesthetic_style` values, returns the one NOT in that set (LRU). Falls back to 'A' if Pinecone is unavailable.
+   - Modify `buildImagePrompt(niche, brand)` to call `pickNextAesthetic` and splice the modifier into the returned prompt string.
+   - Add `pickNextNiche(brand: Brand, availableNiches: string[]): Promise<string>` — queries Pinecone metadata for last N shipped `niche` values per brand, returns the niche from `availableNiches` that was used longest ago (or never). Falls back to `availableNiches[0]` if Pinecone is unavailable.
+
+2. **`src/tools/script-uniqueness-guard.ts`**
+   - Add `getRecentShippedMetadata(brand: Brand, limit: number): Promise<Array<{niche, aesthetic_style, timestamp}>>` — queries Pinecone with a dummy vector, topK=limit, namespace `scripts-{brand}`, sorts matches by `metadata.timestamp` descending client-side.
+   - Extend `persistShippedScript` params to accept `aesthetic_style` and include it in the Pinecone metadata on upsert.
+
+3. **`src/engine/faceless-factory.ts`** (lines ~1300–1330)
+   - Before `generateScript`, call `pickNextNiche(brand, getBrandNiches(brand))` to override any passed-in `niche` argument.
+   - After successful ship, call `persistShippedScript` with the `aesthetic_style` used for that job.
+   - The retry loop stays 3 attempts, but each retry now calls `pickNextNiche` again so it gets the next niche in rotation (not the same one).
+
+4. **`src/engine/batch-producer.ts`** (lines ~140–170)
+   - Same pattern. Replace whatever drives niche selection with `pickNextNiche`. Same LRU behavior.
+
+5. **`pod/pipelines/compose.py`** (lines 1182–1197)
+   - Thumbnail drawtext bug fix. Current: single-line drawtext, no wrap, anything over ~18 chars clips.
+   - Fix: split `_thumb_hook` into 1-3 lines by word boundary targeting ≤14 chars per line, then stack drawtext filters with `y=(h-text_h)/2 - (line_offset)` computed from line count.
+   - Hard-cap `_thumb_hook` to 45 chars total (first 3 lines of ~14 chars each).
+
+**Data layer — no migration required.**
+Pinecone already stores `niche` and `timestamp` in shipped-script metadata. We add `aesthetic_style` as a 4th field. Older scripts without `aesthetic_style` show up as `undefined` in the LRU lookup and are treated as "never used" — rotation still works, just self-heals after the first 3 new shipments.
+
+### Success criteria
+
+1. **Ship ≥30 videos** across both brands after S113+ deploy.
+2. **Aesthetic distribution balanced** — each of A/B/C appears 8–12 times across all shipped videos (balanced within ±2 per brand).
+3. **`aesthetic_style` visible on Mission Control** — a tile that reads Pinecone metadata (or a new `pipeline_runs` Supabase table if MC can't reach Pinecone) and surfaces the 3×2 grid (3 aesthetics × 2 brands) with per-cell: count, avg CTR, avg 30s retention, avg watch time.
+4. **Winning combination identified** and written back to the section below as a results note. Next cycle weights production toward the winner by 2×.
+
+### Mission Control integration
+
+**Required before the 30-video goal can conclude:** a new KPI tile named "Aesthetic Performance" on the MC dashboard. Data source: Pinecone `scripts-sovereign_synthesis` + `scripts-containment_field` namespaces, read via a Vercel serverless function that queries Pinecone REST (no direct browser access — API key stays server-side). Joined against YouTube Data API v3 `videoId` lookups for CTR + retention.
+
+This is the first KPI tile on MC that isn't infra health — it's actual outcome data. Every subsequent business goal on MC should follow the same pattern: the pipeline logs the data, the dashboard surfaces it, the dashboard drives the next session's decisions.
+
+### Results log (update as the 30 videos ship)
+
+| Date | Videos shipped | SS A | SS B | SS C | TCF A | TCF B | TCF C | Best combo (CTR) | Best combo (ret) |
+|------|----------------|------|------|------|-------|-------|-------|------------------|------------------|
+| 2026-04-24 (S113+ ship) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | — | — |
+
+Fill this table as videos ship. At row 30+, rewrite the "winning aesthetic" conclusion into this section and the NORTH_STAR Current Highest-Leverage Action gets updated to "produce against winner + test the next orthogonal axis."
+
+### Rollback plan
+
+If the dual-rotation introduces a regression (e.g. an aesthetic modifier breaks image generation on Flux), the rollback is surgical:
+1. Revert `buildImagePrompt` to pre-rotation (drop the `pickNextAesthetic` call, keep old prompt assembly).
+2. Keep `pickNextNiche` — the niche rotation is independent and lower-risk.
+3. Pinecone metadata writes with `aesthetic_style` continue (harmless, future-compatible).
+
+No schema migrations to undo. No orphaned tables. Revert commit = clean rollback.
+
+---
+
 ## The Current Highest-Leverage Action (UPDATE EVERY SESSION)
 *If this field says the same thing two sessions in a row, the last session didn't earn its keep.*
 
-**Action:** **Measure conversion. The funnel is live, the on-ramp is live, the lead capture trigger is fixed. Wait 7 days (through 2026-05-01), then re-measure: `SELECT COUNT(*) FROM initiates WHERE created_at >= '2026-04-24'`. If >0 leads, optimize the nurture sequence. If 0 leads, the problem is video retention (not routing) — pull per-video retention curves and diagnose.**
+**Action:** **Ship videos. The dual-rotation pipeline is live. Every day the producer runs and logs another A/B/C × niche data point. At 30 videos, measure. Between now and then: monitor for pipeline failures (the `ScriptTooSimilarError` regression that burned S113 must not return) and verify the MC aesthetic-performance tile surfaces the data correctly.**
 
 **Secondary:** Wire Yuki for automated pinned comments on YouTube videos (immediate reach lift). Wire Anita for email reply monitoring (5-min response to lead replies). Both are approved and scoped.
 

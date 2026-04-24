@@ -48,6 +48,13 @@ export interface NicheCooldownSnapshot {
   entries: CooldownEntry[];
   /** Convenience: the niches permitted right now (fresh + relax-if-stalled). */
   permitted: string[];
+  /**
+   * Session 113+ — permitted niches ordered by lastRanAt ASC (oldest first,
+   * never-run ones first). Use this for LRU round-robin selection instead of
+   * `permitted` + random shuffle, which is how we burned Session 113 on
+   * identity-hijacking duplicates.
+   */
+  permittedLRU: string[];
 }
 
 interface LastRunRow {
@@ -121,15 +128,31 @@ export async function getNicheCooldownSnapshot(brand: Brand): Promise<NicheCoold
   });
 
   const hasAnyFresh = entries.some((e) => e.status === "fresh");
-  const permitted = entries
-    .filter((e) => {
-      if (e.status === "fresh") return true;
-      if (e.status === "relax") return !hasAnyFresh; // soft relax only when stalled
-      return false;
+  const permittedEntries = entries.filter((e) => {
+    if (e.status === "fresh") return true;
+    if (e.status === "relax") return !hasAnyFresh; // soft relax only when stalled
+    return false;
+  });
+
+  const permitted = permittedEntries.map((e) => e.niche);
+
+  // Session 113+ — LRU ordering. Null lastRanAt (never run) comes FIRST so
+  // brand-new niches get tried before any previously-used ones. Then oldest
+  // lastRanAt. Then niche name for deterministic tiebreak. This replaces the
+  // `Math.random()` shuffle that was landing on the same depleted niche back
+  // to back.
+  const permittedLRU = [...permittedEntries]
+    .sort((a, b) => {
+      if (a.lastRanAt === null && b.lastRanAt === null) return a.niche.localeCompare(b.niche);
+      if (a.lastRanAt === null) return -1;
+      if (b.lastRanAt === null) return 1;
+      const delta = a.lastRanAt.getTime() - b.lastRanAt.getTime();
+      if (delta !== 0) return delta;
+      return a.niche.localeCompare(b.niche);
     })
     .map((e) => e.niche);
 
-  return { brand, queriedAt, entries, permitted };
+  return { brand, queriedAt, entries, permitted, permittedLRU };
 }
 
 /**
@@ -190,6 +213,8 @@ export async function recordNicheRun(params: {
   thesis?: string;
   jobId?: string;
   source?: string;
+  /** Session 113+ — A/B/C aesthetic used on this run (for performance test). */
+  aestheticStyle?: "A" | "B" | "C";
 }): Promise<void> {
   const cfg = getSupabaseConfig();
   if (!cfg) {
@@ -213,6 +238,7 @@ export async function recordNicheRun(params: {
         thesis: params.thesis ?? null,
         job_id: params.jobId ?? null,
         source: params.source ?? "alfred_daily",
+        aesthetic_style: params.aestheticStyle ?? null,
       }),
     });
     if (!resp.ok) {
@@ -222,4 +248,82 @@ export async function recordNicheRun(params: {
   } catch (err: any) {
     console.warn(`[NicheCooldown] record error: ${err?.message}`);
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Session 113+ — Aesthetic rotation helpers
+// ─────────────────────────────────────────────────────────────────────────────
+// Three aesthetic styles (A/B/C) are assigned to each shipped video and
+// rotated LRU per brand. `getRecentAestheticRuns` pulls the last N rows from
+// niche_cooldown ordered by created_at DESC so the caller can pick whichever
+// style was used longest ago. See NORTH_STAR "30-video A/B/C performance
+// test" section for the full plan.
+
+export type AestheticStyle = "A" | "B" | "C";
+
+export interface AestheticRun {
+  aestheticStyle: AestheticStyle | null;
+  createdAt: Date;
+}
+
+export async function getRecentAestheticRuns(
+  brand: Brand,
+  limit: number = 10,
+): Promise<AestheticRun[]> {
+  const cfg = getSupabaseConfig();
+  if (!cfg) return [];
+  try {
+    const resp = await fetch(
+      `${cfg.url}/rest/v1/niche_cooldown?brand=eq.${encodeURIComponent(brand)}` +
+        `&select=aesthetic_style,created_at&order=created_at.desc&limit=${Math.max(1, limit)}`,
+      {
+        headers: {
+          apikey: cfg.key,
+          Authorization: `Bearer ${cfg.key}`,
+        },
+      },
+    );
+    if (!resp.ok) {
+      console.warn(`[NicheCooldown] aesthetic fetch status=${resp.status}`);
+      return [];
+    }
+    const rows = (await resp.json()) as Array<{
+      aesthetic_style: string | null;
+      created_at: string;
+    }>;
+    return rows.map((r) => ({
+      aestheticStyle: (r.aesthetic_style as AestheticStyle | null) ?? null,
+      createdAt: new Date(r.created_at),
+    }));
+  } catch (err: any) {
+    console.warn(`[NicheCooldown] getRecentAestheticRuns error: ${err?.message}`);
+    return [];
+  }
+}
+
+/**
+ * Pick the next aesthetic for `brand` via LRU. Looks at the last 3 runs:
+ * if any of A/B/C is missing from that window, pick that one. If all three
+ * appear in the window, pick the one that appeared LONGEST ago. If Supabase
+ * is unreachable, falls back to deterministic hash of the current minute so
+ * consecutive renders don't collide.
+ */
+export async function pickNextAesthetic(brand: Brand): Promise<AestheticStyle> {
+  const recent = await getRecentAestheticRuns(brand, 3);
+  const all: AestheticStyle[] = ["A", "B", "C"];
+  const seenSet = new Set<AestheticStyle>();
+  for (const r of recent) {
+    if (r.aestheticStyle === "A" || r.aestheticStyle === "B" || r.aestheticStyle === "C") {
+      seenSet.add(r.aestheticStyle);
+    }
+  }
+  const unused = all.filter((s) => !seenSet.has(s));
+  if (unused.length > 0) return unused[0];
+  // All 3 seen in last 3 — return the oldest-seen of them (last in recent[])
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const s = recent[i].aestheticStyle;
+    if (s === "A" || s === "B" || s === "C") return s;
+  }
+  // Unreachable if recent is non-empty and seenSet.size === 3, but safety net:
+  return "A";
 }

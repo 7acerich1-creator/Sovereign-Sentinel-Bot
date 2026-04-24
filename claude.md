@@ -2,11 +2,10 @@
 
 ## ⚡ Session Start Protocol (READ FIRST — NON-NEGOTIABLE)
 0. **Read `NORTH_STAR.md` at repo root FIRST — before anything.** It holds the $1.2M target, the 5 input metrics that actually lead to revenue, and the current highest-leverage action. If the "Current Highest-Leverage Action" field has not been updated recently, surface that immediately. No build task starts without answering: "does this move one of the 5 metrics in <7 days?" See `feedback_revenue_first_pushback.md` in memory for the pushback protocol.
-1. **Read `LIVE_STATE.md` at repo root SECOND.** It is auto-generated from `src/voice/tts.ts` + `src/index.ts` and is the terminal authority on TTS routing, LLM teams, env vars, git SHA.
-2. **If `LIVE_STATE.md` is missing or older than 24h**, run `npm run verify-state` to regenerate it before touching anything.
-3. **Read `SOVEREIGN-SENTINEL-BOT_MASTER-REFERENCE.md` for invariants + history.** If its runtime claims contradict `LIVE_STATE.md`, **`LIVE_STATE.md` wins** — flag the contradiction and patch the master ref before proceeding.
-4. **When the Architect shares a URL, FETCH IT.** `yt-dlp` + `ffmpeg` in the bash sandbox for videos, `WebFetch` for pages, Chrome tools for social. Never cite capability limits without trying every tool first.
-5. **Never push to `main` while the pipeline is running.** Railway auto-deploys and kills the container.
+1. **Read `SOVEREIGN-SENTINEL-BOT_MASTER-REFERENCE.md` for invariants + history.** Source of truth for runtime claims is THE CODE — `src/voice/tts.ts`, `src/index.ts`, `package.json`, live Railway env. If the master reference contradicts the code, the code wins; patch the master reference.
+2. **Runtime state is read on-demand, not cached.** Do NOT rely on a previous session's claim about what's set in env or what the TTS chain looks like. Grep `src/index.ts` for `AGENT_LLM_TEAMS` or `pipelineLLM`; check Railway env directly. (The old `LIVE_STATE.md` was retired 2026-04-24 because stale cached state was actively misleading diagnoses — see Session 113+ close notes.)
+3. **When the Architect shares a URL, FETCH IT.** `yt-dlp` + `ffmpeg` in the bash sandbox for videos, `WebFetch` for pages, Chrome tools for social. Never cite capability limits without trying every tool first.
+4. **Never push to `main` while the pipeline is running.** Railway auto-deploys and kills the container.
 
 ## Core Directives
 - **Identity:** System Pilot / Second Mind for Sovereign Synthesis.

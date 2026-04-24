@@ -43,6 +43,10 @@ import {
 import { withPodSession } from "../pod/session";
 import { produceVideo, splitOversizedScenes } from "../pod/runpod-client";
 import type { JobSpec, Scene as PodScene, ArtifactUrls } from "../pod/types";
+// Session 113+ — dual-rotation: niche LRU + aesthetic A/B/C for the 30-video
+// performance test. See NORTH_STAR "30-video A/B/C performance test" section.
+import { pickNextAesthetic, recordNicheRun, type AestheticStyle } from "../tools/niche-cooldown";
+import { AESTHETIC_MODIFIERS } from "./content-engine";
 
 export const FACELESS_DIR = "/tmp/faceless_factory";
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -499,7 +503,7 @@ Generate as JSON:
 {
   "title": "CTR-optimized title (max 60 chars). FORMULA: [Bold Claim or Revelation] + [Specificity Anchor]. Specificity = numbers, time frames, or named mechanisms (e.g. 'In 48 Hours', 'The 3 Laws', 'Quantum Field Reset'). Good: 'Delete Your Old Self In 48 Hours — The Quantum Reset Protocol', 'Nobody Told You This About Your Subconscious Programming', 'The 3 Frequency Shifts That Collapse Old Timelines'. Bad: 'Wake Up Call', 'Beyond Right', 'Stuck In The Loop' (too vague, no curiosity gap). MUST be different from ALL previously used titles.${recentTitles.length > 0 ? " BANNED (already used): " + recentTitles.slice(0, 5).map(t => `'${t}'`).join(", ") : ""}",
   "hook": "${blueprint.hook}",
-  "thumbnail_text": "A 3-6 word MEMETIC TRIGGER in ALL CAPS. This is a protest sign, a wall graffiti tag, a punch to the chest. It must be a COMPLETE STANDALONE STATEMENT — a stranger reads it on a wall and feels something WITHOUT any other context. Write it as a declaration, a command, or a revelation. Examples by category — REVELATIONS: 'THEY DESIGNED YOUR CAGE', 'YOUR MEMORIES ARE INSTALLED', 'REALITY HAS A OWNER'. COMMANDS: 'DELETE YOUR OLD SELF', 'STOP BUILDING THEIR DREAM', 'BURN THE INSTRUCTION MANUAL'. CONFRONTATIONS: 'NOBODY IS COMING FOR YOU', 'YOUR COMFORT IS THE TRAP', 'YOU WERE NEVER FREE'. Pick the category that hits hardest for THIS topic. Every word must carry weight. The phrase must be FINISHED — if someone reads it, they understand the full thought instantly.",
+  "thumbnail_text": "A 3-5 word MEMETIC TRIGGER in ALL CAPS. HARD CONSTRAINTS: 3 to 5 words, max 35 characters total, COMPLETE STANDALONE STATEMENT (not a clause, not a setup — a finished thought). This lands on a video thumbnail that auto-scales font size to fit: 3 words = bigger text, 5 words = smaller. Think protest sign, wall graffiti, a punch to the chest. Examples — REVELATIONS: 'THEY DESIGNED YOUR CAGE', 'YOUR MEMORIES ARE INSTALLED', 'REALITY HAS AN OWNER'. COMMANDS: 'DELETE YOUR OLD SELF', 'BURN THE MANUAL'. CONFRONTATIONS: 'YOU WERE NEVER FREE', 'YOUR COMFORT IS THE TRAP'. Every word carries weight. NO ellipsis, NO mid-clause fragments, NO 'the', 'a', or 'an' as the first word. If a stranger reads it cold, they understand the full thought instantly.",
   "thumbnail_visual": "A MOVIE POSTER frame, not a movie still. HIGH CONTRAST, 50% of the frame dark/empty for text. Pick ONE: (A) EXTREME face close-up — eyes filling the frame, single hard light source, rest pitch black, visible skin texture, intensity in the gaze. (B) SINGLE powerful object against darkness — a shattered mirror, a burning letter, a key in a lock, a door cracked open with blinding white light behind it — rim-lit or glowing, everything else black. (C) Abstract energy — golden particles swirling in void, electric arcs, volumetric god-rays cutting through pure darkness. Frame it like a Fincher title card or a Saul Bass poster.",
   "segments": [
     {
@@ -745,7 +749,7 @@ Generate as JSON:
 {
   "title": "CTR-optimized title (max 60 chars). FORMULA: [Bold Claim] + [Specificity — numbers, time frames, or named mechanisms]. Good: 'The 3 Frequency Shifts That Change Everything'. Bad: 'Wake Up Call' (vague). MUST be different from all previously used titles.${recentTitles.length > 0 ? " BANNED: " + recentTitles.slice(0, 5).map(t => `'${t}'`).join(", ") : ""}",
   "hook": "Opening line that stops the scroll — a STATEMENT, not a question",
-  "thumbnail_text": "A 6-10 word HOOK in ALL CAPS. Write the line that makes someone STOP scrolling — a complete standalone statement a stranger reads and FEELS something with zero context. Can span 2 lines on a thumbnail. DECLARATIONS: 'YOU ARE LOYAL TO THE WRONG THINGS AND IT SHOWS', 'THEY DESIGNED YOUR CAGE AND YOU DECORATED IT'. COMMANDS: 'DELETE YOUR OLD SELF BEFORE IT DELETES YOU', 'BURN THE INSTRUCTION MANUAL THEY GAVE YOU'. REVELATIONS: 'NOBODY IS COMING FOR YOU AND THAT IS THE GIFT', 'YOUR MEMORIES ARE INSTALLED NOT REMEMBERED'. The thought is COMPLETE — no trailing ellipsis, no cliffhangers.",
+  "thumbnail_text": "A 3-5 word HOOK in ALL CAPS. HARD CONSTRAINTS: 3 to 5 words, max 35 characters total, COMPLETE STANDALONE STATEMENT. This lands on a video thumbnail that auto-scales font size: 3 words = biggest text, 5 words = smaller. Write the line that makes someone STOP scrolling — a stranger reads it cold and FEELS something with zero context. DECLARATIONS: 'THEY DECORATED YOUR CAGE', 'YOUR LOYALTY IS WRONG'. COMMANDS: 'DELETE YOUR OLD SELF', 'BURN THE MANUAL'. REVELATIONS: 'MEMORIES ARE INSTALLED', 'NOBODY IS COMING'. NO ellipsis, NO cliffhangers, NO setup-only fragments. Every word load-bearing.",
   "thumbnail_visual": "A MOVIE POSTER frame. HIGH CONTRAST, 50% dark/empty for text. Pick ONE: (A) EXTREME face close-up — eyes filling the frame, single hard light, rest pitch black. (B) SINGLE powerful object against darkness — shattered mirror, burning letter, door cracked open with blinding light behind it. (C) Abstract energy — golden particles in void, electric arcs, god-rays cutting through darkness. Frame it like a Fincher title card.",
   "segments": [
     { "voiceover": "2-4 spoken sentences (30-50 words)", "visual_direction": "REAL specific scene: who, what room, what props, what motivated practical light, what physical action", "duration_hint": ${durationHintExample} }
@@ -898,7 +902,7 @@ Return ONLY a JSON array of 4 objects (no markdown, no explanation):
       { "voiceover": "2-4 spoken sentences (30-50 words)", "visual_direction": "9:16 portrait scene description", "duration_hint": 10 }
     ],
     "cta": "Organic closing line (1 sentence, sovereign tone)",
-    "thumbnail_text": "6-10 word ALL CAPS hook — complete standalone statement",
+    "thumbnail_text": "3-5 word ALL CAPS hook, max 35 chars, complete standalone statement. No ellipsis, no cliffhangers. Examples: 'DELETE YOUR OLD SELF', 'THEY DESIGNED YOUR CAGE', 'BURN THE MANUAL'",
     "thumbnail_visual": "Movie poster 9:16 composition"
   }
 ]
@@ -1342,12 +1346,23 @@ export async function produceFacelessVideo(
   // ──────────────────────────────────────────────────────────────────────────
   console.log(`🚀 [FacelessFactory] Delegating compute to pod (XTTS + FLUX + compose + R2)...`);
 
+  // Session 113+ — pick aesthetic A/B/C via LRU. All scenes in this video
+  // share the same aesthetic. The next video this brand produces will rotate
+  // to a different one automatically. This is the "30-video A/B/C
+  // performance test" machinery — every render logs its aesthetic_style into
+  // niche_cooldown so we can join against YouTube CTR/retention later.
+  const aestheticStyle: AestheticStyle = await pickNextAesthetic(brand);
+  const aestheticMod = AESTHETIC_MODIFIERS[brand]?.[aestheticStyle] ?? "";
+  console.log(`🎨 [FacelessFactory] Aesthetic this run: ${aestheticStyle} (${aestheticMod.slice(0, 60)}...)`);
+
   // Map script segments to pod scene format, auto-splitting any >4000 char scenes (S91)
+  // Each scene's image prompt carries the aesthetic modifier so all images in
+  // this video share a coherent visual treatment.
   const rawScenes: PodScene[] = script.segments.map((seg, i) => ({
     index: i,
     image_prompt: brand === "sovereign_synthesis"
-      ? `${seg.visual_direction}. NO people NO faces NO skin`
-      : seg.visual_direction,
+      ? `${seg.visual_direction}. ${aestheticMod}NO people NO faces NO skin`
+      : `${seg.visual_direction}. ${aestheticMod}`,
     tts_text: seg.voiceover,
     duration_hint_s: seg.duration_hint || undefined,
   }));
@@ -1444,10 +1459,27 @@ export async function produceFacelessVideo(
           orientation,
           target_duration: targetDuration,
           pod_job_id: artifacts.jobId,
+          aesthetic_style: aestheticStyle,
         },
       });
     } catch (persistErr: any) {
       console.warn(`[FacelessFactory] persistShippedScript non-fatal: ${persistErr?.message}`);
+    }
+
+    // Session 113+ — record niche + aesthetic in niche_cooldown. This is the
+    // data that drives future LRU rotation AND the 30-video A/B/C performance
+    // measurement (joined against YouTube analytics by Mission Control).
+    try {
+      await recordNicheRun({
+        brand,
+        niche,
+        thesis: script.title,
+        jobId,
+        source: "faceless_factory",
+        aestheticStyle,
+      });
+    } catch (cooldownErr: any) {
+      console.warn(`[FacelessFactory] recordNicheRun non-fatal: ${cooldownErr?.message}`);
     }
   }
 

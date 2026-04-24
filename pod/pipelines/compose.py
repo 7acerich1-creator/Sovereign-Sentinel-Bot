@@ -28,6 +28,7 @@ from typing import Optional
 
 import structlog
 import tempfile
+from PIL import Image, ImageDraw, ImageFont
 
 
 class _SilentAudioError(Exception):
@@ -106,6 +107,229 @@ TYPEWRITER_STYLES = {
         "bold": 1,
     },
 }
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Thumbnail text renderer — Session 113+ rebuild
+# ─────────────────────────────────────────────────────────────────────────────
+# Replaces the old ffmpeg drawtext chain. That approach used fixed char-count
+# limits which lied because Bebas Neue is variable-width: "WWWWWW" renders
+# much wider than "iiiiii" at the same size. 15 sessions of thumbnail bugs
+# traced back to that single flaw.
+#
+# This renderer:
+#   - Measures real pixel widths via Pillow's font.getbbox()
+#   - Wraps at word boundaries only — NEVER mid-word
+#   - Binary-searches the largest fontsize that fits all lines within safe area
+#   - Scales font inversely with word count: 3 words -> ~180px, 7 words -> ~85px
+#   - Sentence-boundary truncation fallback if text somehow won't fit even at
+#     min font (still never mid-word truncation)
+#   - Handles both horizontal (1280x720) and vertical (1080x1920) thumbnails
+
+_THUMB_MARGIN = 40
+_THUMB_FONT_MAX = 200
+_THUMB_FONT_MIN = 52
+_THUMB_LINE_SPACING_FACTOR = 1.05  # 5% gap between stacked lines
+_THUMB_STROKE_WIDTH = 6
+_THUMB_MAX_LINES = 3
+
+
+def _wrap_into_n_lines(words, n_lines):
+    """Wrap words into exactly n_lines balanced segments at word boundaries.
+    Returns None if impossible. Picks the split that minimizes the longest
+    line's char count — keeps the rendered block visually centered.
+    """
+    if n_lines <= 0 or not words:
+        return None
+    n_words = len(words)
+    if n_lines >= n_words:
+        return list(words)
+
+    def _split_positions(remaining, start_idx):
+        if remaining == 0:
+            return [[]]
+        out = []
+        for end in range(start_idx + 1, n_words - remaining + 1):
+            for rest in _split_positions(remaining - 1, end):
+                out.append([end] + rest)
+        return out
+
+    best = None
+    best_max = 10 ** 9
+    for splits in _split_positions(n_lines - 1, 0):
+        segments = []
+        prev = 0
+        for s in splits:
+            segments.append(" ".join(words[prev:s]))
+            prev = s
+        segments.append(" ".join(words[prev:]))
+        max_chars = max(len(seg) for seg in segments)
+        if max_chars < best_max:
+            best_max = max_chars
+            best = segments
+    return best
+
+
+def _measure_line_width(line, font_path, size):
+    font = ImageFont.truetype(font_path, size)
+    bbox = font.getbbox(line)
+    return bbox[2] - bbox[0]
+
+
+def _find_best_fit(text, font_path, canvas_w, canvas_h):
+    """Return (lines, fontsize) — the wrap + size combination that gives the
+    largest readable fontsize while every line fits within the safe area.
+    Word-boundary only. Never mid-word.
+    """
+    safe_w = canvas_w - 2 * _THUMB_MARGIN
+    safe_h = canvas_h - 2 * _THUMB_MARGIN
+    words = text.split()
+    if not words:
+        return [], _THUMB_FONT_MIN
+
+    best = None
+    for target_lines in range(1, min(_THUMB_MAX_LINES, len(words)) + 1):
+        lines = _wrap_into_n_lines(words, target_lines)
+        if not lines:
+            continue
+        lo, hi = _THUMB_FONT_MIN, _THUMB_FONT_MAX
+        best_size_for_wrap = 0
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            max_line_w = max(_measure_line_width(ln, font_path, mid) for ln in lines)
+            extra_gap = int(mid * (_THUMB_LINE_SPACING_FACTOR - 1))
+            block_h = len(lines) * mid + max(0, len(lines) - 1) * extra_gap
+            if max_line_w <= safe_w and block_h <= safe_h:
+                best_size_for_wrap = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        if best_size_for_wrap == 0:
+            continue
+        if best is None or best_size_for_wrap > best[1]:
+            best = (lines, best_size_for_wrap)
+
+    if best is not None:
+        return best
+
+    # Fallback: text doesn't fit at MIN font in any wrap. Truncate at the
+    # first sentence-ending punctuation, NEVER mid-word.
+    sentence_end = re.compile(r"[.!?]")
+    m = sentence_end.search(text)
+    if m and m.end() < len(text):
+        truncated = text[: m.end()].strip()
+        log.warning(
+            "compose_thumbnail_truncated_at_sentence",
+            original_len=len(text),
+            truncated_len=len(truncated),
+        )
+        return _find_best_fit(truncated, font_path, canvas_w, canvas_h)
+
+    # Last resort: trim trailing words one at a time until it fits at min font.
+    trimmed = list(words)
+    while len(trimmed) > 1:
+        trimmed.pop()
+        lines = _wrap_into_n_lines(trimmed, min(_THUMB_MAX_LINES, len(trimmed)))
+        if not lines:
+            continue
+        max_line_w = max(_measure_line_width(ln, font_path, _THUMB_FONT_MIN) for ln in lines)
+        extra_gap = int(_THUMB_FONT_MIN * (_THUMB_LINE_SPACING_FACTOR - 1))
+        block_h = len(lines) * _THUMB_FONT_MIN + max(0, len(lines) - 1) * extra_gap
+        if max_line_w <= canvas_w - 2 * _THUMB_MARGIN and block_h <= canvas_h - 2 * _THUMB_MARGIN:
+            log.warning(
+                "compose_thumbnail_truncated_by_words",
+                original_word_count=len(words),
+                kept_word_count=len(trimmed),
+            )
+            return (lines, _THUMB_FONT_MIN)
+
+    return ([words[0]], _THUMB_FONT_MIN)
+
+
+def render_thumbnail_with_text(
+    src_image_path,
+    text,
+    output_path,
+    canvas_w,
+    canvas_h,
+    font_path=None,
+):
+    """Render a thumbnail: scale + vignette the source image, then overlay
+    `text` centered with dynamic font sizing. Returns dict with rendered
+    lines and fontsize.
+    """
+    if font_path is None:
+        font_path = FONT_BEBAS
+
+    vignette_path = output_path + ".bg.jpg"
+    try:
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", src_image_path,
+                "-vf", f"scale={canvas_w}:{canvas_h}:flags=lanczos,vignette=PI/3",
+                "-q:v", "2",
+                vignette_path,
+            ],
+            capture_output=True, text=True, timeout=30, check=True,
+        )
+    except Exception as exc:
+        log.warning("compose_thumbnail_vignette_failed", error=str(exc)[:300])
+        img = Image.open(src_image_path).convert("RGB")
+        img = img.resize((canvas_w, canvas_h), Image.LANCZOS)
+        img.save(vignette_path, "JPEG", quality=92)
+
+    img = Image.open(vignette_path).convert("RGB")
+    draw = ImageDraw.Draw(img)
+
+    clean_text = (text or "").strip()
+    if not clean_text:
+        img.save(output_path, "JPEG", quality=95)
+        try:
+            os.remove(vignette_path)
+        except OSError:
+            pass
+        return {"lines": [], "fontsize": 0}
+
+    clean_text = clean_text.upper()
+    lines, fontsize = _find_best_fit(clean_text, font_path, canvas_w, canvas_h)
+    if not lines:
+        img.save(output_path, "JPEG", quality=95)
+        try:
+            os.remove(vignette_path)
+        except OSError:
+            pass
+        return {"lines": [], "fontsize": 0}
+
+    font = ImageFont.truetype(font_path, fontsize)
+    line_spacing = int(fontsize * _THUMB_LINE_SPACING_FACTOR)
+    extra_gap = line_spacing - fontsize
+    block_h = len(lines) * fontsize + max(0, len(lines) - 1) * extra_gap
+    start_y = (canvas_h - block_h) // 2
+
+    for i, line in enumerate(lines):
+        bbox = font.getbbox(line)
+        line_w = bbox[2] - bbox[0]
+        x = (canvas_w - line_w) // 2
+        y = start_y + i * line_spacing
+        draw.text(
+            (x, y),
+            line,
+            fill="white",
+            font=font,
+            stroke_width=_THUMB_STROKE_WIDTH,
+            stroke_fill="black",
+        )
+
+    img.save(output_path, "JPEG", quality=95)
+    try:
+        os.remove(vignette_path)
+    except OSError:
+        pass
+
+    return {"lines": lines, "fontsize": fontsize}
+
 
 
 
@@ -1180,35 +1404,24 @@ def compose_video(
         _thumb_hook = " ".join(_words[:5])
 
     try:
-        # Build vf chain: scale + vignette + optional drawtext
-        _vf_parts = ["scale=1280:720:flags=lanczos", "vignette=PI/3"]
-        if _thumb_hook:
-            # Escape special chars for ffmpeg drawtext
-            _safe_hook = _thumb_hook.replace("'", "’").replace(":", "\\:")
-            _vf_parts.append(
-                f"drawtext=fontfile='{FONT_BEBAS}'"
-                f":text='{_safe_hook}'"
-                f":fontsize=120"
-                f":fontcolor=white"
-                f":borderw=5"
-                f":bordercolor=black"
-                f":x=(w-text_w)/2"
-                f":y=(h-text_h)/2"
-            )
-        _vf_chain = ",".join(_vf_parts)
-
-        subprocess.run(
-            [
-                "ffmpeg", "-y",
-                "-i", thumb_src,
-                "-vf", _vf_chain,
-                "-q:v", "2",
-                thumb_path,
-            ],
-            capture_output=True, text=True, timeout=30,
-            check=True,
+        # Session 113+ — Pillow-based thumbnail rendering.
+        # Replaces the ffmpeg drawtext chain. Real font metrics, dynamic
+        # fontsize (3 words -> ~180px, 7 words -> ~85px), word-boundary wrap,
+        # sentence-boundary truncation fallback. Never mid-word.
+        render_info = render_thumbnail_with_text(
+            src_image_path=thumb_src,
+            text=_thumb_hook,
+            output_path=thumb_path,
+            canvas_w=1280,
+            canvas_h=720,
+            font_path=FONT_BEBAS,
         )
-        log.info("compose_thumbnail_ok", hook=_thumb_hook or "(none)")
+        log.info(
+            "compose_thumbnail_ok",
+            hook=_thumb_hook or "(none)",
+            lines=len(render_info.get("lines", [])),
+            fontsize=render_info.get("fontsize", 0),
+        )
     except Exception as exc:
         log.warning("compose_thumbnail_failed", error=str(exc)[:300])
         # Fallback: copy the raw image as thumbnail
@@ -1798,23 +2011,22 @@ def compose_short(
         _thumb_hook = " ".join(_words[:5])
 
     try:
-        _vf_parts = [f"scale={SHORT_WIDTH}:{SHORT_HEIGHT}:flags=lanczos", "vignette=PI/3"]
-        if _thumb_hook:
-            _safe_hook = _thumb_hook.replace("'", "'").replace(":", "\\:")
-            _vf_parts.append(
-                f"drawtext=fontfile='{FONT_BEBAS}'"
-                f":text='{_safe_hook}'"
-                f":fontsize=140"
-                f":fontcolor=white"
-                f":borderw=6"
-                f":bordercolor=black"
-                f":x=(w-text_w)/2"
-                f":y=(h-text_h)/2"
-            )
-        _vf_chain = ",".join(_vf_parts)
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", thumb_src, "-vf", _vf_chain, "-q:v", "2", thumb_path],
-            capture_output=True, text=True, timeout=30, check=True,
+        # Session 113+ — Pillow renderer (same as long-form, vertical canvas).
+        # Vertical safe area is taller, so fontsize can go larger before
+        # height becomes the binding constraint.
+        render_info = render_thumbnail_with_text(
+            src_image_path=thumb_src,
+            text=_thumb_hook,
+            output_path=thumb_path,
+            canvas_w=SHORT_WIDTH,
+            canvas_h=SHORT_HEIGHT,
+            font_path=FONT_BEBAS,
+        )
+        log.info(
+            "compose_short_thumbnail_ok",
+            hook=_thumb_hook or "(none)",
+            lines=len(render_info.get("lines", [])),
+            fontsize=render_info.get("fontsize", 0),
         )
     except Exception as exc:
         log.warning("compose_short_thumbnail_failed", error=str(exc)[:300])

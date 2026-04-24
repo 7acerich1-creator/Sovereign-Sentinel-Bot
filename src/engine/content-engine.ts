@@ -204,13 +204,66 @@ const IMAGE_NICHE_FALLBACK: Record<Brand, string> = {
     "surveillance aesthetic, void (#0a0a0f) background, 1:1 square format, photorealistic, ",
 };
 
-/** Brand-specific SUFFIX — applied AFTER niche prefix */
+/** Brand-specific SUFFIX — applied AFTER niche prefix + aesthetic modifier */
 const BRAND_IMAGE_STYLE: Record<Brand, string> = {
   sovereign_synthesis:
-    "NO text, NO words, NO letters, NO watermarks on the image. NO people, NO human figures, NO faces, NO skin. Photorealistic cinematic quality. Dark background with warm amber/gold lighting. Sovereign, truthful, architectural energy. Environments and objects only.",
+    "NO text, NO words, NO letters, NO watermarks on the image. NO people, NO human figures, NO faces, NO skin. Sovereign, truthful, architectural energy. Environments and objects only.",
   containment_field:
-    "NO text, NO words, NO letters, NO watermarks on the image. Photorealistic cinematic quality. Dark noir atmosphere. Clinical, unsettling, revealing energy.",
+    "NO text, NO words, NO letters, NO watermarks on the image. Dark noir atmosphere. Clinical, unsettling, revealing energy.",
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Session 113+ — Aesthetic A/B/C modifiers
+// ─────────────────────────────────────────────────────────────────────────────
+// These modifiers are inserted between the niche prefix (subject) and the
+// brand suffix (hard rules). One aesthetic is picked per video via LRU
+// rotation in niche-cooldown.pickNextAesthetic(brand). All scenes in a
+// single video share the same aesthetic — the NEXT video rotates.
+//
+// Mapped 1:1 from the 6 test prompts Ace validated externally (S113+).
+// DO NOT edit without updating NORTH_STAR.md's "30-video A/B/C performance
+// test" section — these strings are the ground-truth spec.
+
+export type AestheticStyleLabel = "A" | "B" | "C";
+
+export const AESTHETIC_MODIFIERS: Record<Brand, Record<AestheticStyleLabel, string>> = {
+  sovereign_synthesis: {
+    A:
+      "Rendered as: extreme macro photograph, 85mm lens at f/2.8, single warm tungsten light from " +
+      "upper right at 45 degrees carving deep hard-edged shadows, amber rim light against pure black " +
+      "void background, micro-scratches and patina visible, editorial magazine quality, Wallpaper " +
+      "magazine aesthetic, shallow depth of field. ",
+    B:
+      "Rendered as: concentric mandala composed of flowing liquid gold filaments on pure black void, " +
+      "flower-of-life geometry radiating from a glowing tungsten-white core, amber light tracing " +
+      "radial spokes and nested circles, warm sovereign gold and deep midnight blue palette, " +
+      "particle streams flowing through the geometric lattice, high-frequency alchemical aesthetic. ",
+    C:
+      "Rendered as: oil painting in the style of Rembrandt van Rijn, golden hour lighting, visible " +
+      "brushstroke texture, chiaroscuro lighting, deep Golden Age Dutch masters palette of burnt " +
+      "sienna, gold ochre, ivory, and midnight blue, gallery-quality canvas. ",
+  },
+  containment_field: {
+    A:
+      "Rendered as: extreme macro photograph, 85mm lens at f/2.8, single fluorescent cyan light from " +
+      "above carving clinical shadows, forensic documentary aesthetic, institutional matte-black " +
+      "surface, dust and fingerprint texture, pure black void background, cold documentary quality. ",
+    B:
+      "Rendered as: fragmenting geometric grid pattern in cold cyan and teal on void black, sacred " +
+      "mandala breaking apart into corrupt data pixels, glitch sigil with scan-line distortion, " +
+      "surveillance crosshair overlay, fractal decay from center outward, threat-detection aesthetic. ",
+    C:
+      "Rendered as: oil painting in the style of Francis Bacon meets Edward Hopper, single bare " +
+      "hanging bulb cold light, visible brushstroke texture with expressionist distortion, " +
+      "desaturated palette of cold gray, fluorescent blue-white, bone, and institutional green, " +
+      "gallery-quality canvas with psychological unease. ",
+  },
+};
+
+/** Compose the aesthetic modifier for a given brand+style (helper). */
+export function aestheticModifier(brand: Brand, style: AestheticStyleLabel): string {
+  return AESTHETIC_MODIFIERS[brand]?.[style] ?? "";
+}
 
 /** DALL-E 3 aspect ratio mapping */
 const DALLE_SIZE_MAP: Record<string, string> = {

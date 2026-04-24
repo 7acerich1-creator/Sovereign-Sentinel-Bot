@@ -2334,55 +2334,23 @@ async function main() {
 
   console.log("🟡 [YTCommentWatcher] Scheduled: every 5min across both YT channels");
 
-  // ── Stasis Detection — Daily Agent Self-Check (3:30 PM CDT = 20:30 UTC) ──
-  const stasisFiredDate = { value: "" };
-  const stasisAgents = ["vector", "yuki", "alfred", "anita", "sapphire", "veritas"];
+  // ── Stasis Detection — DISABLED Session 108 ──
+  // Was dispatching stasis_self_check to ALL 6 agents daily = 6 API calls/day.
+  // Every single response was "NOMINAL" — zero actionable output.
+  // That's ~42 wasted API calls/week for nothing. KILLED.
+  // If needed again, re-enable with `enabled: true` below.
+  // const stasisFiredDate = { value: "" };
+  // const stasisAgents = ["vector", "yuki", "alfred", "anita", "sapphire", "veritas"];
 
-  scheduler.add({
-    name: "Daily Stasis Detection Sweep",
-    intervalMs: 60_000,
-    nextRun: new Date(),
-    enabled: true,
-    handler: async () => {
-      if (isAutonomousPaused()) return;
-      const now = new Date();
-      const hour = now.getUTCHours();
-      const minute = now.getUTCMinutes();
-      const dateKey = now.toDateString();
-      if (hour === 20 && minute >= 28 && minute <= 32 && stasisFiredDate.value !== dateKey) {
-        stasisFiredDate.value = dateKey;
-        console.log(`🔍 [StasisCheck] Dispatching daily stasis self-check to all agents for ${dateKey}`);
-        for (const agent of stasisAgents) {
-          try {
-            await dispatchTask({
-              from_agent: "system",
-              to_agent: agent,
-              task_type: "stasis_self_check",
-              priority: 2,
-              chat_id: defaultChatId,
-              payload: {
-                directive:
-                  "STASIS SELF-CHECK — Review your Stasis Detection Protocol. " +
-                  "Evaluate: (1) Have you received tasks in the last 48 hours? " +
-                  "(2) Are any KPIs in your domain declining or flatlined? " +
-                  "(3) Are expected pipeline outputs arriving on schedule? " +
-                  "(4) Do you see a strategic opportunity or threat requiring Ace's decision? " +
-                  "(5) Are you blocked on output from another crew member? " +
-                  "If ANY trigger condition is met, send a proactive message to Ace with the data, your diagnosis, and a clear action request. " +
-                  "If all systems nominal, log 'nominal' and take no action.",
-                triggered_at: new Date().toISOString(),
-                check_type: "daily_stasis",
-              },
-            });
-          } catch (err: any) {
-            console.error(`[StasisCheck] ${agent} dispatch failed: ${err.message}`);
-          }
-        }
-      }
-    },
-  });
+  // scheduler.add({
+  //   name: "Daily Stasis Detection Sweep",
+  //   intervalMs: 60_000,
+  //   nextRun: new Date(),
+  //   enabled: false,
+  //   handler: async () => { /* DISABLED — see comment above */ },
+  // });
 
-  console.log("🔍 [StasisCheck] Scheduled: Daily stasis detection sweep (2PM) for all 6 agents");
+  console.log("🔍 [StasisCheck] DISABLED (S108) — was 6 wasted API calls/day with zero value");
 
   // Heartbeat with memory evolution
   heartbeat.addCheck({

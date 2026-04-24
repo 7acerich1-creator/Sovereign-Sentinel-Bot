@@ -76,6 +76,8 @@ import { textToSpeech } from "./voice/tts";
 import { ProactiveBriefings } from "./proactive/briefings";
 import { HeartbeatSystem } from "./proactive/heartbeat";
 import { pollYouTubeComments } from "./proactive/youtube-comment-watcher";
+import { handleInboundEmail, sendApprovedReply, getPendingReplies } from "./proactive/email-reply-handler";
+import { YouTubeCommentTool, postDiagnosticComment } from "./tools/youtube-comment-tool";
 
 // ── Content Engine ──
 import { dailyContentProduction, distributionSweep, draftAutoPublisher, fluxBatchImageGen, contentEngineStatus, discoverChannels, nukeBufferQueue } from "./engine/content-engine";
@@ -1823,6 +1825,71 @@ async function main() {
         return true;
       }
 
+      // SESSION 109: /comment <videoId> [brand] — post diagnostic link comment on a YouTube video
+      case "/comment": {
+        try {
+          const videoId = args[0];
+          if (!videoId) {
+            await telegram.sendMessage(message.chatId, "Usage: /comment <videoId> [sovereign_synthesis|containment_field]");
+            return true;
+          }
+          const brand = (args[1] as "sovereign_synthesis" | "containment_field") || "sovereign_synthesis";
+          await telegram.sendMessage(message.chatId, `📝 Posting diagnostic comment on ${videoId} (${brand})...`);
+          const result = await postDiagnosticComment(videoId, brand);
+          if (result.success) {
+            await telegram.sendMessage(message.chatId,
+              `✅ Comment posted!\nhttps://www.youtube.com/watch?v=${videoId}&lc=${result.commentId}`
+            );
+          } else {
+            await telegram.sendMessage(message.chatId, `❌ Failed: ${result.error}`);
+          }
+        } catch (err: any) {
+          await telegram.sendMessage(message.chatId, `❌ /comment error: ${err.message?.slice(0, 400)}`);
+        }
+        return true;
+      }
+
+      // SESSION 109: /approve <replyId> — send an Anita-drafted email reply
+      case "/approve": {
+        try {
+          const replyId = arg.trim();
+          if (!replyId) {
+            await telegram.sendMessage(message.chatId, "Usage: /approve <reply_id>");
+            return true;
+          }
+          const result = await sendApprovedReply(replyId);
+          if (result.sent) {
+            await telegram.sendMessage(message.chatId, `✅ Reply sent for ${replyId}`);
+          } else {
+            await telegram.sendMessage(message.chatId, `❌ Send failed: ${result.error}`);
+          }
+        } catch (err: any) {
+          await telegram.sendMessage(message.chatId, `❌ /approve error: ${err.message?.slice(0, 400)}`);
+        }
+        return true;
+      }
+
+      // SESSION 109: /edit <replyId> <text> — send a custom reply instead of Anita's draft
+      case "/edit": {
+        try {
+          const editReplyId = args[0];
+          const customText = args.slice(1).join(" ");
+          if (!editReplyId || !customText) {
+            await telegram.sendMessage(message.chatId, "Usage: /edit <reply_id> <your custom reply text>");
+            return true;
+          }
+          const result = await sendApprovedReply(editReplyId, customText);
+          if (result.sent) {
+            await telegram.sendMessage(message.chatId, `✅ Custom reply sent for ${editReplyId}`);
+          } else {
+            await telegram.sendMessage(message.chatId, `❌ Send failed: ${result.error}`);
+          }
+        } catch (err: any) {
+          await telegram.sendMessage(message.chatId, `❌ /edit error: ${err.message?.slice(0, 400)}`);
+        }
+        return true;
+      }
+
       default:
         // Unknown command — let agent loop handle it
         return false;
@@ -2615,6 +2682,23 @@ async function main() {
 
       return JSON.stringify({ status: "ok", report });
     } catch (err: any) {
+      return JSON.stringify({ status: "error", message: err.message });
+    }
+  });
+
+  // ── /api/inbound-email — Resend inbound email webhook ──
+  // Session 109: Receives lead replies to nurture emails. Dispatches to Anita for
+  // plain-English draft → Telegram approval → send via Resend.
+  // Payload: { from, to, subject, text, html? }
+  webhookServer.register("/api/inbound-email", async (incoming: any) => {
+    if (!defaultChatId || !telegram) {
+      return JSON.stringify({ status: "error", message: "Telegram not configured" });
+    }
+    try {
+      const result = await handleInboundEmail(incoming, telegram, defaultChatId);
+      return JSON.stringify(result);
+    } catch (err: any) {
+      console.error(`[InboundEmail] Webhook error: ${err.message}`);
       return JSON.stringify({ status: "error", message: err.message });
     }
   });
@@ -3427,6 +3511,11 @@ async function main() {
         const BRIEFING_AGENTS = ["sapphire", "vector", "veritas"];
         if (BRIEFING_AGENTS.includes(agentCfg.name)) {
           agentTools.push(new FileBriefingTool(agentCfg.name));
+        }
+
+        // Yuki gets the YouTube comment tool for engagement automation
+        if (agentCfg.name === "yuki") {
+          agentTools.push(new YouTubeCommentTool());
         }
 
         // Vector gets full CRO visibility: Stripe + Buffer + YouTube + Landing

@@ -60,6 +60,44 @@ export class AgentLoop {
     this.tools.delete(name);
   }
 
+  /**
+   * SESSION 108: Detect conversational messages that don't need tool access.
+   * Returns true for greetings, opinions, chat, status questions, etc.
+   * Returns false for anything that implies an action, data lookup, or command.
+   *
+   * The heuristic: if the message contains explicit action verbs or slash commands,
+   * it's NOT conversational. Everything else (short chat, questions about opinions,
+   * greetings, feedback) IS conversational → zero tools, pure text response.
+   */
+  private isConversationalMessage(content: string): boolean {
+    const text = content.toLowerCase().trim();
+
+    // Slash commands always need tools
+    if (text.startsWith("/")) return false;
+
+    // URLs suggest content to process
+    if (text.includes("http://") || text.includes("https://") || text.includes("youtu.be")) return false;
+
+    // Explicit action keywords → needs tools
+    const ACTION_PATTERNS = [
+      /\b(check|fetch|search|find|look\s*up|pull|get|grab|analyze|scan|audit)\b/,
+      /\b(post|publish|schedule|send|dispatch|distribute|upload|push)\b/,
+      /\b(create|generate|build|make|write|draft|compose)\b/,
+      /\b(run|execute|trigger|start|stop|kill|restart|deploy)\b/,
+      /\b(delete|remove|purge|clean|nuke|drain|sweep)\b/,
+      /\b(read|open|show|list|display)\s+(file|log|data|metric|stat|report|brief)/,
+      /\b(how many|how much|what('s| is) (the|my|our) (metric|stat|revenue|view|sub|conversion|count))/,
+      /\b(stripe|buffer|supabase|youtube|r2|railway|pinecone)\b/,
+    ];
+
+    for (const pattern of ACTION_PATTERNS) {
+      if (pattern.test(text)) return false;
+    }
+
+    // If we got here, it's conversational
+    return true;
+  }
+
   async processMessage(
     message: Message,
     sendTyping?: () => Promise<void>,
@@ -133,12 +171,19 @@ export class AgentLoop {
     // 3. Build tool definitions
     const allTools = Array.from(this.tools.values());
 
+    // SESSION 108: CONVERSATIONAL DETECTION — strip tools for chat messages.
+    // Gemini sees 35 tool schemas and compulsively calls them even on "hey what's up".
+    // The system prompt says "don't use tools for conversation" but Gemini ignores it.
+    // Fix: detect conversational messages and route to text-only mode (zero tools).
+    // If the user actually needs a tool, they'll ask explicitly and hit the full path.
+    const isConversational = !isDispatch && !isTextOnly && this.isConversationalMessage(message.content);
+
     let toolDefs: ToolDefinition[];
-    if (isTextOnly) {
+    if (isTextOnly || isConversational) {
       // SESSION 44: LIGHT MODE — ship zero tools. LLM must return text.
-      // This is the cheapest, most reliable path for introspection tasks.
+      // SESSION 108: Also used for conversational messages to prevent tool spam.
       toolDefs = [];
-      console.log(`⚡ [AgentLoop] LIGHT MODE — 0 tools (text-only response)`);
+      console.log(`⚡ [AgentLoop] ${isConversational ? "CONVERSATIONAL" : "LIGHT"} MODE — 0 tools (text-only response)`);
     } else if (isDispatch) {
       // SESSION 35: DISPATCH MODE — only include tools the agent actually needs.
       // Sending 33+ tool schemas (each 200-500 tokens) to every dispatch call

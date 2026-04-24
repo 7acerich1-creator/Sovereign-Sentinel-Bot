@@ -1,11 +1,34 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Proactive Briefings
 // Morning check-in, evening recap, smart recommendations
+// SESSION 108: Rewired to pull REAL data from Supabase
+// (youtube_analytics, landing_analytics, activity_log, crew_dispatch)
+// instead of empty memory stores.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { LLMProvider, MemoryProvider, Channel } from "../types";
 import { config } from "../config";
 import { PERSONA_REGISTRY, getSystemPrompt } from "../agent/personas";
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+
+async function supabaseGet(table: string, params: string): Promise<any[]> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return [];
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+      },
+    });
+    if (!resp.ok) return [];
+    return resp.json() as Promise<any[]>;
+  } catch {
+    return [];
+  }
+}
 
 export class ProactiveBriefings {
   private llm: LLMProvider;
@@ -25,27 +48,28 @@ export class ProactiveBriefings {
 
     const prompt = `Generate a morning sovereign activation briefing for the Architect.
 
-Context from memory (this is ALL the data you have — do NOT invent numbers, stats, or metrics not present here):
-${context || "No context data available."}
+LIVE DATA (pulled from production systems just now):
+${context}
 
 Rules:
-- ONLY reference information actually present in the context above
-- Do NOT fabricate revenue numbers, streak counts, habit stats, or task lists
-- If no data exists for a category, say "No data tracked yet" — never invent it
-- Focus on what IS known: recent activity, actual facts from memory
+- Reference the ACTUAL numbers above — views, visitors, dispatch counts, top videos
+- Do NOT fabricate anything not present in the data
+- If a section says "unavailable", skip it — don't mention the gap
 
-Include (only if real data exists):
-1. Any known progress or status updates from context
-2. One tactical sovereign directive for today
-3. A frequency-lock affirmation
+Include:
+1. Activity Summary: crew dispatch activity, content pipeline output
+2. YouTube pulse: total views across channels, any standout videos
+3. Landing page pulse: visitors, top pages
+4. One tactical sovereign directive for today based on what the data reveals
+5. A frequency-lock affirmation
 
-Keep it under 150 words. Be direct, sovereign, no filler. Format for Telegram (Markdown).`;
+Keep it under 200 words. Be direct, sovereign, data-driven. Format for Telegram (Markdown).`;
 
     try {
       const veritasPrompt = getSystemPrompt(PERSONA_REGISTRY.veritas);
       const response = await this.llm.generate(
         [{ role: "user", content: prompt }],
-        { systemPrompt: veritasPrompt, maxTokens: 500 }
+        { systemPrompt: veritasPrompt, maxTokens: 600 }
       );
 
       await this.channel.sendMessage(
@@ -64,26 +88,27 @@ Keep it under 150 words. Be direct, sovereign, no filler. Format for Telegram (M
 
     const prompt = `Generate an evening debrief for the Architect.
 
-Context from memory (this is ALL the data you have — do NOT invent numbers, stats, or metrics not present here):
-${context || "No context data available."}
+LIVE DATA (pulled from production systems just now):
+${context}
 
 Rules:
-- ONLY reference information actually present in the context above
-- Do NOT fabricate message counts, revenue numbers, or task completions
-- If no data exists for a category, say "No data tracked yet" — never invent it
+- Reference the ACTUAL numbers above
+- Do NOT fabricate anything not present in the data
+- If a section says "unavailable", skip it
 
-Include (only if real data exists):
-1. Summary of any actual activity found in context
-2. Any genuine anomalies from context
-3. One sovereign intent for tomorrow morning
+Include:
+1. Activity Summary: what the crew accomplished today (dispatches completed)
+2. YouTube pulse: views, any anomalies or standout performers
+3. Landing page pulse: visitor trends
+4. One sovereign intent for tomorrow morning based on what the data reveals
 
-Keep it under 150 words. Format for Telegram (Markdown).`;
+Keep it under 200 words. Format for Telegram (Markdown).`;
 
     try {
       const veritasPrompt = getSystemPrompt(PERSONA_REGISTRY.veritas);
       const response = await this.llm.generate(
         [{ role: "user", content: prompt }],
-        { systemPrompt: veritasPrompt, maxTokens: 500 }
+        { systemPrompt: veritasPrompt, maxTokens: 600 }
       );
 
       await this.channel.sendMessage(
@@ -100,10 +125,10 @@ Keep it under 150 words. Format for Telegram (Markdown).`;
   async smartRecommendation(): Promise<string | null> {
     const context = await this.gatherContext();
 
-    const prompt = `Based on the Architect's recent activity and patterns, generate ONE proactive recommendation.
-This could be: a task they should do, a pattern you noticed, an optimization suggestion, or a reminder.
+    const prompt = `Based on the Architect's live data, generate ONE proactive recommendation.
+This could be: a content strategy pivot, a metric that needs attention, or an optimization.
 
-Context:
+Data:
 ${context}
 
 Keep it to 1-2 sentences. Only suggest something genuinely useful.
@@ -112,7 +137,7 @@ If there's nothing worth recommending right now, respond with "NONE".`;
     try {
       const response = await this.llm.generate(
         [{ role: "user", content: prompt }],
-        { systemPrompt: "You are a proactive AI assistant analyzing behavior patterns.", maxTokens: 200 }
+        { systemPrompt: "You are a proactive AI CRO analyst for a sovereign content empire.", maxTokens: 200 }
       );
 
       if (response.content.trim() === "NONE") return null;
@@ -124,24 +149,121 @@ If there's nothing worth recommending right now, respond with "NONE".`;
 
   private async gatherContext(): Promise<string> {
     const parts: string[] = [];
+    const now = new Date();
+    const oneDayAgo = new Date(now.getTime() - 86400000).toISOString();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 86400000).toISOString();
 
-    for (const provider of this.memory) {
-      try {
-        const facts = await provider.getFacts();
-        if (facts.length > 0) {
-          parts.push("Core Facts:\n" + facts.map((f) => `- ${f.key}: ${f.value}`).join("\n"));
+    // ── 1. YouTube Analytics (from Supabase) ──
+    try {
+      const ytRows = await supabaseGet(
+        "youtube_analytics",
+        "select=channel_name,title,views,likes,comments,outlier_score&order=views.desc&limit=200"
+      );
+      if (ytRows.length > 0) {
+        const channels: Record<string, { videos: number; views: number; likes: number; comments: number }> = {};
+        for (const r of ytRows) {
+          const ch = r.channel_name || "Unknown";
+          if (!channels[ch]) channels[ch] = { videos: 0, views: 0, likes: 0, comments: 0 };
+          channels[ch].videos++;
+          channels[ch].views += r.views || 0;
+          channels[ch].likes += r.likes || 0;
+          channels[ch].comments += r.comments || 0;
         }
 
-        const recent = await provider.getRecentMessages(this.chatId, 5);
-        if (recent.length > 0) {
-          parts.push("Recent Activity:\n" + recent.map((m) => `[${m.role}] ${m.content.slice(0, 100)}`).join("\n"));
+        const lines = ["── YOUTUBE ANALYTICS ──"];
+        for (const [name, c] of Object.entries(channels)) {
+          lines.push(`${name}: ${c.videos} videos, ${c.views.toLocaleString()} total views, ${c.likes} likes, ${c.comments} comments`);
         }
-      } catch {
-        // Non-critical
+
+        // Top 3 by views
+        const top3 = ytRows.slice(0, 3);
+        if (top3.length > 0) {
+          lines.push("Top performers:");
+          for (const v of top3) {
+            lines.push(`  • "${v.title}" — ${(v.views || 0).toLocaleString()} views${v.outlier_score ? `, outlier: ${Number(v.outlier_score).toFixed(1)}` : ""}`);
+          }
+        }
+        parts.push(lines.join("\n"));
+      } else {
+        parts.push("── YOUTUBE ANALYTICS ──\nNo data available.");
       }
+    } catch {
+      parts.push("── YOUTUBE ANALYTICS ──\nQuery failed.");
     }
 
-    parts.push(`Current Time: ${new Date().toISOString()}`);
+    // ── 2. Landing Analytics (from Supabase) ──
+    try {
+      const landingRows = await supabaseGet(
+        "landing_analytics",
+        `select=page_path,visitors,page_views,bounce_rate&fetched_at=gte.${sevenDaysAgo}&order=page_views.desc&limit=20`
+      );
+      if (landingRows.length > 0) {
+        let totalVisitors = 0, totalViews = 0;
+        for (const r of landingRows) {
+          totalVisitors += r.visitors || 0;
+          totalViews += r.page_views || 0;
+        }
+        const topPages = landingRows.slice(0, 5).map(
+          (r: any) => `  • ${r.page_path}: ${r.page_views} views, ${r.visitors} visitors`
+        );
+        parts.push([
+          "── LANDING PAGE (7-day) ──",
+          `Total: ${totalVisitors} visitors, ${totalViews} page views`,
+          "Top pages:",
+          ...topPages,
+        ].join("\n"));
+      } else {
+        parts.push("── LANDING PAGE ──\nNo data in last 7 days.");
+      }
+    } catch {
+      parts.push("── LANDING PAGE ──\nQuery failed.");
+    }
+
+    // ── 3. Crew Activity (from crew_dispatch table) ──
+    try {
+      const dispatchRows = await supabaseGet(
+        "crew_dispatch",
+        `select=to_agent,task_type,status,created_at&created_at=gte.${oneDayAgo}&order=created_at.desc&limit=30`
+      );
+      if (dispatchRows.length > 0) {
+        const agentCounts: Record<string, { total: number; completed: number }> = {};
+        for (const r of dispatchRows) {
+          const agent = r.to_agent || "unknown";
+          if (!agentCounts[agent]) agentCounts[agent] = { total: 0, completed: 0 };
+          agentCounts[agent].total++;
+          if (r.status === "completed") agentCounts[agent].completed++;
+        }
+        const lines = ["── CREW ACTIVITY (24h) ──"];
+        for (const [agent, c] of Object.entries(agentCounts)) {
+          lines.push(`${agent}: ${c.completed}/${c.total} tasks completed`);
+        }
+        parts.push(lines.join("\n"));
+      } else {
+        parts.push("── CREW ACTIVITY (24h) ──\nNo dispatches in last 24 hours.");
+      }
+    } catch {
+      parts.push("── CREW ACTIVITY ──\nQuery failed.");
+    }
+
+    // ── 4. YouTube Comments (from youtube_comments_seen) ──
+    try {
+      const commentRows = await supabaseGet(
+        "youtube_comments_seen",
+        `select=author_name,comment_text,video_title&seen_at=gte.${oneDayAgo}&order=seen_at.desc&limit=5`
+      );
+      if (commentRows.length > 0) {
+        const lines = ["── NEW YOUTUBE COMMENTS (24h) ──"];
+        for (const r of commentRows) {
+          lines.push(`• @${r.author_name} on "${(r.video_title || "").slice(0, 40)}": "${(r.comment_text || "").slice(0, 80)}"`);
+        }
+        parts.push(lines.join("\n"));
+      }
+      // Don't show "no comments" — absence is silent
+    } catch {
+      // Silent fail for non-critical
+    }
+
+    parts.push(`\nTimestamp: ${now.toISOString()}`);
     return parts.join("\n\n");
   }
 }

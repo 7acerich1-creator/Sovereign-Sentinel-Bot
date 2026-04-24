@@ -64,6 +64,7 @@ import { join } from "path";
 import { ProposeTaskTool, SaveContentDraftTool, FileBriefingTool, CheckApprovedTasksTool } from "./tools/action-surface";
 import { StripeMetricsTool } from "./tools/stripe-metrics";
 import { BufferAnalyticsTool } from "./tools/buffer-analytics";
+import { YouTubeAnalyticsReaderTool, LandingAnalyticsReaderTool } from "./tools/analytics-readers";
 import { VideoPublisherTool, TikTokPublishTool, InstagramReelsPublishTool, YouTubeShortsPublishTool, YouTubeLongFormPublishTool } from "./tools/video-publisher";
 import { YouTubeUpdateMetadataTool, YouTubePinCommentTool, YouTubeCTAAuditTool } from "./tools/youtube-cta-tools";
 
@@ -3431,10 +3432,12 @@ async function main() {
           agentTools.push(new FileBriefingTool(agentCfg.name));
         }
 
-        // Vector gets Stripe metrics + Buffer analytics for full CRO visibility
+        // Vector gets full CRO visibility: Stripe + Buffer + YouTube + Landing
         if (agentCfg.name === "vector") {
           agentTools.push(new StripeMetricsTool());
           agentTools.push(new BufferAnalyticsTool());
+          agentTools.push(new YouTubeAnalyticsReaderTool());
+          agentTools.push(new LandingAnalyticsReaderTool());
         }
 
         // Pinecone KnowledgeWriter — agent-specific namespaces

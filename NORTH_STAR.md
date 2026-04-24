@@ -152,10 +152,62 @@ No schema migrations to undo. No orphaned tables. Revert commit = clean rollback
 ### Ship record (S113+, 2026-04-24)
 
 - **Commit:** `74da963` on `origin/main` (push: 2026-04-24, 10 files, +2089 / -1993).
+- **Ship-record commit:** `e1bbda4` (this section).
 - **Railway deploy:** auto-triggered, check build logs if producer stalls.
-- **Pod Docker build:** GitHub Actions `pod-build.yml` workflow run `24910773427` triggered by this push. Pod picks up the new image on next wake. Previous pod builds took ~7min.
+- **Pod Docker build:** GitHub Actions `pod-build.yml` workflow run `24910773427` green in 4m15s. Pod picks up the new image on next wake.
 - **Supabase migration:** `add_aesthetic_style_to_niche_cooldown` applied to project `wzthxohtgojenukmdubz`. Column `niche_cooldown.aesthetic_style text NULL` + index `idx_niche_cooldown_brand_created_at`.
-- **Known post-deploy task:** Mission Control `aesthetic-performance` tile. Data source: `SELECT aesthetic_style, brand, COUNT(*), AVG(...) FROM niche_cooldown JOIN youtube_analytics ON job_id GROUP BY 1,2`. Belongs in MC repo (`Sovereign-Mission-Control`), not Sentinel. Surface in a separate session once ~10 videos have shipped.
+
+---
+
+## 🛠️ Next Session Build — Mission Control Aesthetic Performance Tile
+
+**Read this before doing anything else once you mount `Sovereign-Mission-Control`.** This is the closing half of the 30-video A/B/C performance test. The Sentinel side is done; the measurement surface isn't.
+
+**Target repo:** `Sovereign-Mission-Control` (not Sentinel). Mount that folder in the next session and build there.
+
+**What to build:** A single KPI tile on the existing Mission Control dashboard, titled "Aesthetic Performance." It surfaces a 3×2 grid (3 aesthetics A/B/C × 2 brands SS/TCF) with per-cell:
+- Video count shipped
+- Avg YouTube CTR (click-through rate)
+- Avg 30-second retention %
+- Avg watch time (seconds)
+
+Plus a "winner" highlight on the cell with highest CTR-per-retention product once ≥6 videos per cell exist.
+
+**Data source — two joins, no new tables required:**
+
+1. `niche_cooldown` table in Supabase project `wzthxohtgojenukmdubz` — columns `brand`, `aesthetic_style`, `job_id`, `created_at`. This is the ground truth for "which aesthetic was used on which video."
+2. Wherever MC currently reads YouTube analytics from (check `Sovereign-Mission-Control/sovereign-landing/` and the MC dashboard's analytics adapters). Join against `niche_cooldown.job_id` → the YouTube `videoId` stored at ship time.
+
+Query sketch:
+```sql
+SELECT
+  brand,
+  aesthetic_style,
+  COUNT(*) AS video_count,
+  AVG(ctr) AS avg_ctr,
+  AVG(retention_30s) AS avg_retention,
+  AVG(watch_time_s) AS avg_watch_time
+FROM niche_cooldown nc
+LEFT JOIN youtube_analytics ya ON ya.video_id = nc.job_id  -- adjust join key
+WHERE nc.aesthetic_style IS NOT NULL
+  AND nc.created_at > '2026-04-24'  -- only count post-S113+ rotation
+GROUP BY 1, 2
+ORDER BY 1, 2;
+```
+
+**When to build it:** After ~10 videos have shipped with the new rotation so there's data. Before then, the tile would be empty and misleading. Check `SELECT COUNT(*) FROM niche_cooldown WHERE aesthetic_style IS NOT NULL` — if >=10, build the tile.
+
+**Where it lives on MC:** Treat it as the first "outcome" tile, not an infra tile. Should sit prominently on the home dashboard — above the fold, not buried in a secondary panel. It's the first quantitative proof that signal quality → retention, the whole point of the 30-video test.
+
+**Acceptance criteria:**
+1. Tile renders the 3×2 grid with live data from Supabase.
+2. Empty cells (no videos yet for that combination) show "—" not "0" (zero implies bad performance; dash implies no data).
+3. At ≥6 videos per cell, a winner halo/border appears.
+4. A link or button that says "Read the plan" deep-links to this NORTH_STAR.md section so the plan travels with the dashboard.
+
+**Rollback:** Tile is read-only. No writes, no migrations, no risk. If it breaks, comment out the component import.
+
+**Context for picking up cold:** The full plan is above in this file ("🎯 First Real Business Goal — The 30-Video A/B/C Performance Test"). The six aesthetic prompts are also above (verbatim), and the Sentinel-side rotation logic lives in `Sovereign-Sentinel-Bot/src/engine/content-engine.ts` (`AESTHETIC_MODIFIERS` constant) and `Sovereign-Sentinel-Bot/src/tools/niche-cooldown.ts` (`pickNextAesthetic`, `recordNicheRun` with `aestheticStyle` param). You don't need to re-read those unless you're extending the rotation logic — the tile just queries the output.
 
 ---
 

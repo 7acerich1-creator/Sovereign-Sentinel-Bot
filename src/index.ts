@@ -3965,6 +3965,32 @@ async function main() {
               }
             }
 
+            // ── EARLY IMAGE VISION (Sapphire DM only) ──
+            // Sapphire receives a photo → run Gemini 2.5 Flash vision → replace
+            // message.content with extracted info so the agent loop can act on it
+            // (create event, set reminder, append to Notion, etc.). Uses Sapphire's
+            // OWN bot token to bypass the global-token bug in TelegramChannel.
+            if (agentCfg.name === "sapphire" && !message.metadata?.isGroup
+                && message.attachments?.some((a) => a.type === "image")) {
+              const imageAttachment = message.attachments.find((a) => a.type === "image");
+              if (imageAttachment?.fileId) {
+                try {
+                  await agentChannel.sendTyping(message.chatId);
+                  const { analyzeSapphireImage } = await import("./agent/sapphire-pa-context");
+                  const caption = message.content === "[Photo]" ? "" : message.content;
+                  const vision = await analyzeSapphireImage(imageAttachment.fileId, caption);
+                  if (vision.ok) {
+                    message.content = `[ACE SENT YOU AN IMAGE. Here's what's in it]:\n${vision.description}\n\n[ORIGINAL CAPTION]: ${caption || "(no caption)"}\n\n[INSTRUCTION]: Act on the image content. If it has dates/times → propose a calendar event. If it has tasks → propose a reminder or note. If unclear what to do → ask Ace what he wants done with this. Always confirm what you'll do before doing it.`;
+                  } else {
+                    console.warn(`[SapphirePA] Vision failed: ${vision.error}`);
+                    message.content = `[ACE SENT AN IMAGE but vision analysis failed: ${vision.error}. Tell him you couldn't read the image and ask him to describe what's in it.]\n\nOriginal caption: ${caption}`;
+                  }
+                } catch (imgErr: any) {
+                  console.error(`[SapphirePA] Image handler crashed: ${imgErr.message}`);
+                }
+              }
+            }
+
             // ── SAPPHIRE PERSONAL-ASSISTANT COMMAND INTERCEPT ──
             // Runs BEFORE the agent loop. Handles /auth_*, /voice_*, and pending
             // input states (auth code paste, Notion token paste). DM only — never
@@ -4132,16 +4158,20 @@ async function main() {
                 `Pipeline commands go through Veritas. Acknowledge this if the Architect sent it here by mistake.`;
             }
 
-            // ── SAPPHIRE PA MODE A INJECTION ──
-            // Hard-prefix DM messages so Sapphire reliably lands in Personal Assistant
-            // mode (plain English) instead of relying on Gemini Flash to read her dual-mode
-            // prompt. Pure DM only — group chat preserves her COO voice.
+            // ── SAPPHIRE PA MODE A INJECTION + RICH CONTEXT ──
+            // Replaces the static prompt-only injection with live state context:
+            // auth status, upcoming reminders, standing facts, capabilities. So she
+            // FEELS like she remembers things every time, not like a fresh LLM call.
             if (agentCfg.name === "sapphire" && !message.metadata?.isGroup) {
-              message.content =
-                `[CONTEXT: 1-on-1 DM from Ace. You are in MODE A — Personal Assistant. ` +
-                `Plain English only. No "Architect", no sovereign tone, no [inner state] stamp, ` +
-                `no memetic triggers. Talk like a warm, competent assistant.]\n\n` +
-                `${message.content}`;
+              try {
+                const { buildPersonalContextPrefix } = await import("./agent/sapphire-pa-context");
+                const ctxPrefix = await buildPersonalContextPrefix();
+                message.content = `${ctxPrefix}\n${message.content}`;
+              } catch (ctxErr: any) {
+                // Fallback to short-form injection so message still routes correctly
+                console.warn(`[SapphirePA] context build failed: ${ctxErr.message}`);
+                message.content = `[CONTEXT: 1-on-1 DM from Ace. MODE A — Personal Assistant. Plain English. No sovereign tone.]\n\n${message.content}`;
+              }
             }
 
             // Log task to Supabase command_queue

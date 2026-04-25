@@ -261,6 +261,8 @@ def _render_text_block(
     stroke_fill: str = "black",
     text_fill: str = "white",
     upper: bool = False,
+    italic_skew: float = 0.0,
+    quote_wrap: bool = False,
 ):
     """Render a single text block within a defined zone with binary-search
     fontsize fitting and word-boundary wrap.
@@ -276,6 +278,9 @@ def _render_text_block(
         return [], 0
     if upper:
         clean_text = clean_text.upper()
+    if quote_wrap and clean_text:
+        # Smart curly quotes — feel editorial, render cleanly in Bebas Neue.
+        clean_text = f"“{clean_text}”"
 
     words = clean_text.split()
     if not words:
@@ -318,20 +323,66 @@ def _render_text_block(
     block_h = len(lines) * fontsize + max(0, len(lines) - 1) * extra_gap
     start_y = zone_y + (zone_h - block_h) // 2
 
-    draw = ImageDraw.Draw(img)
-    for i, line in enumerate(lines):
-        bbox = font.getbbox(line)
-        line_w = bbox[2] - bbox[0]
-        x = zone_x + (zone_w - line_w) // 2
-        y = start_y + i * line_spacing
-        draw.text(
-            (x, y),
-            line,
-            fill=text_fill,
-            font=font,
-            stroke_width=stroke_width,
-            stroke_fill=stroke_fill,
-        )
+    if italic_skew and abs(italic_skew) > 1e-3:
+        # S117c: Solid-fill subhead. PIL's stroke_width on Bebas Neue at small
+        # fontsize eats the white fill (the stroke covers from both sides
+        # leaving only the outline). Instead we render TWO PASSES on a
+        # transparent layer: (1) blurred black drop shadow for legibility on
+        # any background, (2) solid white glyph on top — both with the italic
+        # skew applied so they remain aligned.
+        from PIL import ImageFilter
+        for i, line in enumerate(lines):
+            bbox = font.getbbox(line)
+            line_w = bbox[2] - bbox[0]
+            line_h = bbox[3] - bbox[1]
+            shadow_offset = max(2, line_h // 30)
+            pad = max(int(line_h * abs(italic_skew)) + shadow_offset * 4, 12)
+            layer_w = line_w + pad * 2
+            layer_h = line_h + shadow_offset * 6 + 16
+
+            # Pass 1 — soft drop shadow (blurred black)
+            shadow_layer = Image.new("RGBA", (layer_w, layer_h), (0, 0, 0, 0))
+            sd = ImageDraw.Draw(shadow_layer)
+            sd.text(
+                (pad + shadow_offset, shadow_offset + 4 - bbox[1]),
+                line, fill=(0, 0, 0, 235), font=font,
+            )
+            shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(radius=max(2, shadow_offset)))
+
+            # Pass 2 — solid white glyph
+            text_layer = Image.new("RGBA", (layer_w, layer_h), (0, 0, 0, 0))
+            td = ImageDraw.Draw(text_layer)
+            td.text(
+                (pad, 4 - bbox[1]),
+                line, fill=text_fill, font=font,
+            )
+
+            # Composite shadow then text, then skew the result.
+            combined = Image.alpha_composite(shadow_layer, text_layer)
+            sheared = combined.transform(
+                (layer_w, layer_h),
+                Image.AFFINE,
+                (1, -italic_skew, italic_skew * layer_h, 0, 1, 0),
+                resample=Image.BICUBIC,
+            )
+            x = zone_x + (zone_w - layer_w) // 2
+            y = start_y + i * line_spacing - (4 - bbox[1])
+            img.paste(sheared, (x, y), sheared)
+    else:
+        draw = ImageDraw.Draw(img)
+        for i, line in enumerate(lines):
+            bbox = font.getbbox(line)
+            line_w = bbox[2] - bbox[0]
+            x = zone_x + (zone_w - line_w) // 2
+            y = start_y + i * line_spacing
+            draw.text(
+                (x, y),
+                line,
+                fill=text_fill,
+                font=font,
+                stroke_width=stroke_width,
+                stroke_fill=stroke_fill,
+            )
 
     return lines, fontsize
 
@@ -361,7 +412,13 @@ def render_thumbnail_with_text(
     if font_path is None:
         font_path = FONT_BEBAS
     if subhead_font_path is None:
-        subhead_font_path = FONT_MONTSERRAT
+        # S117c: Bebas Neue — same display weight as headline. With the wider
+        # subhead zone (46% safe-h), the binary-search fits ~140-180px font,
+        # at which Bebas Neue glyph thickness is plenty solid against the
+        # vignetted backdrop. Italic skew is dropped — quotes alone carry the
+        # "subhead vs headline" visual hierarchy, and pure rendering reads
+        # at a glance which is what matters most.
+        subhead_font_path = FONT_BEBAS
 
     # S117: vignette tightened from PI/3 to PI/2.5 — slightly stronger
     # corner darkening so two-tier text reads at any image content.
@@ -409,9 +466,10 @@ def render_thumbnail_with_text(
     subhead_fontsize = 0
 
     if clean_subhead and clean_headline:
-        # Two-tier: headline 62%, gap 5%, subhead 33% of safe height.
-        gap = int(safe_h * 0.05)
-        headline_zone_h = int(safe_h * 0.62)
+        # S117c: more vertical room for subhead so it can render at fs ~140-180
+        # for max legibility. Headline 50%, gap 4%, subhead 46% of safe height.
+        gap = int(safe_h * 0.04)
+        headline_zone_h = int(safe_h * 0.50)
         subhead_zone_h = safe_h - headline_zone_h - gap
 
         try:
@@ -432,10 +490,18 @@ def render_thumbnail_with_text(
                 img, clean_subhead, subhead_font_path,
                 zone_x=margin, zone_y=margin + headline_zone_h + gap,
                 zone_w=safe_w, zone_h=subhead_zone_h,
-                font_min=max(36, _THUMB_FONT_MIN - 16),
-                font_max=int(_THUMB_FONT_MAX * 0.55),
-                stroke_width=max(3, _THUMB_STROKE_WIDTH - 2),
-                upper=False,
+                font_min=72,
+                # Up to 80% of headline cap — visual hierarchy preserved by
+                # quote-wrap + position, not by being tiny.
+                font_max=int(_THUMB_FONT_MAX * 0.80),
+                # Stroke=2 (down from headline's 6). At subhead fontsize ~130,
+                # a 6px stroke from BOTH sides eats Bebas Neue's ~12px glyph
+                # thickness, leaving nearly-hollow text. Stroke=2 keeps the
+                # legibility outline while the white fill renders solid.
+                stroke_width=2,
+                upper=True,        # Bebas Neue has no lowercase glyphs anyway
+                italic_skew=0.0,   # solid render for readability
+                quote_wrap=True,   # curly-quote-wrap the subhead
             )
         except ValueError as exc:
             log.warning(
@@ -1532,9 +1598,21 @@ def compose_video(
     log.info("compose_final_duration", duration_s=round(total_duration, 2))
 
     # ── Stage 5: Generate thumbnail (aesthetic override) ─────────────────
+    # S117b: the LONG-FORM thumbnail backdrop is a HARDCODED BRAND IMAGE — same
+    # silhouette across every video so it becomes the brand recognition anchor
+    # (Rev. Ike pattern). Only the text varies. FLUX scene images still drive
+    # the video body, just not the thumbnail. Falls back to scene_images if
+    # the brand asset is missing (e.g. local dev without brand-assets/).
     thumb_path = os.path.join(job_dir, "thumbnail.jpg")
-    thumb_idx = min(thumbnail_scene_idx, n_scenes - 1)
-    thumb_src = scene_images[thumb_idx] if thumb_idx < len(scene_images) else scene_images[0]
+    _brand_long_bg = os.path.join(BRAND_ASSETS_DIR, f"bg_long_{('ss' if brand == 'sovereign_synthesis' else 'tcf')}.png")
+    if os.path.isfile(_brand_long_bg):
+        thumb_src = _brand_long_bg
+        log.info("compose_thumbnail_brand_backdrop", path=_brand_long_bg)
+    else:
+        thumb_idx = min(thumbnail_scene_idx, n_scenes - 1)
+        thumb_src = scene_images[thumb_idx] if thumb_idx < len(scene_images) else scene_images[0]
+        log.warning("compose_thumbnail_brand_backdrop_missing_fallback_scene",
+                    expected=_brand_long_bg, used=thumb_src)
 
     # S117: dual-tier thumbnail — headline (ALL CAPS) + subhead (Title Case).
     # Falls back to legacy thumbnail_text -> hook_text -> script slice when
@@ -2223,9 +2301,18 @@ def compose_short(
     total_duration = _probe_duration(final_path)
 
     # ── Stage 5: Vertical thumbnail ────────────────────────────────────────
+    # S117b: HARDCODED BRAND IMAGE backdrop on shorts thumbnails too — same
+    # silhouette across every short. Only the text varies. Falls back to
+    # scene_images[0] if the brand asset is missing.
     thumb_path = os.path.join(job_dir, "thumbnail_short.jpg")
-    # Use the first scene image (most visually impactful for shorts)
-    thumb_src = scene_images[0] if scene_images else ""
+    _brand_short_bg = os.path.join(BRAND_ASSETS_DIR, f"bg_shorts_{('ss' if brand == 'sovereign_synthesis' else 'tcf')}.png")
+    if os.path.isfile(_brand_short_bg):
+        thumb_src = _brand_short_bg
+        log.info("compose_short_thumbnail_brand_backdrop", path=_brand_short_bg)
+    else:
+        thumb_src = scene_images[0] if scene_images else ""
+        log.warning("compose_short_thumbnail_brand_backdrop_missing_fallback_scene",
+                    expected=_brand_short_bg, used=thumb_src)
 
     # S117: dual-tier thumbnail (headline + subhead) with backward-compat fallback.
     _thumb_headline = ""

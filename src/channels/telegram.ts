@@ -13,10 +13,19 @@ export class TelegramChannel implements Channel {
   private bot: Bot;
   private messageHandler?: (message: Message) => Promise<void>;
   private callbackHandler?: (chatId: string, data: string) => Promise<void>;
+  // Capture the bot token at CONSTRUCTION time. index.ts uses a "swap-then-
+  // restore" trick on config.telegram.botToken when constructing each agent's
+  // bot — that swap only persists during the constructor call. Without
+  // capturing it here, photo/voice/document URL building would always read
+  // the global token (Veritas) for every non-Veritas bot, breaking file
+  // downloads silently. S114 caught this when Sapphire's image vision needed
+  // to download via her own token.
+  private botToken: string;
   public botUsername: string = "";  // Populated after initialize() via getMe()
 
   constructor() {
-    this.bot = new Bot(config.telegram.botToken);
+    this.botToken = config.telegram.botToken;
+    this.bot = new Bot(this.botToken);
   }
 
   async initialize(): Promise<void> {
@@ -96,7 +105,7 @@ export class TelegramChannel implements Channel {
           fileId: voice.file_id,
           mimeType: voice.mime_type || "audio/ogg",
           duration: voice.duration,
-          url: file.file_path ? `https://api.telegram.org/file/bot${config.telegram.botToken}/${file.file_path}` : undefined,
+          url: file.file_path ? `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}` : undefined,
         }],
       };
 
@@ -124,7 +133,7 @@ export class TelegramChannel implements Channel {
           fileId: audio.file_id,
           mimeType: audio.mime_type || "audio/mpeg",
           duration: audio.duration,
-          url: file.file_path ? `https://api.telegram.org/file/bot${config.telegram.botToken}/${file.file_path}` : undefined,
+          url: file.file_path ? `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}` : undefined,
         }],
       };
 
@@ -151,7 +160,7 @@ export class TelegramChannel implements Channel {
         attachments: [{
           type: "image",
           fileId: largest.file_id,
-          url: `https://api.telegram.org/file/bot${config.telegram.botToken}/${file.file_path}`,
+          url: `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`,
         }],
       };
 

@@ -56,6 +56,19 @@ export class RememberFactTool implements Tool {
       .upsert({ key, value, category }, { onConflict: "key" });
 
     if (error) return `remember_fact: ${error.message}`;
+
+    // ── DUAL-WRITE TO PINECONE ──
+    // Supabase = fast structured lookup (key/value/category, exact match).
+    // Pinecone = semantic recall (Ace says "what's our gift budget" and the
+    // fact "girls_birthday_parties: $25 budget" surfaces even with different
+    // wording). Best-effort — failure here doesn't block the Supabase save.
+    try {
+      const { upsertSapphireFact } = await import("./_pinecone");
+      await upsertSapphireFact(key, value, category);
+    } catch (e: any) {
+      console.warn(`[remember_fact] Pinecone upsert skipped: ${e.message}`);
+    }
+
     return `Saved: ${key} → "${value.slice(0, 100)}" (${category}).`;
   }
 }

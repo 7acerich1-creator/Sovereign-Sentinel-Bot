@@ -3894,7 +3894,10 @@ async function main() {
           sapphire: "brand",
         };
         const agentNamespace = AGENT_NAMESPACES[agentCfg.name] || "general";
-        if (pineconeMemory.isReady()) {
+        // Sapphire is now a Personal Assistant first — she uses remember_fact (which
+        // writes to the dedicated `sapphire-personal` namespace) instead of the generic
+        // KnowledgeWriterTool that polluted `brand` namespace with personal info.
+        if (pineconeMemory.isReady() && agentCfg.name !== "sapphire") {
           agentTools.push(new KnowledgeWriterTool(pineconeMemory, agentCfg.name, agentNamespace));
         }
 
@@ -4158,17 +4161,16 @@ async function main() {
                 `Pipeline commands go through Veritas. Acknowledge this if the Architect sent it here by mistake.`;
             }
 
-            // ── SAPPHIRE PA MODE A INJECTION + RICH CONTEXT ──
-            // Replaces the static prompt-only injection with live state context:
-            // auth status, upcoming reminders, standing facts, capabilities. So she
-            // FEELS like she remembers things every time, not like a fresh LLM call.
+            // ── SAPPHIRE PA MODE A INJECTION + SEMANTIC RECALL ──
+            // Pass user message so the prefix can do semantic recall against
+            // sapphire-personal Pinecone namespace and surface relevant facts.
             if (agentCfg.name === "sapphire" && !message.metadata?.isGroup) {
               try {
                 const { buildPersonalContextPrefix } = await import("./agent/sapphire-pa-context");
-                const ctxPrefix = await buildPersonalContextPrefix();
-                message.content = `${ctxPrefix}\n${message.content}`;
+                const userMsg = message.content; // capture before mutation
+                const ctxPrefix = await buildPersonalContextPrefix(userMsg);
+                message.content = `${ctxPrefix}\n${userMsg}`;
               } catch (ctxErr: any) {
-                // Fallback to short-form injection so message still routes correctly
                 console.warn(`[SapphirePA] context build failed: ${ctxErr.message}`);
                 message.content = `[CONTEXT: 1-on-1 DM from Ace. MODE A — Personal Assistant. Plain English. No sovereign tone.]\n\n${message.content}`;
               }

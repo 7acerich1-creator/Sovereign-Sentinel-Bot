@@ -31,11 +31,13 @@ async function getSupabase() {
 
 // ── 1. CONTEXT PREFIX ──────────────────────────────────────────────────────
 
-// Lightweight memory hint — counts + auth status only, NOT contents.
-// Sapphire calls recall_facts / list_reminders / calendar_list when she
-// actually needs the data. This is the "table of contents, not the whole
-// book" pattern. Keeps context lean and trusts her tools.
-export async function buildPersonalContextPrefix(): Promise<string> {
+// Lightweight memory hint + SEMANTIC RECALL on Ace's actual question.
+// - Auth status: always (small, critical for tool routing)
+// - Memory counts: not contents (table of contents, not the whole book)
+// - Semantic recall: queries the `sapphire-personal` Pinecone namespace
+//   against THIS message's text, surfaces 0-3 directly relevant facts
+// - Behavioral rule: tools-first, never say "I don't know" without checking
+export async function buildPersonalContextPrefix(userMessage = ""): Promise<string> {
   const parts: string[] = [
     `[CONTEXT: 1-on-1 DM from Ace. MODE A — Personal Assistant. Plain English only. No "Architect", no sovereign tone, no [inner state] stamp.]`,
   ];
@@ -71,8 +73,25 @@ export async function buildPersonalContextPrefix(): Promise<string> {
     console.warn(`[SapphirePA] counts fetch failed: ${e.message}`);
   }
 
+  // ── SEMANTIC RECALL — query sapphire-personal namespace against THIS message ──
+  // This is what makes her feel like a real assistant: "what was the gift budget"
+  // surfaces "girls_birthday_parties: $25" because of similarity, not exact match.
+  // Only fires when the user's message is substantive (>10 chars).
+  if (userMessage && userMessage.length > 10) {
+    try {
+      const { recallSapphireFacts } = await import("../tools/sapphire/_pinecone");
+      const matches = await recallSapphireFacts(userMessage, 4, 0.65);
+      if (matches.length > 0) {
+        const lines = matches.map((m) => `  • ${m.key} (${m.category}, sim ${m.score.toFixed(2)}): ${m.value}`);
+        parts.push(`[RELEVANT TO THIS MESSAGE — pulled from your personal memory]:\n${lines.join("\n")}`);
+      }
+    } catch (e: any) {
+      console.warn(`[SapphirePA] semantic recall failed: ${e.message}`);
+    }
+  }
+
   // Behavioral rule — make tool-first behavior explicit
-  parts.push(`[RULE: Before saying "I don't know" or "I don't have that info" about anything personal, call recall_facts. Before answering about upcoming events, call list_reminders or calendar_list. Tools first, then answer. When Ace tells you something worth keeping (a name, a routine, a preference, a budget), call remember_fact silently before replying.]`);
+  parts.push(`[RULE: Before saying "I don't know" about anything personal, check the recall block above OR call recall_facts. Before answering about upcoming events, call list_reminders or calendar_list. When Ace tells you something worth keeping (a name, a routine, a preference, a budget), call remember_fact silently — never write_knowledge, that's for crew/brand stuff which is off-limits for you in PA mode.]`);
 
   return parts.join("\n");
 }

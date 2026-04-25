@@ -86,8 +86,7 @@ export class GmailInboxTool implements Tool {
   definition: ToolDefinition = {
     name: "gmail_inbox",
     description:
-      "List recent emails from Ace's Gmail inbox. Use for the morning brief and when Ace asks 'any new emails' or 'check my email'. " +
-      "Returns sender, subject, snippet, received time. Defaults to unread + last 24h.",
+      "List recent emails from Ace's Gmail inbox. ONLY call when he explicitly asks 'any new emails', 'check my email', 'anything important come in', or similar — OR when needed to answer a specific email-related question. Do NOT call by default on greetings or unrelated chat. Returns sender, subject, snippet, received time. Defaults to unread + last 24h.",
     parameters: {
       account: { type: "string", description: "Which account: 'primary' (empoweredservices2013), 'secondary' (7ace.rich1), or 'both'." },
       max: { type: "number", description: "Max emails to return per account. Default 10, max 25." },

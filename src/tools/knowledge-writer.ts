@@ -25,7 +25,7 @@ export class KnowledgeWriterTool implements Tool {
 
     this.definition = {
       name: "write_knowledge",
-      description: `Store a key insight, hook, pattern, or discovery in the crew's permanent semantic memory (Pinecone). Future queries from any agent can recall this. Use when you produce something worth remembering — a strong hook, a conversion insight, a brand decision, a content pattern that worked.`,
+      description: `Store a NOVEL insight, hook, pattern, or discovery in the crew's permanent semantic memory (Pinecone). ONLY use for things that are: (a) genuinely new — not a routine result, (b) reusable across future tasks — a pattern, rule, or discovery, NOT a one-off summary, (c) brand/business scope only — for personal Ace stuff use remember_fact. Routine completions are auto-extracted by the system; you only need to call this for STAND-OUT learnings the auto-extractor would miss. If unsure, skip — better to write nothing than write noise.`,
       parameters: {
         content: {
           type: "string",

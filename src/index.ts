@@ -219,6 +219,19 @@ async function main() {
   const pineconeMemory = new PineconeMemory();
   await pineconeMemory.initialize();
 
+  // ── S114p: Wire Pinecone into the business learning loop ──
+  // Every successful crew_dispatch completion will now extract a 1-line
+  // insight via Gemini Flash and write to that agent's namespace.
+  try {
+    const { setPineconeForExtraction } = await import("./agent/insight-extractor");
+    setPineconeForExtraction(pineconeMemory);
+    if (pineconeMemory.isReady()) {
+      console.log("🧠 [InsightExtractor] Wired — every completed dispatch produces an insight");
+    }
+  } catch (e: any) {
+    console.warn(`[InsightExtractor] Failed to wire: ${e.message}`);
+  }
+
   // Log Pinecone status on startup
   if (pineconeMemory.isReady()) {
     console.log(`🧠 Pinecone semantic memory: ${process.env.PINECONE_INDEX || "gravity-claw"} — ACTIVE`);

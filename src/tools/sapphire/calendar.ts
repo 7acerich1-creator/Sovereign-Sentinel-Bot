@@ -74,8 +74,7 @@ export class CalendarListTool implements Tool {
   definition: ToolDefinition = {
     name: "calendar_list",
     description:
-      "List Ace's calendar events in a time range. Use for the morning brief and 'what's on my calendar' questions. " +
-      "Defaults to today + tomorrow if no range given.",
+      "List Ace's calendar events in a time range. ONLY call when he explicitly asks about his calendar, schedule, what's on his day, when an event is, or similar — OR when needed to answer a specific scheduling question. Do NOT call by default. Defaults to today + tomorrow if no range given.",
     parameters: {
       account: { type: "string", description: "'primary', 'secondary', or 'both'. Default 'both'." },
       time_min: { type: "string", description: "ISO 8601 start. Optional, default = now." },

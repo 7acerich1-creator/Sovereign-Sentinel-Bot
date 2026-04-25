@@ -107,7 +107,7 @@ export class SetReminderTool implements Tool {
 export class ListRemindersTool implements Tool {
   definition: ToolDefinition = {
     name: "list_reminders",
-    description: "List Ace's pending reminders. Use when he asks 'what reminders do I have' or 'what's coming up'.",
+    description: "List Ace's pending reminders. ONLY call when he explicitly asks 'what reminders do I have', 'what's coming up', 'do I have anything for X day', or similar. Do NOT call as a default check on every message — the count is already in the context prefix.",
     parameters: {
       window_hours: {
         type: "number",

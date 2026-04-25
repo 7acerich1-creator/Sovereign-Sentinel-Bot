@@ -241,6 +241,11 @@ export async function claimAllPending(agentNames: string[], limitPerAgent = 1): 
 
 /**
  * Complete a dispatch task with result.
+ *
+ * S114p: ALSO triggers business learning loop — successful completions get
+ * a 1-line insight extracted via Gemini Flash and written to that agent's
+ * Pinecone namespace. Best-effort, fire-and-forget. The business learns from
+ * itself; without this, agents execute and forget. Skipped for failures.
  */
 export async function completeDispatch(
   taskId: string,
@@ -248,6 +253,24 @@ export async function completeDispatch(
   result?: string
 ): Promise<void> {
   if (!SUPABASE_URL || !SUPABASE_KEY || !taskId) return;
+
+  // Capture the full task before patching (we need agent + task_type for extraction)
+  let agent = "";
+  let taskType = "";
+  if (status === "completed" && result && result.length >= 50) {
+    try {
+      const lookupResp = await fetch(`${SUPABASE_URL}/rest/v1/crew_dispatch?id=eq.${taskId}&select=to_agent,task_type`, {
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+      });
+      if (lookupResp.ok) {
+        const rows = (await lookupResp.json()) as any[];
+        if (rows && rows[0]) {
+          agent = String(rows[0].to_agent || "");
+          taskType = String(rows[0].task_type || "");
+        }
+      }
+    } catch { /* silent */ }
+  }
 
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/crew_dispatch?id=eq.${taskId}`, {
@@ -266,6 +289,13 @@ export async function completeDispatch(
     });
   } catch (err: any) {
     console.error(`[CrewDispatch] Complete error: ${err.message}`);
+  }
+
+  // ── Fire learning loop (don't await — never block dispatch result) ──
+  if (status === "completed" && agent && result && result.length >= 50) {
+    import("./insight-extractor")
+      .then(({ extractAndStoreInsight }) => extractAndStoreInsight(agent, taskType, result))
+      .catch((e) => console.warn(`[InsightExtractor] ${e.message}`));
   }
 }
 

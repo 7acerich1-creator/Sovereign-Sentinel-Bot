@@ -81,7 +81,7 @@ export class RecallFactsTool implements Tool {
   definition: ToolDefinition = {
     name: "recall_facts",
     description:
-      "Look up Ace's standing facts. Use to answer 'what was the gift budget' or to check what you remember before responding to a question.",
+      "Look up Ace's standing facts. ONLY call when (a) Ace asked a specific question that requires a remembered fact and (b) the answer isn't already in the context prefix block. Do NOT call speculatively or 'just in case' — every call costs latency. The auto-recall in the context block already surfaces semantically relevant facts; rely on that first.",
     parameters: {
       category: { type: "string", description: "Filter by category. Optional." },
       key_match: { type: "string", description: "Substring match on key. Optional." },

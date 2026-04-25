@@ -34,6 +34,50 @@ function getPageCredentials(brand: FacebookBrand): { token: string; pageId: stri
 }
 
 /**
+ * SESSION 115b — In-memory cache for Page Access Tokens derived from the
+ * System User token at runtime. Keyed by pageId. We refresh every 24h.
+ *
+ * Background: prior to S115b the env vars `FACEBOOK_*_PAGE_ACCESS_TOKEN`
+ * held a SYSTEM USER access token (or a legacy long-lived user token).
+ * Posting to `/PAGE_ID/feed` with a non-Page token causes Meta to return
+ * a misleading "publish_actions deprecated" (code=200) error. The fix is
+ * to first call `GET /PAGE_ID?fields=access_token&access_token=SU_TOKEN`
+ * to obtain the Page-scoped access token, then use THAT for /feed POSTs.
+ *
+ * If the env-var token IS already a Page Access Token, the exchange still
+ * succeeds (Meta returns the same/equivalent page token). On exchange
+ * failure we fall back to the env-var token unchanged so any prior working
+ * config keeps working.
+ */
+const pageTokenCache = new Map<string, { token: string; fetchedAt: number }>();
+const PAGE_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+async function resolvePageAccessToken(seedToken: string, pageId: string): Promise<string> {
+  const cached = pageTokenCache.get(pageId);
+  if (cached && Date.now() - cached.fetchedAt < PAGE_TOKEN_TTL_MS) {
+    return cached.token;
+  }
+
+  try {
+    const url = `${FB_API}/${pageId}?fields=access_token&access_token=${encodeURIComponent(seedToken)}`;
+    const res = await fetch(url, { method: "GET" });
+    const data = (await res.json()) as any;
+    if (data && typeof data.access_token === "string" && data.access_token.length > 0) {
+      pageTokenCache.set(pageId, { token: data.access_token, fetchedAt: Date.now() });
+      console.log(`🔑 [FacebookPublisher] Resolved Page Access Token for pageId=${pageId}`);
+      return data.access_token;
+    }
+    const errMsg = data?.error?.message || JSON.stringify(data).slice(0, 200);
+    console.warn(`⚠️ [FacebookPublisher] Could not exchange for Page Access Token (pageId=${pageId}): ${errMsg}. Falling back to seed token.`);
+  } catch (err: any) {
+    console.warn(`⚠️ [FacebookPublisher] Network error exchanging Page Access Token (pageId=${pageId}): ${err.message}. Falling back to seed token.`);
+  }
+  // Fallback path — cache briefly (1 min) so we don't hammer the exchange endpoint on persistent failures.
+  pageTokenCache.set(pageId, { token: seedToken, fetchedAt: Date.now() - PAGE_TOKEN_TTL_MS + 60_000 });
+  return seedToken;
+}
+
+/**
  * Publish a text post (with optional link) to a Facebook Page.
  * Brand parameter selects the target page (defaults to sovereign_synthesis).
  */
@@ -52,7 +96,10 @@ export async function publishToFacebook(
     };
   }
 
-  const { token, pageId } = creds;
+  const { token: seedToken, pageId } = creds;
+  // S115b: Always exchange the env-var token for a true Page Access Token before
+  // calling /PAGE_ID/feed. Cached per pageId for 24h. Fallback-safe.
+  const token = await resolvePageAccessToken(seedToken, pageId);
 
   try {
     // If there's an image, use /photos endpoint; otherwise /feed

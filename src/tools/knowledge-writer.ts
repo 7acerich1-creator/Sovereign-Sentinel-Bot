@@ -60,6 +60,25 @@ export class KnowledgeWriterTool implements Tool {
       return "Error: Content must be at least 10 characters.";
     }
 
+    // ── S114q: HARD GUARD — Sapphire must NEVER use write_knowledge for personal stuff ──
+    // Prompt rule wasn't enough; Gemini Flash kept picking the wrong tool.
+    // Programmatic block: if Sapphire's write looks personal, refuse and redirect.
+    if (this.agentName === "sapphire") {
+      const lower = content.toLowerCase();
+      const personalSignals = [
+        " ace", "ace's", "your daughter", "your son", "your wife", "your partner",
+        "your kids", "your family", "your home", "your house", "your appointment",
+        "your birthday", "your anniversary", "your gym", "your doctor", "got it,",
+        "remembered", "i've noted", "i've saved", "i'll remind", "remind you",
+        "your meeting", "your call", "your event", "his daughter", "his son",
+        "his wife", "his preference", "for you, ", "you said", "you told me",
+      ];
+      const hits = personalSignals.filter((s) => lower.includes(s));
+      if (hits.length > 0) {
+        return `❌ write_knowledge BLOCKED: this looks like personal info about Ace (matched: ${hits.slice(0, 3).join(", ")}). The brand namespace is for business intelligence ONLY. Use **remember_fact** for personal stuff — it writes to the sapphire-personal namespace. If you genuinely need a brand insight, rephrase to remove personal references.`;
+      }
+    }
+
     if (!this.pinecone.isReady()) {
       return "Pinecone not available — knowledge not stored.";
     }

@@ -28,6 +28,9 @@ export class AgentLoop {
   private llmProviders: Map<string, LLMProvider> = new Map();
   private pinecone: PineconeMemory | null = null;
   private identity: AgentIdentity = { agentName: "veritas", namespace: "general" };
+  // S114q: Optional callback fired before each tool execution (per-message).
+  // Used by Sapphire DM handler to send tool indicators to Telegram.
+  private toolCallObserver?: (name: string, args: Record<string, unknown>) => Promise<void> | void;
 
   constructor(llm: LLMProvider, tools: Tool[], memoryProviders: MemoryProvider[]) {
     this.llm = llm;
@@ -38,6 +41,11 @@ export class AgentLoop {
 
   setPinecone(pinecone: PineconeMemory): void {
     this.pinecone = pinecone;
+  }
+
+  // S114q: Set per-message tool observer. Cleared automatically after processMessage.
+  setToolCallObserver(observer?: (name: string, args: Record<string, unknown>) => Promise<void> | void): void {
+    this.toolCallObserver = observer;
   }
 
   setIdentity(identity: AgentIdentity): void {
@@ -445,6 +453,10 @@ export class AgentLoop {
 
       try {
         console.log(`🔧 Executing tool: ${tc.name}(${JSON.stringify(tc.arguments).slice(0, 200)})`);
+        // S114q: Notify observer (Sapphire DM uses this to send tool indicators)
+        if (this.toolCallObserver) {
+          try { await this.toolCallObserver(tc.name, tc.arguments); } catch { /* never block tool exec */ }
+        }
         const output = await tool.execute(tc.arguments, context);
         results.push({
           toolCallId: tc.id,

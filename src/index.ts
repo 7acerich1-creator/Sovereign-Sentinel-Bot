@@ -4229,7 +4229,21 @@ async function main() {
             const agentNameCap = agentCfg.name.charAt(0).toUpperCase() + agentCfg.name.slice(1);
             const processingMsg = await agentChannel.sendMessage(message.chatId, `⚡ _${agentNameCap} Processing..._`, { parseMode: "Markdown" });
 
+            // S114q: Wire tool-call indicators for Sapphire DMs only.
+            // Fires before each tool exec so Ace sees what she's doing.
+            if (agentCfg.name === "sapphire" && !message.metadata?.isGroup) {
+              try {
+                const { makeSapphireToolObserver } = await import("./agent/sapphire-tool-indicators");
+                agentBotLoop.setToolCallObserver(makeSapphireToolObserver(agentChannel, message.chatId));
+              } catch (e: any) {
+                console.warn(`[SapphirePA] Tool observer wire failed: ${e.message}`);
+              }
+            }
+
             const response = await agentBotLoop.processMessage(message, () => agentChannel.sendTyping(message.chatId));
+
+            // Clear the observer so no leak across messages
+            agentBotLoop.setToolCallObserver(undefined);
 
             // Update task status + log to Mission Control
             if (agentTaskId) await updateTask(agentTaskId, "completed", response.slice(0, 500));

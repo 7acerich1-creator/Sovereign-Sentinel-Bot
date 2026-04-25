@@ -2412,12 +2412,14 @@ async function main() {
   });
 
   // SESSION 104: FLUX Pod Batch — generate images for Content Engine queue entries.
-  // Runs every 3 days. Collects entries with image_prompt but no media_url,
-  // spins up one pod session, batch-generates via FLUX, patches media_url back.
-  // Cost: ~$0.07/batch (pod GPU time) vs $3/day (Imagen 4).
+  // SESSION 115 (2026-04-24): Cadence 3d → 1d. Content Engine generates 24/day
+  // (12 per brand), FLUX caps at 50/run. At 3-day cadence, 72 needed but only 50
+  // processed = 22-row backlog grows every cycle. Distribution sweep marks the
+  // image-missing rows as "partial" and they loop forever. Daily cadence keeps
+  // the queue clean (24 generated, 24 processed, zero overflow).
   scheduler.add({
-    name: "FLUX Pod Batch Image Gen (3d)",
-    intervalMs: 3 * 24 * 60 * 60 * 1000, // 3 days
+    name: "FLUX Pod Batch Image Gen (daily)",
+    intervalMs: 24 * 60 * 60 * 1000, // 1 day
     nextRun: new Date(Date.now() + 30 * 60 * 1000), // First run 30 min after boot
     enabled: true,
     handler: async () => {
@@ -3894,10 +3896,12 @@ async function main() {
           sapphire: "brand",
         };
         const agentNamespace = AGENT_NAMESPACES[agentCfg.name] || "general";
-        // Sapphire is now a Personal Assistant first — she uses remember_fact (which
-        // writes to the dedicated `sapphire-personal` namespace) instead of the generic
-        // KnowledgeWriterTool that polluted `brand` namespace with personal info.
-        if (pineconeMemory.isReady() && agentCfg.name !== "sapphire") {
+        // Sapphire keeps write_knowledge for COO-mode brand intelligence (so the
+        // business semantic memory keeps growing) — but her personality prompt
+        // restricts it to crew/brand topics ONLY. Personal stuff (Ace's life)
+        // goes through remember_fact → sapphire-personal namespace.
+        // Two clean lanes, two distinct namespaces, zero contamination.
+        if (pineconeMemory.isReady()) {
           agentTools.push(new KnowledgeWriterTool(pineconeMemory, agentCfg.name, agentNamespace));
         }
 
@@ -3964,6 +3968,30 @@ async function main() {
                   (message as any).__sapphirePATranscribed = true;
                 } catch (vErr: any) {
                   console.error(`[SapphirePA] Voice transcription failed: ${vErr.message}`);
+                }
+              }
+            }
+
+            // ── EARLY PDF ANALYSIS (Sapphire DM only) — Gap 2 ──
+            // Sapphire receives a PDF document → run analyze_pdf → replace
+            // message.content with the extracted text so the agent loop can act.
+            if (agentCfg.name === "sapphire" && !message.metadata?.isGroup
+                && message.attachments?.some((a) => a.type === "document")) {
+              const docAttachment = message.attachments.find((a) => a.type === "document");
+              const isPdf = docAttachment && (
+                (docAttachment as any).mimeType === "application/pdf"
+                || ((docAttachment as any).fileName && (docAttachment as any).fileName.toLowerCase().endsWith(".pdf"))
+              );
+              if (isPdf && docAttachment?.fileId) {
+                try {
+                  await agentChannel.sendTyping(message.chatId);
+                  const { AnalyzePdfTool } = await import("./tools/sapphire");
+                  const pdfTool = new AnalyzePdfTool();
+                  const extraction = await pdfTool.execute({ file_id: docAttachment.fileId, focus: "all" });
+                  const caption = (message.content && message.content !== "[Document]") ? message.content : "";
+                  message.content = `[ACE SENT YOU A PDF. Here's what's in it]:\n${extraction}\n\n[ORIGINAL CAPTION]: ${caption || "(no caption)"}\n\n[INSTRUCTION]: Act on the PDF content. If it has dates/times → propose a calendar event. If it has tasks/deadlines → propose a reminder. If it's a note worth keeping → append to today's Notion page. If unclear what to do → ask Ace. Always confirm before acting.`;
+                } catch (pdfErr: any) {
+                  console.error(`[SapphirePA] PDF handler crashed: ${pdfErr.message}`);
                 }
               }
             }

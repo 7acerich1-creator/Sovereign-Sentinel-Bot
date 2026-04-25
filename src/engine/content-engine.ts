@@ -1343,7 +1343,12 @@ export async function draftAutoPublisher(): Promise<number> {
         brand = "containment_field";
       }
 
-      // Insert into content_engine_queue with immediate scheduling
+      // Insert into content_engine_queue with immediate scheduling.
+      // SESSION 115 FIX (2026-04-24): Removed `source: "draft_auto_publisher"`.
+      // The content_engine_queue table has NO `source` column (verified
+      // against information_schema). Including the field caused every MC
+      // draft promotion INSERT to silently 4xx, which is why the queue
+      // showed zero MC-sourced entries despite drafts existing.
       await supabasePost("content_engine_queue", {
         brand,
         niche: draft.niche || "sovereignty",
@@ -1354,7 +1359,6 @@ export async function draftAutoPublisher(): Promise<number> {
         universal_text: draft.body,
         platform_variants: {},  // Distribution sweep uses universal_text as fallback
         status: "ready",
-        source: "draft_auto_publisher",
       });
 
       // Mark draft as published so it's not re-processed

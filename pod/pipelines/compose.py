@@ -1889,6 +1889,60 @@ def compose_short(
     else:
         log.info("compose_short_captions_skipped_silent_audio")
 
+    # ── Stage 3.4: Persistent bottom-third CTA handle ──────────────────
+    # SESSION 115 (2026-04-24): The Stage 3.5 end-card is appended as a
+    # SEPARATE 2.5s card after the short — invisible to viewers who swipe
+    # in the median ~25s scroll window. This stage burns the @handle
+    # portion of the CTA persistently into the bottom-third of every
+    # frame of the main short, with a semi-transparent dark band behind
+    # for legibility. End-card stays (belt + suspenders).
+    if cta_text and cta_text.strip():
+        try:
+            # Pull just the @handle from the CTA. BRAND_CTA format is
+            # "The protocol is live — @sovereign_synthesis" — the part
+            # AFTER the em-dash is the handle. If no em-dash, use whole.
+            _persist_raw = cta_text.strip()
+            if "\u2014" in _persist_raw:
+                _persist_handle = _persist_raw.split("\u2014", 1)[1].strip()
+            else:
+                _persist_handle = _persist_raw
+            # Cap at 32 chars — anything longer won't fit at fontsize 52
+            if len(_persist_handle) > 32:
+                _persist_handle = _persist_handle[:32]
+            # Escape for drawtext
+            _persist_safe = _persist_handle.replace("'", "\u2019").replace(":", "\\:").replace("\\", "\\\\")
+
+            persist_out = os.path.join(job_dir, "short_persistent_cta.mp4")
+            persist_filter = (
+                f"drawtext=fontfile='{FONT_BEBAS}'"
+                f":text='{_persist_safe}'"
+                f":fontsize=52"
+                f":fontcolor=white"
+                f":box=1:boxcolor=black@0.55:boxborderw=18"
+                f":x=(w-text_w)/2"
+                f":y=h-200"
+            )
+            persist_cmd = [
+                "ffmpeg", "-y",
+                "-i", final_path,
+                "-vf", persist_filter,
+                "-c:v", VIDEO_CODEC, "-preset", "fast", "-crf", VIDEO_CRF,
+                "-c:a", "copy",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                persist_out,
+            ]
+            log.info("compose_short_persistent_cta_burn", handle=_persist_handle)
+            persist_result = subprocess.run(persist_cmd, capture_output=True, text=True, timeout=180)
+            if persist_result.returncode == 0 and os.path.isfile(persist_out):
+                final_path = persist_out
+                log.info("compose_short_persistent_cta_burned", handle=_persist_handle)
+            else:
+                log.warning("compose_short_persistent_cta_failed",
+                            stderr=persist_result.stderr[:300] if persist_result.stderr else "")
+        except Exception as exc:
+            log.warning("compose_short_persistent_cta_error", error=str(exc)[:300])
+
     # ── Stage 3.5: Full-screen CTA card — appended as last 2.5s ────────
     # SESSION 98: Replaced small drawtext with a full-screen branded card
     # appended to the Short, matching the style seen on high-performing

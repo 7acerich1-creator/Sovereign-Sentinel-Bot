@@ -522,13 +522,16 @@ def _image_to_branded_video(
             lines.append(current.strip())
         wrapped = "\\n".join(lines[:4])  # max 4 lines
 
+        # SESSION 115 FIX (2026-04-24): Removed enable=between(t,0.5,DUR-0.5).
+        # Old behavior delayed the hook by 500ms and removed it 500ms early —
+        # killing visibility for feed-scrollers who decide in <1s. The hook
+        # now burns from frame 0 to the final frame.
         text_filter = (
             f"drawtext=fontfile={BRAND_FONT}"
             f":text='{wrapped}'"
             f":fontsize=42:fontcolor=white"
             f":shadowcolor=black@0.8:shadowx=2:shadowy=2"
             f":x=(w-text_w)/2:y=h-text_h-60"
-            f":enable='between(t,0.5,{VIDEO_DURATION - 0.5})'"
         )
         vf = f"{zoom_filter},{text_filter}"
     else:

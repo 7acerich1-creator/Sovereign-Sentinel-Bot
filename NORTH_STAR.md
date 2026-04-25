@@ -338,3 +338,4 @@ When step 3 ships, this section collapses and the evolution goal becomes the nex
 - Not aspirational language (aspirations don't close loops)
 
 This file is the terminal authority on **whether today's work was revenue-relevant**. The answer is yes or no. Write it down.
+  

@@ -457,6 +457,12 @@ export class AgentLoop {
   ): Promise<ToolResult[]> {
     const results: ToolResult[] = [];
 
+    // S114v: Hard cap on retry loops. Track (toolName + JSON args) — if same
+    // call signature repeats 2+ times in this message, refuse the third+ call.
+    // Prevents cost-burning loops when LLM retries blindly on tool errors
+    // (e.g. set_reminder rejecting past dates → retry with same date → loop).
+    const callSignatures: Map<string, number> = new Map();
+
     for (const tc of toolCalls) {
       const tool = this.tools.get(tc.name);
       if (!tool) {
@@ -468,10 +474,20 @@ export class AgentLoop {
         continue;
       }
 
+      // Anti-loop guard
+      const sig = `${tc.name}::${JSON.stringify(tc.arguments).slice(0, 500)}`;
+      const prevCount = callSignatures.get(sig) || 0;
+      if (prevCount >= 2) {
+        const blockedMsg = `❌ BLOCKED: ${tc.name} already called twice this turn with the same arguments. Stop retrying — ask Ace for clarification or compute different arguments.`;
+        console.warn(`[AgentLoop] Anti-loop blocked: ${sig.slice(0, 100)}`);
+        results.push({ toolCallId: tc.id, content: blockedMsg, isError: true });
+        continue;
+      }
+      callSignatures.set(sig, prevCount + 1);
+
       // Check if dangerous and needs confirmation
       if (tool.definition.dangerous && config.security.dangerousCommandConfirmation) {
         console.log(`⚠️ Dangerous tool call: ${tc.name}(${JSON.stringify(tc.arguments)})`);
-        // For now, proceed with warning logged
       }
 
       try {

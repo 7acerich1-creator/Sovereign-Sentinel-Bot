@@ -89,7 +89,7 @@ const DEFAULTS: Record<string, string> = {
   active_goals: "be_present_useful",
   active_format: "warm_concise",
   active_scenario: "default",
-  active_extras: "discernment,memory_routing,what_you_can_do,family_first,no_loops",
+  active_extras: "discernment,memory_routing,what_you_can_do,family_first,no_loops,no_tool_retry_loops",
   active_emotions: "focused,warm",
 };
 
@@ -281,6 +281,20 @@ export async function buildAssembledPrompt(opts: BuildOptions = {}): Promise<str
     for (const line of extraLines) sections.push(`- ${line}`);
     sections.push("");
   }
+
+  // # NOW — inject actual current date/time so Gemini knows "today" exists.
+  // Without this, she computes relative dates ("Friday at 2pm") against her
+  // training cutoff and submits past dates that get rejected by set_reminder.
+  const now = new Date();
+  const cdtOffset = -5; // CDT — Ace's timezone
+  const nowCdt = new Date(now.getTime() + cdtOffset * 60 * 60 * 1000);
+  const dayName = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][nowCdt.getUTCDay()];
+  const monthName = ["January","February","March","April","May","June","July","August","September","October","November","December"][nowCdt.getUTCMonth()];
+  const cdtFormatted = `${dayName}, ${monthName} ${nowCdt.getUTCDate()}, ${nowCdt.getUTCFullYear()} at ${String(nowCdt.getUTCHours()).padStart(2,"0")}:${String(nowCdt.getUTCMinutes()).padStart(2,"0")} CDT`;
+  sections.push(`# NOW`);
+  sections.push(`Current time: ${cdtFormatted} (UTC: ${now.toISOString()})`);
+  sections.push(`When converting natural-language times like "Friday at 2pm" or "tomorrow morning" to ISO 8601 for set_reminder/calendar_create_event, calculate FROM THIS TIMESTAMP. Never use a year other than ${nowCdt.getUTCFullYear()} unless Ace explicitly asks for a different year.`);
+  sections.push("");
 
   // # URGENT ALERT — the spice line, with attention-grabbing framing per ddxfish
   if (state.current_spice) {

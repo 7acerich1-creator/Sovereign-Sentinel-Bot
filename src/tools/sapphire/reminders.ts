@@ -19,14 +19,64 @@ function getSupabase() {
 // Use config source (same fallback chain as the rest of the bot)
 const ACE_CHAT_ID = String(config.telegram.authorizedUserIds[0] || "");
 
-// ── Helper: validate + normalize ISO datetime ───────────────────────────────
-function normalizeFireAt(input: string): { ok: true; iso: string } | { ok: false; err: string } {
+// ── Helper: validate + normalize ISO datetime, with smart correction ───────
+//
+// If fire_at is in the past AND a recurrence_rule is given (e.g., "daily"),
+// auto-roll it forward to the next valid occurrence. This prevents Gemini's
+// "I think it's still 2024" hallucinations from causing infinite retry loops.
+function normalizeFireAt(
+  input: string,
+  recurrence: string | null,
+): { ok: true; iso: string; corrected?: boolean } | { ok: false; err: string } {
   if (!input || typeof input !== "string") return { ok: false, err: "fire_at must be an ISO 8601 string." };
-  const d = new Date(input);
+  let d = new Date(input);
   if (isNaN(d.getTime())) return { ok: false, err: `fire_at "${input}" is not a valid date.` };
-  if (d.getTime() < Date.now() - 60_000) {
-    return { ok: false, err: `fire_at "${input}" is in the past. Use a future time.` };
+
+  const nowMs = Date.now();
+  const grace = 60_000; // 60s grace for clock drift
+
+  // If in the past, try to auto-correct based on intent
+  if (d.getTime() < nowMs - grace) {
+    let corrected = false;
+
+    // Case 1: just the year is wrong (off by >180 days but matches today's month/day pattern)
+    // Bump year forward until it's in the future.
+    const currentYear = new Date().getUTCFullYear();
+    if (d.getUTCFullYear() < currentYear) {
+      d.setUTCFullYear(currentYear);
+      if (d.getTime() < nowMs) d.setUTCFullYear(currentYear + 1);
+      corrected = true;
+    }
+    // Case 2: still in the past after year fix, AND we have a recurrence — roll to next occurrence
+    if (d.getTime() < nowMs - grace && recurrence) {
+      const r = recurrence.toLowerCase().trim();
+      if (r === "daily") {
+        while (d.getTime() < nowMs) d.setUTCDate(d.getUTCDate() + 1);
+        corrected = true;
+      } else if (r === "weekday" || r === "weekend" || r.startsWith("weekly:")) {
+        // Add 7 days at a time until in the future
+        while (d.getTime() < nowMs) d.setUTCDate(d.getUTCDate() + 7);
+        corrected = true;
+      } else if (r.startsWith("monthly:")) {
+        while (d.getTime() < nowMs) d.setUTCMonth(d.getUTCMonth() + 1);
+        corrected = true;
+      }
+    }
+    // Case 3: still in the past, no recurrence — just bump to tomorrow same time
+    if (d.getTime() < nowMs - grace && !recurrence) {
+      const orig = new Date(input);
+      d = new Date(nowMs + 24 * 60 * 60 * 1000);
+      d.setUTCHours(orig.getUTCHours(), orig.getUTCMinutes(), 0, 0);
+      if (d.getTime() < nowMs) d.setUTCDate(d.getUTCDate() + 1);
+      corrected = true;
+    }
+
+    if (d.getTime() < nowMs - grace) {
+      return { ok: false, err: `fire_at "${input}" is in the past and could not be auto-corrected. Compute the date based on the current time injected in your context.` };
+    }
+    return { ok: true, iso: d.toISOString(), corrected };
   }
+
   return { ok: true, iso: d.toISOString() };
 }
 
@@ -69,8 +119,9 @@ export class SetReminderTool implements Tool {
     const recurrence = args.recurrence_rule ? String(args.recurrence_rule).trim() : null;
 
     if (!message) return "set_reminder: message is required.";
-    const norm = normalizeFireAt(fireAtRaw);
+    const norm = normalizeFireAt(fireAtRaw, recurrence);
     if (!norm.ok) return `set_reminder: ${norm.err}`;
+    const correctedNote = norm.corrected ? " (auto-corrected past date to next valid occurrence)" : "";
 
     if (!ACE_CHAT_ID) return "set_reminder: TELEGRAM_AUTHORIZED_USER_ID is not set; cannot route reminder DM.";
 
@@ -99,7 +150,7 @@ export class SetReminderTool implements Tool {
       minute: "2-digit",
       timeZoneName: "short",
     });
-    return `Reminder set for ${friendlyDate}: "${message.slice(0, 80)}"${recurrence ? ` (recurring: ${recurrence})` : ""}. ID: ${data.id}.`;
+    return `Reminder set for ${friendlyDate}: "${message.slice(0, 80)}"${recurrence ? ` (recurring: ${recurrence})` : ""}. ID: ${data.id}.${correctedNote}`;
   }
 }
 

@@ -65,14 +65,21 @@ const TOOL_LABELS: Record<string, string> = {
  * message before each tool execution so Ace sees what she's doing.
  */
 export function makeSapphireToolObserver(channel: Channel, chatId: string) {
-  // Throttle — don't double-fire within 1.5s for same tool (chained calls)
+  // Throttle — don't fire same tool indicator more than once per 8s (was 1.5s).
+  // Tighter cap prevents retry-loop indicator spam (S114v: Sapphire was firing
+  // 5+ "Setting reminder…" indicators when set_reminder rejected past dates).
+  // Also hard cap: max 3 indicators per message regardless of tool name.
   const lastFired: Record<string, number> = {};
+  let totalThisMessage = 0;
+  const MAX_PER_MESSAGE = 3;
   return async (name: string, _args: Record<string, unknown>) => {
     const label = TOOL_LABELS[name];
-    if (!label) return; // Unknown tool — stay silent rather than spam the user
+    if (!label) return;
+    if (totalThisMessage >= MAX_PER_MESSAGE) return;
     const now = Date.now();
-    if (lastFired[name] && now - lastFired[name] < 1500) return;
+    if (lastFired[name] && now - lastFired[name] < 8000) return;
     lastFired[name] = now;
+    totalThisMessage++;
     try {
       await channel.sendMessage(chatId, label);
     } catch {

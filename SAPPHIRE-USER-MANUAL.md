@@ -130,7 +130,7 @@ The morning/evening times don't conflict with your content pipeline. Verified.
 
 ---
 
-## Voice mode (totally free)
+## Voice mode (totally free, no pod spin-up)
 
 Default: she replies with text.
 
@@ -138,7 +138,9 @@ Default: she replies with text.
 - `/voice_off` — back to text only
 - `/voice_brief` — voice for ONLY the morning brief and evening wrap, text for everything else
 
-You can also send her **voice notes** anytime — she transcribes them and acts on what you said. Useful while driving.
+Her voice is "Salli" — a warm US female voice via StreamElements (a free public TTS service). No pod, no GPU time, no per-message cost. If you want a different voice, set `SAPPHIRE_TTS_VOICE` in Railway env to one of: Joanna, Kimberly, Amy (UK), Emma (UK), Ivy.
+
+You can also send her **voice notes** anytime — she transcribes them and acts on what you said. Useful while driving. Transcription costs about $0.006/min via OpenAI Whisper (already wired, already paid for).
 
 ---
 

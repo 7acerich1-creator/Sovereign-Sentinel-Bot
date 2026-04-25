@@ -247,6 +247,95 @@ def _find_best_fit(text, font_path, canvas_w, canvas_h):
     return ([words[0]], _THUMB_FONT_MIN)
 
 
+def _render_text_block(
+    img,
+    text: str,
+    font_path: str,
+    zone_x: int,
+    zone_y: int,
+    zone_w: int,
+    zone_h: int,
+    font_min: int = _THUMB_FONT_MIN,
+    font_max: int = _THUMB_FONT_MAX,
+    stroke_width: int = _THUMB_STROKE_WIDTH,
+    stroke_fill: str = "black",
+    text_fill: str = "white",
+    upper: bool = False,
+):
+    """Render a single text block within a defined zone with binary-search
+    fontsize fitting and word-boundary wrap.
+
+    S117: replaces the silent-truncation path in `_find_best_fit`. If the
+    text physically does not fit at `font_min`, we RAISE rather than truncate.
+    Callers (LLM-prompt + palette layers) deliver text that fits; the
+    compositor never mangles a fragment. Breaks the 10+ session loop where
+    mid-clause truncation was silently shipped.
+    """
+    clean_text = (text or "").strip()
+    if not clean_text:
+        return [], 0
+    if upper:
+        clean_text = clean_text.upper()
+
+    words = clean_text.split()
+    if not words:
+        return [], 0
+
+    safe_w = zone_w
+    safe_h = zone_h
+
+    best = None
+    for target_lines in range(1, min(_THUMB_MAX_LINES, len(words)) + 1):
+        lines = _wrap_into_n_lines(words, target_lines)
+        if not lines:
+            continue
+        lo, hi = font_min, font_max
+        best_size_for_wrap = 0
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            max_line_w = max(_measure_line_width(ln, font_path, mid) for ln in lines)
+            extra_gap = int(mid * (_THUMB_LINE_SPACING_FACTOR - 1))
+            block_h = len(lines) * mid + max(0, len(lines) - 1) * extra_gap
+            if max_line_w <= safe_w and block_h <= safe_h:
+                best_size_for_wrap = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        if best_size_for_wrap == 0:
+            continue
+        if best is None or best_size_for_wrap > best[1]:
+            best = (lines, best_size_for_wrap)
+
+    if best is None:
+        raise ValueError(
+            f"text {clean_text!r} does not fit {zone_w}x{zone_h} at fontsize {font_min}-{font_max}"
+        )
+
+    lines, fontsize = best
+    font = ImageFont.truetype(font_path, fontsize)
+    line_spacing = int(fontsize * _THUMB_LINE_SPACING_FACTOR)
+    extra_gap = line_spacing - fontsize
+    block_h = len(lines) * fontsize + max(0, len(lines) - 1) * extra_gap
+    start_y = zone_y + (zone_h - block_h) // 2
+
+    draw = ImageDraw.Draw(img)
+    for i, line in enumerate(lines):
+        bbox = font.getbbox(line)
+        line_w = bbox[2] - bbox[0]
+        x = zone_x + (zone_w - line_w) // 2
+        y = start_y + i * line_spacing
+        draw.text(
+            (x, y),
+            line,
+            fill=text_fill,
+            font=font,
+            stroke_width=stroke_width,
+            stroke_fill=stroke_fill,
+        )
+
+    return lines, fontsize
+
+
 def render_thumbnail_with_text(
     src_image_path,
     text,
@@ -254,21 +343,35 @@ def render_thumbnail_with_text(
     canvas_w,
     canvas_h,
     font_path=None,
+    subhead=None,
+    subhead_font_path=None,
 ):
     """Render a thumbnail: scale + vignette the source image, then overlay
-    `text` centered with dynamic font sizing. Returns dict with rendered
-    lines and fontsize.
+    `text` (headline) and optional `subhead` centered with dynamic fontsize.
+
+    S117 (2026-04-25): Two-tier text on full-bleed image. The image is the
+    backdrop; the TEXT does the work (Rev. Ike sermon-poster pattern). When
+    `subhead` is provided, headline takes upper 62% of the safe area, gap 5%,
+    subhead takes lower 33%, each independently auto-fit.
+
+    HARD RULE: if either text doesn't fit at min font, RAISE instead of
+    truncating. Caller picks a brand-palette fallback rather than ship a
+    fragment. Breaks the 10+ session "DO YOU SENSE A DEEP," loop.
     """
     if font_path is None:
         font_path = FONT_BEBAS
+    if subhead_font_path is None:
+        subhead_font_path = FONT_MONTSERRAT
 
+    # S117: vignette tightened from PI/3 to PI/2.5 — slightly stronger
+    # corner darkening so two-tier text reads at any image content.
     vignette_path = output_path + ".bg.jpg"
     try:
         subprocess.run(
             [
                 "ffmpeg", "-y",
                 "-i", src_image_path,
-                "-vf", f"scale={canvas_w}:{canvas_h}:flags=lanczos,vignette=PI/3",
+                "-vf", f"scale={canvas_w}:{canvas_h}:flags=lanczos,vignette=PI/2.5",
                 "-q:v", "2",
                 vignette_path,
             ],
@@ -281,46 +384,83 @@ def render_thumbnail_with_text(
         img.save(vignette_path, "JPEG", quality=92)
 
     img = Image.open(vignette_path).convert("RGB")
-    draw = ImageDraw.Draw(img)
 
-    clean_text = (text or "").strip()
-    if not clean_text:
+    clean_headline = (text or "").strip().upper()
+    clean_subhead = (subhead or "").strip()
+
+    if not clean_headline and not clean_subhead:
         img.save(output_path, "JPEG", quality=95)
         try:
             os.remove(vignette_path)
         except OSError:
             pass
-        return {"lines": [], "fontsize": 0}
+        return {
+            "lines": [], "fontsize": 0,
+            "subhead_lines": [], "subhead_fontsize": 0,
+        }
 
-    clean_text = clean_text.upper()
-    lines, fontsize = _find_best_fit(clean_text, font_path, canvas_w, canvas_h)
-    if not lines:
-        img.save(output_path, "JPEG", quality=95)
+    margin = _THUMB_MARGIN
+    safe_w = canvas_w - 2 * margin
+    safe_h = canvas_h - 2 * margin
+
+    lines: list = []
+    fontsize = 0
+    subhead_lines: list = []
+    subhead_fontsize = 0
+
+    if clean_subhead and clean_headline:
+        # Two-tier: headline 62%, gap 5%, subhead 33% of safe height.
+        gap = int(safe_h * 0.05)
+        headline_zone_h = int(safe_h * 0.62)
+        subhead_zone_h = safe_h - headline_zone_h - gap
+
         try:
-            os.remove(vignette_path)
-        except OSError:
-            pass
-        return {"lines": [], "fontsize": 0}
+            lines, fontsize = _render_text_block(
+                img, clean_headline, font_path,
+                zone_x=margin, zone_y=margin,
+                zone_w=safe_w, zone_h=headline_zone_h,
+                font_min=_THUMB_FONT_MIN, font_max=_THUMB_FONT_MAX,
+                stroke_width=_THUMB_STROKE_WIDTH,
+                upper=False,
+            )
+        except ValueError as exc:
+            log.warning("compose_thumbnail_headline_no_fit", error=str(exc)[:200])
+            raise
 
-    font = ImageFont.truetype(font_path, fontsize)
-    line_spacing = int(fontsize * _THUMB_LINE_SPACING_FACTOR)
-    extra_gap = line_spacing - fontsize
-    block_h = len(lines) * fontsize + max(0, len(lines) - 1) * extra_gap
-    start_y = (canvas_h - block_h) // 2
+        try:
+            subhead_lines, subhead_fontsize = _render_text_block(
+                img, clean_subhead, subhead_font_path,
+                zone_x=margin, zone_y=margin + headline_zone_h + gap,
+                zone_w=safe_w, zone_h=subhead_zone_h,
+                font_min=max(36, _THUMB_FONT_MIN - 16),
+                font_max=int(_THUMB_FONT_MAX * 0.55),
+                stroke_width=max(3, _THUMB_STROKE_WIDTH - 2),
+                upper=False,
+            )
+        except ValueError as exc:
+            log.warning(
+                "compose_thumbnail_subhead_no_fit_dropped",
+                error=str(exc)[:200],
+                headline=clean_headline[:60],
+            )
+            subhead_lines = []
+            subhead_fontsize = 0
 
-    for i, line in enumerate(lines):
-        bbox = font.getbbox(line)
-        line_w = bbox[2] - bbox[0]
-        x = (canvas_w - line_w) // 2
-        y = start_y + i * line_spacing
-        draw.text(
-            (x, y),
-            line,
-            fill="white",
-            font=font,
-            stroke_width=_THUMB_STROKE_WIDTH,
-            stroke_fill="black",
-        )
+    else:
+        only_text = clean_headline or clean_subhead.upper()
+        only_font = font_path if clean_headline else subhead_font_path
+        try:
+            lines, fontsize = _render_text_block(
+                img, only_text, only_font,
+                zone_x=margin, zone_y=margin,
+                zone_w=safe_w, zone_h=safe_h,
+                font_min=_THUMB_FONT_MIN, font_max=_THUMB_FONT_MAX,
+                stroke_width=_THUMB_STROKE_WIDTH,
+                upper=False,
+            )
+        except ValueError as exc:
+            log.warning("compose_thumbnail_single_no_fit", error=str(exc)[:200])
+            raise
 
     img.save(output_path, "JPEG", quality=95)
     try:
@@ -328,7 +468,12 @@ def render_thumbnail_with_text(
     except OSError:
         pass
 
-    return {"lines": lines, "fontsize": fontsize}
+    return {
+        "lines": lines,
+        "fontsize": fontsize,
+        "subhead_lines": subhead_lines,
+        "subhead_fontsize": subhead_fontsize,
+    }
 
 
 
@@ -1124,6 +1269,8 @@ def compose_video(
     hook_text: Optional[str] = None,
     script: str = "",
     thumbnail_text: Optional[str] = None,
+    thumbnail_headline: Optional[str] = None,
+    thumbnail_subhead: Optional[str] = None,
 ) -> dict:
     """
     Assemble a full long-form video from per-scene images + audio.
@@ -1389,42 +1536,48 @@ def compose_video(
     thumb_idx = min(thumbnail_scene_idx, n_scenes - 1)
     thumb_src = scene_images[thumb_idx] if thumb_idx < len(scene_images) else scene_images[0]
 
-    # Thumbnail overlay text — prefer the LLM-generated memetic trigger
-    # (complete standalone statement like "THEY DESIGNED YOUR CAGE").
-    # Falls back to first 5 words of hook_text or script if thumbnail_text
-    # was not provided.
-    _thumb_hook = ""
-    if thumbnail_text and thumbnail_text.strip():
-        _thumb_hook = thumbnail_text.strip().upper()
+    # S117: dual-tier thumbnail — headline (ALL CAPS) + subhead (Title Case).
+    # Falls back to legacy thumbnail_text -> hook_text -> script slice when
+    # the LLM did not deliver the new fields.
+    _thumb_headline = ""
+    _thumb_subhead = ""
+    if thumbnail_headline and thumbnail_headline.strip():
+        _thumb_headline = thumbnail_headline.strip().upper()
+        if thumbnail_subhead and thumbnail_subhead.strip():
+            _thumb_subhead = thumbnail_subhead.strip()
+    elif thumbnail_text and thumbnail_text.strip():
+        _thumb_headline = thumbnail_text.strip().upper()
     elif hook_text:
         _words = hook_text.upper().split()
-        _thumb_hook = " ".join(_words[:5])
+        _thumb_headline = " ".join(_words[:5])
     elif script:
         _words = script.split("\n")[0].upper().split()
-        _thumb_hook = " ".join(_words[:5])
+        _thumb_headline = " ".join(_words[:5])
 
     try:
-        # Session 113+ — Pillow-based thumbnail rendering.
-        # Replaces the ffmpeg drawtext chain. Real font metrics, dynamic
-        # fontsize (3 words -> ~180px, 7 words -> ~85px), word-boundary wrap,
-        # sentence-boundary truncation fallback. Never mid-word.
+        # S117: Pillow renderer with two-tier text on full-bleed vignetted image.
+        # Hard-rejects on no-fit instead of silent-truncating.
         render_info = render_thumbnail_with_text(
             src_image_path=thumb_src,
-            text=_thumb_hook,
+            text=_thumb_headline,
             output_path=thumb_path,
             canvas_w=1280,
             canvas_h=720,
             font_path=FONT_BEBAS,
+            subhead=_thumb_subhead or None,
+            subhead_font_path=FONT_MONTSERRAT,
         )
         log.info(
             "compose_thumbnail_ok",
-            hook=_thumb_hook or "(none)",
+            headline=_thumb_headline or "(none)",
+            subhead=_thumb_subhead or "(none)",
             lines=len(render_info.get("lines", [])),
             fontsize=render_info.get("fontsize", 0),
+            sub_lines=len(render_info.get("subhead_lines", [])),
+            sub_fontsize=render_info.get("subhead_fontsize", 0),
         )
     except Exception as exc:
         log.warning("compose_thumbnail_failed", error=str(exc)[:300])
-        # Fallback: copy the raw image as thumbnail
         import shutil
         shutil.copy2(thumb_src, thumb_path)
 
@@ -1605,6 +1758,8 @@ def compose_short(
     cta_text: Optional[str] = None,
     audio_is_raw_tts: bool = False,
     thumbnail_text: Optional[str] = None,
+    thumbnail_headline: Optional[str] = None,
+    thumbnail_subhead: Optional[str] = None,
 ) -> dict:
     """
     Assemble a native 9:16 vertical short from scene images + pre-extracted audio.
@@ -2072,31 +2227,40 @@ def compose_short(
     # Use the first scene image (most visually impactful for shorts)
     thumb_src = scene_images[0] if scene_images else ""
 
-    # Thumbnail overlay — prefer LLM memetic trigger, fall back to hook
-    _thumb_hook = ""
-    if thumbnail_text and thumbnail_text.strip():
-        _thumb_hook = thumbnail_text.strip().upper()
+    # S117: dual-tier thumbnail (headline + subhead) with backward-compat fallback.
+    _thumb_headline = ""
+    _thumb_subhead = ""
+    if thumbnail_headline and thumbnail_headline.strip():
+        _thumb_headline = thumbnail_headline.strip().upper()
+        if thumbnail_subhead and thumbnail_subhead.strip():
+            _thumb_subhead = thumbnail_subhead.strip()
+    elif thumbnail_text and thumbnail_text.strip():
+        _thumb_headline = thumbnail_text.strip().upper()
     elif hook_text:
         _words = hook_text.upper().split()
-        _thumb_hook = " ".join(_words[:5])
+        _thumb_headline = " ".join(_words[:5])
 
     try:
-        # Session 113+ — Pillow renderer (same as long-form, vertical canvas).
-        # Vertical safe area is taller, so fontsize can go larger before
-        # height becomes the binding constraint.
+        # S117: Pillow two-tier renderer. Vertical canvas gives more headroom
+        # than long-form so both tiers can run larger fontsize.
         render_info = render_thumbnail_with_text(
             src_image_path=thumb_src,
-            text=_thumb_hook,
+            text=_thumb_headline,
             output_path=thumb_path,
             canvas_w=SHORT_WIDTH,
             canvas_h=SHORT_HEIGHT,
             font_path=FONT_BEBAS,
+            subhead=_thumb_subhead or None,
+            subhead_font_path=FONT_MONTSERRAT,
         )
         log.info(
             "compose_short_thumbnail_ok",
-            hook=_thumb_hook or "(none)",
+            headline=_thumb_headline or "(none)",
+            subhead=_thumb_subhead or "(none)",
             lines=len(render_info.get("lines", [])),
             fontsize=render_info.get("fontsize", 0),
+            sub_lines=len(render_info.get("subhead_lines", [])),
+            sub_fontsize=render_info.get("subhead_fontsize", 0),
         )
     except Exception as exc:
         log.warning("compose_short_thumbnail_failed", error=str(exc)[:300])

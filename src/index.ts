@@ -77,6 +77,7 @@ import { textToSpeech } from "./voice/tts";
 import { ProactiveBriefings } from "./proactive/briefings";
 import { HeartbeatSystem } from "./proactive/heartbeat";
 import { pollYouTubeComments } from "./proactive/youtube-comment-watcher";
+import { pollNewShortsForPinnedComment } from "./proactive/yuki-shorts-pinner";
 import { pollYouTubeStats } from "./proactive/youtube-stats-fetcher";
 import { runHookDrops } from "./proactive/yuki-hook-dropper";
 import { pollBlueskyReplies } from "./proactive/yuki-bluesky-replier";
@@ -2651,6 +2652,29 @@ async function main() {
   });
 
   console.log("🟡 [YTCommentWatcher] Scheduled: every 5min across both YT channels");
+
+  // ── Yuki Shorts Pinner — auto-post diagnostic comment on every new Short ──
+  // S117 (2026-04-25). Closes the engagement gap on Shorts: the comment
+  // watcher only sees REPLIES to existing comments, not new uploads. This
+  // cron polls search.list?order=date for both channels every 5 min, filters
+  // to videos ≤ 60s (Shorts), and posts a Yuki-generated diagnostic comment
+  // as the channel owner via commentThreads.insert. Dedup via Supabase
+  // yuki_short_comments_posted. See src/proactive/yuki-shorts-pinner.ts.
+  scheduler.add({
+    name: "Yuki Shorts Pinner",
+    intervalMs: 5 * 60_000,
+    nextRun: new Date(Date.now() + 60_000), // offset 1 min from comment poll to spread load
+    enabled: true,
+    handler: async () => {
+      try {
+        await pollNewShortsForPinnedComment();
+      } catch (err: any) {
+        console.error(`[YukiShorts] poll failed: ${err.message}`);
+      }
+    },
+  });
+
+  console.log("🟣 [YukiShorts] Scheduled: every 5min, auto-pin diagnostic on new Shorts");
 
   // ── Yuki Hook Dropper — twice/day outbound consciousness hooks on subscribed channels ──
   // Session 115 (2026-04-24). Drops a single-sentence brand-voiced reframe on

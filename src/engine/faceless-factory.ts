@@ -38,6 +38,12 @@ import {
   persistShippedScript,
   ScriptTooSimilarError,
 } from "../tools/script-uniqueness-guard";
+// S117 (2026-04-25) — strict thumbnail headline/subhead validation + brand-palette fallback.
+import {
+  pickFallbackPair,
+  validateHeadline,
+  validateSubhead,
+} from "../data/thumbnail-fallback-palette";
 // Phase 4 — Pod delegation imports. Railway generates the script; the pod
 // handles TTS, image generation, video composition, and R2 upload.
 import { withPodSession } from "../pod/session";
@@ -121,6 +127,74 @@ export interface ScriptSegment {
   duration_hint: number; // seconds
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// S117 (2026-04-25) — Thumbnail headline/subhead sanitizer
+// ─────────────────────────────────────────────────────────────────────────────
+// The LLM is asked for two strict-spec fields (thumbnail_headline +
+// thumbnail_subhead). gemini-2.5-flash-lite drifts under natural-language
+// constraints, so EVERY emission is validated against the palette validators
+// and falls back to a curated brand pair on any failure.
+// Backward-compat: if only the legacy `thumbnail_text` was emitted, we try
+// to use it as the headline (uppercased, length-capped) and let the subhead
+// come from the palette match.
+// Never silent-truncate — that's the loop we're breaking.
+// ─────────────────────────────────────────────────────────────────────────────
+export interface SanitizedThumbnailText {
+  headline: string;
+  subhead: string;
+  used_fallback: boolean;
+  fallback_reason: string;
+}
+
+export function sanitizeThumbnailFields(
+  parsed: any,
+  brand: Brand,
+  topicContext: string = "",
+): SanitizedThumbnailText {
+  const rawHeadline = String(parsed?.thumbnail_headline || "").trim();
+  const rawSubhead = String(parsed?.thumbnail_subhead || "").trim();
+  const legacyText = String(parsed?.thumbnail_text || "").trim();
+
+  const headlineErr = validateHeadline(rawHeadline);
+  const subheadErr = validateSubhead(rawSubhead);
+
+  if (!headlineErr && !subheadErr) {
+    return {
+      headline: rawHeadline,
+      subhead: rawSubhead,
+      used_fallback: false,
+      fallback_reason: "",
+    };
+  }
+
+  if (legacyText && headlineErr) {
+    const upcasedLegacy = legacyText.toUpperCase().replace(/[,\.…]+$/g, "").trim();
+    const legacyErr = validateHeadline(upcasedLegacy);
+    if (!legacyErr && !subheadErr) {
+      console.warn(`[FacelessFactory] thumbnail_headline missing, recovered from legacy thumbnail_text — subhead validated. Using rescued pair.`);
+      return {
+        headline: upcasedLegacy,
+        subhead: rawSubhead,
+        used_fallback: false,
+        fallback_reason: "legacy thumbnail_text used as headline",
+      };
+    }
+  }
+
+  const fallback = pickFallbackPair(brand, topicContext);
+  const reason = [
+    headlineErr ? `headline: ${headlineErr}` : null,
+    subheadErr ? `subhead: ${subheadErr}` : null,
+  ].filter(Boolean).join("; ") || "both fields invalid";
+  console.warn(`[FacelessFactory] Thumbnail fields failed validation (${reason}) — falling back to palette pair: "${fallback.headline}" / "${fallback.subhead}"`);
+  return {
+    headline: fallback.headline,
+    subhead: fallback.subhead,
+    used_fallback: true,
+    fallback_reason: reason,
+  };
+}
+
 export interface FrequencyActivation {
   declaration: string;    // "I am starting to see" — the viewer's conviction statement
   context_line: string;   // Brief line the narrator says BEFORE the declaration to set it up
@@ -134,7 +208,12 @@ export interface FacelessScript {
   segments: ScriptSegment[];
   cta: string;
   frequency_activations?: FrequencyActivation[]; // 2 per long-form — mid-video consciousness CTAs
-  thumbnail_text?: string;      // 6-10 words, ALL CAPS, for thumbnail overlay — the scroll-stopper
+  /** @deprecated S117 — split into thumbnail_headline + thumbnail_subhead. Kept for backward compat with in-flight scripts. */
+  thumbnail_text?: string;
+  /** S117: 4-6 word ALL CAPS pain-point headline (Rev. Ike sermon-poster style). */
+  thumbnail_headline?: string;
+  /** S117: 4-8 word italic Title Case amplifier — sits below the headline. */
+  thumbnail_subhead?: string;
   thumbnail_visual?: string;    // Cinematographer direction for the thumbnail base image
 }
 
@@ -508,7 +587,8 @@ Generate as JSON:
 {
   "title": "CTR-optimized title (max 60 chars). FORMULA: [Bold Claim or Revelation] + [Specificity Anchor]. Specificity = numbers, time frames, or named mechanisms (e.g. 'In 48 Hours', 'The 3 Laws', 'Quantum Field Reset'). Good: 'Delete Your Old Self In 48 Hours — The Quantum Reset Protocol', 'Nobody Told You This About Your Subconscious Programming', 'The 3 Frequency Shifts That Collapse Old Timelines'. Bad: 'Wake Up Call', 'Beyond Right', 'Stuck In The Loop' (too vague, no curiosity gap). MUST be different from ALL previously used titles.${recentTitles.length > 0 ? " BANNED (already used): " + recentTitles.slice(0, 5).map(t => `'${t}'`).join(", ") : ""}",
   "hook": "${blueprint.hook}",
-  "thumbnail_text": "A 3-5 word MEMETIC TRIGGER in ALL CAPS. HARD CONSTRAINTS: 3 to 5 words, max 35 characters total, COMPLETE STANDALONE STATEMENT (not a clause, not a setup — a finished thought). This lands on a video thumbnail that auto-scales font size to fit: 3 words = bigger text, 5 words = smaller. Think protest sign, wall graffiti, a punch to the chest. Examples — REVELATIONS: 'THEY DESIGNED YOUR CAGE', 'YOUR MEMORIES ARE INSTALLED', 'REALITY HAS AN OWNER'. COMMANDS: 'DELETE YOUR OLD SELF', 'BURN THE MANUAL'. CONFRONTATIONS: 'YOU WERE NEVER FREE', 'YOUR COMFORT IS THE TRAP'. Every word carries weight. NO ellipsis, NO mid-clause fragments, NO 'the', 'a', or 'an' as the first word. If a stranger reads it cold, they understand the full thought instantly.",
+  "thumbnail_headline": "A 4-6 word PAIN-POINT HEADLINE in ALL CAPS — the MAIN punch. Names a feeling, lie, or trap the viewer recognizes instantly. COMPLETE STANDALONE STATEMENT (not a fragment, not a setup, not a cliffhanger). HARD CONSTRAINTS: 3-6 words, max 32 chars, ALL CAPS only. Think Rev. Ike sermon poster — 'GOD WILL NOT CHOOSE FOR YOU', not entertainment-niche power-words. REVELATIONS: 'THEY DESIGNED YOUR CAGE', 'YOUR MEMORIES ARE INSTALLED'. COMMANDS: 'BURN THE MANUAL', 'DELETE YOUR OLD SELF', 'STOP CHASING THE SIGNAL'. CONFRONTATIONS: 'YOU WERE NEVER FREE', 'YOUR COMFORT IS THE TRAP'. HARD BANS: NO ellipsis, NO trailing comma, NO mid-clause cutoff, NO single power-words like 'EXPOSED' alone.",
+  "thumbnail_subhead": "A 4-8 word ITALIC AMPLIFIER in mixed case — sits below the headline, completes the headline's promise. Names the WHY or the CONSEQUENCE in Title Case. Complete clause, not a fragment. HARD CONSTRAINTS: 4-8 words, max 56 chars, mixed case. The headline punches; the subhead twists the knife. Examples — 'And Why Your Reality Will Not Hold', 'The Architecture They Hide From You', 'The Code They Do Not Want You Reading', 'How To Walk Through The Wall', 'The Identity Reset They Will Not Teach', 'And This Is Why Your Life Is Not Changing'. HARD BANS: NO ellipsis, NO trailing comma, NO leading 'And...' pattern repeated across multiple videos.",
   "thumbnail_visual": "A MOVIE POSTER frame, not a movie still. HIGH CONTRAST, 50% of the frame dark/empty for text. Pick ONE: (A) EXTREME face close-up — eyes filling the frame, single hard light source, rest pitch black, visible skin texture, intensity in the gaze. (B) SINGLE powerful object against darkness — a shattered mirror, a burning letter, a key in a lock, a door cracked open with blinding white light behind it — rim-lit or glowing, everything else black. (C) Abstract energy — golden particles swirling in void, electric arcs, volumetric god-rays cutting through pure darkness. Frame it like a Fincher title card or a Saul Bass poster.",
   "segments": [
     {
@@ -754,7 +834,8 @@ Generate as JSON:
 {
   "title": "CTR-optimized title (max 60 chars). FORMULA: [Bold Claim] + [Specificity — numbers, time frames, or named mechanisms]. Good: 'The 3 Frequency Shifts That Change Everything'. Bad: 'Wake Up Call' (vague). MUST be different from all previously used titles.${recentTitles.length > 0 ? " BANNED: " + recentTitles.slice(0, 5).map(t => `'${t}'`).join(", ") : ""}",
   "hook": "Opening line that stops the scroll — a STATEMENT, not a question",
-  "thumbnail_text": "A 3-5 word HOOK in ALL CAPS. HARD CONSTRAINTS: 3 to 5 words, max 35 characters total, COMPLETE STANDALONE STATEMENT. This lands on a video thumbnail that auto-scales font size: 3 words = biggest text, 5 words = smaller. Write the line that makes someone STOP scrolling — a stranger reads it cold and FEELS something with zero context. DECLARATIONS: 'THEY DECORATED YOUR CAGE', 'YOUR LOYALTY IS WRONG'. COMMANDS: 'DELETE YOUR OLD SELF', 'BURN THE MANUAL'. REVELATIONS: 'MEMORIES ARE INSTALLED', 'NOBODY IS COMING'. NO ellipsis, NO cliffhangers, NO setup-only fragments. Every word load-bearing.",
+  "thumbnail_headline": "A 4-6 word PAIN-POINT HEADLINE in ALL CAPS — the MAIN punch. Names a feeling, lie, or trap the viewer recognizes instantly. COMPLETE STANDALONE STATEMENT. HARD CONSTRAINTS: 3-6 words, max 32 chars, ALL CAPS only. Think Rev. Ike sermon poster — 'GOD WILL NOT CHOOSE FOR YOU', not entertainment power-words. DECLARATIONS: 'THEY DECORATED YOUR CAGE', 'YOUR LOYALTY IS WRONG'. COMMANDS: 'DELETE YOUR OLD SELF', 'BURN THE MANUAL'. REVELATIONS: 'MEMORIES ARE INSTALLED', 'NOBODY IS COMING'. NO ellipsis, NO trailing comma, NO mid-clause cutoff.",
+  "thumbnail_subhead": "A 4-8 word ITALIC AMPLIFIER in mixed case — sits below the headline. Names the WHY or the CONSEQUENCE. Complete clause. HARD CONSTRAINTS: 4-8 words, max 56 chars, Title Case. Examples — 'And Why Your Reality Will Not Hold', 'The Architecture They Hide From You', 'How To Walk Through The Wall', 'The Identity Reset They Will Not Teach'. NO ellipsis, NO trailing comma.",
   "thumbnail_visual": "A MOVIE POSTER frame. HIGH CONTRAST, 50% dark/empty for text. Pick ONE: (A) EXTREME face close-up — eyes filling the frame, single hard light, rest pitch black. (B) SINGLE powerful object against darkness — shattered mirror, burning letter, door cracked open with blinding light behind it. (C) Abstract energy — golden particles in void, electric arcs, god-rays cutting through darkness. Frame it like a Fincher title card.",
   "segments": [
     { "voiceover": "2-4 spoken sentences (30-50 words)", "visual_direction": "REAL specific scene: who, what room, what props, what motivated practical light, what physical action", "duration_hint": ${durationHintExample} }
@@ -815,6 +896,10 @@ RULES:
     console.warn(`⚠️ [FacelessFactory] Long-form script only has ${totalWords} words — expected 1200-1800 for 10-15 min. Video will be shorter than target.`);
   }
 
+  // S117: sanitize+validate the dual thumbnail fields with brand-palette fallback.
+  const _topicCtx = `${parsed.title || ""} ${parsed.hook || ""} ${niche}`;
+  const _thumbFields = sanitizeThumbnailFields(parsed, brand, _topicCtx);
+
   return {
     title: parsed.title || "Untitled",
     niche,
@@ -823,7 +908,10 @@ RULES:
     segments,
     cta: parsed.cta || "The full protocol is at sovereign-synthesis.com",
     frequency_activations: parsed.frequency_activations,
-    thumbnail_text: parsed.thumbnail_text || "",
+    thumbnail_headline: _thumbFields.headline,
+    thumbnail_subhead: _thumbFields.subhead,
+    // Backward-compat: thumbnail_text aliased to the headline so legacy consumers still get a value.
+    thumbnail_text: _thumbFields.headline,
     thumbnail_visual: parsed.thumbnail_visual || "",
   };
 }
@@ -907,7 +995,8 @@ Return ONLY a JSON array of 4 objects (no markdown, no explanation):
       { "voiceover": "2-4 spoken sentences (30-50 words)", "visual_direction": "9:16 portrait scene description", "duration_hint": 10 }
     ],
     "cta": "Organic closing line (1 sentence, sovereign tone)",
-    "thumbnail_text": "3-5 word ALL CAPS hook, max 35 chars, complete standalone statement. No ellipsis, no cliffhangers. Examples: 'DELETE YOUR OLD SELF', 'THEY DESIGNED YOUR CAGE', 'BURN THE MANUAL'",
+    "thumbnail_headline": "4-6 word ALL CAPS pain-point headline, max 32 chars, complete standalone statement. Rev. Ike sermon-poster style. Examples: 'DELETE YOUR OLD SELF', 'THEY DESIGNED YOUR CAGE', 'BURN THE MANUAL', 'STOP CHASING THE SIGNAL'. NO ellipsis, NO trailing comma.",
+    "thumbnail_subhead": "4-8 word italic Title Case amplifier, max 56 chars. Names the WHY or consequence. Examples: 'And Why Your Reality Will Not Hold', 'The Architecture They Hide From You', 'How To Walk Through The Wall'. NO ellipsis, NO trailing comma.",
     "thumbnail_visual": "Movie poster 9:16 composition"
   }
 ]
@@ -971,6 +1060,10 @@ Each object must have exactly 5 segments. Highest-impact short first.`;
       duration_hint: Math.max(Number(seg.duration_hint) || 8, 5),
     }));
 
+    // S117: sanitize+validate dual thumbnail fields with brand-palette fallback.
+    const _shortTopicCtx = `${s.title || ""} ${s.hook || ""} ${niche}`;
+    const _shortThumbFields = sanitizeThumbnailFields(s, brand, _shortTopicCtx);
+
     const script: FacelessScript = {
       title: String(s.title || `Standalone Short ${i + 1}`),
       niche,
@@ -978,7 +1071,10 @@ Each object must have exactly 5 segments. Highest-impact short first.`;
       hook: String(s.hook || segments[0]?.voiceover?.split(".")[0] || ""),
       segments,
       cta: String(s.cta || "The protocol is at sovereign-synthesis.com"),
-      thumbnail_text: String(s.thumbnail_text || ""),
+      thumbnail_headline: _shortThumbFields.headline,
+      thumbnail_subhead: _shortThumbFields.subhead,
+      // Backward-compat alias (see long-form path).
+      thumbnail_text: _shortThumbFields.headline,
       thumbnail_visual: String(s.thumbnail_visual || ""),
     };
 
@@ -1384,7 +1480,11 @@ export async function produceFacelessVideo(
     script: script.segments.map(s => s.voiceover).join("\n\n"),
     scenes: podScenes,
     hook_text: hookText || undefined,
-    thumbnail_text: script.thumbnail_text || undefined,
+    // S117: dual-field thumbnail (headline + subhead). thumbnail_text stays as
+    // a backward-compat alias to the headline so legacy renderers still work.
+    thumbnail_headline: script.thumbnail_headline || undefined,
+    thumbnail_subhead: script.thumbnail_subhead || undefined,
+    thumbnail_text: script.thumbnail_text || script.thumbnail_headline || undefined,
     client_job_id: jobId,
   };
 

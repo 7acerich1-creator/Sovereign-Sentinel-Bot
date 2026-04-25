@@ -137,7 +137,15 @@ class ProduceRequest(BaseModel):
     )
     thumbnail_text: Optional[str] = Field(
         default=None, max_length=100,
-        description="3-6 word ALL CAPS memetic trigger for thumbnail overlay.",
+        description="DEPRECATED S117 — use thumbnail_headline + thumbnail_subhead.",
+    )
+    thumbnail_headline: Optional[str] = Field(
+        default=None, max_length=40,
+        description="S117: 4-6 word ALL CAPS pain-point headline (upper text zone).",
+    )
+    thumbnail_subhead: Optional[str] = Field(
+        default=None, max_length=80,
+        description="S117: 4-8 word italic Title Case amplifier (lower text zone).",
     )
     client_job_id: Optional[str] = Field(default=None, max_length=200)
 
@@ -167,7 +175,15 @@ class ProduceShortRequest(BaseModel):
     hook_text: Optional[str] = Field(default=None, max_length=200)
     thumbnail_text: Optional[str] = Field(
         default=None, max_length=100,
-        description="3-6 word ALL CAPS memetic trigger for thumbnail overlay.",
+        description="DEPRECATED S117 — use thumbnail_headline + thumbnail_subhead.",
+    )
+    thumbnail_headline: Optional[str] = Field(
+        default=None, max_length=40,
+        description="S117: 4-6 word ALL CAPS pain-point headline.",
+    )
+    thumbnail_subhead: Optional[str] = Field(
+        default=None, max_length=80,
+        description="S117: 4-8 word italic Title Case amplifier.",
     )
     cta_text: Optional[str] = Field(default=None, max_length=300,
                                     description="CTA overlay for last 3s of the short.")
@@ -953,6 +969,8 @@ def _run_short_pipeline(job_id: str, req: ProduceShortRequest) -> None:
             cta_text=req.cta_text,
             audio_is_raw_tts=req.audio_is_raw_tts,
             thumbnail_text=req.thumbnail_text,
+            thumbnail_headline=req.thumbnail_headline,
+            thumbnail_subhead=req.thumbnail_subhead,
         )
         video_path = compose_result["video_path"]
         thumb_path = compose_result["thumbnail_path"]
@@ -1108,6 +1126,8 @@ def _run_pipeline(job_id: str, req: ProduceRequest) -> None:
             hook_text=req.hook_text,
             script=req.script,
             thumbnail_text=req.thumbnail_text,
+            thumbnail_headline=req.thumbnail_headline,
+            thumbnail_subhead=req.thumbnail_subhead,
         )
         video_path = compose_result["video_path"]
         thumb_path = compose_result["thumbnail_path"]

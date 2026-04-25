@@ -49,7 +49,18 @@ class ProduceRequest(BaseModel):
     )
     thumbnail_text: Optional[str] = Field(
         default=None, max_length=150,
-        description="6-10 word ALL CAPS hook for thumbnail overlay. Complete standalone statement.",
+        description="DEPRECATED S117 — use thumbnail_headline + thumbnail_subhead. "
+                    "Kept for backward compat with in-flight scripts.",
+    )
+    thumbnail_headline: Optional[str] = Field(
+        default=None, max_length=40,
+        description="S117: 4-6 word ALL CAPS pain-point headline. Upper text zone of "
+                    "the brand-frame thumbnail layout. Complete standalone statement.",
+    )
+    thumbnail_subhead: Optional[str] = Field(
+        default=None, max_length=80,
+        description="S117: 4-8 word italic Title Case amplifier. Lower text zone, "
+                    "smaller font. Names the WHY or consequence.",
     )
     client_job_id: Optional[str] = Field(default=None, max_length=200)
 

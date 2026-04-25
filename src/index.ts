@@ -1620,26 +1620,57 @@ async function main() {
               return true;
             }
 
-            const ssUnchopped = unchopped.filter(v => v.brand === "sovereign_synthesis").length;
-            const cfUnchopped = unchopped.filter(v => v.brand === "containment_field").length;
+            // SESSION 116: rebuilt list output. Old format crammed the full
+            // jobId UUID into each line, mixed brands chronologically, and ran
+            // unreadable on phone Telegram. New layout: group by brand, show
+            // open work first with done count summarized, last 8 chars of
+            // jobId only, fixed-width index column. Indices still stable.
+            type RechopRow = { idx: number; v: typeof allVideos[number]; done: boolean };
+            const indexed: RechopRow[] = allVideos.map((v, idx) => ({
+              idx, v, done: !unchoppedJobIds.has(v.jobId),
+            }));
+            const ssRows = indexed.filter(r => r.v.brand === "sovereign_synthesis");
+            const cfRows = indexed.filter(r => r.v.brand === "containment_field");
 
-            const list = allVideos.map((v, i) => {
-              const done = !unchoppedJobIds.has(v.jobId);
-              const emoji = v.brand === "sovereign_synthesis" ? "🔴" : "🟣";
-              const status = done ? " ✅" : "";
-              const dateStr = v.lastModified ? v.lastModified.toISOString().slice(0, 10) : "???";
-              return `[${i}]${status} ${emoji} ${dateStr} ${v.jobId.slice(0, 40)} (${(v.sizeBytes / 1024 / 1024).toFixed(0)}MB)`;
-            }).join("\n");
+            const formatRow = (r: RechopRow): string => {
+              const date = r.v.lastModified ? r.v.lastModified.toISOString().slice(0, 10) : "????-??-??";
+              const sizeMB = (r.v.sizeBytes / 1024 / 1024).toFixed(0).padStart(3, " ");
+              const tag = r.done ? "✅" : "▢ ";
+              const idTail = r.v.jobId.length > 8 ? `…${r.v.jobId.slice(-8)}` : r.v.jobId;
+              const idxStr = `[${String(r.idx).padStart(2, " ")}]`;
+              return `  ${tag} ${idxStr} ${date}  ${sizeMB}MB  ${idTail}`;
+            };
 
-            const gateNote = forceMode ? "" : `\n⚠️ Quality gate ON — pre-XTTS videos hidden. Add --force to see all.\n`;
-            const msg = `📦 LONG-FORMS: ${allVideos.length} eligible, ${unchopped.length} need shorts\n` +
-              `🔴 SS: ${ssUnchopped} unchopped\n🟣 TCF: ${cfUnchopped} unchopped\n${gateNote}\n` +
-              `${list}\n\n` +
-              `Indices are STABLE — they never shift after rechop.\n` +
-              `Commands:\n` +
-              `/rechop all — process ALL ${unchopped.length} remaining\n` +
-              `/rechop <N> — one video (e.g. /rechop 0)\n` +
-              `/rechop 1,2,3 — multi-video, ONE pod session`;
+            const VISIBLE_PER_SECTION = 20;
+            const sectionFor = (label: string, emoji: string, rows: RechopRow[]): string => {
+              if (rows.length === 0) return "";
+              const open = rows.filter(r => !r.done);
+              const done = rows.filter(r => r.done);
+              const visibleOpen = open.slice(0, VISIBLE_PER_SECTION);
+              const hiddenOpen = open.length - visibleOpen.length;
+              const lines = visibleOpen.length
+                ? visibleOpen.map(formatRow).join("\n")
+                : "   (none unchopped)";
+              const overflow = hiddenOpen > 0 ? `\n   …+ ${hiddenOpen} more unchopped (use /rechop all)` : "";
+              const doneSummary = done.length ? `\n   + ${done.length} already rechopped` : "";
+              return `\n${emoji} ${label}  (${open.length} open / ${rows.length} total)\n${lines}${overflow}${doneSummary}`;
+            };
+
+            const list = sectionFor("SOVEREIGN SYNTHESIS", "🔴", ssRows)
+              + sectionFor("CONTAINMENT FIELD", "🟣", cfRows);
+
+            const ssUnchopped = ssRows.filter(r => !r.done).length;
+            const cfUnchopped = cfRows.filter(r => !r.done).length;
+            const gateNote = forceMode ? "" : "\n⚠️ Quality gate ON. Add --force to include pre-XTTS videos.";
+            const msg =
+              `📦 RECHOP QUEUE — ${unchopped.length} need shorts (${allVideos.length} total)\n` +
+              `🔴 SS ${ssUnchopped} open  •  🟣 TCF ${cfUnchopped} open${gateNote}\n` +
+              list + "\n\n" +
+              `Commands\n` +
+              `  /rechop all     — process ALL ${unchopped.length} remaining\n` +
+              `  /rechop <N>     — one video by index above\n` +
+              `  /rechop 1,2,3   — multi-video, one pod session\n` +
+              `Indices are stable across runs.`;
 
             // Split if too long for Telegram
             if (msg.length > 4000) {

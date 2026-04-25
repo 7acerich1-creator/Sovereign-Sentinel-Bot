@@ -471,7 +471,14 @@ BRAND_MUSIC = {
     "containment_field": "/app/brand-assets/ambient_drone.mp3",
 }
 BRAND_FONT = "/app/brand-assets/BebasNeue-Regular.ttf"
+# SESSION 116 (2026-04-25): per-brand handle burned in last ~2s of every kinetic
+# feed video so viewers always see WHERE to follow even if they swipe past hook.
+BRAND_HANDLE = {
+    "sovereign_synthesis": "@sovereign_synthesis",
+    "containment_field": "@TheContainmentField",
+}
 VIDEO_DURATION = 7  # seconds
+CTA_BADGE_START_S = 5.0  # CTA fades in at 5.0s, runs until end (final 2s of 7s clip)
 
 
 def _image_to_branded_video(
@@ -483,8 +490,11 @@ def _image_to_branded_video(
     """
     Convert a static image to a 7-second branded video with:
     - Ken Burns slow zoom (1.0 → 1.08 over 7s)
-    - Brand music (fades in/out)
-    - Hook text burned at bottom (Bebas Neue, white with dark shadow)
+    - Brand music (fades in/out + loudnorm so SS clip isn't near-silent)
+    - Hook text burned at bottom — multi-line via textfile= (drawtext text= is
+      unreliable for newlines on ffmpeg 4.4.2; %{eol} is "not known" and
+      "\\n" leaks the literal letter N. Fixed via real newlines in a temp file.)
+    - Closing CTA badge fades in at t=5s with @handle for the brand
     Returns True on success.
     """
     import subprocess
@@ -504,38 +514,82 @@ def _image_to_branded_video(
         f":d={total_frames}:s=1080x1080:fps={fps}"
     )
 
-    # Text overlay if hook_text provided
+    filters = [zoom_filter]
+    extra_files: list[str] = []
+
+    # ── Hook text overlay (multi-line via textfile=) ──
     if hook_text:
-        # Escape special chars for ffmpeg drawtext
-        safe_text = hook_text.replace("'", "\u2019").replace(":", "\\:")
-        # Wrap at ~35 chars per line
+        # Collapse any incoming newlines to spaces — we control wrap ourselves.
+        # Replace smart quotes are kept (drawtext renders Unicode fine via Bebas).
+        safe_text = (
+            hook_text.replace("\r\n", " ")
+            .replace("\n", " ")
+            .replace("'", "\u2019")
+        )
+        # SESSION 116: tighter wrap (28 chars vs old 35) — at fontsize=42 on a
+        # 1080px canvas the old width spilled past the safe zone and clipped at
+        # the bezel. 28 chars stays comfortably inside.
         words = safe_text.split()
-        lines = []
+        lines: list[str] = []
         current = ""
         for w in words:
-            if len(current) + len(w) + 1 > 35:
-                lines.append(current.strip())
+            if len(current) + len(w) + 1 > 28:
+                if current:
+                    lines.append(current.strip())
                 current = w
             else:
                 current = f"{current} {w}" if current else w
         if current:
             lines.append(current.strip())
-        wrapped = "\\n".join(lines[:4])  # max 4 lines
+        lines = lines[:4]  # max 4 lines
 
-        # SESSION 115 FIX (2026-04-24): Removed enable=between(t,0.5,DUR-0.5).
-        # Old behavior delayed the hook by 500ms and removed it 500ms early —
-        # killing visibility for feed-scrollers who decide in <1s. The hook
-        # now burns from frame 0 to the final frame.
+        # Write to a sidecar .txt with REAL newlines.  drawtext `textfile=`
+        # respects them.  The `text=` parameter does NOT.
+        out_dir = os.path.dirname(out_path) or "/tmp"
+        hook_textfile = os.path.join(
+            out_dir, f"hook_{os.path.basename(out_path)}.txt"
+        )
+        with open(hook_textfile, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines))
+        extra_files.append(hook_textfile)
+
+        # textfile= does not need shell escaping for the content. The path
+        # itself must avoid drawtext separators (':' and ','). out_dir is
+        # /tmp/<job_id> so safe.
         text_filter = (
             f"drawtext=fontfile={BRAND_FONT}"
-            f":text='{wrapped}'"
+            f":textfile={hook_textfile}"
             f":fontsize=42:fontcolor=white"
             f":shadowcolor=black@0.8:shadowx=2:shadowy=2"
-            f":x=(w-text_w)/2:y=h-text_h-60"
+            f":line_spacing=10"
+            f":x=(w-text_w)/2:y=h-text_h-90"
         )
-        vf = f"{zoom_filter},{text_filter}"
-    else:
-        vf = zoom_filter
+        filters.append(text_filter)
+
+    # ── SESSION 116: Closing CTA badge (last ~2s) ──
+    handle = BRAND_HANDLE.get(brand, "")
+    if handle:
+        # Single-line, no escape gymnastics needed for plain ASCII handle.
+        cta_filter = (
+            f"drawtext=fontfile={BRAND_FONT}"
+            f":text='{handle}'"
+            f":fontsize=56:fontcolor=white"
+            f":box=1:boxcolor=black@0.65:boxborderw=22"
+            f":x=(w-text_w)/2:y=80"
+            f":enable='gte(t,{CTA_BADGE_START_S})'"
+        )
+        filters.append(cta_filter)
+
+    vf = ",".join(filters)
+
+    # SESSION 116: loudnorm on the music bus.  The SS music asset was rendered
+    # at -28.5 dB mean (CF was -12.9 dB).  loudnorm normalizes to broadcast -14
+    # LUFS so both brands hit phone speakers at parity.
+    af = (
+        f"afade=t=in:ss=0:d=1,"
+        f"afade=t=out:st={VIDEO_DURATION - 1}:d=1,"
+        f"loudnorm=I=-14:LRA=7:TP=-1.5"
+    )
 
     cmd = [
         "ffmpeg", "-y",
@@ -543,8 +597,8 @@ def _image_to_branded_video(
         "-i", music_path,
         "-vf", vf,
         "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-        "-c:a", "aac", "-b:a", "128k",
-        "-af", f"afade=t=in:ss=0:d=1,afade=t=out:st={VIDEO_DURATION - 1}:d=1",
+        "-c:a", "aac", "-b:a", "128k", "-ar", "48000",
+        "-af", af,
         "-t", str(VIDEO_DURATION),
         "-pix_fmt", "yuv420p",
         "-shortest",
@@ -552,11 +606,19 @@ def _image_to_branded_video(
     ]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
         if result.returncode != 0:
-            log.error("branded_video_ffmpeg_fail", stderr=result.stderr[:300])
+            log.error("branded_video_ffmpeg_fail", stderr=result.stderr[:400])
             return False
-        return os.path.isfile(out_path) and os.path.getsize(out_path) > 1000
+        ok = os.path.isfile(out_path) and os.path.getsize(out_path) > 1000
+        # Clean up sidecar text files on success — they only matter during render.
+        if ok:
+            for f in extra_files:
+                try:
+                    os.unlink(f)
+                except OSError:
+                    pass
+        return ok
     except Exception as e:
         log.error("branded_video_exception", error=str(e)[:200])
         return False

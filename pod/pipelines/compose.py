@@ -1947,27 +1947,43 @@ def compose_short(
     # SESSION 98: Replaced small drawtext with a full-screen branded card
     # appended to the Short, matching the style seen on high-performing
     # Shorts (big centered text on dark background = visible in shelf).
+    # SESSION 116 FIX (2026-04-25): Five prior sessions tried to fix
+    # "blank navy card at end of short". Root cause: ffmpeg 4.4.2 logs
+    # `[Parsed_drawtext_1] %{eol} is not known` once per frame and emits
+    # NO text — only the navy background remains. `%{eol}` is not a valid
+    # drawtext expansion on the pod's ffmpeg version. Fix: write the CTA
+    # text to a temp file with real newlines and use textfile=. Verified
+    # against ffmpeg 4.4.2 + DejaVuSans (will work identically with
+    # FONT_BEBAS — drawtext font loading is independent of textfile=).
     if cta_text and cta_text.strip():
         try:
             CTA_CARD_DUR = 2.5  # seconds
-            _safe_cta = cta_text.strip().replace("'", "\u2019").replace(":", "\\:")
+            # NOTE: textfile= reads bytes literally — no escape needed for
+            # quotes/colons/etc. We only use the unescaped (but smart-quoted)
+            # version when writing to disk.
+            _raw_cta = cta_text.strip().replace("'", "\u2019")
             # SESSION 100: Split on em-dash (natural break) or midpoint.
             # Old naive midpoint smashed "ON" + "THE" together as "ONNTHE".
-            # Use %{eol} which ffmpeg drawtext interprets as a real newline.
-            if "\u2014" in _safe_cta:
-                # Split on em-dash: "FULL VIDEO ON THE CHANNEL" / "@ACE_RICHIE77"
-                _parts = _safe_cta.split("\u2014", 1)
+            if "\u2014" in _raw_cta:
+                _parts = _raw_cta.split("\u2014", 1)
                 _line1 = _parts[0].strip()
                 _line2 = _parts[1].strip() if len(_parts) > 1 else ""
-            elif len(_safe_cta) > 28:
-                _cta_words = _safe_cta.split()
+            elif len(_raw_cta) > 28:
+                _cta_words = _raw_cta.split()
                 _mid = len(_cta_words) // 2
                 _line1 = " ".join(_cta_words[:_mid])
                 _line2 = " ".join(_cta_words[_mid:])
             else:
-                _line1 = _safe_cta
+                _line1 = _raw_cta
                 _line2 = ""
-            _cta_display = f"{_line1}%{{eol}}{_line2}" if _line2 else _safe_cta
+
+            # Write the CTA text to a sidecar file with REAL newlines.
+            cta_textfile = os.path.join(job_dir, "cta_card_text.txt")
+            with open(cta_textfile, "w", encoding="utf-8") as _fh:
+                if _line2:
+                    _fh.write(f"{_line1}\n{_line2}")
+                else:
+                    _fh.write(_line1)
 
             # Brand-specific card background colors (dark, premium feel)
             _bg_color = "0x0A1628" if brand == "sovereign_synthesis" else "0x0D0D1A"
@@ -1978,7 +1994,7 @@ def compose_short(
             card_filter = (
                 f"color=c={_bg_color}:s={SHORT_WIDTH}x{SHORT_HEIGHT}:d={CTA_CARD_DUR}:r={SHORT_FPS},"
                 f"drawtext=fontfile='{FONT_BEBAS}'"
-                f":text='{_cta_display}'"
+                f":textfile={cta_textfile}"
                 f":fontsize=72"
                 f":fontcolor={_accent}"
                 f":borderw=4"

@@ -127,6 +127,66 @@ export async function postDiagnosticComment(
 }
 
 /**
+ * Reply to an existing YouTube comment thread (threaded reply, not top-level).
+ * Used by Yuki's auto-reply path on the 5-min comment watcher.
+ *
+ * NOTE: This is a DIFFERENT endpoint than postYouTubeComment.
+ *   - postYouTubeComment uses /commentThreads (top-level on a video)
+ *   - replyToYouTubeComment uses /comments with parentId (threaded reply)
+ *
+ * Requires the same youtube.force-ssl scope. parentId can be either a
+ * topLevelComment id OR a threadId — the API treats both as parents.
+ */
+export async function replyToYouTubeComment(
+  parentCommentId: string,
+  text: string,
+  brand: Brand = "sovereign_synthesis"
+): Promise<{ success: boolean; commentId?: string; error?: string }> {
+  const token = await getYouTubeToken(brand);
+  if (!token) {
+    return { success: false, error: `No OAuth token available for ${brand}` };
+  }
+
+  try {
+    const resp = await fetch(
+      "https://www.googleapis.com/youtube/v3/comments?part=snippet",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          snippet: {
+            parentId: parentCommentId,
+            textOriginal: text,
+          },
+        }),
+      }
+    );
+
+    if (!resp.ok) {
+      const errBody = await resp.text();
+      console.error(`[YTReply] POST failed ${resp.status}: ${errBody.slice(0, 500)}`);
+      if (resp.status === 403) {
+        return {
+          success: false,
+          error: `403 Forbidden — OAuth token likely missing youtube.force-ssl scope. Re-authorize at: https://accounts.google.com/o/oauth2/v2/auth?client_id=${process.env.YOUTUBE_CLIENT_ID}&redirect_uri=urn:ietf:wg:oauth:2.0:oob&response_type=code&scope=https://www.googleapis.com/auth/youtube.force-ssl&access_type=offline&prompt=consent`,
+        };
+      }
+      return { success: false, error: `YouTube API ${resp.status}: ${errBody.slice(0, 300)}` };
+    }
+
+    const data = (await resp.json()) as any;
+    const commentId = data.id;
+    console.log(`[YTReply] Posted reply ${commentId} on parent ${parentCommentId} (${brand})`);
+    return { success: true, commentId };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
  * Agent tool class for Yuki (and other agents if needed).
  */
 export class YouTubeCommentTool implements Tool {

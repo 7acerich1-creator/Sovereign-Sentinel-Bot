@@ -78,6 +78,7 @@ import { ProactiveBriefings } from "./proactive/briefings";
 import { HeartbeatSystem } from "./proactive/heartbeat";
 import { pollYouTubeComments } from "./proactive/youtube-comment-watcher";
 import { pollYouTubeStats } from "./proactive/youtube-stats-fetcher";
+import { runHookDrops } from "./proactive/yuki-hook-dropper";
 import { handleInboundEmail, sendApprovedReply, getPendingReplies } from "./proactive/email-reply-handler";
 import { YouTubeCommentTool, postDiagnosticComment } from "./tools/youtube-comment-tool";
 
@@ -2081,7 +2082,7 @@ async function main() {
   // These dispatch tasks to crew agents via crew_dispatch, picked up by the dispatch poller.
   // Each fires once per day at a specific hour using the same minute-check pattern as briefings.
 
-  const autonomousFiredDates = { ytStatsFetch: "", vectorSweep: "", alfredScan: "", veritasDirective: "", ctaAudit: "", landingAnalytics: "" };
+  const autonomousFiredDates = { ytStatsFetch: "", vectorSweep: "", alfredScan: "", veritasDirective: "", ctaAudit: "", landingAnalytics: "", yukiHookDrops14: "", yukiHookDrops22: "" };
 
   // YouTube Analytics — Daily Stats Fetch (9:00 AM CDT = 14:00 UTC — before Alfred trend scan)
   // Calls the fetch-youtube-stats Supabase Edge Function to pull real video stats from
@@ -2524,6 +2525,75 @@ async function main() {
   });
 
   console.log("🟡 [YTCommentWatcher] Scheduled: every 5min across both YT channels");
+
+  // ── Yuki Hook Dropper — twice/day outbound consciousness hooks on subscribed channels ──
+  // Session 115 (2026-04-24). Drops a single-sentence brand-voiced reframe on
+  // the freshest upload of the highest-leverage channels Ace's two channels
+  // are subscribed to. Hard cap 5 drops per brand per run. See
+  // src/proactive/yuki-hook-dropper.ts.
+  scheduler.add({
+    name: "Yuki Hook Drops — 14:00 UTC / 9:00 AM CDT",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      const now = new Date();
+      const hour = now.getUTCHours();
+      const minute = now.getUTCMinutes();
+      const dateKey = now.toDateString();
+      if (hour === 14 && minute >= 0 && minute <= 2 && autonomousFiredDates.yukiHookDrops14 !== dateKey) {
+        autonomousFiredDates.yukiHookDrops14 = dateKey;
+        console.log(`🟡 [YukiHookDropper] morning run firing for ${dateKey}`);
+        try {
+          const ss = await runHookDrops("sovereign_synthesis");
+          const cf = await runHookDrops("containment_field");
+          if (defaultChatId && telegram) {
+            await telegram.sendMessage(defaultChatId,
+              `🟡 *Yuki Hook Drops — 9 AM CDT*\n\n` +
+              `*Sovereign Synthesis:* ${ss.posted} posted (${ss.attempted} attempted, ${ss.errors} errors)\n` +
+              `*Containment Field:* ${cf.posted} posted (${cf.attempted} attempted, ${cf.errors} errors)`,
+              { parseMode: "Markdown" });
+          }
+        } catch (err: any) {
+          console.error(`[YukiHookDropper] morning run failed: ${err.message}`);
+        }
+      }
+    },
+  });
+
+  scheduler.add({
+    name: "Yuki Hook Drops — 22:00 UTC / 5:00 PM CDT",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      const now = new Date();
+      const hour = now.getUTCHours();
+      const minute = now.getUTCMinutes();
+      const dateKey = now.toDateString();
+      if (hour === 22 && minute >= 0 && minute <= 2 && autonomousFiredDates.yukiHookDrops22 !== dateKey) {
+        autonomousFiredDates.yukiHookDrops22 = dateKey;
+        console.log(`🟡 [YukiHookDropper] evening run firing for ${dateKey}`);
+        try {
+          const ss = await runHookDrops("sovereign_synthesis");
+          const cf = await runHookDrops("containment_field");
+          if (defaultChatId && telegram) {
+            await telegram.sendMessage(defaultChatId,
+              `🟡 *Yuki Hook Drops — 5 PM CDT*\n\n` +
+              `*Sovereign Synthesis:* ${ss.posted} posted (${ss.attempted} attempted, ${ss.errors} errors)\n` +
+              `*Containment Field:* ${cf.posted} posted (${cf.attempted} attempted, ${cf.errors} errors)`,
+              { parseMode: "Markdown" });
+          }
+        } catch (err: any) {
+          console.error(`[YukiHookDropper] evening run failed: ${err.message}`);
+        }
+      }
+    },
+  });
+
+  console.log("🟡 [YukiHookDropper] Scheduled: 14:00 UTC + 22:00 UTC (9 AM + 5 PM CDT) across both YT channels");
 
   // ── YouTube Analytics Stats — Fix B for the 30-Video A/B/C Test ──
   // S114 (2026-04-24). Existing fetch-youtube-stats edge function populates

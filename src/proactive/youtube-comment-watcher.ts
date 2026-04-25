@@ -16,6 +16,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { Channel } from "../types";
+import { replyToCommentAsAce } from "./yuki-comment-replier";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -217,6 +218,23 @@ export async function pollYouTubeComments(
       } catch (err: any) {
         console.error(`[YTCommentWatcher] Telegram send failed: ${err.message}`);
       }
+
+      // Yuki auto-reply (fire-and-forget) — Session 115 (2026-04-24).
+      // Generates a plain-Ace voice reply and posts it via the threaded-reply
+      // API. Failures are logged + recorded to youtube_comments_seen.reply_error
+      // but never propagate up here — the watcher's job is the alert; the reply
+      // is best-effort additive.
+      replyToCommentAsAce({
+        commentId,
+        brand,
+        videoId,
+        videoTitle,
+        authorName,
+        authorHandle,
+        textOriginal,
+      }).catch((err: any) => {
+        console.error(`[YTCommentWatcher] yuki replier crashed unexpectedly: ${err.message}`);
+      });
     }
   }
 }

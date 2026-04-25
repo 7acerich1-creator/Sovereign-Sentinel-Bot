@@ -24,15 +24,31 @@
 
 ---
 
-## SAPPHIRE PERSONAL ASSISTANT (S114, 2026-04-24)
+## SAPPHIRE — PERSONAL ASSISTANT FIRST, COO SECOND (S114, 2026-04-25)
 
-Sapphire now has a **dual-mode personality**: COO when in group chat or dispatched tasks (sovereign tone, existing behavior), and **Personal Assistant** when in DM with Ace (plain English, no memetic triggers, no `*[inner state: ...]*` stamp). Detection at the personality prompt level — see `src/data/personalities.json` "sapphire" entry.
+**Sapphire's permanent identity is now Ace's full-time Personal Assistant.** The COO/sentinel role is a secondary hat she wears ONLY when activated by group chat or dispatched tasks. Default mode in 1-on-1 DM is PA — plain English, no sovereign tone, no `*[inner state: ...]*` stamp. Detection at the personality prompt level + hard context injection in `src/index.ts`.
+
+**Two-Lane Memory Architecture (NEVER cross-pollinate):**
+
+| | Mode A (PA) | Mode B (COO) |
+|---|---|---|
+| Save memory | `remember_fact` → `sapphire-personal` Pinecone namespace | `write_knowledge` → `brand` Pinecone namespace |
+| Recall | `recall_facts` + auto-semantic-recall in DM context block | agent-loop semantic recall against `brand` |
+| Topic | Ace's life, family, schedule, errands | Crew/business intelligence, brand insights |
+
+Personal facts in `brand` = pollution. Business insights in `sapphire-personal` = noise in Ace's daily brief. Both must stay clean for the business to evolve AND Ace's life to be served.
+
+**Pinecone namespaces (don't confuse them):**
+- `sapphire-personal` — Ace's life. Written by `remember_fact`. Auto-recalled in PA DMs.
+- `brand` — business insights. Written by `write_knowledge` (COO mode only).
+- `hooks`, `content`, `clips`, `funnels` — Alfred, Anita, Yuki, Vector respectively.
 
 **Tables (Supabase, project `wzthxohtgojenukmdubz`):**
 - `sapphire_reminders` — durable reminder queue, polled every 60s
 - `sapphire_credentials` — OAuth refresh tokens for Google + Notion (NOT in Railway env vars)
 - `sapphire_daily_pages` — one row per calendar date, ties to a Notion page
 - `sapphire_known_facts` — standing prefs (e.g., "girls' birthday parties = $25 gift")
+- `sapphire_family_profiles` — first-class family member objects (S114 Gap 8)
 
 All RLS service-role-only. Indexed for the reminder poller.
 
@@ -278,7 +294,7 @@ Immutable roster. Do not add, remove, or rename. Each agent runs on its own Tele
 | # | Agent | Token Env Var | Role | Pinecone NS |
 |---|-------|---------------|------|-------------|
 | 1 | **Veritas** | `VERITAS_TOKEN` (also `TELEGRAM_BOT_TOKEN`) | Chief Brand Officer — weekly directive, strategic oversight, group lead (always responds) | `veritas` |
-| 2 | **Sapphire** | `SAPPHIRE_TOKEN` | Chief Operating Officer — task decomposition, pipeline health, group copilot (plain-English summaries) | `sapphire` |
+| 2 | **Sapphire** | `SAPPHIRE_TOKEN` | **Personal Assistant (PRIMARY)** for Ace — calendar/email/reminders/Notion/family. **COO (SECONDARY)** in group chat / dispatched tasks — task decomposition, pipeline health. | `sapphire-personal` (PA) + `brand` (COO) |
 | 3 | **Alfred** | `ALFRED_TOKEN` | Head of Content Intelligence — trend scan (8 AM CDT), YouTube URL processing, VidRush feeder | `alfred` |
 | 4 | **Yuki** | `YUKI_TOKEN` | Head of Distribution & Creative — SOLE Buffer posting authority, visual content, clip generation | `yuki` |
 | 5 | **Anita** | `ANITA_TOKEN` | Head of Conversion & Nurture — email sequences, copy, must follow Email Brand Standard (Section 11) | `anita` |

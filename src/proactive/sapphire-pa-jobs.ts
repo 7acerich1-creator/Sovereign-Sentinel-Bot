@@ -167,8 +167,8 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
     return;
   }
 
-  // ── Pull data in parallel ──
-  const [calSummary, inboxSummary, reminders] = await Promise.all([
+  // ── Pull data in parallel — add news brief (Gap 7) ──
+  const [calSummary, inboxSummary, reminders, newsBrief] = await Promise.all([
     getCalendarSummaryForBrief().catch((e) => `(calendar unavailable: ${e.message})`),
     getInboxSummaryForBrief(24).catch((e) => `(email unavailable: ${e.message})`),
     supabase
@@ -179,6 +179,7 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
       .lte("fire_at", new Date(today.getTime() + 24 * 60 * 60 * 1000).toISOString())
       .order("fire_at", { ascending: true })
       .limit(15),
+    import("../tools/sapphire/news").then((m) => m.getNewsForBrief()).catch(() => ""),
   ]);
 
   // ── Compose text ──
@@ -201,6 +202,12 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
       const t = new Date(r.fire_at).toLocaleString("en-US", { timeZone: ACE_TZ, hour: "numeric", minute: "2-digit" });
       sections.push(`• ${t} — ${r.message}`);
     }
+    sections.push("");
+  }
+
+  if (newsBrief && newsBrief.trim().length > 20) {
+    sections.push("📰 NEWS WORTH A LOOK");
+    sections.push(newsBrief);
     sections.push("");
   }
 

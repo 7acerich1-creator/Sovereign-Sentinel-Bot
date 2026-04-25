@@ -98,41 +98,140 @@ export async function upsertSapphireFact(
   }
 }
 
-// ── QUERY similar personal facts ────────────────────────────────────────────
+// ── QUERY similar personal facts ACROSS multiple namespaces ────────────────
+//
+// Sapphire reads from FOUR namespaces because seed memory may live anywhere:
+//   - sapphire-personal: NEW. PA-mode personal facts (post-S114l).
+//   - sapphire: LEGACY. Original Sapphire COO memory before namespace split.
+//   - shared: Cross-cutting insights from any agent (insight-extractor flagged shared:true).
+//   - brand: Business intel (lower weight — usually not personal but may contain Ace context).
+//
+// Results are merged + deduped + sorted by score. Sapphire-personal gets a
+// small score boost to prefer her own personal memory when scores are close.
+const PA_RECALL_NAMESPACES: Array<{ ns: string; weight: number }> = [
+  { ns: "sapphire-personal", weight: 1.0 },
+  { ns: "sapphire", weight: 0.95 },         // legacy
+  { ns: "shared", weight: 0.9 },
+  { ns: "brand", weight: 0.85 },             // last priority — mostly business
+];
+
+interface RecallMatch {
+  key: string;
+  value: string;
+  category: string;
+  score: number;
+  namespace: string;
+}
+
+async function queryNamespace(
+  vec: number[],
+  namespace: string,
+  topK: number,
+): Promise<RecallMatch[]> {
+  try {
+    const res = await fetch(`${PINECONE_HOST}/query`, {
+      method: "POST",
+      headers: { "Api-Key": PINECONE_API_KEY!, "Content-Type": "application/json" },
+      body: JSON.stringify({ namespace, vector: vec, topK, includeMetadata: true }),
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as any;
+    const matches = (data.matches as any[]) || [];
+    return matches.map((m) => ({
+      key: String(m.metadata?.key || m.metadata?.id || m.id || ""),
+      // Different writers use different metadata schemas — try both
+      value: String(m.metadata?.value || m.metadata?.content || ""),
+      category: String(m.metadata?.category || m.metadata?.type || ""),
+      score: Number(m.score || 0),
+      namespace,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export async function recallSapphireFacts(
   query: string,
   topK = 5,
   minScore = 0.6,
-): Promise<Array<{ key: string; value: string; category: string; score: number }>> {
+): Promise<Array<{ key: string; value: string; category: string; score: number; namespace: string }>> {
   if (!PINECONE_HOST || !PINECONE_API_KEY) return [];
   if (!query || query.length < 4) return [];
 
   const vec = await embedText(query);
   if (!vec) return [];
 
+  // Query all namespaces in parallel
+  const perNamespaceK = Math.max(2, Math.ceil(topK / 2));
+  const allResults = await Promise.all(
+    PA_RECALL_NAMESPACES.map(({ ns, weight }) =>
+      queryNamespace(vec, ns, perNamespaceK).then((matches) =>
+        matches.map((m) => ({ ...m, score: m.score * weight })),
+      ),
+    ),
+  );
+
+  // Merge, dedupe by (namespace, key), apply minScore, sort desc, slice topK
+  const merged: RecallMatch[] = [];
+  const seen = new Set<string>();
+  for (const ns of allResults) {
+    for (const m of ns) {
+      const id = `${m.namespace}::${m.key}`;
+      if (seen.has(id)) continue;
+      if (m.score < minScore) continue;
+      if (!m.value) continue;
+      seen.add(id);
+      merged.push(m);
+    }
+  }
+  merged.sort((a, b) => b.score - a.score);
+  return merged.slice(0, topK);
+}
+
+// ── AUDIT: stats + sample per namespace ─────────────────────────────────────
+//
+// Used by the /api/sapphire/memory-audit endpoint to inspect what's actually
+// in Pinecone for each namespace Sapphire reads from.
+export async function auditSapphireMemory(
+  sampleQuery = "Ace background life mission family",
+): Promise<{
+  available: boolean;
+  stats: Record<string, number>;
+  samples: Record<string, RecallMatch[]>;
+  error?: string;
+}> {
+  if (!PINECONE_HOST || !PINECONE_API_KEY) {
+    return { available: false, stats: {}, samples: {}, error: "Pinecone env not configured" };
+  }
+
+  const stats: Record<string, number> = {};
+  const samples: Record<string, RecallMatch[]> = {};
+
+  // 1. describe_index_stats — total vector counts per namespace
   try {
-    const res = await fetch(`${PINECONE_HOST}/query`, {
+    const statsRes = await fetch(`${PINECONE_HOST}/describe_index_stats`, {
       method: "POST",
       headers: { "Api-Key": PINECONE_API_KEY, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        namespace: NAMESPACE,
-        vector: vec,
-        topK,
-        includeMetadata: true,
-      }),
+      body: "{}",
     });
-    if (!res.ok) return [];
-    const data = (await res.json()) as any;
-    const matches = (data.matches as any[]) || [];
-    return matches
-      .filter((m) => m.score >= minScore)
-      .map((m) => ({
-        key: String(m.metadata?.key || ""),
-        value: String(m.metadata?.value || ""),
-        category: String(m.metadata?.category || ""),
-        score: Number(m.score || 0),
-      }));
-  } catch {
-    return [];
+    if (statsRes.ok) {
+      const data = (await statsRes.json()) as any;
+      for (const [ns, info] of Object.entries(data.namespaces || {})) {
+        stats[ns] = (info as any).vectorCount || 0;
+      }
+      stats.__total = data.totalVectorCount || 0;
+    }
+  } catch (e: any) {
+    return { available: false, stats: {}, samples: {}, error: `describe_index_stats failed: ${e.message}` };
   }
+
+  // 2. Sample query against each namespace Sapphire would read
+  const vec = await embedText(sampleQuery);
+  if (vec) {
+    for (const { ns } of PA_RECALL_NAMESPACES) {
+      samples[ns] = await queryNamespace(vec, ns, 5);
+    }
+  }
+
+  return { available: true, stats, samples };
 }

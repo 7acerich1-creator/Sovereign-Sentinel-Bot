@@ -95,10 +95,14 @@ export async function buildPersonalContextPrefix(userMessage = ""): Promise<stri
   if (userMessage && userMessage.length > 10) {
     try {
       const { recallSapphireFacts } = await import("../tools/sapphire/_pinecone");
-      const matches = await recallSapphireFacts(userMessage, 4, 0.65);
+      // Wider net (6, lower min) — pulls from sapphire-personal + sapphire (legacy) + shared + brand
+      const matches = await recallSapphireFacts(userMessage, 6, 0.55);
       if (matches.length > 0) {
-        const lines = matches.map((m) => `  • ${m.key} (${m.category}, sim ${m.score.toFixed(2)}): ${m.value}`);
-        parts.push(`[RELEVANT TO THIS MESSAGE — pulled from your personal memory]:\n${lines.join("\n")}`);
+        const lines = matches.map((m) => {
+          const value = m.value.length > 240 ? m.value.slice(0, 240) + "…" : m.value;
+          return `  • [${m.namespace}] ${m.key || "(no key)"} (sim ${m.score.toFixed(2)}): ${value}`;
+        });
+        parts.push(`[RELEVANT TO THIS MESSAGE — pulled from your full semantic memory across namespaces]:\n${lines.join("\n")}`);
       }
     } catch (e: any) {
       console.warn(`[SapphirePA] semantic recall failed: ${e.message}`);

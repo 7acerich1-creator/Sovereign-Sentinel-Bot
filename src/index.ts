@@ -2757,6 +2757,21 @@ async function main() {
   // ── 8. Webhook Server ──
   const webhookServer = new WebhookServer();
 
+  // ── /api/sapphire/memory-audit ── (S114u)
+  // Returns vector counts per namespace + sample matches against the namespaces
+  // Sapphire reads from. Use to verify if seed memory (pool hall, egregore,
+  // war with reality) is actually in Pinecone and which namespace.
+  webhookServer.register("/api/sapphire/memory-audit", async (incoming: any) => {
+    try {
+      const { auditSapphireMemory } = await import("./tools/sapphire/_pinecone");
+      const query = (incoming?.query && String(incoming.query)) || "Ace background life mission family pool hall egregore war reality";
+      const result = await auditSapphireMemory(query);
+      return JSON.stringify(result, null, 2);
+    } catch (err: any) {
+      return JSON.stringify({ error: err.message });
+    }
+  });
+
   webhookServer.register("/api/heartbeat", async (payload: any) => {
     const tag = payload?.tag || "system";
     const message = payload?.message || `⚡ Heartbeat received — ${tag}`;

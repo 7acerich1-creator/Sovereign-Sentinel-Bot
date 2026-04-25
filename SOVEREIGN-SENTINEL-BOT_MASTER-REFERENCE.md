@@ -24,9 +24,72 @@
 
 ---
 
+## SAPPHIRE PERSONAL ASSISTANT (S114, 2026-04-24)
+
+Sapphire now has a **dual-mode personality**: COO when in group chat or dispatched tasks (sovereign tone, existing behavior), and **Personal Assistant** when in DM with Ace (plain English, no memetic triggers, no `*[inner state: ...]*` stamp). Detection at the personality prompt level — see `src/data/personalities.json` "sapphire" entry.
+
+**Tables (Supabase, project `wzthxohtgojenukmdubz`):**
+- `sapphire_reminders` — durable reminder queue, polled every 60s
+- `sapphire_credentials` — OAuth refresh tokens for Google + Notion (NOT in Railway env vars)
+- `sapphire_daily_pages` — one row per calendar date, ties to a Notion page
+- `sapphire_known_facts` — standing prefs (e.g., "girls' birthday parties = $25 gift")
+
+All RLS service-role-only. Indexed for the reminder poller.
+
+**New modules:**
+- `src/proactive/sapphire-oauth.ts` — OOB Google OAuth + Notion token storage. Reuses `YOUTUBE_CLIENT_ID/SECRET`. Refresh-on-demand access tokens.
+- `src/agent/sapphire-pa-commands.ts` — deterministic command intercept (runs before LLM). Authorization-gated. Voice preference state. Pending-paste handling for auth codes.
+- `src/tools/sapphire/` — 16 tools: reminders × 3, gmail × 4, calendar × 3, notion × 4, facts × 2.
+- `src/proactive/sapphire-pa-jobs.ts` — `runReminderPoll`, `runMorningBrief`, `runEveningWrap`. Idempotent via fired-date keys.
+- `src/proactive/sapphire-watchers.ts` — `runCalendarLookahead` (24h-ahead reminders), `runEmailTriagePoll`.
+- `src/voice/sapphire-voice.ts` — XTTS with `SAPPHIRE_XTTS_SPEAKER` (default "Tammie Ema") for outbound voice notes.
+
+**Scheduled jobs (added):**
+- Reminder poll — every 60s
+- Morning brief — 16:00 UTC (11 AM CDT)
+- Evening wrap — 06:15 UTC (1:15 AM CDT)
+- Calendar 24h lookahead — every 6 hours
+- Email triage — every 30 minutes
+
+**Telegram commands (DM Sapphire, Ace only):**
+- `/auth_google_primary` / `/auth_google_secondary` — OAuth setup
+- `/auth_notion` — Notion integration token paste
+- `/auth_status` — connection check
+- `/voice_on` / `/voice_off` / `/voice_brief`
+- `/sapphire_help` — full command list
+
+**Optional env var:** `SAPPHIRE_XTTS_SPEAKER` (default "Tammie Ema").
+
+**Cost:** Whisper transcription ~$0.006/min (existing OPENAI_API_KEY), XTTS reuses existing pod, Gmail/Calendar/Notion APIs free.
+
+---
+
 ## MISSION CONTROL CROSS-SYNC LOG
 
 *Written BY Mission Control sessions, READ BY Sentinel Bot sessions. Read at every session start. Most recent entries at TOP.*
+
+### 2026-04-24 — MC S114: Aesthetic Performance tile data path SHIPPED on bot side (sovereign override — both Fix A + Fix B in one MC session)
+
+**Sovereign override note:** This entry records bot-side commits that were authored from an MC cowork (not a Bot cowork) at the Architect's explicit instruction "do both fixes right now." Cross-sync protocol normally bars MC sessions from editing bot code; this is an override, not a precedent.
+
+**What shipped on bot side (commit `fe442d3` on `origin/main`, Railway auto-deploy):**
+
+**Fix A — `niche_cooldown.youtube_video_id` write-back (the join key MC's Aesthetic Performance tile needs):**
+- `src/engine/faceless-factory.ts`: `FacelessResult` interface gains optional `jobId` field; return statement now passes the internal `fv_{brand}_{niche}_{ts}` jobId through.
+- `src/engine/vidrush-orchestrator.ts`: after successful YouTube publish (where both `youtubeVideoId` and `facelessResult.jobId` are in scope, ~line 2030 area), PATCHes `niche_cooldown` setting `youtube_video_id` where `job_id = facelessResult.jobId AND youtube_video_id IS NULL`. Skips DRYRUN_ ids and `fv_dryrun_` jobIds. Non-fatal on failure.
+- `src/engine/batch-producer.ts`: `ProducedVideo` interface gains a deterministic per-video `jobId` (`fv_{brand}_{niche}_{ts}_{i}`). Same value goes into both the `niche_cooldown` INSERT (production time) AND the `FacelessResult` that vidrush eventually consumes (publish time). Previously batch-published videos had `niche_cooldown.job_id = NULL` and were unjoinable.
+
+**Fix B — Real CTR + retention via YouTube Analytics API v2:**
+- New module `src/proactive/youtube-stats-fetcher.ts`. Reuses the existing OAuth helper pattern from `youtube-comment-watcher.ts`: env vars `YOUTUBE_REFRESH_TOKEN` (SS) and `YOUTUBE_REFRESH_TOKEN_TCF` (TCF) are exchanged for short-lived access tokens, then `youtubeanalytics.googleapis.com/v2/reports` is called twice per brand:
+  1. Pass 1: `views,averageViewPercentage,averageViewDuration` (90-day window, top 200 by views) → patches `youtube_analytics.retention`.
+  2. Pass 2: `impressions,impressionClickThroughRate` (top 200 by impressions) → patches `youtube_analytics.ctr` and `youtube_analytics.impressions`.
+- `views` is NEVER overwritten — Data API v3 path remains canonical for that field.
+- `src/index.ts`: scheduler entry added, 6h cadence, first run 60s after boot. YouTube Analytics has 24-48h reporting lag — more frequent polling is wasted budget.
+- 403 "Insufficient scope" detection: if existing OAuth tokens were granted with `youtube.readonly` only (not `yt-analytics.readonly`), the failure is caught and a re-consent URL is logged loudly. **First run will reveal whether re-consent is needed.**
+
+**MC SIDE IMPLICATION:**
+- Nothing further required on MC. The Aesthetic Performance tile already queries `niche_cooldown ⨝ youtube_analytics` correctly. As soon as (a) Alfred ships a video with the new dual-rotation pipeline AND vidrush links the videoId back, AND (b) the stats fetcher patches retention/ctr, cells light up automatically.
+- **Watch Railway logs for the FIRST `[YTStatsFetcher]` line** within ~6h of bot deploy. If it says `OAuth tokens missing yt-analytics.readonly scope`, the Architect must re-consent (~5 min Google Cloud Console task — instructions in the log line). If it says `retention patched X/Y videos`, working as designed.
 
 ### 2026-04-15 — S62: Pod Foundation CLOSED (Phase 1 ☑; image published + speaker WAVs on volume)
 

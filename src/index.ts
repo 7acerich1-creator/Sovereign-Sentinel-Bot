@@ -51,6 +51,7 @@ import { injectYoutubeProtocolsIfNeeded } from "./agent/protocol-injection";
 import { ProtocolReaderTool, ProtocolWriterTool } from "./tools/protocol-reader";
 import { RelationshipContextTool } from "./tools/relationship-context";
 import { SapphireSentinel } from "./proactive/sapphire-sentinel";
+import { handleSapphirePACommand } from "./agent/sapphire-pa-commands";
 import { PineconeMemory } from "./memory/pinecone";
 import { KnowledgeWriterTool } from "./tools/knowledge-writer";
 import { ImageGeneratorTool } from "./tools/image-generator";
@@ -1922,6 +1923,120 @@ async function main() {
   // In-memory guard to prevent briefings from firing every 60s during the matching hour
   const briefingFiredDates = { morning: "", evening: "" };
 
+  // ── Sapphire PA channel reference (populated once Sapphire's bot inits below) ──
+  // Three scheduled jobs (reminder poll, morning brief, evening wrap) need to send
+  // DMs as Sapphire — they look up this ref at fire time. Null until Sapphire boots.
+  // Reference type intentionally `any` to avoid forward-declaration headaches.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sapphirePARef: { channel: any | null } = { channel: null };
+  const sapphirePAFiredDates = { morningBrief: "", eveningWrap: "" };
+
+  // ── SAPPHIRE PA — Calendar 24h-ahead lookahead (every 6 hours) ──
+  // Scans the next 48h of calendar events on both accounts and creates
+  // 24h-ahead reminders so Ace never gets surprised by tomorrow's commitments.
+  scheduler.add({
+    name: "Sapphire PA — Calendar Lookahead (6h)",
+    intervalMs: 6 * 60 * 60 * 1000,
+    nextRun: new Date(Date.now() + 5 * 60 * 1000), // First run 5min after boot
+    enabled: true,
+    handler: async () => {
+      try {
+        const { runCalendarLookahead } = await import("./proactive/sapphire-watchers");
+        await runCalendarLookahead();
+      } catch (e: any) {
+        console.error(`[SapphireWatch] Calendar lookahead scheduling error: ${e.message}`);
+      }
+    },
+  });
+
+  // ── SAPPHIRE PA — Email Triage Poll (every 30 min) ──
+  // Checks for high-priority unread emails on both accounts and DMs Ace
+  // when something matches the priority filter (school, invites, urgent, etc.).
+  scheduler.add({
+    name: "Sapphire PA — Email Triage (30m)",
+    intervalMs: 30 * 60 * 1000,
+    nextRun: new Date(Date.now() + 7 * 60 * 1000), // First run 7min after boot
+    enabled: true,
+    handler: async () => {
+      if (!sapphirePARef.channel) return;
+      try {
+        const { runEmailTriagePoll } = await import("./proactive/sapphire-watchers");
+        await runEmailTriagePoll(sapphirePARef.channel);
+      } catch (e: any) {
+        console.error(`[SapphireWatch] Email triage scheduling error: ${e.message}`);
+      }
+    },
+  });
+
+  // ── SAPPHIRE PA — Reminder poller (every 60s) ──
+  // Polls public.sapphire_reminders for due reminders, fires DMs through Sapphire.
+  // Persists across Railway redeploys (state is in Supabase, not memory).
+  scheduler.add({
+    name: "Sapphire PA — Reminder Poll (60s)",
+    intervalMs: 60_000,
+    nextRun: new Date(Date.now() + 90_000), // First run 90s after boot
+    enabled: true,
+    handler: async () => {
+      if (!sapphirePARef.channel) return;
+      try {
+        const { runReminderPoll } = await import("./proactive/sapphire-pa-jobs");
+        await runReminderPoll(sapphirePARef.channel);
+      } catch (e: any) {
+        console.error(`[SapphirePA] Reminder poll error: ${e.message}`);
+      }
+    },
+  });
+
+  // ── SAPPHIRE PA — Morning Brief (16:00 UTC = 11 AM CDT) ──
+  scheduler.add({
+    name: "Sapphire PA — Morning Brief (11 AM CDT)",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      if (!sapphirePARef.channel || !defaultChatId) return;
+      const now = new Date();
+      const dateKey = now.toDateString();
+      // Fire at exactly 16:00 UTC ± 2 minutes, once per UTC date
+      if (now.getUTCHours() === 16 && now.getUTCMinutes() <= 2 && sapphirePAFiredDates.morningBrief !== dateKey) {
+        sapphirePAFiredDates.morningBrief = dateKey;
+        console.log(`🌅 [SapphirePA] Morning brief firing for ${dateKey}`);
+        try {
+          const { runMorningBrief } = await import("./proactive/sapphire-pa-jobs");
+          await runMorningBrief(sapphirePARef.channel, defaultChatId);
+        } catch (e: any) {
+          console.error(`[SapphirePA] Morning brief error: ${e.message}`);
+        }
+      }
+    },
+  });
+
+  // ── SAPPHIRE PA — Evening Wrap (06:15 UTC = 1:15 AM CDT next day) ──
+  // 15-min offset from the daily 06:00 UTC landing-analytics fetch so they don't collide.
+  scheduler.add({
+    name: "Sapphire PA — Evening Wrap (1:15 AM CDT)",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      if (!sapphirePARef.channel || !defaultChatId) return;
+      const now = new Date();
+      const dateKey = now.toDateString();
+      if (now.getUTCHours() === 6 && now.getUTCMinutes() >= 15 && now.getUTCMinutes() <= 17 && sapphirePAFiredDates.eveningWrap !== dateKey) {
+        sapphirePAFiredDates.eveningWrap = dateKey;
+        console.log(`🌙 [SapphirePA] Evening wrap firing for ${dateKey}`);
+        try {
+          const { runEveningWrap } = await import("./proactive/sapphire-pa-jobs");
+          await runEveningWrap(sapphirePARef.channel, defaultChatId);
+        } catch (e: any) {
+          console.error(`[SapphirePA] Evening wrap error: ${e.message}`);
+        }
+      }
+    },
+  });
+
   // Schedule morning briefing (10:00 AM CDT = 15:00 UTC — first thing, before any agent dispatches)
   scheduler.add({
     name: "Morning Briefing",
@@ -3661,6 +3776,11 @@ async function main() {
         if (agentCfg.name === "sapphire") {
           agentTools.push(new ProtocolWriterTool());
           agentTools.push(new RelationshipContextTool());
+          // ── Personal Assistant tool layer (Phase 3 / S114) ──
+          // 16 tools: reminders × 3, gmail × 4, calendar × 3, notion × 4, facts × 2.
+          // These power Sapphire's PA mode (DM with Ace about life/calendar/email).
+          const { buildSapphirePATools } = await import("./tools/sapphire");
+          for (const t of buildSapphirePATools()) agentTools.push(t);
         }
 
         // Action Surface Layer — every agent gets visibility tools
@@ -3725,6 +3845,13 @@ async function main() {
         // Store loop + channel reference for dispatch polling
         agentLoops.set(agentCfg.name, { loop: agentBotLoop, channel: agentChannel });
 
+        // ── Sapphire PA channel reference for scheduled jobs ──
+        // Reminder poll, morning brief, and evening wrap need this ref to send DMs as Sapphire.
+        if (agentCfg.name === "sapphire") {
+          sapphirePARef.channel = agentChannel;
+          console.log(`[SapphirePA] Channel ref wired — reminder poll + briefs are armed.`);
+        }
+
         // Group management for agent bot — use REAL Telegram username from getMe()
         // Sapphire = "copilot" (responds to all Architect messages with plain English assessment after Veritas)
         // All other agents = "crew" (respond only on @mention, reply, broadcast, or /command)
@@ -3741,6 +3868,41 @@ async function main() {
         // Wire Handler (Isolated from MessageRouter)
         agentChannel.onMessage(async (message: Message) => {
           try {
+            // ── EARLY VOICE TRANSCRIPTION (Sapphire DM only) ──
+            // For Sapphire's PA mode we need transcripts BEFORE the command
+            // intercept so voice-noted commands work too.
+            if (agentCfg.name === "sapphire" && !message.metadata?.isGroup
+                && message.attachments?.some((a) => a.type === "voice" || a.type === "audio")) {
+              const voiceAttachment = message.attachments.find((a) => a.type === "voice" || a.type === "audio");
+              if (voiceAttachment?.url) {
+                try {
+                  await agentChannel.sendTyping(message.chatId);
+                  const audioBuffer = await downloadTelegramFile(voiceAttachment.url);
+                  const transcription = await transcribeAudio(audioBuffer, voiceAttachment.mimeType);
+                  message.content = transcription;
+                  // Mark so the later voice block doesn't double-transcribe
+                  (message as any).__sapphirePATranscribed = true;
+                } catch (vErr: any) {
+                  console.error(`[SapphirePA] Voice transcription failed: ${vErr.message}`);
+                }
+              }
+            }
+
+            // ── SAPPHIRE PERSONAL-ASSISTANT COMMAND INTERCEPT ──
+            // Runs BEFORE the agent loop. Handles /auth_*, /voice_*, and pending
+            // input states (auth code paste, Notion token paste). DM only — never
+            // intercepts in group chats so Sapphire's COO role isn't disrupted.
+            // Only the authorized user (Ace) can trigger any of these.
+            if (agentCfg.name === "sapphire" && !message.metadata?.isGroup) {
+              try {
+                const handled = await handleSapphirePACommand(message, agentChannel);
+                if (handled) return;
+              } catch (paErr: any) {
+                console.error(`[SapphirePA] Command intercept failed: ${paErr.message}`);
+                // Fall through to agent loop on error
+              }
+            }
+
             if (!agentGroupManager.shouldRespond(message)) return;
 
             // ── CoPilot delay — Sapphire waits for Veritas to respond first ──
@@ -3778,8 +3940,9 @@ async function main() {
                 `If something needs the Architect's attention, flag it simply. Stay warm, stay sharp.`;
             }
 
-            // Voice handling
-            if (message.attachments?.some((a) => a.type === "voice" || a.type === "audio")) {
+            // Voice handling (skip if Sapphire PA early-transcription already ran)
+            if (!(message as any).__sapphirePATranscribed
+                && message.attachments?.some((a) => a.type === "voice" || a.type === "audio")) {
               const voiceAttachment = message.attachments.find((a) => a.type === "voice" || a.type === "audio");
               if (voiceAttachment?.url) {
                 await agentChannel.sendTyping(message.chatId);

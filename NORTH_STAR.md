@@ -216,7 +216,7 @@ ORDER BY 1, 2;
 
 **Action:** **Ship videos. The dual-rotation pipeline is live. Every day the producer runs and logs another A/B/C × niche data point. At 30 videos, measure. Between now and then: monitor for pipeline failures (the `ScriptTooSimilarError` regression that burned S113 must not return) and verify the MC aesthetic-performance tile surfaces the data correctly.**
 
-**Secondary:** Wire Yuki for automated pinned comments on YouTube videos (immediate reach lift). Wire Anita for email reply monitoring (5-min response to lead replies). Both are approved and scoped.
+**Secondary:** ✅ S115 SHIPPED Yuki YouTube auto-reply (5-min, plain-Ace voice, both channels) + twice-daily outbound consciousness-hook drops on subscribed channels (14:00 + 22:00 UTC, hard cap 5/brand/run). Commit `4836544`. Watch first Railway logs for TCF-token `youtube.force-ssl` 403 (re-auth URL emitted on failure). Anita email-reply monitoring still pending.
 
 Justification: Pod migration is COMPLETE (Phase 6 shipped S79). S107 shipped 53-file brand overhaul. S109 fixed the silent trigger crash that was killing ALL lead captures. The diagnostic link is now in all video descriptions. For the first time in 109 sessions, the full path from viewer → description link → diagnostic → lead capture → nurture email is LIVE and functional. The highest-leverage action is now measurement + engagement automation, not more building.
 

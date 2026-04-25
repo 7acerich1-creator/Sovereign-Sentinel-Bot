@@ -31,13 +31,12 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { postYouTubeComment } from "../tools/youtube-comment-tool";
+import { generateShortText } from "../llm/gemini-flash";
 
 type Brand = "sovereign_synthesis" | "containment_field";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const HOOK_MODEL = "claude-haiku-4-5-20251001";
 
 const MAX_DROPS_PER_RUN = 5;
 const MAX_SUBSCRIPTIONS_TO_SCAN = 50;
@@ -227,38 +226,28 @@ async function recordDrop(row: Record<string, unknown>): Promise<void> {
 }
 
 async function generateHook(brand: Brand, videoTitle: string, channelTitle: string): Promise<string | null> {
-  if (!ANTHROPIC_API_KEY) return null;
   const userMessage = `Channel: ${channelTitle}\nVideo title: ${videoTitle}\n\nWrite ONE single-sentence comment per the rules above.`;
-  try {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: HOOK_MODEL,
-        max_tokens: 250,
-        system: BRAND_HOOK_PROMPTS[brand],
-        messages: [{ role: "user", content: userMessage }],
-      }),
-    });
-    if (!resp.ok) return null;
-    const data = (await resp.json()) as any;
-    let text: string = data?.content?.[0]?.text || "";
-    text = text.trim().replace(/^["']|["']$/g, "");
-    // Enforce single sentence — strip anything after first sentence-ending punctuation+space+capital
-    const m = text.match(/^.+?[.!?](?=\s+[A-Z]|$)/s);
-    if (m) text = m[0];
-    if (!text || text.length > 350) return null;
-    // Hard reject obvious failure modes
-    if (/https?:\/\//i.test(text)) return null;
-    if (/subscribe|check out|my channel/i.test(text)) return null;
-    return text;
-  } catch {
+
+  const { text: raw, error } = await generateShortText(
+    BRAND_HOOK_PROMPTS[brand],
+    userMessage,
+    { maxOutputTokens: 250, temperature: 0.85 }
+  );
+
+  if (error || !raw) {
+    console.warn(`[YukiHookDropper] LLM failed: ${error}`);
     return null;
   }
+
+  let text = raw.trim().replace(/^["']|["']$/g, "");
+  // Enforce single sentence — strip anything after first sentence-ending punctuation+space+capital
+  const m = text.match(/^.+?[.!?](?=\s+[A-Z]|$)/s);
+  if (m) text = m[0];
+  if (!text || text.length > 350) return null;
+  // Hard reject obvious failure modes
+  if (/https?:\/\//i.test(text)) return null;
+  if (/subscribe|check out|my channel/i.test(text)) return null;
+  return text;
 }
 
 /**

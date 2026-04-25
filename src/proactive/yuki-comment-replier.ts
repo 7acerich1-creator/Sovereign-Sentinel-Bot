@@ -23,15 +23,12 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { replyToYouTubeComment } from "../tools/youtube-comment-tool";
+import { generateShortText } from "../llm/gemini-flash";
 
 type Brand = "sovereign_synthesis" | "containment_field";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-
-// Cheap model for 1-3 sentence replies. Sonnet is overkill here.
-const REPLY_MODEL = "claude-haiku-4-5-20251001";
 
 // Plain-Ace voice — explicitly NOT the brand voice.
 // Mirrors Sapphire PA pattern from S114: plain English, no memetic triggers,
@@ -96,68 +93,46 @@ interface LlmDecision {
 }
 
 async function generateReplyText(ctx: CommentReplyContext): Promise<LlmDecision> {
-  if (!ANTHROPIC_API_KEY) {
-    return { should_reply: false, reason: "ANTHROPIC_API_KEY not set" };
-  }
-
   const userMessage = `Video title: ${ctx.videoTitle}\nCommenter: ${ctx.authorName}\nComment: ${ctx.textOriginal.slice(0, 1500)}`;
 
-  try {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: REPLY_MODEL,
-        max_tokens: 400,
-        system: PLAIN_ACE_SYSTEM_PROMPT,
-        messages: [{ role: "user", content: userMessage }],
-      }),
-    });
+  const { text, error } = await generateShortText(
+    PLAIN_ACE_SYSTEM_PROMPT,
+    userMessage,
+    { maxOutputTokens: 400, temperature: 0.8 }
+  );
 
-    if (!resp.ok) {
-      const body = await resp.text();
-      return { should_reply: false, reason: `LLM ${resp.status}: ${body.slice(0, 200)}` };
-    }
-
-    const data = (await resp.json()) as any;
-    const text = data?.content?.[0]?.text || "";
-    if (!text) return { should_reply: false, reason: "empty LLM response" };
-
-    // Strip code fences if the model wrapped it anyway
-    const cleaned = text.trim().replace(/^```(?:json)?/, "").replace(/```$/, "").trim();
-
-    let parsed: LlmDecision;
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch {
-      // Fallback: if the model returned plain text, assume it's the reply
-      const trimmed = cleaned.replace(/^["']|["']$/g, "");
-      if (trimmed && trimmed.length < 500) {
-        return { should_reply: true, reply: trimmed };
-      }
-      return { should_reply: false, reason: `LLM returned non-JSON: ${cleaned.slice(0, 100)}` };
-    }
-
-    if (parsed.should_reply && parsed.reply) {
-      // Final safety: hard-reject if any banned word slipped through
-      const banned = /\b(sovereign|synthesis|containment|frequency|transmission|architect|firmware|protocol|initiate|resonance)\b/i;
-      if (banned.test(parsed.reply)) {
-        return { should_reply: false, reason: `banned-word leak: ${parsed.reply.slice(0, 80)}` };
-      }
-      // Cap length defensively
-      if (parsed.reply.length > 500) {
-        parsed.reply = parsed.reply.slice(0, 497) + "...";
-      }
-    }
-
-    return parsed;
-  } catch (err: any) {
-    return { should_reply: false, reason: `LLM exception: ${err.message}` };
+  if (error || !text) {
+    return { should_reply: false, reason: error || "empty LLM response" };
   }
+
+  // Strip code fences if the model wrapped JSON in them
+  const cleaned = text.trim().replace(/^```(?:json)?/, "").replace(/```$/, "").trim();
+
+  let parsed: LlmDecision;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    // Fallback: if the model returned plain text, assume it's the reply
+    const trimmed = cleaned.replace(/^["']|["']$/g, "");
+    if (trimmed && trimmed.length < 500) {
+      return { should_reply: true, reply: trimmed };
+    }
+    return { should_reply: false, reason: `LLM returned non-JSON: ${cleaned.slice(0, 100)}` };
+  }
+
+  if (parsed.should_reply && parsed.reply) {
+    // Final safety: hard-reject if any banned word slipped through
+    const banned = /\b(sovereign|synthesis|containment|frequency|transmission|architect|firmware|protocol|initiate|resonance)\b/i;
+    if (banned.test(parsed.reply)) {
+      return { should_reply: false, reason: `banned-word leak: ${parsed.reply.slice(0, 80)}` };
+    }
+    // Cap length defensively
+    if (parsed.reply.length > 500) {
+      parsed.reply = parsed.reply.slice(0, 497) + "...";
+    }
+  }
+
+  return parsed;
 }
 
 async function patchSeenRow(commentId: string, brand: Brand, patch: Record<string, unknown>): Promise<void> {

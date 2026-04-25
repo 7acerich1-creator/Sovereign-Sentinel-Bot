@@ -32,18 +32,41 @@ interface BskySession {
 
 const sessionCache: Partial<Record<BskyBrand, BskySession>> = {};
 
+/**
+ * Resolve Bluesky credentials per brand.
+ *
+ * S115 correction (2026-04-25): The handle "sovereign-synthesis.com" on
+ * Bluesky belongs to The Containment Field's account (one Bluesky
+ * presence using SS's verified domain). Sovereign Synthesis does NOT
+ * have a separate Bluesky account yet. So:
+ *   - CF resolves from BLUESKY_HANDLE_CF + BLUESKY_APP_PASSWORD_CF
+ *   - SS path requires BOTH env vars AND a handle that DOESN'T collide
+ *     with CF's. If they collide, return null — prevents accidental
+ *     dual-auth on the same account producing duplicate replies.
+ *
+ * When SS gets its own Bluesky account, set BLUESKY_HANDLE_SS to the
+ * new (different) handle and the SS path activates automatically.
+ */
 function getCredentials(brand: BskyBrand): { identifier: string; password: string } | null {
-  if (brand === "sovereign_synthesis") {
-    const password = process.env.BLUESKY_APP_PASSWORD_SS;
-    const identifier = process.env.BLUESKY_HANDLE_SS || "sovereign-synthesis.com";
-    if (!password) return null;
-    return { identifier, password };
+  const cfHandle = process.env.BLUESKY_HANDLE_CF;
+  const cfPassword = process.env.BLUESKY_APP_PASSWORD_CF;
+
+  if (brand === "containment_field") {
+    if (!cfHandle || !cfPassword) return null;
+    return { identifier: cfHandle, password: cfPassword };
   }
-  // containment_field — no creds yet, will return null until env vars added
-  const password = process.env.BLUESKY_APP_PASSWORD_CF;
-  const identifier = process.env.BLUESKY_HANDLE_CF;
-  if (!password || !identifier) return null;
-  return { identifier, password };
+
+  // brand === sovereign_synthesis
+  const ssHandle = process.env.BLUESKY_HANDLE_SS;
+  const ssPassword = process.env.BLUESKY_APP_PASSWORD_SS;
+  if (!ssHandle || !ssPassword) return null;
+  // Dedup guard: if SS handle collides with CF handle, the env vars are
+  // mistakenly pointing both brands at the same account. Skip the SS path.
+  if (cfHandle && ssHandle.toLowerCase() === cfHandle.toLowerCase()) {
+    console.log(`[Bluesky] sovereign_synthesis: handle collides with CF (${ssHandle}), skipping`);
+    return null;
+  }
+  return { identifier: ssHandle, password: ssPassword };
 }
 
 async function createSession(brand: BskyBrand): Promise<BskySession | null> {

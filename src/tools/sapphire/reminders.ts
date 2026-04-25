@@ -12,7 +12,7 @@ import { config } from "../../config";
 
 function getSupabase() {
   return import("@supabase/supabase-js").then((m) =>
-    m.createClient(config.memory.supabaseUrl!, config.memory.supabaseKey!),
+    m.createClient(config.memory.supabaseUrl!, (process.env.SUPABASE_SERVICE_ROLE_KEY || config.memory.supabaseKey)!),
   );
 }
 

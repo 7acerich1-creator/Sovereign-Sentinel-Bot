@@ -118,7 +118,7 @@ export async function exchangeCodeForRefreshToken(
   const { createClient } = await import("@supabase/supabase-js");
   const supabase = createClient(
     config.memory.supabaseUrl!,
-    config.memory.supabaseKey!,
+    (process.env.SUPABASE_SERVICE_ROLE_KEY || config.memory.supabaseKey)!,
   );
 
   const { error: dbErr } = await supabase
@@ -160,7 +160,7 @@ export async function getValidGoogleAccessToken(
   const { createClient } = await import("@supabase/supabase-js");
   const supabase = createClient(
     config.memory.supabaseUrl!,
-    config.memory.supabaseKey!,
+    (process.env.SUPABASE_SERVICE_ROLE_KEY || config.memory.supabaseKey)!,
   );
 
   const { data: row, error: readErr } = await supabase
@@ -243,7 +243,7 @@ export async function storeNotionToken(
   const { createClient } = await import("@supabase/supabase-js");
   const supabase = createClient(
     config.memory.supabaseUrl!,
-    config.memory.supabaseKey!,
+    (process.env.SUPABASE_SERVICE_ROLE_KEY || config.memory.supabaseKey)!,
   );
 
   const { error } = await supabase
@@ -267,7 +267,7 @@ export async function getNotionToken(): Promise<{ ok: true; token: string } | { 
   const { createClient } = await import("@supabase/supabase-js");
   const supabase = createClient(
     config.memory.supabaseUrl!,
-    config.memory.supabaseKey!,
+    (process.env.SUPABASE_SERVICE_ROLE_KEY || config.memory.supabaseKey)!,
   );
 
   const { data: row, error } = await supabase
@@ -290,7 +290,7 @@ export async function getSapphireAuthStatus(): Promise<{
   const { createClient } = await import("@supabase/supabase-js");
   const supabase = createClient(
     config.memory.supabaseUrl!,
-    config.memory.supabaseKey!,
+    (process.env.SUPABASE_SERVICE_ROLE_KEY || config.memory.supabaseKey)!,
   );
 
   const { data } = await supabase

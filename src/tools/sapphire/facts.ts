@@ -14,7 +14,7 @@ const VALID_CATEGORIES = ["family", "preferences", "people", "logistics", "stand
 
 async function getSupabase() {
   const m = await import("@supabase/supabase-js");
-  return m.createClient(config.memory.supabaseUrl!, config.memory.supabaseKey!);
+  return m.createClient(config.memory.supabaseUrl!, (process.env.SUPABASE_SERVICE_ROLE_KEY || config.memory.supabaseKey)!);
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

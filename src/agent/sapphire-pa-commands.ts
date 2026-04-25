@@ -64,7 +64,7 @@ export function getVoicePreference(): typeof voicePreference {
 async function loadVoicePreference(): Promise<void> {
   try {
     const { createClient } = await import("@supabase/supabase-js");
-    const supabase = createClient(config.memory.supabaseUrl!, config.memory.supabaseKey!);
+    const supabase = createClient(config.memory.supabaseUrl!, (process.env.SUPABASE_SERVICE_ROLE_KEY || config.memory.supabaseKey)!);
     const { data } = await supabase
       .from("sapphire_known_facts")
       .select("value")
@@ -82,7 +82,7 @@ async function saveVoicePreference(pref: typeof voicePreference): Promise<void> 
   voicePreference = pref;
   try {
     const { createClient } = await import("@supabase/supabase-js");
-    const supabase = createClient(config.memory.supabaseUrl!, config.memory.supabaseKey!);
+    const supabase = createClient(config.memory.supabaseUrl!, (process.env.SUPABASE_SERVICE_ROLE_KEY || config.memory.supabaseKey)!);
     await supabase
       .from("sapphire_known_facts")
       .upsert(

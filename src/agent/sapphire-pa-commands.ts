@@ -64,7 +64,7 @@ export function getVoicePreference(): typeof voicePreference {
 async function loadVoicePreference(): Promise<void> {
   try {
     const { createClient } = await import("@supabase/supabase-js");
-    const supabase = createClient(config.memory.supabaseUrl, config.memory.supabaseKey);
+    const supabase = createClient(config.memory.supabaseUrl!, config.memory.supabaseKey!);
     const { data } = await supabase
       .from("sapphire_known_facts")
       .select("value")
@@ -82,7 +82,7 @@ async function saveVoicePreference(pref: typeof voicePreference): Promise<void> 
   voicePreference = pref;
   try {
     const { createClient } = await import("@supabase/supabase-js");
-    const supabase = createClient(config.memory.supabaseUrl, config.memory.supabaseKey);
+    const supabase = createClient(config.memory.supabaseUrl!, config.memory.supabaseKey!);
     await supabase
       .from("sapphire_known_facts")
       .upsert(
@@ -122,7 +122,7 @@ export async function handleSapphirePACommand(
   if (pending && !text.startsWith("/")) {
     if (pending.kind === "google_auth_code") {
       clearPending(message.chatId);
-      await channel.sendTyping(message.chatId);
+      await channel.sendTyping?.(message.chatId);
       const result = await exchangeCodeForRefreshToken(pending.account, text);
       if (result.ok) {
         await channel.sendMessage(
@@ -140,7 +140,7 @@ export async function handleSapphirePACommand(
     }
     if (pending.kind === "notion_token") {
       clearPending(message.chatId);
-      await channel.sendTyping(message.chatId);
+      await channel.sendTyping?.(message.chatId);
       const result = await storeNotionToken(text);
       if (result.ok) {
         await channel.sendMessage(

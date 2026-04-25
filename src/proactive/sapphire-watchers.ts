@@ -19,7 +19,7 @@ const ACE_TZ = "America/Chicago";
 
 async function getSupabase() {
   const m = await import("@supabase/supabase-js");
-  return m.createClient(config.memory.supabaseUrl, config.memory.supabaseKey);
+  return m.createClient(config.memory.supabaseUrl!, config.memory.supabaseKey!);
 }
 
 const ACCOUNTS: SapphireAccountLabel[] = ["empoweredservices2013", "7ace.rich1"];

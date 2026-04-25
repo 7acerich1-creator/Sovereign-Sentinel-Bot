@@ -114,8 +114,8 @@ export async function exchangeCodeForRefreshToken(
   // Persist to sapphire_credentials
   const { createClient } = await import("@supabase/supabase-js");
   const supabase = createClient(
-    config.memory.supabaseUrl,
-    config.memory.supabaseKey,
+    config.memory.supabaseUrl!,
+    config.memory.supabaseKey!,
   );
 
   const { error: dbErr } = await supabase
@@ -156,8 +156,8 @@ export async function getValidGoogleAccessToken(
 
   const { createClient } = await import("@supabase/supabase-js");
   const supabase = createClient(
-    config.memory.supabaseUrl,
-    config.memory.supabaseKey,
+    config.memory.supabaseUrl!,
+    config.memory.supabaseKey!,
   );
 
   const { data: row, error: readErr } = await supabase
@@ -239,8 +239,8 @@ export async function storeNotionToken(
 
   const { createClient } = await import("@supabase/supabase-js");
   const supabase = createClient(
-    config.memory.supabaseUrl,
-    config.memory.supabaseKey,
+    config.memory.supabaseUrl!,
+    config.memory.supabaseKey!,
   );
 
   const { error } = await supabase
@@ -263,8 +263,8 @@ export async function storeNotionToken(
 export async function getNotionToken(): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
   const { createClient } = await import("@supabase/supabase-js");
   const supabase = createClient(
-    config.memory.supabaseUrl,
-    config.memory.supabaseKey,
+    config.memory.supabaseUrl!,
+    config.memory.supabaseKey!,
   );
 
   const { data: row, error } = await supabase
@@ -286,8 +286,8 @@ export async function getSapphireAuthStatus(): Promise<{
 }> {
   const { createClient } = await import("@supabase/supabase-js");
   const supabase = createClient(
-    config.memory.supabaseUrl,
-    config.memory.supabaseKey,
+    config.memory.supabaseUrl!,
+    config.memory.supabaseKey!,
   );
 
   const { data } = await supabase

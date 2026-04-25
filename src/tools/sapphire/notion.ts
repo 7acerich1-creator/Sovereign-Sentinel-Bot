@@ -232,7 +232,7 @@ export async function findOrCreateDailyPage(
   });
 
   const { createClient } = await import("@supabase/supabase-js");
-  const supabase = createClient(config.memory.supabaseUrl, config.memory.supabaseKey);
+  const supabase = createClient(config.memory.supabaseUrl!, config.memory.supabaseKey!);
 
   // Check if we already have a page for this date
   const { data: existing } = await supabase
@@ -285,7 +285,7 @@ export async function findOrCreateDailyPage(
 // ── Parent page ID storage (the page Ace shares with the integration) ──────
 export async function getNotionParentPageId(): Promise<string | null> {
   const { createClient } = await import("@supabase/supabase-js");
-  const supabase = createClient(config.memory.supabaseUrl, config.memory.supabaseKey);
+  const supabase = createClient(config.memory.supabaseUrl!, config.memory.supabaseKey!);
   const { data } = await supabase
     .from("sapphire_known_facts")
     .select("value")
@@ -296,7 +296,7 @@ export async function getNotionParentPageId(): Promise<string | null> {
 
 export async function setNotionParentPageId(pageId: string): Promise<void> {
   const { createClient } = await import("@supabase/supabase-js");
-  const supabase = createClient(config.memory.supabaseUrl, config.memory.supabaseKey);
+  const supabase = createClient(config.memory.supabaseUrl!, config.memory.supabaseKey!);
   await supabase.from("sapphire_known_facts").upsert(
     { key: "notion_parent_page_id", value: pageId.replace(/-/g, ""), category: "preferences" },
     { onConflict: "key" },

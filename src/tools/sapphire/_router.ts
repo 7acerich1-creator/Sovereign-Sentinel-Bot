@@ -114,7 +114,9 @@ const MATCHERS: TierMatcher[] = [
   {
     name: "family",
     match: (t) =>
-      /\b(daughter|son|wife|husband|partner|spouse|kid|kids|child|children|family|mom|dad|mother|father|sister|brother|grandparent|nephew|niece|aunt|uncle|cousin|allerg|pediatrician|school|nanny|babysit|birthday|dob)\b/i.test(t),
+      /\b(daughter|son|wife|husband|partner|spouse|kid|kids|child|children|family|mom|dad|mother|father|sister|brother|grandparent|nephew|niece|aunt|uncle|cousin|allerg|pediatrician|school|nanny|babysit|birthday|bday|bdays|dob)\b/i.test(t)
+      // Also match common names already saved as family — Aliza, Maddy
+      || /\b(aliza|maddy|maya)\b/i.test(t),
     load: tierFamily,
   },
   {

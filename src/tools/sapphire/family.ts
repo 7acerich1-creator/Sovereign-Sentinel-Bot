@@ -71,6 +71,26 @@ export class SaveFamilyMemberTool implements Tool {
       .from("sapphire_family_profiles")
       .upsert(row, { onConflict: "name" });
     if (error) return `save_family_member: ${error.message}`;
+
+    // ── ALSO write to Pinecone sapphire-personal namespace ──
+    // So semantic recall surfaces this person when Ace asks about them later.
+    // Without this, she'd only find them via direct get_family() calls.
+    try {
+      const summary = [
+        `${name} is Ace's ${relationship}.`,
+        args.date_of_birth ? `Born ${args.date_of_birth}.` : "",
+        allergies?.length ? `Allergies: ${allergies.join(", ")}.` : "",
+        args.school ? `School: ${args.school}.` : "",
+        args.doctor ? `Doctor: ${args.doctor}.` : "",
+        activities?.length ? `Activities: ${activities.join(", ")}.` : "",
+        args.notes ? String(args.notes) : "",
+      ].filter(Boolean).join(" ");
+      const { upsertSapphireFact } = await import("./_pinecone");
+      await upsertSapphireFact(`family_${name.toLowerCase()}`, summary, "family");
+    } catch (e: any) {
+      console.warn(`[save_family_member] Pinecone mirror skipped: ${e.message}`);
+    }
+
     return `Saved profile for ${name} (${relationship}).`;
   }
 }
@@ -83,7 +103,12 @@ export class GetFamilyTool implements Tool {
   definition: ToolDefinition = {
     name: "get_family",
     description:
-      "Look up family member(s). Use when Ace asks 'when is Maya's birthday', 'what's the kids' doctor', 'who has soccer'. Without args, returns all family members.",
+      "Look up family member info you've saved. Call this WHENEVER Ace mentions a family member (kids, wife, parents) and you need to recall details — birthdays, allergies, school, doctor, activities. Don't say you forgot or ask him to retell — call this tool first.\n\n" +
+      "Examples:\n" +
+      "• 'when's Maya's birthday' → get_family(name='Maya') → reply with the date\n" +
+      "• 'remember the daughters' birthdays?' → get_family(relationship='daughter') → reply with both dates\n" +
+      "• 'what's the kids' doctor' → get_family() → look up doctor field\n" +
+      "• 'do you remember my family' → get_family() → list everyone you know",
     parameters: {
       name: { type: "string", description: "Optional. Filter by exact name." },
       relationship: { type: "string", description: "Optional. Filter by relationship (daughter, son, spouse, etc)." },

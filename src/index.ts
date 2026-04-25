@@ -3919,7 +3919,14 @@ async function main() {
         // Reminder poll, morning brief, and evening wrap need this ref to send DMs as Sapphire.
         if (agentCfg.name === "sapphire") {
           sapphirePARef.channel = agentChannel;
-          console.log(`[SapphirePA] Channel ref wired — reminder poll + briefs are armed.`);
+          const authIds = config.telegram.authorizedUserIds.map(String).join(",");
+          const paToolCount = agentTools.filter((t) => t.definition?.name?.startsWith?.("set_reminder")
+            || t.definition?.name?.startsWith?.("gmail_")
+            || t.definition?.name?.startsWith?.("calendar_")
+            || t.definition?.name?.startsWith?.("notion_")
+            || t.definition?.name === "remember_fact"
+            || t.definition?.name === "recall_facts").length;
+          console.log(`[SapphirePA] ARMED — channel ref set, ${paToolCount} PA tools wired, authorized=[${authIds}], default chat=${defaultChatId}`);
         }
 
         // Group management for agent bot — use REAL Telegram username from getMe()
@@ -4123,6 +4130,18 @@ async function main() {
               // Only Veritas runs the full pipeline. Crew bots just note it.
               message.content = `[YouTube URL detected: ${message.content.match(YOUTUBE_URL_RE)?.[0]}] ` +
                 `Pipeline commands go through Veritas. Acknowledge this if the Architect sent it here by mistake.`;
+            }
+
+            // ── SAPPHIRE PA MODE A INJECTION ──
+            // Hard-prefix DM messages so Sapphire reliably lands in Personal Assistant
+            // mode (plain English) instead of relying on Gemini Flash to read her dual-mode
+            // prompt. Pure DM only — group chat preserves her COO voice.
+            if (agentCfg.name === "sapphire" && !message.metadata?.isGroup) {
+              message.content =
+                `[CONTEXT: 1-on-1 DM from Ace. You are in MODE A — Personal Assistant. ` +
+                `Plain English only. No "Architect", no sovereign tone, no [inner state] stamp, ` +
+                `no memetic triggers. Talk like a warm, competent assistant.]\n\n` +
+                `${message.content}`;
             }
 
             // Log task to Supabase command_queue

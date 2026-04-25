@@ -16,7 +16,8 @@ function getSupabase() {
   );
 }
 
-const ACE_CHAT_ID = process.env.TELEGRAM_AUTHORIZED_USER_ID || "";
+// Use config source (same fallback chain as the rest of the bot)
+const ACE_CHAT_ID = String(config.telegram.authorizedUserIds[0] || "");
 
 // ── Helper: validate + normalize ISO datetime ───────────────────────────────
 function normalizeFireAt(input: string): { ok: true; iso: string } | { ok: false; err: string } {

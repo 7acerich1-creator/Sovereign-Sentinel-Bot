@@ -98,10 +98,23 @@ async function saveVoicePreference(pref: typeof voicePreference): Promise<void> 
 loadVoicePreference().catch(() => {});
 
 // ── Authorization gate ──────────────────────────────────────────────────────
+// Uses the SAME source as the rest of the bot (config.telegram.authorizedUserIds).
+// Direct process.env reads silently fail when the env var name varies — config.ts
+// has a fallback chain (TELEGRAM_AUTHORIZED_USER_IDS → TELEGRAM_AUTHORIZED_USER_ID
+// → AUTHORIZED_USER_ID → hardcoded fallback) so this is the canonical source.
 function isAce(message: Message): boolean {
-  const acedId = process.env.TELEGRAM_AUTHORIZED_USER_ID;
-  if (!acedId) return false;
-  return String(message.userId) === acedId || String(message.chatId) === acedId;
+  const ids = config.telegram.authorizedUserIds.map(String);
+  if (ids.length === 0) {
+    console.warn(`[SapphirePA] No authorized user IDs configured — intercept disabled`);
+    return false;
+  }
+  const userId = String(message.userId || "");
+  const chatId = String(message.chatId || "");
+  const ok = ids.includes(userId) || ids.includes(chatId);
+  if (!ok) {
+    console.log(`[SapphirePA] Auth check FAIL — userId=${userId} chatId=${chatId} authorized=[${ids.join(",")}]`);
+  }
+  return ok;
 }
 
 // ── Main entry point ────────────────────────────────────────────────────────

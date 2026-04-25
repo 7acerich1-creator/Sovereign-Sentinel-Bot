@@ -37,7 +37,7 @@ export async function runCalendarLookahead(): Promise<void> {
     const auth = await getSapphireAuthStatus();
     if (!auth.google.empoweredservices2013 && !auth.google["7ace.rich1"]) return;
 
-    const aceChatId = process.env.TELEGRAM_AUTHORIZED_USER_ID;
+    const aceChatId = String(config.telegram.authorizedUserIds[0] || "");
     if (!aceChatId) return;
 
     const supabase = await getSupabase();
@@ -176,7 +176,7 @@ export async function runEmailTriagePoll(channel: Channel): Promise<void> {
     const auth = await getSapphireAuthStatus();
     if (!auth.google.empoweredservices2013 && !auth.google["7ace.rich1"]) return;
 
-    const aceChatId = process.env.TELEGRAM_AUTHORIZED_USER_ID;
+    const aceChatId = String(config.telegram.authorizedUserIds[0] || "");
     if (!aceChatId) return;
 
     const supabase = await getSupabase();

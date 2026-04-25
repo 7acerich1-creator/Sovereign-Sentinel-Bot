@@ -110,9 +110,11 @@ export async function upsertSapphireFact(
 // small score boost to prefer her own personal memory when scores are close.
 const PA_RECALL_NAMESPACES: Array<{ ns: string; weight: number }> = [
   { ns: "sapphire-personal", weight: 1.0 },
-  { ns: "sapphire", weight: 0.95 },         // legacy
-  { ns: "shared", weight: 0.9 },
-  { ns: "brand", weight: 0.85 },             // last priority — mostly business
+  { ns: "sapphire", weight: 0.95 },              // legacy (empty in current state but kept for future)
+  { ns: "sovereign-synthesis", weight: 0.95 },   // SEED MEMORY — 80 vectors of Ace's deep context
+  { ns: "conversations", weight: 0.9 },          // past chat history — 32 vectors
+  { ns: "shared", weight: 0.9 },                 // cross-cutting insights
+  { ns: "brand", weight: 0.85 },                 // last priority — mostly business but contains some Ace context
 ];
 
 interface RecallMatch {

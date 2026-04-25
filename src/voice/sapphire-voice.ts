@@ -1,63 +1,111 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Sapphire Voice Reply Helper
-// Session 114 — 2026-04-24 (S114b: free TTS, no pod)
+// Session 114 — 2026-04-24 (S114f: Google Translate TTS — verified live 200 audio/mpeg)
 //
-// Outbound TTS for Sapphire's PA mode. Uses StreamElements TTS — totally free,
-// no API key, no GPU pod spin-up, single HTTP call per voice note.
-// Voice: "Salli" (warm US female) — natural, conversational tone.
+// Outbound TTS for Sapphire's PA mode. Uses Google Translate's TTS endpoint
+// — totally free, no API key, no GPU pod spin-up. Handles long text via
+// chunking (~180-char limit per request). Returns concatenated MP3.
 //
 // Falls back to text on any failure so Ace never silently misses a brief.
-//
-// Note re Session 106 XTTS-only directive: that rule scopes to PIPELINE TTS
-// (videos that need Ace's cloned voice). Sapphire's PA replies are a different
-// surface (DM voice notes, distinct identity) — free TTS is the correct call
-// to avoid GPU pod spin-up cost on every reply.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { Channel } from "../types";
 
-// StreamElements voice list at:
-//   https://api.streamelements.com/kappa/v2/speech/voices
-// Warm female options: "Salli" (US), "Joanna" (US), "Kimberly" (US),
-//   "Amy" (UK), "Emma" (UK), "Ivy" (US child-safe).
-const SAPPHIRE_VOICE = process.env.SAPPHIRE_TTS_VOICE || "Salli";
-const SE_TTS_URL = "https://api.streamelements.com/kappa/v2/speech";
+const GTTS_URL = "https://translate.google.com/translate_tts";
+// Voice options: tl=en-US (American), en-GB (British), en-AU (Australian)
+const SAPPHIRE_LANG = process.env.SAPPHIRE_TTS_LANG || "en-US";
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
+
+// Google Translate TTS hard-caps ~200 chars per request. Chunk on sentence
+// boundaries when possible, fall back to word boundaries.
+const CHUNK_LIMIT = 180;
 
 export type VoicePreference = "voice" | "text" | "voice_brief_only";
 
 interface SendSapphireReplyOpts {
-  // 'reply' | 'brief' — briefs are voiced when preference is "voice_brief_only"
   kind?: "reply" | "brief";
-  // Hard-override the global voice preference for this one call
   forceMode?: "voice" | "text";
 }
 
-async function synthesizeSapphire(text: string): Promise<Buffer | null> {
-  // StreamElements caps text at ~3000 chars per call. Trim long briefs.
-  const trimmed = text.length > 2800 ? text.slice(0, 2800) + "..." : text;
+function chunkText(text: string): string[] {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= CHUNK_LIMIT) return [cleaned];
 
+  const chunks: string[] = [];
+  // Split on sentence-ish boundaries first
+  const sentences = cleaned.split(/(?<=[.!?])\s+/);
+  let cur = "";
+  for (const s of sentences) {
+    if ((cur + " " + s).trim().length <= CHUNK_LIMIT) {
+      cur = (cur ? cur + " " : "") + s;
+      continue;
+    }
+    if (cur) chunks.push(cur);
+    if (s.length <= CHUNK_LIMIT) {
+      cur = s;
+    } else {
+      // Sentence longer than CHUNK_LIMIT — word-split
+      const words = s.split(" ");
+      cur = "";
+      for (const w of words) {
+        if ((cur + " " + w).trim().length <= CHUNK_LIMIT) {
+          cur = (cur ? cur + " " : "") + w;
+        } else {
+          if (cur) chunks.push(cur);
+          cur = w;
+        }
+      }
+    }
+  }
+  if (cur) chunks.push(cur);
+  return chunks;
+}
+
+async function fetchOneChunk(text: string): Promise<Buffer | null> {
   try {
-    const url = `${SE_TTS_URL}?voice=${encodeURIComponent(SAPPHIRE_VOICE)}&text=${encodeURIComponent(trimmed)}`;
+    const url = `${GTTS_URL}?ie=UTF-8&client=tw-ob&tl=${encodeURIComponent(SAPPHIRE_LANG)}&q=${encodeURIComponent(text)}`;
     const resp = await fetch(url, {
       method: "GET",
-      headers: { Accept: "audio/mpeg" },
-      signal: AbortSignal.timeout(20_000),
+      headers: { "User-Agent": UA, Accept: "audio/mpeg" },
+      signal: AbortSignal.timeout(15_000),
     });
     if (!resp.ok) {
-      console.warn(`[SapphireVoice] StreamElements ${resp.status} — falling back to text`);
+      console.warn(`[SapphireVoice] gTTS chunk ${resp.status}`);
       return null;
     }
-    return Buffer.from(await resp.arrayBuffer());
+    const buf = Buffer.from(await resp.arrayBuffer());
+    if (buf.length < 100) {
+      console.warn(`[SapphireVoice] gTTS chunk too small (${buf.length}b) — likely empty`);
+      return null;
+    }
+    return buf;
   } catch (e: any) {
-    console.warn(`[SapphireVoice] synthesis failed: ${e.message} — falling back to text`);
+    console.warn(`[SapphireVoice] gTTS chunk error: ${e.message}`);
     return null;
   }
 }
 
+async function synthesizeSapphire(text: string): Promise<Buffer | null> {
+  const chunks = chunkText(text);
+  if (chunks.length === 0) return null;
+
+  // For long briefs, cap at 8 chunks (~1440 chars max audio) to keep voice
+  // notes under ~2 min. Text caption still carries full content.
+  const limited = chunks.slice(0, 8);
+
+  const buffers: Buffer[] = [];
+  for (const chunk of limited) {
+    const b = await fetchOneChunk(chunk);
+    if (!b) {
+      // Partial failure — return what we have if any, else null
+      return buffers.length > 0 ? Buffer.concat(buffers) : null;
+    }
+    buffers.push(b);
+  }
+  return Buffer.concat(buffers);
+}
+
 // ── Main exported reply helper ──────────────────────────────────────────────
-//
-// Resolves voice preference, attempts synthesis, falls back to text on any
-// failure. Always sends *something* to Ace.
 export async function sendSapphireReply(
   channel: Channel,
   chatId: string,
@@ -85,7 +133,6 @@ export async function sendSapphireReply(
   if (typeof (channel as any).sendVoice === "function") {
     try {
       await (channel as any).sendVoice(chatId, audio, "audio/mpeg");
-      // Always include a short text caption so chat is searchable
       const caption = text.length > 240 ? text.slice(0, 240) + "..." : text;
       await channel.sendMessage(chatId, caption);
       return;

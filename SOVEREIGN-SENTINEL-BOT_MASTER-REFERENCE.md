@@ -204,8 +204,8 @@ All RLS service-role-only. Indexed for the reminder poller.
 
 These are hard rules that govern every session's work. Violations create the bugs history keeps archiving.
 
-### 0.1 Prompt Economy
-Agent system prompts MUST stay under 1000 tokens. Session 27 shipped an 85% reduction after bloated prompts caused silent Groq→Gemini failover. Session 35 applied the same discipline to dispatch-mode tool schemas. See `feedback_prompt_economy.md`.
+### 0.1 Prompt Economy — RETIRED S117
+The "1000-token cap" was a band-aid for a different problem (27k context bloat from bulk-loading everything into every prompt). It got cargo-culted forward and started constraining good directive design. Replaced by the **ddxfish active-state pattern** (see [`MAVEN-CREW-DIRECTIVES.md`](./MAVEN-CREW-DIRECTIVES.md) §1.3): prompts assemble per turn from a pieces library + active state + spice rotation, so the prompt is exactly as long as it needs to be for the current scenario, no more. New rule: prompts should be tight, not arbitrarily short. Sapphire's prompt-builder (`src/agent/sapphire-prompt-builder.ts`) is the reference implementation.
 
 ### 0.2 Root Cause Discipline
 Stop patching symptoms. Trace the full payload, verify against live data, think architecturally. If two sessions in a row flipped the same fix, the root cause wasn't the last fix. See `feedback_root_cause_discipline.md`.
@@ -276,11 +276,12 @@ Three live systems. **Never cross-contaminate.**
 - **Dashboard:** https://supabase.com/dashboard/project/wzthxohtgojenukmdubz
 - **Access:** bot uses `SUPABASE_SERVICE_ROLE_KEY` (bypasses RLS). Dashboard uses `SUPABASE_ANON_KEY` (RLS enforced).
 
-### Pinecone
+### Pinecone (S117 audit — corrected 2026-04-25)
 - **Index:** `gravity-claw`
 - **Host:** `gravity-claw-cpcpbz1.svc.aped-4627-b74a.pinecone.io`
-- **Namespaces:** one per agent (`veritas`, `sapphire`, `alfred`, `yuki`, `anita`, `vector`) + `shared` for knowledge_nodes.
-- **Note:** embeddings currently disabled — no embedding-capable key set. Pinecone reads still work against existing vectors (316 live).
+- **Embeddings:** Gemini `gemini-embedding-001` via `GEMINI_API_KEY`. **Working.** Verified live via `/debug/memory` endpoint: HTTP 200, 1024-dim vectors, **4,339 vectors live** across 12 namespaces. The "embeddings disabled — no embedding-capable key set" note that lived here for many sessions was stale and wrong; ignore any prior reference to it.
+- **Active namespaces (live):** `hooks` (Alfred), `clips` (Yuki), `content` (Anita), `funnels` (Vector), `brand` (Veritas + Sapphire COO mode), `shared`, `veritas`, `sovereign-synthesis`, `conversations`, `general`, plus per-brand script namespaces `scripts-sovereign_synthesis`, `scripts-containment_field`, `scripts-ace_richie` (legacy).
+- **Known sub-issue (NON-blocking, S117):** the Supabase mirror tables `knowledge_nodes` and `sync_log` aren't being populated by `writeKnowledge()`. Pinecone writes succeed; the mirror writes silently fail. Bots query Pinecone directly for semantic search so the autonomy vision is unaffected — but Mission Control's SQL-side audit trail is empty. Fix #1 applied S117: added `UNIQUE(vector_id)` constraint to `sync_log` (the upsert-onConflict was failing without it). Fix #2 outstanding: investigate why `writeToSupabase()` `INSERT` into `knowledge_nodes` isn't landing despite RLS-bypassed service role and matching schema (insert via SQL works directly, so it's not a schema mismatch — likely a JS-client serialization issue around `tags jsonb`). See follow-up task.
 
 ### File System (Windows) — CORRECTED 2026-04-25 (S115c audit)
 - **Working repo (canonical):** `C:\Users\richi\Sovereign-Sentinel-Bot` (git checkout, deploys to Railway)
@@ -310,30 +311,26 @@ Three live systems. **Never cross-contaminate.**
 
 ---
 
-## 5. SIX MAVEN CREW AGENTS
+## 5. SIX MAVEN CREW AGENTS — see [`MAVEN-CREW-DIRECTIVES.md`](./MAVEN-CREW-DIRECTIVES.md)
 
-Immutable roster. Do not add, remove, or rename. Each agent runs on its own Telegram bot token and owns a Pinecone namespace.
+Immutable roster. Do not add, remove, or rename. Each agent runs on its own Telegram bot token and owns a Pinecone namespace. **Full calibrated directives, decision trees, hive-interface contracts, and ddxfish pattern specs live in [`MAVEN-CREW-DIRECTIVES.md`](./MAVEN-CREW-DIRECTIVES.md) at repo root.** This section is a roster snapshot only.
 
-| # | Agent | Token Env Var | Role | Pinecone NS |
-|---|-------|---------------|------|-------------|
-| 1 | **Veritas** | `VERITAS_TOKEN` (also `TELEGRAM_BOT_TOKEN`) | Chief Brand Officer — weekly directive, strategic oversight, group lead (always responds) | `veritas` |
-| 2 | **Sapphire** | `SAPPHIRE_TOKEN` | **Personal Assistant (PRIMARY)** for Ace — calendar/email/reminders/Notion/family. **COO (SECONDARY)** in group chat / dispatched tasks — task decomposition, pipeline health. | `sapphire-personal` (PA) + `brand` (COO) |
-| 3 | **Alfred** | `ALFRED_TOKEN` | Head of Content Intelligence — trend scan (8 AM CDT), YouTube URL processing, VidRush feeder | `alfred` |
-| 4 | **Yuki** | `YUKI_TOKEN` | Head of Distribution & Creative — SOLE Buffer posting authority, visual content, clip generation | `yuki` |
-| 5 | **Anita** | `ANITA_TOKEN` | Head of Conversion & Nurture — email sequences, copy, must follow Email Brand Standard (Section 11) | `anita` |
-| 6 | **Vector** | `VECTOR_TOKEN` | Head of Revenue Intelligence — 10 AM CDT metrics sweep, Stripe tracking, performance analysis | `vector` |
+| # | Agent | Token | Pinecone NS | One-line role |
+|---|-------|---------------|-------------|------|
+| 1 | **Veritas** | `VERITAS_TOKEN` (also primary `TELEGRAM_BOT_TOKEN`) | `brand` (writes), `shared` | Business macro meta-watcher. Reads the hive widely, surfaces drift via Telegram DM, never executes. Group lead. |
+| 2 | **Sapphire** | `SAPPHIRE_TOKEN` | `sapphire-personal` (PA mode), `brand` (COO mode) | Ace's personal assistant + Life COO (his life, NOT business — Veritas owns business macro). |
+| 3 | **Alfred** | `ALFRED_TOKEN` | `hooks` | Content pipeline upstream judgment — daily trend scan + memetic-trigger filter feeds Faceless Factory. |
+| 4 | **Yuki** | `YUKI_TOKEN` | `clips` | Social presence + memetic triggering across YouTube / Bluesky / Facebook. SOLE posting authority. |
+| 5 | **Anita** | `ANITA_TOKEN` | `content` | Nurture program + funnel diagnosis. Newsletter compounding-ideas track. Cap 3 emails/week autonomous. |
+| 6 | **Vector** | `VECTOR_TOKEN` | `funnels` | Analytics writer. Pulls external APIs, writes Supabase analytics tables, reports daily, no downstream dispatch. |
 
-### Group Chat Roles
-- **Lead** (Veritas): always responds in group chat. No gating.
-- **Copilot** (Sapphire): plain-English summary when full pipeline completes.
-- **Crew** (Alfred, Yuki, Anita, Vector): respond only when `@mentioned` or broadcast-triggered.
+### Hard architectural constraints (per MAVEN-CREW-DIRECTIVES.md §1.2)
+- **No cross-bot direct messaging.** Coordination emerges from the shared hive (Pinecone semantic + Supabase structured) only. Each bot DMs Ace directly. Hive medium > direct dispatch. (`PIPELINE_ROUTES` in `src/agent/crew-dispatch.ts` already commented off since S36; this constraint formalizes that.)
+- **Two-tier memory:** Supabase = structured state; Pinecone = semantic hive (each bot retrieves only relevant context per cycle, never bulk-reads).
+- **Direct-to-Ace messaging only.** Every outbound bot message is a Telegram DM to Ace through that bot's own token. No bot-to-bot DMs.
 
-### Agent Autonomy Boundaries
-- **Veritas/Sapphire** — coordinate, do NOT execute content or distribution directly.
-- **Alfred** — discovers and analyzes, does NOT post to social or send emails.
-- **Yuki** — creates and distributes visual/video content, does NOT handle email or strategic direction.
-- **Anita** — creates copy, does NOT post to social (dispatches to Yuki), MUST follow Email Brand Standard.
-- **Vector** — analyzes and reports, does NOT create content or post (distribution handled by Deterministic Content Engine).
+### Group chat roles (legacy; honored until refactored)
+- **Lead** (Veritas): always responds. **Copilot** (Sapphire): plain-English summary on pipeline completion. **Crew** (Alfred/Yuki/Anita/Vector): respond only on `@mention` or broadcast.
 
 ---
 
@@ -516,7 +513,9 @@ Archived (do not reuse): `prod_UAWwRgKTgeF6wj`, `prod_UAX3zxKjJiCYtO`, `prod_UAX
 `MORNING_BRIEFING_HOUR=15` (10 AM CDT) · `EVENING_RECAP_HOUR=1` (8 PM CDT). Code uses `getUTCHours()`. Ace is CDT (UTC-5).
 
 ### KILLED — do not set
-`GEMINI_API_KEY` (billing crisis, S35) · `INSTAGRAM_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ID` (Meta API abandoned) · `TIKTOK_ACCESS_TOKEN` (deferred until app approval) · `BUFFER_ACCESS_TOKEN` (v1 REST dead, use `BUFFER_API_KEY`)
+`INSTAGRAM_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ID` (Meta API abandoned) · `TIKTOK_ACCESS_TOKEN` (deferred until app approval) · `BUFFER_ACCESS_TOKEN` (v1 REST dead, use `BUFFER_API_KEY`)
+
+> **Note (S117):** `GEMINI_API_KEY` was listed as KILLED here for sessions citing the S35 billing crisis. That note is stale and was wrong. The S35 problem was a runaway Anita/dispatch loop, not the key itself. `GEMINI_API_KEY` has been required ever since — Sapphire PDF/news/research, the insight-extractor, gemini-flash text-gen, and Pinecone embeddings all depend on it. Confirmed live S117 via `/debug/memory` (HTTP 200, embedding endpoint working, 4339 Pinecone vectors).
 
 ### DEPRECATED aliases
 `SOCIAL_SCHEDULER_API_KEY` → `BUFFER_API_KEY` · `NEXT_PUBLIC_SUPABASE_URL` → `SUPABASE_URL` · `NEXT_PUBLIC_SUPABASE_ANON_KEY` → `SUPABASE_ANON_KEY` · `AUTHORIZED_USER_ID` → `TELEGRAM_AUTHORIZED_USER_ID`
@@ -617,27 +616,11 @@ The `SovereignSynthesisProjects` folder is the **parts warehouse**, not a deploy
 
 ---
 
-## 14. AGENT COORDINATION — EXECUTIVE ROLE MAP (Canonical)
+## 14. AGENT COORDINATION — see [`MAVEN-CREW-DIRECTIVES.md`](./MAVEN-CREW-DIRECTIVES.md)
 
-The canonical roles for each agent. Supabase `personality_config` blueprints match this table (pushed Session 7A, 2026-04-02).
+Per-bot calibrated directives, decision trees, autonomy loops, reflection schemas, ddxfish prompt-pieces structure, hive-interface contracts, DM format templates, self-evolution hooks, and tool sets are all canonical in [`MAVEN-CREW-DIRECTIVES.md`](./MAVEN-CREW-DIRECTIVES.md). This section formerly held a 6-row exec-role table + tool summary; both are superseded by the directive doc.
 
-| Agent | Exec Role | Business Function | Revenue Accountability |
-|---|---|---|---|
-| Veritas | Chief Brand Officer | Weekly directive, brand integrity, strategic direction | Sets agenda that drives all downstream revenue |
-| Sapphire | Chief Operating Officer | Task decomposition, pipeline health, coordination | Ensures work chains into revenue outcomes |
-| Alfred | Head of Content Intelligence | Trend scanning, source material, YT pipeline feeder | Feeds raw material that becomes distributed content |
-| Yuki | Head of Distribution & Creative | Buffer posting, Shorts, clip generation | SOLE posting authority — 329+ posts/week target |
-| Anita | Head of Conversion & Nurture | Email sequences, conversion copy | Converts attention into purchases ($77–$12K ladder) |
-| Vector | Head of Revenue Intelligence | Metrics sweep, Stripe, performance tracking | Kills what's not working, optimizes for $1.2M |
-
-### Agent Tool Sets (summary — full contracts in `src/tools/`)
-
-- **Veritas** — base tools, crew_dispatch, file_briefing, propose_task
-- **Sapphire** — ProtocolWriter, RelationshipContext, FileBriefing, crew_dispatch, check_approved_tasks
-- **Alfred** — ProtocolReader, SaveContentDraft, YouTube interceptor, web search, clip_generator (analysis), Make.com trigger
-- **Yuki** — social_scheduler_create_post, video_publisher, clip_generator, image_generator, SaveContentDraft
-- **Anita** — ProtocolReader, SaveContentDraft (+ NEEDED: read_nurture_template, update_nurture_template, email scheduling)
-- **Vector** — StripeMetrics, FileBriefing, buffer_analytics, social_scheduler (analytics), video_publisher (analytics)
+**The Sapphire-as-Life-COO refinement (S117):** Sapphire's "COO" role is COO of Ace's *life*, not the business. Veritas owns business macro. Operational test: business numbers → Veritas; Richie numbers → Sapphire.
 
 ---
 

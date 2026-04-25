@@ -83,6 +83,7 @@ import { runHookDrops } from "./proactive/yuki-hook-dropper";
 import { pollBlueskyReplies } from "./proactive/yuki-bluesky-replier";
 import { runBlueskyHookDrops } from "./proactive/yuki-bluesky-hook-dropper";
 import { handleInboundEmail, sendApprovedReply, getPendingReplies } from "./proactive/email-reply-handler";
+import { runWeeklyNewsletterCycle } from "./proactive/anita-newsletter";
 import { YouTubeCommentTool, postDiagnosticComment } from "./tools/youtube-comment-tool";
 
 // ── Content Engine ──
@@ -2644,14 +2645,54 @@ async function main() {
     handler: async () => {
       if (!defaultChatId || !telegram) return;
       try {
-        await pollYouTubeComments(telegram, defaultChatId);
+        // S117: route comment alerts to Yuki's DM (she owns social presence).
+        // agentLoops is populated during multi-bot init (later in this file);
+        // by the time the cron fires (5 min after boot at earliest), Yuki's
+        // channel is wired. Falls back to primary `telegram` if not.
+        const yukiChannel = agentLoops.get("yuki")?.channel;
+        await pollYouTubeComments(telegram, defaultChatId, { alertChannel: yukiChannel });
       } catch (err: any) {
         console.error(`[YTCommentWatcher] poll failed: ${err.message}`);
       }
     },
   });
 
-  console.log("🟡 [YTCommentWatcher] Scheduled: every 5min across both YT channels");
+  console.log("🟡 [YTCommentWatcher] Scheduled: every 5min, alerts → Yuki (S117)");
+
+  // ── Anita Weekly Newsletter — Sunday 14:00 UTC (9 AM CDT) ───────────────
+  // S117 (2026-04-25). Per Ace: Anita gets autonomy (no per-email approval)
+  // capped at 3 emails/week. Weekly newsletter compounds prior ideas via
+  // semantic memory in `content` Pinecone namespace + the newsletter_ideas
+  // graph in Supabase. See src/proactive/anita-newsletter.ts.
+  const newsletterFiredKeys: Set<string> = new Set();
+  scheduler.add({
+    name: "Anita Weekly Newsletter",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      const now = new Date();
+      // Sunday = 0, target hour 14:00 UTC
+      if (now.getUTCDay() !== 0 || now.getUTCHours() !== 14) return;
+      const fireKey = `newsletter-${now.toISOString().slice(0, 10)}`;
+      if (newsletterFiredKeys.has(fireKey)) return;
+      newsletterFiredKeys.add(fireKey);
+      try {
+        const anitaChannel = agentLoops.get("anita")?.channel;
+        const result = await runWeeklyNewsletterCycle({
+          alertChannel: anitaChannel || telegram,
+          alertChatId: defaultChatId,
+          dryRun: false,
+        });
+        console.log(`[AnitaNewsletter] Cycle ended: ${result.status} — ${result.details}`);
+      } catch (err: any) {
+        console.error(`[AnitaNewsletter] Cycle failed: ${err.message}`);
+      }
+    },
+  });
+
+  console.log("📧 [AnitaNewsletter] Scheduled: Sunday 14:00 UTC weekly (S117)");
 
   // ── Yuki Shorts Pinner — auto-post diagnostic comment on every new Short ──
   // S117 (2026-04-25). Closes the engagement gap on Shorts: the comment

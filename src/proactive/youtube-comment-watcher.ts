@@ -114,12 +114,19 @@ const inMemorySeen: Record<Brand, Set<string>> = {
 let firstRunPerBrand: Record<Brand, boolean> = { sovereign_synthesis: true, containment_field: true };
 
 // ── Main poll function — call once per tick ──
+// S117 (2026-04-25): Comment alerts now route to Yuki's bot DM (she owns
+// social presence and engagement). The `alertChannel` param lets the caller
+// pass Yuki's TelegramChannel; falls back to the primary `telegram` (Veritas)
+// only if Yuki's channel isn't yet wired (e.g. during early boot or if
+// YUKI_TOKEN is missing). Veritas keeps system-health visibility via direct
+// reads of the youtube_comments_seen Supabase table.
 export async function pollYouTubeComments(
   telegram: Channel,
   chatId: string,
-  opts: { alertWindowMs?: number } = {}
+  opts: { alertWindowMs?: number; alertChannel?: Channel } = {}
 ): Promise<void> {
   const alertWindowMs = opts.alertWindowMs ?? 24 * 60 * 60 * 1000;
+  const alerter: Channel = opts.alertChannel ?? telegram;
   const now = Date.now();
 
   for (const brand of Object.keys(BRAND_CONFIG) as Brand[]) {
@@ -213,8 +220,8 @@ export async function pollYouTubeComments(
         `*Reply →* ${replyUrl}`;
 
       try {
-        await telegram.sendMessage(chatId, msg, { parseMode: "Markdown" });
-        console.log(`[YTCommentWatcher] alerted: ${cfg.label} / ${authorName} / ${commentId}`);
+        await alerter.sendMessage(chatId, msg, { parseMode: "Markdown" });
+        console.log(`[YTCommentWatcher] alerted via ${opts.alertChannel ? "Yuki" : "primary"}: ${cfg.label} / ${authorName} / ${commentId}`);
       } catch (err: any) {
         console.error(`[YTCommentWatcher] Telegram send failed: ${err.message}`);
       }

@@ -79,6 +79,8 @@ import { HeartbeatSystem } from "./proactive/heartbeat";
 import { pollYouTubeComments } from "./proactive/youtube-comment-watcher";
 import { pollYouTubeStats } from "./proactive/youtube-stats-fetcher";
 import { runHookDrops } from "./proactive/yuki-hook-dropper";
+import { pollBlueskyReplies } from "./proactive/yuki-bluesky-replier";
+import { runBlueskyHookDrops } from "./proactive/yuki-bluesky-hook-dropper";
 import { handleInboundEmail, sendApprovedReply, getPendingReplies } from "./proactive/email-reply-handler";
 import { YouTubeCommentTool, postDiagnosticComment } from "./tools/youtube-comment-tool";
 
@@ -2095,7 +2097,7 @@ async function main() {
   // These dispatch tasks to crew agents via crew_dispatch, picked up by the dispatch poller.
   // Each fires once per day at a specific hour using the same minute-check pattern as briefings.
 
-  const autonomousFiredDates = { ytStatsFetch: "", vectorSweep: "", alfredScan: "", veritasDirective: "", ctaAudit: "", landingAnalytics: "", yukiHookDrops14: "", yukiHookDrops22: "", facelessProduce: "" };
+  const autonomousFiredDates = { ytStatsFetch: "", vectorSweep: "", alfredScan: "", veritasDirective: "", ctaAudit: "", landingAnalytics: "", yukiHookDrops14: "", yukiHookDrops22: "", facelessProduce: "", bskyHookDrops14: "", bskyHookDrops22: "" };
 
   // YouTube Analytics — Daily Stats Fetch (9:00 AM CDT = 14:00 UTC — before Alfred trend scan)
   // Calls the fetch-youtube-stats Supabase Edge Function to pull real video stats from
@@ -2687,6 +2689,93 @@ async function main() {
   });
 
   console.log("🟡 [YukiHookDropper] Scheduled: 14:00 UTC + 22:00 UTC (9 AM + 5 PM CDT) across both YT channels");
+
+  // ── Yuki Bluesky Reply Watcher — 5min poll, mirrors YouTube cadence ──
+  // Session 115 (2026-04-25). Polls notifications via AT Protocol,
+  // dedupes against bluesky_replies_seen, drafts plain-Ace voice via
+  // Gemini Flash, posts via createRecord.
+  scheduler.add({
+    name: "Yuki Bluesky Reply Poll",
+    intervalMs: 5 * 60_000,
+    nextRun: new Date(Date.now() + 60_000), // first run 60s after boot
+    enabled: true,
+    handler: async () => {
+      try {
+        await pollBlueskyReplies();
+      } catch (err: any) {
+        console.error(`[YukiBskyReplier] poll failed: ${err.message}`);
+      }
+    },
+  });
+
+  console.log("🦋 [YukiBskyReplier] Scheduled: every 5min (Bluesky AT Protocol)");
+
+  // ── Yuki Bluesky Hook Dropper — twice/day, offset 30min from YouTube ──
+  // 14:30 UTC (9:30 AM CDT) and 22:30 UTC (5:30 PM CDT) so logging /
+  // outbound API load is staggered from the YouTube hook drops at :00.
+  scheduler.add({
+    name: "Yuki Bluesky Hook Drops — 14:30 UTC",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      const now = new Date();
+      const hour = now.getUTCHours();
+      const minute = now.getUTCMinutes();
+      const dateKey = now.toDateString();
+      if (hour === 14 && minute >= 30 && minute <= 32 && autonomousFiredDates.bskyHookDrops14 !== dateKey) {
+        autonomousFiredDates.bskyHookDrops14 = dateKey;
+        console.log(`🦋 [YukiBskyHookDropper] morning run firing for ${dateKey}`);
+        try {
+          const ss = await runBlueskyHookDrops("sovereign_synthesis");
+          const cf = await runBlueskyHookDrops("containment_field");
+          if (defaultChatId && telegram) {
+            await telegram.sendMessage(defaultChatId,
+              `🦋 *Yuki Bluesky Hook Drops — 9:30 AM CDT*\n\n` +
+              `*Sovereign Synthesis:* ${ss.posted} posted (${ss.attempted} attempted, ${ss.skipped} skipped, ${ss.errors} errors)\n` +
+              `*Containment Field:* ${cf.posted} posted (${cf.attempted} attempted, ${cf.skipped} skipped, ${cf.errors} errors)`,
+              { parseMode: "Markdown" });
+          }
+        } catch (err: any) {
+          console.error(`[YukiBskyHookDropper] morning run failed: ${err.message}`);
+        }
+      }
+    },
+  });
+
+  scheduler.add({
+    name: "Yuki Bluesky Hook Drops — 22:30 UTC",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      const now = new Date();
+      const hour = now.getUTCHours();
+      const minute = now.getUTCMinutes();
+      const dateKey = now.toDateString();
+      if (hour === 22 && minute >= 30 && minute <= 32 && autonomousFiredDates.bskyHookDrops22 !== dateKey) {
+        autonomousFiredDates.bskyHookDrops22 = dateKey;
+        console.log(`🦋 [YukiBskyHookDropper] evening run firing for ${dateKey}`);
+        try {
+          const ss = await runBlueskyHookDrops("sovereign_synthesis");
+          const cf = await runBlueskyHookDrops("containment_field");
+          if (defaultChatId && telegram) {
+            await telegram.sendMessage(defaultChatId,
+              `🦋 *Yuki Bluesky Hook Drops — 5:30 PM CDT*\n\n` +
+              `*Sovereign Synthesis:* ${ss.posted} posted (${ss.attempted} attempted, ${ss.skipped} skipped, ${ss.errors} errors)\n` +
+              `*Containment Field:* ${cf.posted} posted (${cf.attempted} attempted, ${cf.skipped} skipped, ${cf.errors} errors)`,
+              { parseMode: "Markdown" });
+          }
+        } catch (err: any) {
+          console.error(`[YukiBskyHookDropper] evening run failed: ${err.message}`);
+        }
+      }
+    },
+  });
+
+  console.log("🦋 [YukiBskyHookDropper] Scheduled: 14:30 + 22:30 UTC (9:30 AM + 5:30 PM CDT)");
 
   // ── YouTube Analytics Stats — Fix B for the 30-Video A/B/C Test ──
   // S114 (2026-04-24). Existing fetch-youtube-stats edge function populates

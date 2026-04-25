@@ -100,14 +100,23 @@ export async function runReminderPoll(channel: Channel): Promise<void> {
 
     for (const r of due as any[]) {
       try {
-        const friendly = new Date(r.fire_at).toLocaleString("en-US", {
-          timeZone: ACE_TZ,
-          weekday: "short",
-          hour: "numeric",
-          minute: "2-digit",
-        });
-        const text = `Reminder for ${friendly}: ${r.message}`;
-        await sendSapphireReply(channel, r.chat_id, text);
+        // S114w: COMPOSER routing — if payload.composer is set, route through
+        // the composer (Gemini Flash compose-and-send) instead of dumping the
+        // raw reminder text. Used for daily check-ins, ritual reminders, etc.
+        const composerName = r.payload?.composer;
+        if (composerName) {
+          const { runComposer } = await import("./sapphire-composers");
+          await runComposer(composerName, channel, r.chat_id);
+        } else {
+          const friendly = new Date(r.fire_at).toLocaleString("en-US", {
+            timeZone: ACE_TZ,
+            weekday: "short",
+            hour: "numeric",
+            minute: "2-digit",
+          });
+          const text = `Reminder for ${friendly}: ${r.message}`;
+          await sendSapphireReply(channel, r.chat_id, text);
+        }
 
         // Mark fired
         await supabase
@@ -173,7 +182,7 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
     getInboxSummaryForBrief(24).catch((e) => `(email unavailable: ${e.message})`),
     supabase
       .from("sapphire_reminders")
-      .select("fire_at, message")
+      .select("fire_at, message, payload")
       .eq("status", "pending")
       .gte("fire_at", today.toISOString())
       .lte("fire_at", new Date(today.getTime() + 24 * 60 * 60 * 1000).toISOString())
@@ -196,9 +205,12 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
   sections.push(inboxSummary || "Inbox is quiet.");
   sections.push("");
 
-  if (reminders.data && reminders.data.length > 0) {
+  // S114w: Filter out composer-routed reminders — they ARE the brief or are
+  // sent as their own composed message, not items to list here.
+  const visibleReminders = (reminders.data as any[] || []).filter((r) => !r.payload?.composer);
+  if (visibleReminders.length > 0) {
     sections.push("⏰ REMINDERS TODAY");
-    for (const r of reminders.data as any[]) {
+    for (const r of visibleReminders) {
       const t = new Date(r.fire_at).toLocaleString("en-US", { timeZone: ACE_TZ, hour: "numeric", minute: "2-digit" });
       sections.push(`• ${t} — ${r.message}`);
     }

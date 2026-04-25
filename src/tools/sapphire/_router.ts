@@ -21,6 +21,7 @@ import {
   SaveFamilyMemberTool, GetFamilyTool,
   CreatePlanTool, ApprovePlanTool, AdvancePlanTool, RecordStepResultTool, CancelPlanTool,
   AddNewsSourceTool, RemoveNewsSourceTool, ListNewsSourcesTool,
+  SetPieceTool, RemovePieceTool, CreatePieceTool, ListPiecesTool, ViewSelfPromptTool,
 } from "./index";
 
 // ── TIER definitions ───────────────────────────────────────────────────────
@@ -78,6 +79,18 @@ function tierPlanner(): Tool[] {
 /** News source management (rare — only when explicitly configuring). */
 function tierNews(): Tool[] {
   return [new AddNewsSourceTool(), new RemoveNewsSourceTool(), new ListNewsSourcesTool()];
+}
+
+/** Self-modification (Phase 3) — only when Ace asks her to change herself or
+ *  she's noticing a meta-state (mood, mode, loop). */
+function tierSelfMod(): Tool[] {
+  return [
+    new SetPieceTool(),
+    new RemovePieceTool(),
+    new CreatePieceTool(),
+    new ListPiecesTool(),
+    new ViewSelfPromptTool(),
+  ];
 }
 
 // ── Intent matchers ─────────────────────────────────────────────────────────
@@ -139,6 +152,14 @@ const MATCHERS: TierMatcher[] = [
     match: (t) =>
       /\b(news source|rss|subscribe to news|add news|remove news|list (my )?news|news feeds?)\b/i.test(t),
     load: tierNews,
+  },
+  {
+    name: "self_mod",
+    match: (t) =>
+      /\b(your (persona|mood|emotion|format|scenario|prompt|setup|configuration)|how are you (set up|configured)|change your(self)?|switch (to|your)|update your prompt|view your prompt|list your pieces|create (a )?(new )?piece|set piece|remove piece)\b/i.test(t)
+      // Also when Ace tells her she's stuck in a pattern or asks her to be different
+      || /\b(stop being|be more|tone (it )?down|tone up|loosen up|be quieter|be louder|drop the closing|skip the italic)\b/i.test(t),
+    load: tierSelfMod,
   },
 ];
 

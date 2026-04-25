@@ -52,6 +52,12 @@ const TOOL_LABELS: Record<string, string> = {
   web_search: "🔍 Searching the web…",
   browser: "🌐 Browsing…",
   read_protocols: "📜 Reading protocols…",
+  // Self-mod meta-tools (S114u)
+  set_piece: "🎚️ Adjusting myself…",
+  remove_piece: "🎚️ Dropping a mode…",
+  create_piece: "✨ Adding to my library…",
+  list_pieces: "📚 Checking my library…",
+  view_self_prompt: "🪞 Looking at myself…",
 };
 
 /**

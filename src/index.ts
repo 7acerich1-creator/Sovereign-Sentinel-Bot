@@ -2095,7 +2095,7 @@ async function main() {
   // These dispatch tasks to crew agents via crew_dispatch, picked up by the dispatch poller.
   // Each fires once per day at a specific hour using the same minute-check pattern as briefings.
 
-  const autonomousFiredDates = { ytStatsFetch: "", vectorSweep: "", alfredScan: "", veritasDirective: "", ctaAudit: "", landingAnalytics: "", yukiHookDrops14: "", yukiHookDrops22: "" };
+  const autonomousFiredDates = { ytStatsFetch: "", vectorSweep: "", alfredScan: "", veritasDirective: "", ctaAudit: "", landingAnalytics: "", yukiHookDrops14: "", yukiHookDrops22: "", facelessProduce: "" };
 
   // YouTube Analytics — Daily Stats Fetch (9:00 AM CDT = 14:00 UTC — before Alfred trend scan)
   // Calls the fetch-youtube-stats Supabase Edge Function to pull real video stats from
@@ -2286,7 +2286,85 @@ async function main() {
     },
   });
 
-  console.log("⚡ [AutoOps] Scheduled: YT stats fetch (9:00AM CDT/14:00UTC), Alfred trend scan (10:05AM CDT/15:05UTC), Vector daily sweep (12:00PM CDT/17:00UTC), Veritas weekly directive (Mon 12:10PM CDT/17:10UTC)");
+  // ── Faceless Factory — Daily Video Production (16:00 UTC, alternating brands) ──
+  // S115d: makes the 30-video A/B/C performance test progress autonomously.
+  // Each fire pulls Alfred's most-recent daily_trend_scan result as source intelligence,
+  // selects ONE brand by day-of-month parity (even=SS, odd=TCF), and produces ONE faceless
+  // video. The aesthetic LRU rotation in pickNextAesthetic naturally cycles A→B→C across the
+  // 30-day run, filling the Mission Control Aesthetic Performance grid with real data.
+  scheduler.add({
+    name: "Faceless Factory Daily Production",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      const now = new Date();
+      const hour = now.getUTCHours();
+      const dateKey = now.toDateString();
+      const inWindow = hour === 16; // any minute in 16:00 UTC hour
+      if (!inWindow || autonomousFiredDates.facelessProduce === dateKey) return;
+
+      // Persistent dup-fire guard — check niche_cooldown for any row created today.
+      // Without this, a Railway redeploy at 16:30 UTC would re-fire the daily slot.
+      try {
+        const todayStart = new Date(now);
+        todayStart.setUTCHours(0, 0, 0, 0);
+        const checkRes = await fetch(
+          `${process.env.SUPABASE_URL}/rest/v1/niche_cooldown?created_at=gte.${todayStart.toISOString()}&select=id&limit=1`,
+          { headers: { apikey: process.env.SUPABASE_SERVICE_ROLE_KEY!, Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}` } }
+        );
+        const existing = await checkRes.json() as any[];
+        if (Array.isArray(existing) && existing.length > 0) {
+          autonomousFiredDates.facelessProduce = dateKey;
+          console.log(`🎬 [FacelessAutonomy] Already fired today (niche_cooldown row exists) — skipping`);
+          return;
+        }
+      } catch (err: any) {
+        console.warn(`[FacelessAutonomy] Dup-fire guard query failed (continuing): ${err.message}`);
+      }
+
+      autonomousFiredDates.facelessProduce = dateKey;
+
+      // Brand selection: even day-of-month → SS, odd → TCF
+      const dayOfMonth = now.getUTCDate();
+      const brand: "sovereign_synthesis" | "containment_field" =
+        dayOfMonth % 2 === 0 ? "sovereign_synthesis" : "containment_field";
+
+      // Pull Alfred's latest daily_trend_scan result for source intelligence
+      let sourceIntel = "";
+      const niche = brand === "sovereign_synthesis" ? "sovereignty" : "dark-psychology";
+      try {
+        const alfredRes = await fetch(
+          `${process.env.SUPABASE_URL}/rest/v1/crew_dispatch?to_agent=eq.alfred&task_type=eq.daily_trend_scan&status=eq.completed&order=completed_at.desc&limit=1&select=result`,
+          { headers: { apikey: process.env.SUPABASE_SERVICE_ROLE_KEY!, Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}` } }
+        );
+        const alfredRows = await alfredRes.json() as any[];
+        if (alfredRows[0]?.result) {
+          sourceIntel = String(alfredRows[0].result);
+        }
+      } catch (err: any) {
+        console.warn(`[FacelessAutonomy] Could not fetch Alfred seed: ${err.message}`);
+      }
+
+      // Fallback: synthetic seed from brand + niche if Alfred unavailable
+      if (!sourceIntel || sourceIntel.length < 200) {
+        sourceIntel = `Generate a ${niche} thesis seed for ${brand}. Focus on the architecture of liberation from simulated systems. 90-second long-form. Single core insight, three reinforcing examples, one call to sovereignty.`;
+      }
+
+      console.log(`🎬 [FacelessAutonomy] Daily fire — brand=${brand} niche=${niche} (${dateKey})`);
+
+      try {
+        const { produceFacelessBatch } = await import("./engine/faceless-factory");
+        const results = await produceFacelessBatch(pipelineLLM, sourceIntel.slice(0, 3000), niche, [brand]);
+        console.log(`✅ [FacelessAutonomy] Produced ${results.length} videos for ${brand}`);
+      } catch (err: any) {
+        console.error(`❌ [FacelessAutonomy] Production failed: ${err.message}`);
+      }
+    },
+  });
+
+  console.log("⚡ [AutoOps] Scheduled: YT stats fetch (9:00AM CDT/14:00UTC), Alfred trend scan (10:05AM CDT/15:05UTC), Vector daily sweep (12:00PM CDT/17:00UTC), Veritas weekly directive (Mon 12:10PM CDT/17:10UTC), Faceless production (16:00UTC, alternating brands)");
 
   // ── Deterministic Content Engine — Daily Production + Distribution ──
   // Master ref Section 23. Posting guide: SOVEREIGN-POSTING-GUIDE.md
@@ -4229,31 +4307,33 @@ async function main() {
             const agentNameCap = agentCfg.name.charAt(0).toUpperCase() + agentCfg.name.slice(1);
             const processingMsg = await agentChannel.sendMessage(message.chatId, `⚡ _${agentNameCap} Processing..._`, { parseMode: "Markdown" });
 
-            // S114q: Wire tool-call indicators for Sapphire DMs only.
-            // Fires before each tool exec so Ace sees what she's doing.
-            // S114r: Also tier the tool set so only relevant tools load (was 27 always).
+            // ── S114u: ddxfish snapshot/restore pattern — leak-proof tool tiering ──
+            // Snapshot tools + observer + context state BEFORE the LLM call, restore in
+            // finally so they NEVER leak across messages even if processMessage throws.
             let sapphireToolSnapshot: Map<string, any> | null = null;
-            if (agentCfg.name === "sapphire" && !message.metadata?.isGroup) {
+            const isSapphireDM = agentCfg.name === "sapphire" && !message.metadata?.isGroup;
+            if (isSapphireDM) {
               try {
                 const { makeSapphireToolObserver } = await import("./agent/sapphire-tool-indicators");
                 agentBotLoop.setToolCallObserver(makeSapphireToolObserver(agentChannel, message.chatId));
 
-                // ── S114r: Tier the tool set to only what this message needs ──
+                // Tier the tool set to only what this message needs (~5K tokens vs 27 always)
                 const { selectToolsForMessage } = await import("./tools/sapphire/_router");
                 const hasAttachment = !!message.attachments?.length;
-                // Strip context prefix from text for matching — match against original user text only
-                const rawText = message.content.replace(/^\[CONTEXT:[\s\S]*?\]\s*/m, "").trim();
+                // Match against ORIGINAL user text — strip context prefix that we injected
+                const rawText = message.content
+                  .replace(/^# IDENTITY[\s\S]*?(?=^[^#]|\Z)/m, "")
+                  .replace(/^# LIVE STATE[\s\S]*?(?=^[^#]|\Z)/m, "")
+                  .replace(/^URGENT ALERT[\s\S]*?\n\n/m, "")
+                  .replace(/^\[CONTEXT:[\s\S]*?\]\s*/m, "")
+                  .trim();
                 const selection = selectToolsForMessage(rawText, hasAttachment);
-                console.log(`[SapphirePA] Tool tiering — loaded [${selection.loadedTiers.join(",")}] = ${selection.toolCount} tools (~${selection.approxTokens} tokens, was 27)`);
+                console.log(`[SapphirePA] Tool tiering — loaded [${selection.loadedTiers.join(",")}] = ${selection.toolCount} tools (~${selection.approxTokens} tokens, was 32)`);
 
-                // ── S114r: Context budget cap for Sapphire DM ──
-                // Drop recent message cap from 10 → 6, skip semantic search (her PA
-                // prefix already pulls from sapphire-personal Pinecone namespace).
-                // Combined with tool tiering, total input drops from ~12K → ~5K tokens.
+                // Context budget cap — drop recent msg cap to 6, skip semantic search
                 agentBotLoop.setContextOverrides({ maxRecentMessages: 6, skipSemanticSearch: true });
 
-                // Keep cross-mode tools (write_knowledge, propose_task, etc) and only
-                // swap PA tools. Snapshot first so we can restore.
+                // Snapshot full tool set so we can restore. Strip PA tools, replace with tier selection.
                 sapphireToolSnapshot = agentBotLoop.snapshotTools();
                 const allCurrent = Array.from(sapphireToolSnapshot.values());
                 const PA_TOOL_NAMES = new Set([
@@ -4266,20 +4346,26 @@ async function main() {
                   "save_family_member","get_family",
                   "create_plan","approve_plan","advance_plan","record_step_result","cancel_plan",
                   "add_news_source","remove_news_source","list_news_sources",
+                  "set_piece","remove_piece","create_piece","list_pieces","view_self_prompt",
                 ]);
                 const nonPATools = allCurrent.filter((t: any) => !PA_TOOL_NAMES.has(t.definition?.name));
                 agentBotLoop.setTools([...nonPATools, ...selection.tools]);
               } catch (e: any) {
-                console.warn(`[SapphirePA] Tool tiering failed: ${e.message} — falling back to full set`);
+                console.warn(`[SapphirePA] Tool tiering setup failed: ${e.message} — falling back to full set`);
               }
             }
 
-            const response = await agentBotLoop.processMessage(message, () => agentChannel.sendTyping(message.chatId));
-
-            // Restore full tool set + clear observer + context overrides so no leak across messages
-            agentBotLoop.setToolCallObserver(undefined);
-            agentBotLoop.setContextOverrides(undefined);
-            if (sapphireToolSnapshot) agentBotLoop.restoreTools(sapphireToolSnapshot);
+            // ── try/finally guarantees state restore even on processMessage throw ──
+            let response: string;
+            try {
+              response = await agentBotLoop.processMessage(message, () => agentChannel.sendTyping(message.chatId));
+            } finally {
+              if (isSapphireDM) {
+                agentBotLoop.setToolCallObserver(undefined);
+                agentBotLoop.setContextOverrides(undefined);
+                if (sapphireToolSnapshot) agentBotLoop.restoreTools(sapphireToolSnapshot);
+              }
+            }
 
             // Update task status + log to Mission Control
             if (agentTaskId) await updateTask(agentTaskId, "completed", response.slice(0, 500));

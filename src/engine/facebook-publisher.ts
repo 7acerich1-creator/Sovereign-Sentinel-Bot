@@ -102,8 +102,16 @@ export async function publishToFacebook(
   const token = await resolvePageAccessToken(seedToken, pageId);
 
   try {
-    // If there's an image, use /photos endpoint; otherwise /feed
+    // S115c: Detect video URLs (.mp4, .mov, .webm, etc.) and route to /videos
+    // instead of /photos. Prior to this fix, content_engine_queue rows with
+    // R2-hosted .mp4 in media_url were being POSTed to /photos as `url=...mp4`,
+    // which Meta rejected with "Invalid parameter (code=100)".
     if (options?.imageUrl) {
+      const lowerUrl = options.imageUrl.toLowerCase().split("?")[0];
+      const videoExts = [".mp4", ".mov", ".webm", ".m4v", ".avi"];
+      if (videoExts.some(ext => lowerUrl.endsWith(ext))) {
+        return await postVideo(pageId, token, text, options.imageUrl);
+      }
       return await postPhoto(pageId, token, text, options.imageUrl);
     }
 
@@ -173,5 +181,42 @@ async function postPhoto(
   const errSubcode = data.error?.error_subcode || "";
   const errMsg = data.error?.message || JSON.stringify(data);
   console.error(`❌ [FacebookPublisher] Photo API error: code=${errCode} subcode=${errSubcode} - ${errMsg}`);
+  return { success: false, error: `${errMsg} (code=${errCode})` };
+}
+
+/**
+ * S115c — Post a video with description to the Page via /PAGE_ID/videos endpoint.
+ * Accepts a hosted file_url (R2 .mp4 in our case). FB pulls the file server-side
+ * and auto-generates a thumbnail from frame 0. Returns the video ID + post ID.
+ */
+async function postVideo(
+  pageId: string,
+  token: string,
+  description: string,
+  videoUrl: string
+): Promise<FacebookPostResult> {
+  const body = {
+    file_url: videoUrl,
+    description,
+    access_token: token,
+  };
+
+  const res = await fetch(`${FB_API}/${pageId}/videos`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  const data = (await res.json()) as any;
+
+  if (data.id) {
+    console.log(`✅ [FacebookPublisher] Video posted: ${data.id}`);
+    return { success: true, postId: data.id };
+  }
+
+  const errCode = data.error?.code || "unknown";
+  const errSubcode = data.error?.error_subcode || "";
+  const errMsg = data.error?.message || JSON.stringify(data);
+  console.error(`❌ [FacebookPublisher] Video API error: code=${errCode} subcode=${errSubcode} - ${errMsg}`);
   return { success: false, error: `${errMsg} (code=${errCode})` };
 }

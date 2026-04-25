@@ -13,6 +13,7 @@ import { ResearchBriefTool } from "./research";
 import { SaveFamilyMemberTool, GetFamilyTool } from "./family";
 import { CreatePlanTool, ApprovePlanTool, AdvancePlanTool, RecordStepResultTool, CancelPlanTool } from "./planner";
 import { AddNewsSourceTool, RemoveNewsSourceTool, ListNewsSourcesTool } from "./news";
+import { SetPieceTool, RemovePieceTool, CreatePieceTool, ListPiecesTool, ViewSelfPromptTool } from "./self_mod";
 import type { Tool } from "../../types";
 
 export {
@@ -44,6 +45,11 @@ export {
   AddNewsSourceTool,
   RemoveNewsSourceTool,
   ListNewsSourcesTool,
+  SetPieceTool,
+  RemovePieceTool,
+  CreatePieceTool,
+  ListPiecesTool,
+  ViewSelfPromptTool,
 };
 
 // ── Bundle factory — returns all 27 PA tools ───────────────────────────────
@@ -87,5 +93,11 @@ export function buildSapphirePATools(): Tool[] {
     new AddNewsSourceTool(),
     new RemoveNewsSourceTool(),
     new ListNewsSourcesTool(),
+    // Self-modification meta tools (5) — S114u ddxfish pattern
+    new SetPieceTool(),
+    new RemovePieceTool(),
+    new CreatePieceTool(),
+    new ListPiecesTool(),
+    new ViewSelfPromptTool(),
   ];
 }

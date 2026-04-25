@@ -31,16 +31,31 @@ async function getSupabase() {
 
 // ── 1. CONTEXT PREFIX ──────────────────────────────────────────────────────
 
-// Lightweight memory hint + SEMANTIC RECALL on Ace's actual question.
-// - Auth status: always (small, critical for tool routing)
-// - Memory counts: not contents (table of contents, not the whole book)
-// - Semantic recall: queries the `sapphire-personal` Pinecone namespace
-//   against THIS message's text, surfaces 0-3 directly relevant facts
-// - Behavioral rule: tools-first, never say "I don't know" without checking
+// S114t: Now ALSO prepends the assembled-prompt block (persona + goals +
+// scenario + emotions + extras + spice) — replaces the static personality.
+// This is the ddxfish/sapphire pattern: dynamic, fresh, swappable per-piece.
+//
+// Then the lightweight memory hint + semantic recall (auth status, counts,
+// Pinecone-relevant facts for THIS message) follows.
 export async function buildPersonalContextPrefix(userMessage = ""): Promise<string> {
-  const parts: string[] = [
-    `[CONTEXT: 1-on-1 DM from Ace. MODE A — Personal Assistant. Plain English only. No "Architect", no sovereign tone, no [inner state] stamp.]`,
-  ];
+  const parts: string[] = [];
+
+  // ── 1. Assembled identity prompt (ddxfish pattern) ──
+  // Pulls library pieces + active selection + spice with lookahead.
+  // Replaces the static personality wall-of-text. Includes IDENTITY / GOALS /
+  // FORMAT / CURRENT MOMENT / RULES / URGENT ALERT (spice) sections.
+  try {
+    const { buildAssembledPrompt, mergePiecesFromDB } = await import("./sapphire-prompt-builder");
+    await mergePiecesFromDB(); // No-op after first call — loads AI-created pieces
+    const assembled = await buildAssembledPrompt();
+    if (assembled) parts.push(assembled);
+  } catch (e: any) {
+    console.warn(`[SapphirePA] Assembled prompt failed: ${e.message} — using fallback`);
+    parts.push(`[CONTEXT: DM from Ace. PA mode. Warm, sharp, plain English.]`);
+  }
+
+  // ── 2. Live state hints ──
+  parts.push(`# LIVE STATE (this message)`);
 
   // Auth status — small but critical for routing decisions
   try {
@@ -90,8 +105,9 @@ export async function buildPersonalContextPrefix(userMessage = ""): Promise<stri
     }
   }
 
-  // Behavioral rule — make tool-first behavior explicit
-  parts.push(`[RULE: Before saying "I don't know" about anything personal, check the recall block above OR call recall_facts. Before answering about upcoming events, call list_reminders or calendar_list. When Ace tells you something worth keeping (a name, a routine, a preference, a budget), call remember_fact silently — never write_knowledge, that's for crew/brand stuff which is off-limits for you in PA mode.]`);
+  // (Behavioral rules now live in the assembled prompt's extras section —
+  // discernment, memory_routing, what_you_can_do, family_first, no_loops.
+  // Don't duplicate them here.)
 
   return parts.join("\n");
 }

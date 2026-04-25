@@ -282,12 +282,13 @@ Three live systems. **Never cross-contaminate.**
 - **Namespaces:** one per agent (`veritas`, `sapphire`, `alfred`, `yuki`, `anita`, `vector`) + `shared` for knowledge_nodes.
 - **Note:** embeddings currently disabled — no embedding-capable key set. Pinecone reads still work against existing vectors (316 live).
 
-### File System (Windows)
-- **Working repo (canonical):** `C:\Users\richi\Sovereign-Sentinel-Bot`
-- **Mission Control repo:** `C:\Users\richi\Sovereign-Mission-Control`
-- **Landing repo:** `C:\Users\richi\sovereign-landing`
+### File System (Windows) — CORRECTED 2026-04-25 (S115c audit)
+- **Working repo (canonical):** `C:\Users\richi\Sovereign-Sentinel-Bot` (git checkout, deploys to Railway)
+- **Mission Control repo:** `C:\Users\richi\Sovereign-Mission-Control\repo\` (git checkout, deploys to Vercel) — note the `\repo` subfolder, not the parent
+- **Landing repo:** `C:\Users\richi\Sovereign-Mission-Control\sovereign-landing\` (git checkout, deploys to Vercel)
 - **Legacy parts warehouse:** `C:\Users\richi\OneDrive\Documents\SovereignSynthesisProjects` (read-only reference)
 - **Skills vault:** `SovereignSynthesisProjects\gravity-claw-skills-vault`
+- **Stale clones to clean up next time at terminal:** `C:\Users\richi\_slgit\`, `C:\Users\richi\temp-sovereign-fix\`, `C:\Users\richi\Sovereign-Mission-Control\_slgit\` (all leftover work-in-progress, none deployed)
 
 ---
 

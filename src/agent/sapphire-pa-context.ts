@@ -31,69 +31,48 @@ async function getSupabase() {
 
 // ── 1. CONTEXT PREFIX ──────────────────────────────────────────────────────
 
+// Lightweight memory hint — counts + auth status only, NOT contents.
+// Sapphire calls recall_facts / list_reminders / calendar_list when she
+// actually needs the data. This is the "table of contents, not the whole
+// book" pattern. Keeps context lean and trusts her tools.
 export async function buildPersonalContextPrefix(): Promise<string> {
   const parts: string[] = [
-    `[CONTEXT: 1-on-1 DM from Ace. You are in MODE A — Personal Assistant.`,
-    `Plain English only. No "Architect", no sovereign tone, no [inner state] stamp,`,
-    `no memetic triggers. Talk like a warm, competent assistant.]`,
-    ``,
+    `[CONTEXT: 1-on-1 DM from Ace. MODE A — Personal Assistant. Plain English only. No "Architect", no sovereign tone, no [inner state] stamp.]`,
   ];
 
-  // Auth status — so she stops asking what's connected
+  // Auth status — small but critical for routing decisions
   try {
     const auth = await getSapphireAuthStatus();
-    const connected: string[] = [];
-    if (auth.google.empoweredservices2013) connected.push("empoweredservices2013 Gmail+Calendar");
-    if (auth.google["7ace.rich1"]) connected.push("7ace.rich1 Gmail+Calendar");
-    if (auth.notion) connected.push("Notion");
-    if (connected.length > 0) {
-      parts.push(`[CONNECTED RIGHT NOW: ${connected.join(", ")}. You CAN call gmail_*, calendar_*, notion_* tools right now without re-auth.]`);
-    } else {
-      parts.push(`[NOT YET CONNECTED to Gmail/Calendar/Notion. If Ace asks you to do something requiring those, tell him to run /auth_status to set it up.]`);
-    }
-    parts.push(``);
+    const flags: string[] = [];
+    flags.push(auth.google.empoweredservices2013 ? "empoweredservices2013✓" : "empoweredservices2013✗");
+    flags.push(auth.google["7ace.rich1"] ? "7ace.rich1✓" : "7ace.rich1✗");
+    flags.push(auth.notion ? "Notion✓" : "Notion✗");
+    parts.push(`[CONNECTED: ${flags.join(" | ")}. ✓ = tools usable now. ✗ = not yet authed.]`);
   } catch (e: any) {
-    // Silent — don't break message handling on context build failure
     console.warn(`[SapphirePA] auth status fetch failed: ${e.message}`);
   }
 
-  // Upcoming reminders (next 24h) — so she knows what's queued
+  // Memory counts ONLY — not the contents. She queries when she needs them.
   try {
     const supabase = await getSupabase();
-    const horizon = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const { data: reminders } = await supabase
-      .from("sapphire_reminders")
-      .select("fire_at, message")
-      .eq("status", "pending")
-      .lte("fire_at", horizon)
-      .order("fire_at", { ascending: true })
-      .limit(8);
-    if (reminders && reminders.length > 0) {
-      const lines = reminders.map((r: any) => {
-        const t = new Date(r.fire_at).toLocaleString("en-US", { timeZone: ACE_TZ, weekday: "short", hour: "numeric", minute: "2-digit" });
-        return `  - ${t}: ${r.message}`;
-      }).join("\n");
-      parts.push(`[REMINDERS QUEUED FOR NEXT 24H — you set these for him]:\n${lines}`);
-      parts.push(``);
-    }
+    const now = new Date();
+    const todayHorizon = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+    const weekHorizon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const [factsCount, reminders24h, reminders7d] = await Promise.all([
+      supabase.from("sapphire_known_facts").select("key", { count: "exact", head: true }),
+      supabase.from("sapphire_reminders").select("id", { count: "exact", head: true })
+        .eq("status", "pending").lte("fire_at", todayHorizon),
+      supabase.from("sapphire_reminders").select("id", { count: "exact", head: true })
+        .eq("status", "pending").gt("fire_at", todayHorizon).lte("fire_at", weekHorizon),
+    ]);
+    parts.push(`[MEMORY: ${factsCount.count || 0} standing facts saved | ${reminders24h.count || 0} reminders queued today | ${reminders7d.count || 0} more this week. Call recall_facts / list_reminders to read specifics when needed.]`);
   } catch (e: any) {
-    console.warn(`[SapphirePA] reminders fetch failed: ${e.message}`);
+    console.warn(`[SapphirePA] counts fetch failed: ${e.message}`);
   }
 
-  // Standing facts — Ace's prefs and recurring info
-  try {
-    const facts = await loadFactsForContext();
-    if (facts && facts.trim().length > 0) {
-      parts.push(`[STANDING FACTS YOU KNOW ABOUT ACE — use these to feel coherent]:\n${facts}`);
-      parts.push(``);
-    }
-  } catch (e: any) {
-    console.warn(`[SapphirePA] facts fetch failed: ${e.message}`);
-  }
-
-  // Capabilities reminder — keep it tight
-  parts.push(`[YOU CAN: read/search/send Gmail, read/create/reschedule Calendar events, create/append/search Notion pages, set/list/cancel reminders (durable), remember/recall standing facts, analyze images Ace sends you. When he tells you something worth keeping (a person's name, a routine, a budget), call remember_fact silently before responding.]`);
-  parts.push(``);
+  // Behavioral rule — make tool-first behavior explicit
+  parts.push(`[RULE: Before saying "I don't know" or "I don't have that info" about anything personal, call recall_facts. Before answering about upcoming events, call list_reminders or calendar_list. Tools first, then answer. When Ace tells you something worth keeping (a name, a routine, a preference, a budget), call remember_fact silently before replying.]`);
 
   return parts.join("\n");
 }

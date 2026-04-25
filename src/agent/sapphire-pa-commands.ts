@@ -231,11 +231,11 @@ async function handleAuthGoogle(
     message.chatId,
     `Connect ${accountFriendly} for Gmail + Calendar:\n\n` +
     `1. Tap this link: ${url}\n\n` +
-    `2. If Google asks which account, pick ${accountFriendly}.\n\n` +
+    `2. Pick ${accountFriendly} when Google asks.\n\n` +
     `3. Click Continue / Allow on the permissions screen.\n\n` +
-    `4. Google will show you a code on a page that says "sign in" or "please copy this code". Copy it.\n\n` +
-    `5. Paste the code right here as your next message to me.\n\n` +
-    `(Code expires in 10 minutes. If you mess up, run the command again.)`,
+    `4. You'll land on a page that says "✓ Connected". Close that tab.\n\n` +
+    `5. Come back here and run /auth_status to confirm.\n\n` +
+    `That's it — no codes to paste.`,
   );
   return true;
 }

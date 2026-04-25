@@ -30,9 +30,12 @@ const SAPPHIRE_GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
 ];
 
-// OOB redirect — Google shows the auth code on a page, Ace pastes it into Telegram.
-// The existing OAuth client supports OOB (proven by youtube-comment-tool.ts).
-const OOB_REDIRECT = "urn:ietf:wg:oauth:2.0:oob";
+// Real OAuth callback URL — Google deprecated OOB in 2022 and the existing
+// OAuth client now rejects it (verified live 2026-04-24: "Error 400:
+// redirect_uri_mismatch"). The redirect URI must be registered in the GCP
+// console for this OAuth client. Endpoint is handled inline in webhooks.ts.
+const OAUTH_REDIRECT_URI = process.env.SAPPHIRE_OAUTH_REDIRECT_URI
+  || "https://gravity-claw-production-d849.up.railway.app/api/sapphire-oauth-callback";
 
 // ── 1. Generate consent URL ─────────────────────────────────────────────────
 export function generateGoogleConsentUrl(accountLabel: SapphireAccountLabel): string | null {
@@ -41,7 +44,7 @@ export function generateGoogleConsentUrl(accountLabel: SapphireAccountLabel): st
 
   const params = new URLSearchParams({
     client_id: clientId,
-    redirect_uri: OOB_REDIRECT,
+    redirect_uri: OAUTH_REDIRECT_URI,
     response_type: "code",
     scope: SAPPHIRE_GOOGLE_SCOPES.join(" "),
     access_type: "offline",
@@ -77,7 +80,7 @@ export async function exchangeCodeForRefreshToken(
         client_secret: clientSecret,
         code: authCode.trim(),
         grant_type: "authorization_code",
-        redirect_uri: OOB_REDIRECT,
+        redirect_uri: OAUTH_REDIRECT_URI,
       }).toString(),
     });
   } catch (e: any) {

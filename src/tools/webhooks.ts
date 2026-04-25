@@ -155,6 +155,54 @@ export class WebhookServer {
         return;
       }
 
+      // ── Sapphire OAuth callback (Google redirects here with ?code=&state=) ──
+      // Receives Google's auth code, exchanges for refresh token, persists to Supabase,
+      // returns a friendly HTML success page. State carries the account label.
+      if (req.method === "GET" && req.url?.startsWith("/api/sapphire-oauth-callback")) {
+        try {
+          const u = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+          const code = u.searchParams.get("code");
+          const state = u.searchParams.get("state") || "";
+          const errorParam = u.searchParams.get("error");
+
+          if (errorParam) {
+            res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(`<!DOCTYPE html><html><head><title>Sapphire — Error</title><style>body{font-family:-apple-system,sans-serif;max-width:600px;margin:60px auto;padding:24px;background:#0a0a0f;color:#e0e0e0;line-height:1.6}h1{color:#ff6b6b}a{color:#3EF7E8}</style></head><body><h1>Authorization declined</h1><p>Google reported: <code>${errorParam}</code></p><p>You can close this tab and run <code>/auth_google_primary</code> in Telegram to try again.</p></body></html>`);
+            return;
+          }
+          if (!code) {
+            res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(`<!DOCTYPE html><html><head><title>Sapphire — Error</title></head><body><h1>Missing code</h1><p>Google didn't include an authorization code in the redirect. Try the auth flow again.</p></body></html>`);
+            return;
+          }
+
+          // State format: "sapphire-{accountLabel}-{timestamp}"
+          const stateMatch = state.match(/^sapphire-([^-]+(?:\.[a-z0-9]+)?)-\d+$/);
+          const accountLabel = stateMatch?.[1];
+          if (accountLabel !== "empoweredservices2013" && accountLabel !== "7ace.rich1") {
+            res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(`<!DOCTYPE html><html><head><title>Sapphire — Error</title></head><body><h1>Invalid state</h1><p>State parameter could not be parsed: <code>${state}</code></p></body></html>`);
+            return;
+          }
+
+          // Exchange the code
+          const { exchangeCodeForRefreshToken } = await import("../proactive/sapphire-oauth");
+          const result = await exchangeCodeForRefreshToken(accountLabel as any, code);
+
+          if (result.ok) {
+            res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Sapphire — Connected</title><style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:600px;margin:80px auto;padding:32px;background:#0a0a0f;color:#e0e0e0;line-height:1.7;text-align:center}h1{color:#3EF7E8;font-size:32px}p{font-size:18px}.acc{color:#C9A84C;font-weight:600}.tip{margin-top:40px;padding:20px;background:#121826;border-radius:12px;font-size:14px;color:#888}</style></head><body><h1>✓ Connected</h1><p><span class="acc">${accountLabel}@gmail.com</span> is now linked to Sapphire.</p><p>You can close this tab.</p><div class="tip">Sapphire can now read your Gmail and Calendar for this account. Try DMing her: <em>"What's on my calendar tomorrow?"</em></div></body></html>`);
+          } else {
+            res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(`<!DOCTYPE html><html><head><title>Sapphire — Token Exchange Failed</title><style>body{font-family:-apple-system,sans-serif;max-width:700px;margin:60px auto;padding:24px;background:#0a0a0f;color:#e0e0e0;line-height:1.6}h1{color:#ff6b6b}code{background:#1a1a2e;padding:2px 6px;border-radius:4px}</style></head><body><h1>Connection failed</h1><p>${result.error}</p><p>Run <code>/auth_google_${accountLabel === "empoweredservices2013" ? "primary" : "secondary"}</code> in Telegram to retry.</p></body></html>`);
+          }
+        } catch (e: any) {
+          res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(`<!DOCTYPE html><html><head><title>Sapphire — Error</title></head><body><h1>Server error</h1><p>${e.message}</p></body></html>`);
+        }
+        return;
+      }
+
       if (req.method !== "POST") {
         res.writeHead(404);
         res.end();

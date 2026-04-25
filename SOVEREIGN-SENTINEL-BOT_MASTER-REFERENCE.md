@@ -24,7 +24,29 @@
 
 ---
 
-## SAPPHIRE — PERSONAL ASSISTANT FIRST, COO SECOND (S114, 2026-04-25)
+## SAPPHIRE — PERSONAL ASSISTANT FIRST, COO SECOND (S114 CLOSED, 2026-04-25)
+
+**Session 114 final commit:** `deb184f` on origin/main. Railway auto-deploy live.
+
+**What this session shipped (in order):**
+1. Foundation — 4 Supabase tables, RLS service-role-only
+2. OAuth — real callback URL flow (OOB was deprecated by Google), tokens in `sapphire_credentials` not env vars
+3. Tool layer — 27 PA tools across reminders/gmail/calendar/notion/facts/PDF/research/family/planner/news
+4. Voice — Whisper in (~$0.006/min), Google Translate TTS out (free), TelegramChannel token bug fixed properly
+5. Image vision — Gemini 2.5 Flash multimodal for screenshots
+6. Persona — dual-mode prompt (PA in DM, COO in group/dispatch), hard context injection in index.ts
+7. Scheduled jobs — reminder poll (60s), morning brief (11AM CDT), evening wrap (1:15AM CDT), calendar 24h lookahead, email triage 30m, news in morning brief
+8. Two-lane Pinecone — `sapphire-personal` (PA) + `brand` (COO), zero cross-pollination
+9. Business learning loop — `insight-extractor.ts` extracts 1 insight per completed dispatch → agent's namespace + optionally `shared`. Reverses the "knowledge_nodes had 1 row in 11 days" stagnation
+10. Tool discernment — explicit ONLY-WHEN rules in tool descriptions, DISCERNMENT block in Sapphire prompt
+
+**User-facing docs:**
+- `SAPPHIRE-USER-MANUAL.md` — commands, capabilities, troubleshooting
+- `SAPPHIRE-VS-BILLIONAIRE-TIER.md` — gap analysis, roadmap, cost comparison
+
+**Deferred (not built):** None active. Plaid finance integration was scoped but Ace removed it.
+
+
 
 **Sapphire's permanent identity is now Ace's full-time Personal Assistant.** The COO/sentinel role is a secondary hat she wears ONLY when activated by group chat or dispatched tasks. Default mode in 1-on-1 DM is PA — plain English, no sovereign tone, no `*[inner state: ...]*` stamp. Detection at the personality prompt level + hard context injection in `src/index.ts`.
 

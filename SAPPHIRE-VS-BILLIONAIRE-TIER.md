@@ -72,11 +72,6 @@ Ranked by leverage (how much it changes your daily life), not by coolness.
 **You're missing:** Cross-source attendee lookup. She CAN read your Gmail and Calendar separately but doesn't connect them — "Ace has a 3pm with john@acme.com" → fetch last email thread with john → search company news → output brief.
 **To add:** Scheduled job that runs 30 min before every calendar event, pulls attendee context, DMs you the brief.
 
-### Gap 5: Finance integration
-**Billionaire EA does:** Reads your bank/credit/brokerage daily. Categorizes spend. Flags unusual transactions. Pays bills. Tracks tax categories. Reconciles receipts.
-**You're missing:** Plaid (bank read-only) or Stripe Personal. Receipt OCR partially solved by image vision.
-**To add (sensitive):** Plaid integration (read-only). Sapphire learns your spending patterns and proactively flags anomalies. Stripe she already has access to but only for business revenue, not personal.
-
 ### Gap 6: Phone-call interface
 **Billionaire EA does:** Picks up your calls when you can't. Schedules/reschedules verbally with people who don't text. Conference-bridges you in.
 **You're missing:** A phone number she can answer/dial. You have ElevenLabs Agents loaded in this MCP — that does inbound/outbound voice calls with a voice clone.
@@ -165,7 +160,6 @@ Honest about the ceiling:
 | Notion (existing plan) | $0 |
 | Gmail/Calendar APIs | $0 |
 | ElevenLabs Agents + Twilio number (phone) | $15–25 |
-| Plaid (financial reads) | Free tier 100 transactions/mo |
 | Kayak/Skyscanner (travel) | Free tier |
 | **Total** | **$17–27/month** |
 

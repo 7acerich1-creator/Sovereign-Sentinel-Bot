@@ -1476,7 +1476,7 @@ export async function produceFacelessVideo(
   const podJobSpec: JobSpec = {
     brand: brand as "sovereign_synthesis" | "containment_field",
     niche,
-    seed: sourceIntelligence.slice(0, 500),
+    seed: sourceIntelligence.slice(0, 240),  // S117d: pod JobSpec.seed caps at 240 chars (Pydantic max_length)
     script: script.segments.map(s => s.voiceover).join("\n\n"),
     scenes: podScenes,
     hook_text: hookText || undefined,

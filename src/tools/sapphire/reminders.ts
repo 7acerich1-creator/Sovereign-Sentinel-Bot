@@ -39,9 +39,12 @@ export class SetReminderTool implements Tool {
     name: "set_reminder",
     description:
       "Schedule a reminder DM to Ace at a specific future time. Persists across bot restarts. " +
-      "Use this whenever Ace says 'remind me to X at Y' or 'remind me about Z in N days'. " +
-      "Convert natural language times (like 'Friday at 2pm', 'in 2 days', 'tomorrow at 9am') " +
-      "into an ISO 8601 timestamp BEFORE calling this tool. Assume Ace is in CDT (UTC-5) unless he specifies otherwise.",
+      "Convert natural language ('Friday at 2pm', 'in 2 days', 'tomorrow at 9am') to ISO 8601 BEFORE calling. Ace is CDT (UTC-5).\n\n" +
+      "Examples:\n" +
+      "• 'remind me to call mom Friday 2pm' → set_reminder(message='Call mom', fire_at='2026-04-25T19:00:00Z')\n" +
+      "• 'remind me in 2 days to renew insurance' → set_reminder(message='Renew insurance', fire_at='<now+2d ISO>')\n" +
+      "• 'every weekday at 7am remind me to take vitamins' → set_reminder(message='Take vitamins', fire_at='<tomorrow 7am ISO>', recurrence_rule='weekday')\n" +
+      "• 'every morning at 8 ask me 3 personal questions' → set_reminder(message='Ask Ace 3 personal questions today', fire_at='<tomorrow 8am ISO>', recurrence_rule='daily')",
     parameters: {
       message: {
         type: "string",

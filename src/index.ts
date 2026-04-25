@@ -4231,19 +4231,55 @@ async function main() {
 
             // S114q: Wire tool-call indicators for Sapphire DMs only.
             // Fires before each tool exec so Ace sees what she's doing.
+            // S114r: Also tier the tool set so only relevant tools load (was 27 always).
+            let sapphireToolSnapshot: Map<string, any> | null = null;
             if (agentCfg.name === "sapphire" && !message.metadata?.isGroup) {
               try {
                 const { makeSapphireToolObserver } = await import("./agent/sapphire-tool-indicators");
                 agentBotLoop.setToolCallObserver(makeSapphireToolObserver(agentChannel, message.chatId));
+
+                // ── S114r: Tier the tool set to only what this message needs ──
+                const { selectToolsForMessage } = await import("./tools/sapphire/_router");
+                const hasAttachment = !!message.attachments?.length;
+                // Strip context prefix from text for matching — match against original user text only
+                const rawText = message.content.replace(/^\[CONTEXT:[\s\S]*?\]\s*/m, "").trim();
+                const selection = selectToolsForMessage(rawText, hasAttachment);
+                console.log(`[SapphirePA] Tool tiering — loaded [${selection.loadedTiers.join(",")}] = ${selection.toolCount} tools (~${selection.approxTokens} tokens, was 27)`);
+
+                // ── S114r: Context budget cap for Sapphire DM ──
+                // Drop recent message cap from 10 → 6, skip semantic search (her PA
+                // prefix already pulls from sapphire-personal Pinecone namespace).
+                // Combined with tool tiering, total input drops from ~12K → ~5K tokens.
+                agentBotLoop.setContextOverrides({ maxRecentMessages: 6, skipSemanticSearch: true });
+
+                // Keep cross-mode tools (write_knowledge, propose_task, etc) and only
+                // swap PA tools. Snapshot first so we can restore.
+                sapphireToolSnapshot = agentBotLoop.snapshotTools();
+                const allCurrent = Array.from(sapphireToolSnapshot.values());
+                const PA_TOOL_NAMES = new Set([
+                  "set_reminder","list_reminders","cancel_reminder",
+                  "gmail_inbox","gmail_search","gmail_send","gmail_draft",
+                  "calendar_list","calendar_create_event","calendar_reschedule",
+                  "notion_create_page","notion_append_to_page","notion_search","notion_set_parent_page",
+                  "remember_fact","recall_facts",
+                  "analyze_pdf","research_brief",
+                  "save_family_member","get_family",
+                  "create_plan","approve_plan","advance_plan","record_step_result","cancel_plan",
+                  "add_news_source","remove_news_source","list_news_sources",
+                ]);
+                const nonPATools = allCurrent.filter((t: any) => !PA_TOOL_NAMES.has(t.definition?.name));
+                agentBotLoop.setTools([...nonPATools, ...selection.tools]);
               } catch (e: any) {
-                console.warn(`[SapphirePA] Tool observer wire failed: ${e.message}`);
+                console.warn(`[SapphirePA] Tool tiering failed: ${e.message} — falling back to full set`);
               }
             }
 
             const response = await agentBotLoop.processMessage(message, () => agentChannel.sendTyping(message.chatId));
 
-            // Clear the observer so no leak across messages
+            // Restore full tool set + clear observer + context overrides so no leak across messages
             agentBotLoop.setToolCallObserver(undefined);
+            agentBotLoop.setContextOverrides(undefined);
+            if (sapphireToolSnapshot) agentBotLoop.restoreTools(sapphireToolSnapshot);
 
             // Update task status + log to Mission Control
             if (agentTaskId) await updateTask(agentTaskId, "completed", response.slice(0, 500));

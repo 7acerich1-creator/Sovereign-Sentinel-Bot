@@ -48,6 +48,13 @@ export class AgentLoop {
     this.toolCallObserver = observer;
   }
 
+  // S114r: Per-message context budget overrides. Sapphire DMs use cap=6 to stop
+  // 12K-token bloat. Reset to undefined after each processMessage.
+  private contextOverrides?: { maxRecentMessages?: number; skipSemanticSearch?: boolean };
+  setContextOverrides(opts?: { maxRecentMessages?: number; skipSemanticSearch?: boolean }): void {
+    this.contextOverrides = opts;
+  }
+
   setIdentity(identity: AgentIdentity): void {
     this.identity = identity;
   }
@@ -66,6 +73,19 @@ export class AgentLoop {
 
   removeTool(name: string): void {
     this.tools.delete(name);
+  }
+
+  // S114r: Replace the entire tool set for a single message (used by Sapphire
+  // tool-tiering — only load tools the message actually needs). Use with the
+  // "around" pattern: snapshot before, replace, run, restore.
+  snapshotTools(): Map<string, Tool> {
+    return new Map(this.tools);
+  }
+  setTools(tools: Tool[]): void {
+    this.tools = new Map(tools.map((t) => [t.definition.name, t]));
+  }
+  restoreTools(snapshot: Map<string, Tool>): void {
+    this.tools = snapshot;
   }
 
   /**
@@ -344,8 +364,9 @@ export class AgentLoop {
         });
       }
 
-      // Load recent messages — 10 is enough for conversational continuity (was 20×3=60)
-      const recent = await provider.getRecentMessages(message.chatId, 10);
+      // Load recent messages — default 10, override via contextOverrides (Sapphire DM uses 6)
+      const recentCap = this.contextOverrides?.maxRecentMessages ?? 10;
+      const recent = await provider.getRecentMessages(message.chatId, recentCap);
       for (const msg of recent) {
         context.push({
           role: msg.role as "user" | "assistant",
@@ -353,8 +374,10 @@ export class AgentLoop {
         });
       }
 
-      // Semantic search for relevant memories (keep at 3 — useful for user chat)
-      if (message.content.length > 5) {
+      // Semantic search for relevant memories — Sapphire DM skips this (her PA prefix
+      // already does Pinecone recall against sapphire-personal namespace).
+      const skipSearch = this.contextOverrides?.skipSemanticSearch === true;
+      if (!skipSearch && message.content.length > 5) {
         const searchResults = await provider.search(message.content, 3);
         if (searchResults.length > 0) {
           const memText = searchResults.map((r) => `[${r.source}] ${r.content}`).join("\n");

@@ -127,7 +127,7 @@ export class CalendarListTool implements Tool {
 export class CalendarCreateEventTool implements Tool {
   definition: ToolDefinition = {
     name: "calendar_create_event",
-    description: "Create a new calendar event. Use when Ace asks to add something to his calendar.",
+    description: "Create a new calendar event. Convert natural language to ISO 8601 (Ace is CDT/UTC-5).\n\nExamples:\n• 'add 3pm meeting Wednesday with John about contract' → calendar_create_event(summary='Meeting with John (contract)', start='<wed 3pm CDT ISO>', end='<wed 4pm CDT ISO>')\n• 'schedule Maya pediatrician Friday 10am' → calendar_create_event(summary='Maya pediatrician', start='<fri 10am CDT ISO>')",
     parameters: {
       account: { type: "string", description: "'primary' or 'secondary'. Default 'primary'." },
       summary: { type: "string", description: "Event title." },

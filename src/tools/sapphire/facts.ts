@@ -25,10 +25,13 @@ export class RememberFactTool implements Tool {
   definition: ToolDefinition = {
     name: "remember_fact",
     description:
-      "Save a standing fact about Ace's life so you remember it across sessions. Examples: " +
-      "'girls birthday parties = $25 gift budget', 'wife's name is Maria', 'no calls before 11am', " +
-      "'pediatrician is Dr. Patel at City Health'. Use when Ace tells you something that should persist " +
-      "(not for one-off task data — that goes to reminders or calendar).",
+      "Save a standing fact about Ace's life. Use for ANY personal info that should persist (NOT for one-off task data). " +
+      "write_knowledge will REFUSE personal content — this is the only way to save personal stuff.\n\n" +
+      "Examples:\n" +
+      "• 'gift budget for kids' parties is $25' → remember_fact(key='kids_party_gift_budget', value='$25 per gift', category='preferences')\n" +
+      "• 'no calls before 11am' → remember_fact(key='no_calls_before_11am', value='Do not schedule calls before 11am CDT', category='schedule')\n" +
+      "• 'pediatrician is Dr Patel at City Health' → remember_fact(key='pediatrician', value='Dr. Patel at City Health', category='health')\n\n" +
+      "For family member structured data (name+DOB+school+allergies) use save_family_member instead.",
     parameters: {
       key: { type: "string", description: "Short snake_case identifier. Example: 'gift_budget_kids_parties'." },
       value: { type: "string", description: "The fact in plain English." },

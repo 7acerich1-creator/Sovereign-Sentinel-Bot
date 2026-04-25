@@ -27,8 +27,11 @@ export class SaveFamilyMemberTool implements Tool {
   definition: ToolDefinition = {
     name: "save_family_member",
     description:
-      "Add or update a family member's profile. Use when Ace tells you a name, DOB, school, allergy, doctor, or activity for someone in his family. Upsert by name (case-insensitive). " +
-      "Examples: when Ace says 'My daughter Maya was born March 14 2019, allergic to peanuts, goes to St. Anne's' — call this with name='Maya', relationship='daughter', date_of_birth='2019-03-14', allergies=['peanuts'], school=\"St. Anne's\".",
+      "Add or update a family member's profile (name + DOB + school + allergies + doctor + activities). Upsert by name. Use this INSTEAD OF remember_fact when the info is about a specific family member.\n\n" +
+      "Examples:\n" +
+      "• 'My daughter Maya was born March 14 2019, allergic to peanuts, goes to St Anne's' → save_family_member(name='Maya', relationship='daughter', date_of_birth='2019-03-14', allergies='peanuts', school=\"St Anne's\")\n" +
+      "• 'My wife Sarah, doctor is Dr. Lee at Riverside' → save_family_member(name='Sarah', relationship='spouse', doctor='Dr. Lee at Riverside')\n" +
+      "• 'Aliza born May 19 2015, Maddy born August 5 2017' → call this twice, once per daughter",
     parameters: {
       name: { type: "string", description: "Family member's name." },
       relationship: { type: "string", description: "One of: daughter, son, spouse, partner, mother, father, sibling, grandparent, other." },

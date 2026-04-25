@@ -112,7 +112,49 @@ By default she creates DRAFTS — she only sends if you explicitly say "send".
 - "Remember: my pediatrician is Dr. Patel at City Health."
 - "What do you remember about gift budgets?"
 
-She stores these forever, surfaces them automatically when relevant.
+She stores these in BOTH a structured table (fast lookup) AND a semantic vector store (`sapphire-personal` namespace). When you ask in different wording, she still finds the right fact.
+
+### Family (first-class profiles)
+
+- "Remember: my daughter Maya, born March 14 2019, allergic to peanuts, goes to St. Anne's."
+- "When is Maya's birthday?"
+- "What's the kids' doctor?"
+
+Family members get full profiles with DOB, allergies, school, doctor, activities. She surfaces them automatically when relevant.
+
+### Documents (Gap 2 — NEW)
+
+Send her a PDF in Telegram (school flyer, contract, bank statement, receipt, RSVP card). She extracts dates, amounts, parties, action items — and proposes calendar events / reminders / Notion notes based on what's in it.
+
+- Just attach the PDF to a Telegram message
+- Optional caption like "summarize this" or "create a reminder for whatever's in here"
+- She'll ask before creating events/reminders unless you said to do it directly
+
+### Research (Gap 3 — NEW)
+
+- "Research Acme Corp before my Tuesday meeting."
+- "Background-check this contractor: Bob Smith electrical."
+- "What's the going rate for a Telegram bot developer?"
+
+She searches the web (DuckDuckGo, no API key), fetches top results, Gemini-summarizes into a 1-pager with sources. `quick` (3 results, fast) or `thorough` (5 results, fetched + deep-summarized).
+
+### Multi-step plans (Gap 10 — NEW)
+
+For anything that requires several actions in sequence, she'll write a numbered plan first, ask you to approve, then execute step by step.
+
+- "Plan my anniversary." → she drafts: 1. Find restaurants. 2. Pick one. 3. Reserve. 4. Order flowers. 5. Set calendar event. 6. Set reminder day-of. → asks "approve?" → executes after you say yes.
+- "Plan a Friday trip to Austin." → she drafts flight search + hotel + ground transport + reminders.
+- Each step survives bot restarts (stored in `sapphire_plans` table).
+
+### News brief (Gap 7 — NEW)
+
+Your morning brief at 11 AM CDT now includes a personalized news section. By default she pulls from Hacker News, TechCrunch, Marketing Brew. You can add/remove:
+
+- "Add news source: Bloomberg https://feeds.bloomberg.com/markets/news.rss"
+- "Remove news source: TechCrunch"
+- "List my news sources"
+
+Gemini Flash filters items by what she knows about your interests (your standing facts). Top 5 in your morning brief.
 
 ---
 

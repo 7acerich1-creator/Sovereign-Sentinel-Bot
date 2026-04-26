@@ -24,6 +24,37 @@
 
 ---
 
+## S122b — Buffer GraphQL schema fix + briefing Telegram relay (2026-04-26 ~20:40 UTC)
+
+**Commit:** `6045457` on origin/main (3 files: `src/tools/buffer-analytics.ts`, `src/channels/agent-voice.ts`, `src/index.ts`, +344/-166).
+
+**Why:** Vector's S122 backfill briefing landed clean, surfaced two real bugs:
+1. **Buffer GraphQL has been broken since S36.** Built on a fabricated schema. Per Buffer's own docs (developers.buffer.com Apr 2026), the Post type has only `id/text/dueAt/channelId/status/assets` — NO `statistics`, NO `channel { ... }` sub-object — and `first:` is a sibling argument to `input:`, NOT inside it. Buffer GraphQL also doesn't expose engagement metrics at all (likes/clicks/impressions/reach are on Buffer's roadmap, not yet shipped). The S36 query asked for all of those simultaneously — `Cannot query field "statistics" on type "Post"` and `Field "first" is not defined by type "PostsInput"` were correct rejections.
+2. **Briefings reached MC but not Telegram.** Vector's S122 briefing sat in the `briefings` table; Architect on Telegram only saw the receipt `✅ Briefing filed: <id>` — not the body.
+
+**Fix 1 — `src/tools/buffer-analytics.ts` rewrite:**
+- Query matches Buffer's actual schema: `posts(first: N, input: { organizationId, filter: { status: [sent] } }) { edges { node { id text dueAt channelId status } } pageInfo { ... } }`.
+- Channels resolved via the existing `getBufferChannels()` cache from `buffer-graphql.ts` (zero extra API calls in the 4h TTL window).
+- Reports return honest data: post counts per channel, channel cadence (most-recent dates), recent posts with text + timestamp.
+- `top_posts` deprecated to alias of `recent` with explicit note.
+- `ENGAGEMENT_FOOTER` appended to every report — explicit bridge note that engagement metrics live in YouTube Analytics / Meta Graph / X API / LinkedIn Marketing API, not Buffer GraphQL. Vector's future briefings will carry this disclaimer instead of fabricating zeros.
+
+**Fix 2 — Briefing → Telegram relay:**
+- New `relayBriefingToTelegram(agent, briefingId, channel, chatId)` in `src/channels/agent-voice.ts`. Fetches briefing row from Supabase, formats with priority-icon + agent-display header (`⚡ *Vector — Daily Sweep*` + title), body verbatim, optional action-items block, then `appendThoughtTag` for the closing reflection in agent voice tied to a NORTH_STAR metric chosen by `briefing_type`. Fail-soft: never throws; if Markdown parsing fails the relay retries plain-text; if everything fails it logs and returns false. Caller continues unblocked.
+- Wired in dispatch poller (`src/index.ts:5184+`) directly after `completeDispatch`. Extracts the briefing UUID once via `/✅ Briefing filed:\s*([0-9a-f-]{8,})/i`, uses it both for the gate check AND for the relay. Fire-and-forget (`void (async () => { ... })()`) so the dispatch loop never waits on Telegram.
+- Pattern matches Veritas's morning briefing path that already used `appendThoughtTag`. Vector inherits the same UX for dispatch results.
+
+**Architecture clarification (the "ant + logbook + forward" question):** the briefings table IS the canonical record. Telegram is one consumer among several (MC visual surface, Telegram DM, future email digest). The S122b relay is the missing fanout step, not a workaround. Design correct; implementation gap closed.
+
+**Verification:**
+- `npx tsc --noEmit` exit 0, zero output.
+- Single push to origin/main: `5255bb0..6045457`.
+- Test dispatch `583e26b9-7ca8-4bc1-bb4f-8bfb4674f60e` queued at 20:41 UTC for end-to-end exercise (Railway redeploy in flight).
+
+**Open at close:** verify next session that `583e26b9` lands a real briefing AND the Telegram DM carries the body (not just the receipt). If body lands → S122b confirmed. If only receipt lands → relay path has a runtime bug despite tsc clean.
+
+---
+
 ## S122 — Vector daily_metrics_sweep file_briefing gate + hardened directive (2026-04-26 ~19:25 UTC)
 
 **Commit:** `f7ba158` on origin/main (single-file: `src/index.ts`, +59/-27). Railway auto-deploy triggered.

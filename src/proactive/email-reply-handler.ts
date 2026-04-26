@@ -181,10 +181,23 @@ export async function storeDraftAndRequestApproval(
   }
 }
 
+// S119h: deduplication so the same replyId can't be approval-carded twice
+// (e.g. if completeDispatch fires twice for the same dispatch). 24h TTL.
+const _approvalCardSent = new Map<string, number>();
+function _cleanApprovalCardSent(): void {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const [id, ts] of _approvalCardSent) {
+    if (ts < cutoff) _approvalCardSent.delete(id);
+  }
+}
+
 /**
  * S119c: Convenience wrapper — uses the module-level registered channel.
  * Called from crew-dispatch.completeDispatch when an email_reply_draft task finishes.
  * If the registered channel is missing, logs and no-ops (don't crash the dispatch loop).
+ *
+ * S119h: idempotent per replyId — won't fire the approval card more than once
+ * for the same draft even if upstream calls duplicate.
  */
 export async function notifyDraftReady(replyId: string, draftText: string): Promise<void> {
   if (!_telegramChannel || !_defaultChatId) {
@@ -194,6 +207,12 @@ export async function notifyDraftReady(replyId: string, draftText: string): Prom
     );
     return;
   }
+  _cleanApprovalCardSent();
+  if (_approvalCardSent.has(replyId)) {
+    console.log(`[EmailReply] Approval card already sent for ${replyId} — skipping duplicate.`);
+    return;
+  }
+  _approvalCardSent.set(replyId, Date.now());
   await storeDraftAndRequestApproval(replyId, draftText, _telegramChannel, _defaultChatId);
 }
 

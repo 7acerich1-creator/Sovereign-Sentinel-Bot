@@ -301,40 +301,36 @@ export async function completeDispatch(
       .catch((e) => console.warn(`[InsightExtractor] ${e.message}`));
   }
 
-  // ── S119c/d: Email reply draft → Telegram approval prompt ──
+  // ── S119c/d/h: Email reply draft → Telegram approval prompt ──
   // When Anita finishes drafting an inbound-email reply, fire the
   // ✉️ Anita's Draft Reply approval card to the Architect's Telegram.
   //
-  // S119d FIX: Anita stores the draft in content_drafts table FIRST, then her
-  // crew_dispatch.result is just a meta-summary ("task complete"). So the regex
-  // approach (extractDraftFromAgentResult) didn't match. Pull the body straight
-  // from content_drafts instead — most recent Anita email draft for this dispatch.
+  // S119h FIX: ALWAYS pull from content_drafts (the single source of truth).
+  // Removed the regex extractor — it kept matching garbage text in Anita's
+  // meta-summary results ("I'm ready for the next command.") instead of
+  // her actual draft. content_drafts is canonical; Anita writes there FIRST.
   // Never blocks the dispatch loop; failures are logged.
   if (status === "completed" && taskType === "email_reply_draft" && dispatchPayload) {
     const replyId = String(dispatchPayload.reply_id || "");
     if (replyId) {
-      // Try freeform text first (cheap), fall back to content_drafts lookup
-      let draftText = result ? extractDraftFromAgentResult(result) : null;
-
-      if (!draftText) {
-        try {
-          const draftResp = await fetch(
-            `${SUPABASE_URL}/rest/v1/content_drafts?agent_name=eq.anita&draft_type=eq.email&order=created_at.desc&limit=1&select=body,created_at`,
-            { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
-          );
-          if (draftResp.ok) {
-            const drafts = (await draftResp.json()) as any[];
-            if (drafts?.[0]?.body) {
-              draftText = String(drafts[0].body).trim();
-              console.log(
-                `[EmailReply] Pulled draft from content_drafts for replyId=${replyId} ` +
-                  `(${draftText.length} chars, draft created_at=${drafts[0].created_at})`
-              );
-            }
+      let draftText: string | null = null;
+      try {
+        const draftResp = await fetch(
+          `${SUPABASE_URL}/rest/v1/content_drafts?agent_name=eq.anita&draft_type=eq.email&order=created_at.desc&limit=1&select=body,created_at`,
+          { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+        );
+        if (draftResp.ok) {
+          const drafts = (await draftResp.json()) as any[];
+          if (drafts?.[0]?.body) {
+            draftText = String(drafts[0].body).trim();
+            console.log(
+              `[EmailReply] Pulled draft from content_drafts for replyId=${replyId} ` +
+                `(${draftText.length} chars, draft created_at=${drafts[0].created_at})`
+            );
           }
-        } catch (err: any) {
-          console.warn(`[EmailReply] content_drafts lookup failed: ${err.message}`);
         }
+      } catch (err: any) {
+        console.warn(`[EmailReply] content_drafts lookup failed: ${err.message}`);
       }
 
       if (draftText) {
@@ -343,44 +339,11 @@ export async function completeDispatch(
           .catch((e) => console.warn(`[EmailReply] notifyDraftReady error: ${e.message}`));
       } else {
         console.warn(
-          `[EmailReply] Could not recover draft for replyId=${replyId}. ` +
-            `Result: ${result?.slice(0, 200) || "(empty)"}`
+          `[EmailReply] No draft found in content_drafts for replyId=${replyId}.`
         );
       }
     }
   }
-}
-
-/**
- * S119c: Extract Anita's draft text from her freeform crew_dispatch result.
- * Anita reports back like: "Email reply draft created... Draft content: \"Hey,\n..."
- * Tries multiple patterns — falls back to null if no match.
- */
-function extractDraftFromAgentResult(result: string): string | null {
-  if (!result) return null;
-  const patterns: RegExp[] = [
-    /Draft content:\s*"([\s\S]+?)"(?:\s*$|\s*\.\s*$)/i,
-    /Draft content:\s*"([\s\S]+)"/i,
-    /Draft:\s*"([\s\S]+?)"(?:\s*$|\s*\.\s*$)/i,
-    /Email reply:\s*"([\s\S]+?)"(?:\s*$|\s*\.\s*$)/i,
-    /Reply text:\s*"([\s\S]+?)"(?:\s*$|\s*\.\s*$)/i,
-  ];
-  for (const re of patterns) {
-    const m = result.match(re);
-    if (m && m[1]) {
-      return m[1]
-        .replace(/\\n/g, "\n")
-        .replace(/\\"/g, '"')
-        .replace(/\\t/g, "\t")
-        .trim();
-    }
-  }
-  // Last-resort: if the result contains a multi-line draft after a colon, grab it
-  const colonMatch = result.match(/(?:Draft|Reply)[:\s][\s\S]+?\n([\s\S]+)$/i);
-  if (colonMatch && colonMatch[1] && colonMatch[1].length >= 10) {
-    return colonMatch[1].trim();
-  }
-  return null;
 }
 
 /**

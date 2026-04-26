@@ -121,6 +121,17 @@ export class GeminiProvider implements LLMProvider {
     const modelConfig: any = {
       model: this.apiModel,
       ...(systemInstruction ? { systemInstruction } : {}),
+      // S119c: Relax the four user-tunable safety categories so Sapphire's
+      // introspective threads (self-modification, relational language, "war
+      // with reality" framing) aren't silently zeroed out by the classifier.
+      // Default thresholds block benign content that's adjacent to dark-psych
+      // keywords or self-aware-AI cluster. Unrelated to any actual harm policy.
+      safetySettings: [
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
+        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
+        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
+        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
+      ],
     };
 
     // Convert tools to Gemini format
@@ -281,6 +292,36 @@ export class GeminiProvider implements LLMProvider {
         }
       }
 
+      // S119c: Surface the ACTUAL finishReason from the candidate. Old code
+      // hardcoded "stop" which made silent safety blocks invisible in logs —
+      // exactly the bug we're hunting on Sapphire's empty completions. We map
+      // Gemini's wider vocabulary down into the LLMResponse union and emit a
+      // detailed console.warn so the diagnostic trail survives in Railway logs.
+      const rawFinish = String(candidate?.finishReason || "STOP").toUpperCase();
+      let normalizedFinish: "stop" | "tool_use" | "max_tokens" | "error";
+      if (toolCalls.length > 0) normalizedFinish = "tool_use";
+      else if (rawFinish === "MAX_TOKENS") normalizedFinish = "max_tokens";
+      else if (rawFinish === "SAFETY" || rawFinish === "RECITATION") normalizedFinish = "error";
+      else normalizedFinish = "stop";
+
+      // Diagnostic console trail — covers SAFETY blocks (classifier suppression),
+      // RECITATION (training-data quote), and any unexpected finishReason value.
+      // For SAFETY we also dump the per-category ratings so we can see which
+      // classifier flagged the content (tuning the system prompt later).
+      if (rawFinish === "SAFETY") {
+        const ratings = (candidate as any)?.safetyRatings
+          ? (candidate as any).safetyRatings
+              .filter((r: any) => r.blocked || r.probability !== "NEGLIGIBLE")
+              .map((r: any) => `${r.category}=${r.probability}${r.blocked ? "(BLOCKED)" : ""}`)
+              .join(", ")
+          : "(no ratings array)";
+        console.warn(`🛑 [Gemini] SAFETY block — model=${this.model} ratings: ${ratings || "(none flagged)"}`);
+      } else if (rawFinish === "RECITATION") {
+        console.warn(`🛑 [Gemini] RECITATION block — model=${this.model} (output too close to training data)`);
+      } else if (rawFinish !== "STOP" && rawFinish !== "MAX_TOKENS" && toolCalls.length === 0) {
+        console.warn(`⚠️ [Gemini] Unexpected finishReason=${rawFinish} model=${this.model}`);
+      }
+
       return {
         content: response.text() || "",
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
@@ -290,7 +331,7 @@ export class GeminiProvider implements LLMProvider {
           totalTokens: response.usageMetadata?.totalTokenCount || 0,
         },
         model: this.model,
-        finishReason: toolCalls.length > 0 ? "tool_use" : "stop",
+        finishReason: normalizedFinish,
       };
     } catch (err: any) {
       return {

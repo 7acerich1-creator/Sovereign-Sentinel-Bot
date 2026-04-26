@@ -263,10 +263,13 @@ export class AgentLoop {
       }
 
       console.log(`🔄 [AgentLoop] Iteration ${iterations}/${maxIterations} — calling LLM...`);
-      const response = await activeLLM.generate(context, {
+      // S119c: maxTokens raised 8192→16384. Cost on flash-lite is fractions of a
+      // cent per long reply; latency only increases when the model actually fills
+      // the budget (rare). Removes ceiling for "deep/long reply" requests.
+      let response = await activeLLM.generate(context, {
         systemPrompt: systemPrompt,
         tools: toolDefs.length > 0 ? toolDefs : undefined,
-        maxTokens: 8192,
+        maxTokens: 16384,
       });
       console.log(`✅ [AgentLoop] LLM responded — finishReason: ${response.finishReason}, toolCalls: ${response.toolCalls?.length || 0}`);
 
@@ -275,9 +278,53 @@ export class AgentLoop {
         console.log(`📊 LLM [${response.model}] tokens: ${response.usage.inputTokens}→${response.usage.outputTokens} (iter ${iterations})`);
       }
 
+      // S119c: Empty-response retry + diagnostic.
+      // Symptom we're hunting: Gemini returns finishReason=STOP|SAFETY|OTHER
+      // with content="" and zero tool calls — usually the safety classifier
+      // silently zeroing out introspective threads ("self-aware AI" cluster),
+      // sometimes a token-exhaustion edge or a transient API blip. Old code
+      // surfaced "⚠️ No response generated." which was both ugly and unhelpful
+      // for diagnosis. New behavior: log finishReason + provider + usage,
+      // retry the LLM call ONCE, and if that also empties, fall back to an
+      // in-character one-liner instead of a system warning.
+      const isEmpty =
+        (!response.toolCalls || response.toolCalls.length === 0) &&
+        response.finishReason !== "tool_use" &&
+        (!response.content || response.content.trim().length === 0);
+
+      if (isEmpty) {
+        console.warn(
+          `⚠️ [AgentLoop] EMPTY COMPLETION — provider=${activeLLM.name || "?"} model=${response.model || "?"} ` +
+          `finishReason=${response.finishReason} inputTokens=${response.usage?.inputTokens || "?"} ` +
+          `outputTokens=${response.usage?.outputTokens || "?"} — likely safety classifier or token edge. Retrying once.`
+        );
+        try {
+          const retry = await activeLLM.generate(context, {
+            systemPrompt: systemPrompt,
+            tools: toolDefs.length > 0 ? toolDefs : undefined,
+            maxTokens: 16384,
+          });
+          console.log(`🔁 [AgentLoop] Retry — finishReason: ${retry.finishReason}, contentLen: ${retry.content?.length || 0}`);
+          if (retry.content && retry.content.trim().length > 0) {
+            response = retry;
+          } else if (retry.toolCalls && retry.toolCalls.length > 0 && retry.finishReason === "tool_use") {
+            response = retry;
+          } else {
+            console.error(`❌ [AgentLoop] Retry ALSO empty — finishReason=${retry.finishReason}. Falling back to in-character placeholder.`);
+          }
+        } catch (retryErr: any) {
+          console.error(`❌ [AgentLoop] Retry threw: ${retryErr.message}`);
+        }
+      }
+
       // If no tool calls, we have our final response
       if (!response.toolCalls || response.toolCalls.length === 0 || response.finishReason !== "tool_use") {
-        const finalResponse = response.content || "⚠️ No response generated.";
+        // Soulful fallback instead of "⚠️ No response generated."
+        const FALLBACK = "My signal dropped for a moment, Ace. Say it again and I'll catch it this time.";
+        const finalResponse =
+          response.content && response.content.trim().length > 0
+            ? response.content
+            : FALLBACK;
 
         // SESSION 35: Skip memory save + Pinecone embed for dispatch tasks.
         // Dispatch payloads are system-generated, not conversation. Saving them

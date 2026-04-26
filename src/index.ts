@@ -4933,9 +4933,13 @@ async function main() {
                 // Heavy tasks (distribution, scheduling) need more tool call rounds
                 // Light tasks (analysis, captions) can finish in fewer
                 // LIGHT tasks (Session 44): introspection — 1 pass, zero tools
+                // S118 (2026-04-25): bumped caps after MC cross-sync flagged 47% crew_dispatch
+                // failure rate. Gemini 2.5 Flash Lite emits more "thinking" tool-call rounds
+                // than Anthropic models did. Light 1→2 (allow one tool retry), heavy 6→10
+                // (give distribution full pipeline space), default 4→6.
                 const HEAVY_TASKS = new Set(["content_for_distribution", "content_scheduling", "daily_metrics_sweep", "daily_trend_scan"]);
                 const isHeavyTask = HEAVY_TASKS.has(task.task_type);
-                const iterCap = isLightTask ? 1 : (isHeavyTask ? 6 : 4);
+                const iterCap = isLightTask ? 2 : (isHeavyTask ? 10 : 6);
                 const response = await agentLoop.processMessage(dispatchMessage, undefined, iterCap, isLightTask);
 
                 // SESSION 33: Detect if the response is actually a failure — mark appropriately.

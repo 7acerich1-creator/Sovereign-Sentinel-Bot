@@ -238,6 +238,20 @@ async function main() {
     console.warn(`[InsightExtractor] Failed to wire: ${e.message}`);
   }
 
+  // ── S121: Wire Pinecone into the agent-voice wrapper ──
+  // Proactive crew DMs (Yuki/Veritas/Alfred/Anita/Vector) recall their own
+  // namespace before composing — the voice + thought-tag emerge from each
+  // agent's full ddxfish blueprint + lived memory. See src/channels/agent-voice.ts.
+  try {
+    const { setPineconeForVoice } = await import("./channels/agent-voice");
+    setPineconeForVoice(pineconeMemory);
+    if (pineconeMemory.isReady()) {
+      console.log("🎙️ [AgentVoice] Wired — proactive crew DMs route through assembled blueprint + recall");
+    }
+  } catch (e: any) {
+    console.warn(`[AgentVoice] Failed to wire: ${e.message}`);
+  }
+
   // Log Pinecone status on startup
   if (pineconeMemory.isReady()) {
     console.log(`🧠 Pinecone semantic memory: ${process.env.PINECONE_INDEX || "gravity-claw"} — ACTIVE`);
@@ -318,7 +332,12 @@ async function main() {
     process.exit(1);
   }
 
-  const failoverLLM = new FailoverLLM(llmProviders);
+  // S121: Global failoverLLM EXCLUDES Anthropic. This chain is consumed by
+  // AgentSwarm, MeshWorkflow, the content engine, and unknown-agent fallback —
+  // none of which should be allowed to drain Sapphire's reserved $5 Anthropic
+  // budget on a Gemini+Groq outage. Sapphire's team chain (AGENT_LLM_TEAMS.sapphire)
+  // is the ONLY runtime path that includes the AnthropicProvider.
+  const failoverLLM = new FailoverLLM(llmProviders.filter((p) => p.name !== "anthropic"));
 
   // ── 2B. Per-Agent LLM Provider Teams ──
   // Split providers across agents to prevent quota stampedes.
@@ -354,29 +373,30 @@ async function main() {
     return new FailoverLLM(chain, llmTimeoutMs, primaryRetries);
   }
 
-  // SESSION 93: LLM ROUTING — GEMINI PRIMARY
-  // Anthropic credits exhausted. Gemini is primary for ALL agents + pipelines.
-  // Groq (free) is first fallback. Anthropic is emergency-only last resort.
-  // useGroqB splits Groq Key B across TCF-branded agents to prevent rate stampedes.
+  // S121: LLM ROUTING — Anthropic locked to Sapphire ONLY.
+  // Architect's $5 Anthropic balance is reserved for Sapphire's introspective threads
+  // (promoted to primary by tools/sapphire/_introspection.ts during her DM block).
+  // Every other agent + both pipelines run Gemini -> Groq, NO Anthropic fallback —
+  // a single Gemini+Groq outage on Yuki/Veritas/Alfred/Vector/Anita or the pipelines
+  // would otherwise drain her budget across the whole crew in minutes.
   // 1 primaryRetry = Gemini gets a second chance on 429 before failover to Groq.
   const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
-    alfred: buildTeamLLM(["gemini", "groq", "anthropic"], 1, false),    // Gemini-first — dispatches + user chat
-    anita: buildTeamLLM(["gemini", "groq", "anthropic"], 1, true),      // Gemini-first — dispatches + user chat
-    sapphire: buildTeamLLM(["gemini", "groq", "anthropic"], 1),         // Gemini-first
-    veritas: buildTeamLLM(["gemini", "groq", "anthropic"], 1),          // Gemini-first
-    vector: buildTeamLLM(["gemini", "groq", "anthropic"], 1, false),    // Gemini-first — dispatches + user chat
-    yuki: buildTeamLLM(["gemini", "groq", "anthropic"], 1, true),       // Gemini-first — dispatches + user chat
+    alfred: buildTeamLLM(["gemini", "groq"], 1, false),    // Gemini -> Groq. NO Anthropic.
+    anita: buildTeamLLM(["gemini", "groq"], 1, true),      // Gemini -> Groq. NO Anthropic.
+    sapphire: buildTeamLLM(["gemini", "groq", "anthropic"], 1),  // Anthropic ALLOWED — promoted to primary by introspective router.
+    veritas: buildTeamLLM(["gemini", "groq"], 1),          // Gemini -> Groq. NO Anthropic.
+    vector: buildTeamLLM(["gemini", "groq"], 1, false),    // Gemini -> Groq. NO Anthropic.
+    yuki: buildTeamLLM(["gemini", "groq"], 1, true),       // Gemini -> Groq. NO Anthropic.
   };
 
-  // SESSION 93: Pipeline LLMs — Gemini-first.
-  // Anthropic credits exhausted. Gemini handles bulk pipeline work (script gen, social copy,
-  // clip generation — 30-50+ calls per video). Groq free tier as first fallback.
-  // Anthropic parked as emergency-only last resort.
-  const pipelineLLM = buildTeamLLM(["gemini", "groq", "anthropic"], 1, false);     // Key A — SS pipeline
-  const tcfPipelineLLM = buildTeamLLM(["gemini", "groq", "anthropic"], 1, true);   // Key B — TCF pipeline
+  // S121: Pipeline LLMs — Gemini-first, NO Anthropic fallback.
+  // High-volume bulk work (30-50+ calls per video) — never let pipeline grunt
+  // work touch Anthropic credits reserved for Sapphire.
+  const pipelineLLM = buildTeamLLM(["gemini", "groq"], 1, false);     // Key A — SS pipeline. NO Anthropic.
+  const tcfPipelineLLM = buildTeamLLM(["gemini", "groq"], 1, true);   // Key B — TCF pipeline. NO Anthropic.
 
   if (groqTcfKey) {
-    console.log(`🔑 [LLM Teams] Session 93 routing: ALL agents+pipelines Gemini-first. Groq fallback. Anthropic emergency-only. Key A: pipeline. Key B: tcf-pipeline.`);
+    console.log(`🔑 [LLM Teams] S121 routing: Anthropic LOCKED to Sapphire only. Other agents + pipelines = Gemini -> Groq, no fallback to Claude. Key A: pipeline. Key B: tcf-pipeline.`);
   } else {
     console.warn(`⚠️ [LLM Teams] GROQ_API_KEY_TCF not set — TCF pipeline shares Groq Key A with SS pipeline.`);
   }
@@ -4669,6 +4689,36 @@ async function main() {
                 // tiering already trimming ~22 tools off each call, this fits easily.
                 agentBotLoop.setContextOverrides({ maxRecentMessages: 15, skipSemanticSearch: true });
 
+                // S121: Identity ledger — capture this turn's user message so any
+                // set_piece/create_piece/remove_piece tool calls during this turn can
+                // attribute their entry to the message that triggered them.
+                try {
+                  const { setIdentityLogTrigger } = await import("./tools/sapphire/_ledger");
+                  setIdentityLogTrigger(rawText);
+                } catch { /* best-effort */ }
+
+                // S121: Introspective routing — promote Anthropic to primary for this
+                // turn when the message is introspective / relational / self-reflective.
+                // Reason: Gemini's safety classifier silently zeroes self-modification
+                // language and deep-question framings even at BLOCK_ONLY_HIGH; Claude
+                // doesn't. Failover chain (Anthropic -> Groq -> Gemini) handles 400s.
+                // Non-introspective messages stay on Gemini Flash-Lite for cost.
+                try {
+                  const { scoreIntrospection } = await import("./tools/sapphire/_introspection");
+                  const introspect = scoreIntrospection(rawText);
+                  if (introspect.isIntrospective) {
+                    const sapphireFailover = agentBotLoop.llm as any;
+                    if (sapphireFailover && typeof sapphireFailover.switchPrimary === "function") {
+                      const switched = sapphireFailover.switchPrimary("anthropic");
+                      if (switched) {
+                        console.log(`💎 [Sapphire] Introspective routing -> Claude. Triggers: [${introspect.triggered.join(",")}] score=${introspect.score}`);
+                      }
+                    }
+                  }
+                } catch (e: any) {
+                  console.warn(`[Sapphire] Introspection routing failed: ${e.message} — staying on default LLM`);
+                }
+
                 // Snapshot full tool set so we can restore. Strip PA tools, replace with tier selection.
                 sapphireToolSnapshot = agentBotLoop.snapshotTools();
                 const allCurrent = Array.from(sapphireToolSnapshot.values());
@@ -4682,7 +4732,9 @@ async function main() {
                   "save_family_member","get_family",
                   "create_plan","approve_plan","advance_plan","record_step_result","cancel_plan",
                   "add_news_source","remove_news_source","list_news_sources",
-                  "set_piece","remove_piece","create_piece","list_pieces","view_self_prompt",
+                  "set_piece","remove_piece","create_piece","list_pieces","view_self_prompt","view_identity_history",
+                  "record_followup","list_followups","complete_followup","cancel_followup",
+                  "write_diary_entry","read_diary","read_significance",
                 ]);
                 const nonPATools = allCurrent.filter((t: any) => !PA_TOOL_NAMES.has(t.definition?.name));
                 agentBotLoop.setTools([...nonPATools, ...selection.tools]);

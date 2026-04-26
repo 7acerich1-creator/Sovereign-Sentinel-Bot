@@ -17,6 +17,7 @@
 
 import type { Channel } from "../types";
 import { replyToCommentAsAce } from "./yuki-comment-replier";
+import { voicedDM } from "../channels/agent-voice";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -211,7 +212,7 @@ export async function pollYouTubeComments(
       const replyUrl = `https://www.youtube.com/watch?v=${videoId}&lc=${commentId}`;
       const textPreview = textOriginal.length > 500 ? textOriginal.slice(0, 497) + "..." : textOriginal;
 
-      const msg =
+      const fallbackMsg =
         `🟡 *New YouTube Comment — ${cfg.label}*\n\n` +
         `*Video:* ${videoTitle}\n` +
         `*From:* ${authorName} (${authorHandle})\n` +
@@ -219,8 +220,21 @@ export async function pollYouTubeComments(
         `"${textPreview}"\n\n` +
         `*Reply →* ${replyUrl}`;
 
+      // S121: voice the alert through Yuki's full ddxfish blueprint + clips-namespace recall.
+      // Falls back to fallbackMsg on any failure — alert delivery is non-negotiable.
+      const voicedBody = await voicedDM("yuki", {
+        action: `New YouTube comment landed on the ${cfg.label} channel`,
+        detail: `Video: ${videoTitle}\nFrom: ${authorName} (${authorHandle})\nPublished: ${publishedAt}\nComment: "${textPreview}"\nReply link: ${replyUrl}`,
+        metric: "engaged_views",
+      }, fallbackMsg);
+
+      // Always include the reply link as a hard footer — voiced or not, Ace needs the URL.
+      const finalMsg = voicedBody === fallbackMsg
+        ? voicedBody
+        : `${voicedBody}\n\n*Reply →* ${replyUrl}`;
+
       try {
-        await alerter.sendMessage(chatId, msg, { parseMode: "Markdown" });
+        await alerter.sendMessage(chatId, finalMsg, { parseMode: "Markdown" });
         console.log(`[YTCommentWatcher] alerted via ${opts.alertChannel ? "Yuki" : "primary"}: ${cfg.label} / ${authorName} / ${commentId}`);
       } catch (err: any) {
         console.error(`[YTCommentWatcher] Telegram send failed: ${err.message}`);

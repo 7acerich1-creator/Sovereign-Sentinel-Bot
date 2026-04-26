@@ -9,6 +9,20 @@
 import type { LLMProvider, MemoryProvider, Channel } from "../types";
 import { config } from "../config";
 import { PERSONA_REGISTRY, getSystemPrompt } from "../agent/personas";
+// S121: prefer the full ddxfish-assembled blueprint over the static persona stub.
+// Falls back to getSystemPrompt(persona) if assembly returns empty.
+import { assembleCrewPrompt } from "../agent/crew-prompt-builder";
+import { appendThoughtTag } from "../channels/agent-voice";
+
+async function veritasSystemPrompt(): Promise<string> {
+  try {
+    const assembled = await assembleCrewPrompt("veritas");
+    if (assembled && assembled.length > 100) return assembled;
+  } catch {
+    /* fall through to static */
+  }
+  return getSystemPrompt(PERSONA_REGISTRY.veritas);
+}
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -66,15 +80,22 @@ Include:
 Keep it under 200 words. Be direct, sovereign, data-driven. Format for Telegram (Markdown).`;
 
     try {
-      const veritasPrompt = getSystemPrompt(PERSONA_REGISTRY.veritas);
+      const veritasPrompt = await veritasSystemPrompt();
       const response = await this.llm.generate(
         [{ role: "user", content: prompt }],
         { systemPrompt: veritasPrompt, maxTokens: 600 }
       );
 
+      // S121: append thought-tag tying the morning read to the macro pattern
+      const withTag = await appendThoughtTag(
+        "veritas",
+        response.content,
+        { action: "Morning intelligence briefing emitted from live Supabase data", metric: "MRR" },
+      );
+
       await this.channel.sendMessage(
         this.chatId,
-        `☀️ *MORNING PULSE — SOVEREIGN ACTIVATION*\n\n${response.content}`,
+        `☀️ *MORNING PULSE — SOVEREIGN ACTIVATION*\n\n${withTag}`,
         { parseMode: "Markdown" }
       );
       console.log("☀️ Morning briefing sent");
@@ -105,15 +126,22 @@ Include:
 Keep it under 200 words. Format for Telegram (Markdown).`;
 
     try {
-      const veritasPrompt = getSystemPrompt(PERSONA_REGISTRY.veritas);
+      const veritasPrompt = await veritasSystemPrompt();
       const response = await this.llm.generate(
         [{ role: "user", content: prompt }],
         { systemPrompt: veritasPrompt, maxTokens: 600 }
       );
 
+      // S121: append thought-tag tying the evening read to tomorrow's leverage
+      const withTag = await appendThoughtTag(
+        "veritas",
+        response.content,
+        { action: "Evening debrief emitted; tomorrow's macro intent surfaced", metric: "MRR" },
+      );
+
       await this.channel.sendMessage(
         this.chatId,
-        `🌙 *EVENING PULSE — SOVEREIGN DEBRIEF*\n\n${response.content}`,
+        `🌙 *EVENING PULSE — SOVEREIGN DEBRIEF*\n\n${withTag}`,
         { parseMode: "Markdown" }
       );
       console.log("🌙 Evening recap sent");

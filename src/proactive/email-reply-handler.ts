@@ -18,6 +18,7 @@
 
 import { dispatchTask } from "../agent/crew-dispatch";
 import type { Channel } from "../types";
+import { voicedDM } from "../channels/agent-voice";
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_EMAIL = "Sovereign Synthesis <ace@sovereign-synthesis.com>";
@@ -86,16 +87,22 @@ export async function handleInboundEmail(
 
   const replyId = `reply_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-  // 1. Notify Architect immediately that a reply came in
-  const alertMsg =
+  // 1. Notify Architect immediately that a reply came in — voiced through Anita (S121)
+  const alertFallback =
     `📧 *Inbound Email Reply*\n\n` +
     `*From:* ${from}\n` +
     `*Subject:* ${subject}\n\n` +
     `"${text.slice(0, 500)}${text.length > 500 ? "..." : ""}"\n\n` +
     `_Dispatching to Anita for draft response..._`;
 
+  const alertVoiced = await voicedDM("anita", {
+    action: `Inbound email reply just landed from ${from}`,
+    detail: `Subject: ${subject}\n\nReply text:\n"${text.slice(0, 500)}${text.length > 500 ? "..." : ""}"\n\nDispatching to myself for draft.`,
+    metric: "leads",
+  }, alertFallback);
+
   try {
-    await telegram.sendMessage(chatId, alertMsg, { parseMode: "Markdown" });
+    await telegram.sendMessage(chatId, alertVoiced, { parseMode: "Markdown" });
   } catch (err: any) {
     console.error(`[EmailReply] Telegram alert failed: ${err.message}`);
   }
@@ -166,8 +173,18 @@ export async function storeDraftAndRequestApproval(
 
   pending.draftText = draftText;
 
+  // S121: a short voiced preamble from Anita presenting her own draft.
+  // The structured card below stays mechanical so /approve and /edit remain parseable.
+  const preambleFallback = `_Draft ready for your read — ${pending.to}._`;
+  const preamble = await voicedDM("anita", {
+    action: `My draft reply to ${pending.to} is ready for your read`,
+    detail: `Subject: "${pending.subject}". Draft is shown below the preamble. Awaiting /approve or /edit.`,
+    metric: "leads",
+  }, preambleFallback);
+
   const approvalMsg =
-    `✉️ *Anita's Draft Reply*\n\n` +
+    `${preamble}\n\n` +
+    `✉️ *Draft Reply*\n\n` +
     `*To:* ${pending.to}\n` +
     `*Subject:* ${pending.subject}\n\n` +
     `---\n${draftText}\n---\n\n` +

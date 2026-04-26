@@ -21,6 +21,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { Channel } from "../types";
+import { voicedDM } from "../channels/agent-voice";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -307,15 +308,17 @@ export async function runMilestoneSync(opts: {
     }
   }
 
-  // Optional alert if anything closed
+  // Optional alert if anything closed — voiced through Vector (S121)
   if (closed > 0 && opts.alertChannel && opts.alertChatId) {
     const closures = details.filter((d) => d.startsWith("🎯")).join("\n");
+    const fallback = `🎯 *Milestone closures (${closed})*\n\n${closures}`;
+    const voiced = await voicedDM("vector", {
+      action: `${closed} channel milestone${closed === 1 ? "" : "s"} just closed`,
+      detail: closures,
+      metric: closed === 1 ? "subscribers" : "MRR",
+    }, fallback);
     try {
-      await opts.alertChannel.sendMessage(
-        opts.alertChatId,
-        `🎯 *Milestone closures (${closed})*\n\n${closures}`,
-        { parseMode: "Markdown" },
-      );
+      await opts.alertChannel.sendMessage(opts.alertChatId, voiced, { parseMode: "Markdown" });
     } catch {}
   }
 

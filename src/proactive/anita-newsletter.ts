@@ -14,6 +14,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { Channel } from "../types";
+import { voicedDM, type FactPayload } from "../channels/agent-voice";
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_EMAIL = "Sovereign Synthesis <ace@sovereign-synthesis.com>";
@@ -367,9 +368,12 @@ export async function runWeeklyNewsletterCycle(opts: {
   alertChatId?: string;
   dryRun?: boolean;
 }): Promise<{ status: string; details: string }> {
-  const alert = async (text: string) => {
+  // S121: every alert routes through Anita's voice (ddxfish blueprint + content-namespace
+  // recall). Falls back to the raw `text` on any failure — alert delivery never breaks.
+  const alert = async (text: string, fact?: FactPayload) => {
     if (opts.alertChannel && opts.alertChatId) {
-      try { await opts.alertChannel.sendMessage(opts.alertChatId, text, { parseMode: "Markdown" }); } catch {}
+      const body = fact ? await voicedDM("anita", fact, text) : text;
+      try { await opts.alertChannel.sendMessage(opts.alertChatId, body, { parseMode: "Markdown" }); } catch {}
     }
     console.log(`[AnitaNewsletterCron] ${text.replace(/\n/g, " | ").slice(0, 200)}`);
   };
@@ -377,7 +381,14 @@ export async function runWeeklyNewsletterCycle(opts: {
   // 1. Cap check
   const cap = await getWeeklyCapStatus();
   if (cap.capped) {
-    await alert(`📭 *Anita newsletter — skipped (cap reached)*\nSent ${cap.sends_last_7d}/3 in last 7 days. Next opportunity opens as old sends roll out.`);
+    await alert(
+      `📭 *Anita newsletter — skipped (cap reached)*\nSent ${cap.sends_last_7d}/3 in last 7 days. Next opportunity opens as old sends roll out.`,
+      {
+        action: "Newsletter cycle skipped — weekly send cap reached",
+        detail: `${cap.sends_last_7d}/3 sends in last 7 days. No new issue this cycle.`,
+        metric: "leads",
+      },
+    );
     return { status: "skipped_cap", details: `${cap.sends_last_7d}/3` };
   }
 
@@ -405,7 +416,14 @@ export async function runWeeklyNewsletterCycle(opts: {
     priorIssues,
   });
   if (!composed.ok) {
-    await alert(`⚠️ *Anita newsletter — compose failed*\n${composed.error}`);
+    await alert(
+      `⚠️ *Anita newsletter — compose failed*\n${composed.error}`,
+      {
+        action: "Newsletter compose step failed — Gemini call did not produce a usable issue",
+        detail: `Error: ${composed.error}`,
+        metric: "leads",
+      },
+    );
     return { status: "compose_failed", details: composed.error || "unknown" };
   }
 
@@ -422,20 +440,41 @@ export async function runWeeklyNewsletterCycle(opts: {
     ideasExpounded: ideasExpoundedArr,
   });
   if (!draft.ok || !draft.id) {
-    await alert(`⚠️ *Anita newsletter — draft save failed*\n${draft.error}`);
+    await alert(
+      `⚠️ *Anita newsletter — draft save failed*\n${draft.error}`,
+      {
+        action: "Newsletter draft save failed at the newsletter_issues insert step",
+        detail: `Error: ${draft.error}`,
+        metric: "leads",
+      },
+    );
     return { status: "draft_save_failed", details: draft.error || "unknown" };
   }
 
   // 6. Dry-run exit
   if (opts.dryRun) {
-    await alert(`📝 *Anita newsletter draft saved (dry-run)*\nIssue #${issueNumber}: "${composed.subject}"\n\nNot sent — dry-run mode. Inspect newsletter_issues table.`);
+    await alert(
+      `📝 *Anita newsletter draft saved (dry-run)*\nIssue #${issueNumber}: "${composed.subject}"\n\nNot sent — dry-run mode. Inspect newsletter_issues table.`,
+      {
+        action: `Newsletter issue #${issueNumber} drafted in dry-run mode (not sent)`,
+        detail: `Subject: "${composed.subject}". Available in newsletter_issues for review.`,
+        metric: "leads",
+      },
+    );
     return { status: "draft_only_dryrun", details: `issue ${issueNumber} draft id ${draft.id}` };
   }
 
   // 7. Get recipients
   const recipients = await listNewsletterRecipients();
   if (recipients.length === 0) {
-    await alert(`📭 *Anita newsletter — no recipients*\nIssue #${issueNumber} drafted but \`initiates\` table has 0 valid emails. Draft saved; will not send until audience exists.`);
+    await alert(
+      `📭 *Anita newsletter — no recipients*\nIssue #${issueNumber} drafted but \`initiates\` table has 0 valid emails. Draft saved; will not send until audience exists.`,
+      {
+        action: `Newsletter issue #${issueNumber} drafted but cannot ship — zero recipients in initiates table`,
+        detail: `Issue is saved to newsletter_issues; will hold until at least one valid email exists.`,
+        metric: "leads",
+      },
+    );
     return { status: "no_recipients", details: `issue ${issueNumber} drafted, 0 recipients` };
   }
 
@@ -449,7 +488,14 @@ export async function runWeeklyNewsletterCycle(opts: {
     referenceId: draft.id,
   });
   if (!send.sent) {
-    await alert(`⚠️ *Anita newsletter — send failed*\nIssue #${issueNumber}: ${send.error}`);
+    await alert(
+      `⚠️ *Anita newsletter — send failed*\nIssue #${issueNumber}: ${send.error}`,
+      {
+        action: `Newsletter issue #${issueNumber} failed to ship via Resend`,
+        detail: `Error: ${send.error}`,
+        metric: "leads",
+      },
+    );
     return { status: "send_failed", details: send.error || "unknown" };
   }
 
@@ -460,7 +506,12 @@ export async function runWeeklyNewsletterCycle(opts: {
     `Issue #${issueNumber}: "${composed.subject}"\n` +
     `Recipients: ${recipients.length}\n` +
     `Cap: ${(cap.sends_last_7d ?? 0) + 1}/3 in last 7 days\n` +
-    `Resend ID: \`${send.resendEmailId}\``
+    `Resend ID: \`${send.resendEmailId}\``,
+    {
+      action: `Newsletter issue #${issueNumber} shipped to ${recipients.length} recipient${recipients.length === 1 ? "" : "s"}`,
+      detail: `Subject: "${composed.subject}". Cap usage: ${(cap.sends_last_7d ?? 0) + 1}/3 in last 7 days. Resend ID: ${send.resendEmailId}`,
+      metric: "leads",
+    },
   );
   return { status: "sent", details: `issue ${issueNumber} → ${recipients.length} recipients` };
 }

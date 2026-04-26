@@ -24,6 +24,51 @@
 
 ---
 
+## S122 — Vector daily_metrics_sweep file_briefing gate + hardened directive (2026-04-26 ~19:25 UTC)
+
+**Commit:** `f7ba158` on origin/main (single-file: `src/index.ts`, +59/-27). Railway auto-deploy triggered.
+
+**Symptom Architect saw:** Telegram DM from Vector at 12:01 PM CDT (17:01 UTC): *"The daily CRO metrics sweep is complete, and the findings have been reported to Ace."* — and nothing else. No numbers. No briefing.
+
+**Diagnostic from `crew_dispatch` rows by `to_agent='vector'`:**
+| Date (UTC) | task_type | status | result |
+|---|---|---|---|
+| 2026-04-23 17:00 | daily_metrics_sweep | completed | Full intel report — MRR=$0, Buffer GraphQL diagnosed, Anita+Yuki dispatched, briefing filed. **Worked.** |
+| 2026-04-24 17:00 | daily_metrics_sweep | failed | `⚠️ Agent loop reached maximum iterations without a final response.` |
+| 2026-04-25 17:00 | daily_metrics_sweep | completed | `[Called tool: buffer_analytics({"report":"channel_breakdown"})]` — tool-call trace fragment, no synthesis |
+| 2026-04-26 17:00 | daily_metrics_sweep | completed | The meta-line above. Zero tool calls. |
+
+`SELECT * FROM briefings WHERE agent_name='vector' AND created_at >= NOW() - INTERVAL '36 hours'` → empty. Vector did NOT call `file_briefing` once in the last day-and-a-half.
+
+**Root cause (architectural, not a one-off glitch):**
+- Directive ended with `"Report findings to the Architect via Telegram"`.
+- There is **no `dm_architect` / `send_telegram_message` tool** in the codebase.
+- The agent loop's `sendMessage` ToolContext at `src/agent/loop.ts:361-364` is a stub that just `console.log`s.
+- The dispatch poller at `src/index.ts:5043` writes the response to `crew_dispatch.result` and never sends it to Telegram.
+- The ONLY mechanical path from Vector → Architect's inbox is `file_briefing` (writes to `briefings` table → MC surfaces).
+- Gemini Flash Lite (current default for crew, Anthropic credits drained per S115) progressively shortcut the inference. 04-23 inferred the contract correctly. By 04-26, it returned a meta-narration with no tool calls.
+
+**Two fixes shipped this session:**
+
+1. **Hardened directive (lines ~2191-2204).** Replaced the soft `"Report findings to the Architect via Telegram"` with an explicit MANDATORY tool sequence: stripe_metrics + 3× buffer_analytics + file_briefing (step 7 explicit, including title/briefing_type/priority/body parameters). Final-message contract: must be exactly `✅ Briefing filed: <briefing_id>` — nothing else. Enumerated failure modes ((a) skip any tool call, (b) skip file_briefing, (c) return meta-narration). The "no dm_architect tool exists" fact is now in the directive itself so Vector can't infer otherwise.
+
+2. **Server-side `file_briefing` gate (lines ~5042-5063).** Added `BRIEFING_GATED_TASKS = new Set(["daily_metrics_sweep"])`. If the task is gated and the response doesn't contain `"✅ Briefing filed"` (the success marker emitted by the FileBriefingTool at `src/tools/action-surface.ts:274`), force `dispatchStatus = "failed"`. Surfaces the silent failure as a real failure instead of letting the meta-line masquerade as a green dispatch. Other gated task types can be added as their directives harden to the same contract.
+
+**Backfill:** Inserted `crew_dispatch` row `4202f13f-c0e0-4e2b-9f1e-fed9e75b4ac6` at 19:27 UTC with the new hardened directive text inline so today's metrics get reported.
+
+**Verification:**
+- `npx tsc --noEmit` — exit 0, zero output.
+- `git status --short` — only `src/index.ts` staged. Parallel session's orphan mods on `faceless-factory.ts`, `script-uniqueness-guard.ts`, `sapphire/_router.ts`, `sapphire/index.ts`, `sapphire/roster.ts` left untouched per `feedback_orphan_files_break_railway`.
+- Single-file commit. No `git add .` from sandbox per `feedback_crlf_noise_is_not_a_real_diff`.
+- `git push origin main` exit 0. `78a0150..f7ba158`.
+- Pipeline quiet at push time (`vid_rush_queue` 4h window: empty).
+
+**The pattern this fix establishes:** any directive that says "report" or "DM" without naming the EXACT tool that does it is a hallucination trap when the model is on Gemini Flash Lite. Audit pass surfaced one current offender (Vector's was the only one). The gate set `BRIEFING_GATED_TASKS` is the enforcement primitive — when other directives harden to the same contract, add the task_type to the set.
+
+**Open:** Verify the backfill dispatch produced a real briefing (poll `crew_dispatch.result` for `4202f13f`). If Vector still shortcuts under the new directive, the gate will catch it as failed and we know the directive alone isn't sufficient — model swap or tool-call-required instruction at the LLM-provider level (function-calling `tool_choice: required`) is the next escalation.
+
+---
+
 ## S120 AUDIT — Sapphire Upgrade Verification (2026-04-26)
 
 **No commits made this session. The four specified fixes were already live in HEAD.**

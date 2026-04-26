@@ -75,7 +75,9 @@
       "text": "#1a1a2e",
       "text-dim": "#555555",
       "border": "#ddd8d0",
-      "_notes": "Landing page light mode override. Same accents apply."
+      "_notes": "CANONICAL — this is the consumer-facing default for ALL of sovereign-synthesis.com (emails, sales pages, member portal, diagnostics). Anything a buyer touches uses these tokens.",
+      "is_consumer_default": true,
+      "applies_to": ["emails","sales pages","diagnostics","member portal","public landing"]
     }
   },
 

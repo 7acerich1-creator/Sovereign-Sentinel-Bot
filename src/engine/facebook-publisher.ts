@@ -7,9 +7,21 @@
  *   FACEBOOK_PAGE_ID              — Sovereign Synthesis page ID (1064072003457963)
  *   FACEBOOK_CF_PAGE_ACCESS_TOKEN — The Containment Field page token
  *   FACEBOOK_CF_PAGE_ID           — The Containment Field page ID (987809164425935)
+ *
+ * Optional env (S118c — Planner-staged hybrid):
+ *   FACEBOOK_PLANNER_LEAD_MIN     — minutes ahead to schedule each post in
+ *                                    Business Suite Planner instead of live.
+ *                                    `0` or unset = live publishing (legacy).
+ *                                    Recommended: 15 — gives a veto window
+ *                                    where every bot post lands in Planner
+ *                                    inbox where the Architect can review,
+ *                                    edit, or cancel before auto-publish.
+ *                                    Min effective value 11 (Meta requires
+ *                                    scheduled_publish_time > 10 min ahead).
  */
 
 const FB_API = "https://graph.facebook.com/v25.0";
+const META_MIN_SCHEDULE_LEAD_MIN = 11; // Meta requires > 10 min lead
 
 export type FacebookBrand = "sovereign_synthesis" | "containment_field";
 
@@ -17,6 +29,29 @@ interface FacebookPostResult {
   success: boolean;
   postId?: string;
   error?: string;
+  /** True when this post was staged in Planner instead of going live. */
+  scheduled?: boolean;
+  /** Unix timestamp (seconds) when the staged post will auto-publish. */
+  scheduledFor?: number;
+}
+
+/**
+ * S118c — Resolve the scheduled_publish_time to use for this call.
+ * Priority: per-call override > FACEBOOK_PLANNER_LEAD_MIN env > live.
+ * Returns null when posting should go LIVE; otherwise a unix timestamp (seconds).
+ * Always clamped to >= now + META_MIN_SCHEDULE_LEAD_MIN to avoid Meta's reject.
+ */
+function resolveScheduledTime(perCallOverride?: number): number | null {
+  // Explicit per-call value wins
+  if (typeof perCallOverride === "number" && perCallOverride > 0) {
+    const minTs = Math.floor(Date.now() / 1000) + META_MIN_SCHEDULE_LEAD_MIN * 60;
+    return Math.max(perCallOverride, minTs);
+  }
+  // Env default
+  const envMin = Number(process.env.FACEBOOK_PLANNER_LEAD_MIN || 0);
+  if (!envMin || envMin <= 0) return null; // Live mode
+  const effectiveLead = Math.max(envMin, META_MIN_SCHEDULE_LEAD_MIN);
+  return Math.floor(Date.now() / 1000) + effectiveLead * 60;
 }
 
 function getPageCredentials(brand: FacebookBrand): { token: string; pageId: string } | null {
@@ -80,10 +115,21 @@ async function resolvePageAccessToken(seedToken: string, pageId: string): Promis
 /**
  * Publish a text post (with optional link) to a Facebook Page.
  * Brand parameter selects the target page (defaults to sovereign_synthesis).
+ *
+ * S118c — When `scheduledPublishTime` is set OR `FACEBOOK_PLANNER_LEAD_MIN`
+ * env is > 0, the post is staged in Business Suite Planner instead of going
+ * live. The Architect can review/edit/cancel from `business.facebook.com`
+ * before the scheduled time. Same return shape; `scheduled: true` is set.
  */
 export async function publishToFacebook(
   text: string,
-  options?: { link?: string; imageUrl?: string; brand?: FacebookBrand }
+  options?: {
+    link?: string;
+    imageUrl?: string;
+    brand?: FacebookBrand;
+    /** Unix timestamp (seconds). Overrides FACEBOOK_PLANNER_LEAD_MIN env. */
+    scheduledPublishTime?: number;
+  }
 ): Promise<FacebookPostResult> {
   const brand = options?.brand || "sovereign_synthesis";
   const creds = getPageCredentials(brand);
@@ -101,6 +147,9 @@ export async function publishToFacebook(
   // calling /PAGE_ID/feed. Cached per pageId for 24h. Fallback-safe.
   const token = await resolvePageAccessToken(seedToken, pageId);
 
+  // S118c: Resolve scheduled-publish timestamp (null = live mode).
+  const scheduledFor = resolveScheduledTime(options?.scheduledPublishTime);
+
   try {
     // S115c: Detect video URLs (.mp4, .mov, .webm, etc.) and route to /videos
     // instead of /photos. Prior to this fix, content_engine_queue rows with
@@ -110,9 +159,9 @@ export async function publishToFacebook(
       const lowerUrl = options.imageUrl.toLowerCase().split("?")[0];
       const videoExts = [".mp4", ".mov", ".webm", ".m4v", ".avi"];
       if (videoExts.some(ext => lowerUrl.endsWith(ext))) {
-        return await postVideo(pageId, token, text, options.imageUrl);
+        return await postVideo(pageId, token, text, options.imageUrl, scheduledFor, brand);
       }
-      return await postPhoto(pageId, token, text, options.imageUrl);
+      return await postPhoto(pageId, token, text, options.imageUrl, scheduledFor, brand);
     }
 
     const body: Record<string, string> = {
@@ -124,6 +173,11 @@ export async function publishToFacebook(
       body.link = options.link;
     }
 
+    if (scheduledFor !== null) {
+      body.published = "false";
+      body.scheduled_publish_time = String(scheduledFor);
+    }
+
     const res = await fetch(`${FB_API}/${pageId}/feed`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -133,8 +187,13 @@ export async function publishToFacebook(
     const data = (await res.json()) as any;
 
     if (data.id) {
-      console.log(`✅ [FacebookPublisher] Posted to ${brand}: ${data.id}`);
-      return { success: true, postId: data.id };
+      const mode = scheduledFor !== null
+        ? `🗓️ STAGED in Planner for ${new Date(scheduledFor * 1000).toISOString()}`
+        : `✅ Posted live`;
+      console.log(`${mode} to ${brand}: ${data.id}`);
+      return scheduledFor !== null
+        ? { success: true, postId: data.id, scheduled: true, scheduledFor }
+        : { success: true, postId: data.id };
     }
 
     const errCode = data.error?.code || "unknown";
@@ -150,18 +209,26 @@ export async function publishToFacebook(
 
 /**
  * Post a photo with caption to the Page.
+ * S118c — When `scheduledFor` is provided, the photo is staged in Planner.
  */
 async function postPhoto(
   pageId: string,
   token: string,
   caption: string,
-  imageUrl: string
+  imageUrl: string,
+  scheduledFor: number | null = null,
+  brand: FacebookBrand = "sovereign_synthesis"
 ): Promise<FacebookPostResult> {
-  const body = {
+  const body: Record<string, string> = {
     url: imageUrl,
     message: caption,
     access_token: token,
   };
+
+  if (scheduledFor !== null) {
+    body.published = "false";
+    body.scheduled_publish_time = String(scheduledFor);
+  }
 
   const res = await fetch(`${FB_API}/${pageId}/photos`, {
     method: "POST",
@@ -173,8 +240,13 @@ async function postPhoto(
 
   if (data.id || data.post_id) {
     const id = data.post_id || data.id;
-    console.log(`✅ [FacebookPublisher] Photo posted: ${id}`);
-    return { success: true, postId: id };
+    const mode = scheduledFor !== null
+      ? `🗓️ STAGED Photo in Planner for ${new Date(scheduledFor * 1000).toISOString()}`
+      : `✅ Photo posted live`;
+    console.log(`${mode} to ${brand}: ${id}`);
+    return scheduledFor !== null
+      ? { success: true, postId: id, scheduled: true, scheduledFor }
+      : { success: true, postId: id };
   }
 
   const errCode = data.error?.code || "unknown";
@@ -188,18 +260,26 @@ async function postPhoto(
  * S115c — Post a video with description to the Page via /PAGE_ID/videos endpoint.
  * Accepts a hosted file_url (R2 .mp4 in our case). FB pulls the file server-side
  * and auto-generates a thumbnail from frame 0. Returns the video ID + post ID.
+ * S118c — When `scheduledFor` is provided, the video is staged in Planner.
  */
 async function postVideo(
   pageId: string,
   token: string,
   description: string,
-  videoUrl: string
+  videoUrl: string,
+  scheduledFor: number | null = null,
+  brand: FacebookBrand = "sovereign_synthesis"
 ): Promise<FacebookPostResult> {
-  const body = {
+  const body: Record<string, string> = {
     file_url: videoUrl,
     description,
     access_token: token,
   };
+
+  if (scheduledFor !== null) {
+    body.published = "false";
+    body.scheduled_publish_time = String(scheduledFor);
+  }
 
   const res = await fetch(`${FB_API}/${pageId}/videos`, {
     method: "POST",
@@ -210,8 +290,13 @@ async function postVideo(
   const data = (await res.json()) as any;
 
   if (data.id) {
-    console.log(`✅ [FacebookPublisher] Video posted: ${data.id}`);
-    return { success: true, postId: data.id };
+    const mode = scheduledFor !== null
+      ? `🗓️ STAGED Video in Planner for ${new Date(scheduledFor * 1000).toISOString()}`
+      : `✅ Video posted live`;
+    console.log(`${mode} to ${brand}: ${data.id}`);
+    return scheduledFor !== null
+      ? { success: true, postId: data.id, scheduled: true, scheduledFor }
+      : { success: true, postId: data.id };
   }
 
   const errCode = data.error?.code || "unknown";

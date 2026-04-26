@@ -84,6 +84,7 @@ import { pollBlueskyReplies } from "./proactive/yuki-bluesky-replier";
 import { runBlueskyHookDrops } from "./proactive/yuki-bluesky-hook-dropper";
 import { handleInboundEmail, sendApprovedReply, getPendingReplies } from "./proactive/email-reply-handler";
 import { runWeeklyNewsletterCycle } from "./proactive/anita-newsletter";
+import { runMilestoneSync } from "./proactive/milestone-sync";
 import { YouTubeCommentTool, postDiagnosticComment } from "./tools/youtube-comment-tool";
 
 // ── Content Engine ──
@@ -2694,6 +2695,33 @@ async function main() {
 
   console.log("📧 [AnitaNewsletter] Scheduled: Sunday 14:00 UTC weekly (S117)");
 
+  // ── Milestone Sync — every 6h, offset 30 min from YT stats fetcher ────
+  // S117 (2026-04-25). Patches channel_milestones.current_value from live
+  // data sources (YT Data API for subs, youtube_analytics for watch_hours
+  // + video views, initiates for cross-traffic leads). Auto-flips status
+  // to 'achieved' and activates next sub-milestone when target reached.
+  // First run 4 min after boot so the YT stats fetcher gets a head start.
+  scheduler.add({
+    name: "Milestone Sync",
+    intervalMs: 6 * 60 * 60_000,
+    nextRun: new Date(Date.now() + 4 * 60_000),
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      try {
+        const vectorChannel = agentLoops.get("vector")?.channel;
+        await runMilestoneSync({
+          alertChannel: vectorChannel || telegram,
+          alertChatId: defaultChatId,
+        });
+      } catch (err: any) {
+        console.error(`[MilestoneSync] sweep failed: ${err.message}`);
+      }
+    },
+  });
+
+  console.log("🎯 [MilestoneSync] Scheduled: every 6h (S117) — patches channel_milestones live");
+
   // ── Yuki Shorts Pinner — auto-post diagnostic comment on every new Short ──
   // S117 (2026-04-25). Closes the engagement gap on Shorts: the comment
   // watcher only sees REPLIES to existing comments, not new uploads. This
@@ -4060,6 +4088,31 @@ async function main() {
       console.error(`❌ [PersonalityLoader] Bundled JSON failed: ${err.message}`);
     }
 
+    // S117: ddxfish pattern — for the 5 non-Sapphire crew bots, OVERRIDE the
+    // static blueprint with the runtime-assembled prompt from per-bot pieces
+    // libraries + bot_active_state selections. Sapphire keeps her own
+    // per-turn assembler (sapphire-prompt-builder.ts). See
+    // MAVEN-CREW-DIRECTIVES.md §1.3 + src/agent/crew-prompt-builder.ts.
+    try {
+      const { assembleCrewPrompt } = await import("./agent/crew-prompt-builder");
+      const CREW_DDXFISH = ["veritas", "yuki", "alfred", "anita", "vector"] as const;
+      for (const agent of CREW_DDXFISH) {
+        try {
+          const assembled = await assembleCrewPrompt(agent);
+          if (assembled && assembled.length > 100 && personalityMap[agent]) {
+            personalityMap[agent].prompt_blueprint = assembled;
+            console.log(`🧬 [CrewPromptBuilder] ${agent}: assembled ${assembled.length} chars from pieces (overriding personalities.json)`);
+          } else {
+            console.warn(`⚠️ [CrewPromptBuilder] ${agent}: assembled prompt too short (${assembled.length} chars) — keeping personalities.json fallback`);
+          }
+        } catch (innerErr: any) {
+          console.warn(`⚠️ [CrewPromptBuilder] ${agent} assembly failed: ${innerErr.message} — keeping personalities.json fallback`);
+        }
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ [CrewPromptBuilder] Module import failed: ${err.message} — all crew bots use personalities.json`);
+    }
+
     // SUPABASE HOT-UPDATE DISABLED — Session 28 root cause analysis:
     // The personality_config table still had the OLD 18-20K char bloated prompts.
     // Every boot cycle, lean bundled JSON (~1.6K) loaded first, then Supabase
@@ -4161,6 +4214,13 @@ async function main() {
         const BRIEFING_AGENTS = ["sapphire", "vector", "veritas"];
         if (BRIEFING_AGENTS.includes(agentCfg.name)) {
           agentTools.push(new FileBriefingTool(agentCfg.name));
+        }
+
+        // S117: Memetic Trigger Judge — Yuki + Alfred quality gate before
+        // posting/emitting. See MAVEN-CREW-DIRECTIVES.md §4.7 + §5.7.
+        if (agentCfg.name === "yuki" || agentCfg.name === "alfred") {
+          const { MemeticTriggerJudgeTool } = await import("./tools/memetic-trigger-judge");
+          agentTools.push(new MemeticTriggerJudgeTool());
         }
 
         // Yuki gets the YouTube comment tool for engagement automation

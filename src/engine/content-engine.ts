@@ -771,18 +771,24 @@ ${platforms.map((p) => `  "${p}": "Platform-adapted version for ${p}"`).join(",\
  * DAILY CONTENT PRODUCTION — runs once early morning.
  * Generates 6 time slots × 2 brands = 12 content pieces.
  * Stores in content_engine_queue table for the distribution job.
+ *
+ * S118d — `daysAhead` (default 1) controls how many days forward we generate.
+ * Set `FACEBOOK_PLANNER_DAYS_AHEAD=7` (or pass explicitly) to fill the whole
+ * upcoming week so `prestageFacebookSweep()` has rows to stage in Planner.
+ * The dedup check (existing rows for the same brand/slot/date are skipped)
+ * keeps re-runs cheap. Weekend days inside the window are skipped — they
+ * route through `queueWeekendReposts()` on their own day.
  */
-export async function dailyContentProduction(llm: LLMProvider, force = false): Promise<number> {
-  console.log(`🚀 [ContentEngine] Daily content production starting...${force ? " (FORCE — bypassing date check)" : ""}`);
-
-  const today = new Date();
-  const dayOfWeek = today.getDay();
-
-  // Weekend = repost top performers (skip generation)
-  if (dayOfWeek === 0 || dayOfWeek === 6) {
-    console.log("📊 [ContentEngine] Weekend — queueing top performer reposts instead of new content");
-    return await queueWeekendReposts();
-  }
+export async function dailyContentProduction(
+  llm: LLMProvider,
+  force = false,
+  daysAhead?: number
+): Promise<number> {
+  const envDays = Number(process.env.FACEBOOK_PLANNER_DAYS_AHEAD || 0);
+  const horizon = Math.max(1, Math.min(daysAhead || envDays || 1, 14)); // cap at 14d for sanity
+  console.log(
+    `🚀 [ContentEngine] Daily content production starting (horizon=${horizon}d)${force ? " (FORCE — bypassing date check)" : ""}`
+  );
 
   let channelMap: BrandChannelMap;
   try {
@@ -793,7 +799,28 @@ export async function dailyContentProduction(llm: LLMProvider, force = false): P
   }
 
   let generated = 0;
-  const dateStr = today.toISOString().split("T")[0]; // YYYY-MM-DD
+
+  for (let dayOffset = 0; dayOffset < horizon; dayOffset++) {
+    const today = new Date();
+    today.setUTCDate(today.getUTCDate() + dayOffset);
+    today.setUTCHours(0, 0, 0, 0);
+    const dayOfWeek = today.getUTCDay();
+
+    // Weekend = repost top performers — only handle "today" weekends here so
+    // we don't shadow the dedicated weekend job. Future-day weekends inside
+    // the horizon are simply skipped (the regular weekend job will handle them
+    // on the day-of).
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      if (dayOffset === 0) {
+        console.log("📊 [ContentEngine] Today is weekend — queueing top performer reposts");
+        generated += await queueWeekendReposts();
+      } else {
+        console.log(`📅 [ContentEngine] Skipping weekend day +${dayOffset} (handled by weekend job)`);
+      }
+      continue;
+    }
+
+    const dateStr = today.toISOString().split("T")[0]; // YYYY-MM-DD
 
   for (const brand of BRANDS) {
     // Each brand gets its own niche for the day (independent rotation)
@@ -869,8 +896,9 @@ export async function dailyContentProduction(llm: LLMProvider, force = false): P
       }
     }
   }
+  } // close horizon (dayOffset) loop
 
-  console.log(`🏁 [ContentEngine] Daily production complete: ${generated} pieces generated`);
+  console.log(`🏁 [ContentEngine] Daily production complete: ${generated} pieces generated across ${horizon}d horizon`);
   return generated;
 }
 
@@ -1162,6 +1190,103 @@ export async function distributionSweep(): Promise<number> {
   }
 
   return posted;
+}
+
+/**
+ * S118d — FB PLANNER PRE-STAGING SWEEP
+ *
+ * Picks up FUTURE-scheduled CEQ rows (status=ready, scheduled_time > now+11min,
+ * scheduled_time < now+7d, image ready, FB not yet handled) and pre-stages them
+ * in Business Suite Planner with `scheduled_publish_time = ceq.scheduled_time`.
+ *
+ * Effect: when the bot generates a row at 09:00 UTC for a 15:00 UTC slot, this
+ * pass stages the FB version in Planner immediately with publish_time=15:00 UTC.
+ * The Architect sees the whole pipeline laid out in Planner ahead of time and
+ * can review/edit/cancel any post before it auto-publishes.
+ *
+ * Marks `buffer_results` with `✅ facebook_direct(facebook_direct): {postId} STAGED for {iso}`
+ * so the daily distribution sweep's `alreadyHandled` set skips FB at fire time.
+ *
+ * Skips rows without `media_url` to avoid staging text-only when an image is
+ * still pending from FLUX. When FLUX populates the column, the next sweep picks
+ * the row up and stages with image attached.
+ *
+ * Idempotent: running this twice on the same row is a no-op because the second
+ * pass sees `facebook_direct` in `buffer_results` and skips.
+ *
+ * Returns the number of rows staged this run.
+ */
+export async function prestageFacebookSweep(): Promise<number> {
+  // Honor the same env switch as live publishing — if Planner mode is OFF
+  // (FACEBOOK_PLANNER_LEAD_MIN=0 or unset), this whole pass is disabled and
+  // the legacy "post live at scheduled_time" path takes over.
+  const plannerLead = Number(process.env.FACEBOOK_PLANNER_LEAD_MIN || 0);
+  if (!plannerLead || plannerLead <= 0) {
+    return 0;
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const minTs = nowSec + 11 * 60; // Meta minimum lead
+  const maxTs = nowSec + 7 * 24 * 60 * 60; // 7 days out
+  const minIso = new Date(minTs * 1000).toISOString();
+  const maxIso = new Date(maxTs * 1000).toISOString();
+
+  // Pull rows whose time falls in (now+11min, now+7d), ready, with image present
+  const candidates = await supabaseQuery(
+    "content_engine_queue",
+    `status=eq.ready&scheduled_time=gt.${minIso}&scheduled_time=lt.${maxIso}` +
+      `&media_url=not.is.null&order=scheduled_time.asc&limit=24`
+  );
+
+  if (!candidates || candidates.length === 0) return 0;
+
+  let staged = 0;
+  for (const draft of candidates) {
+    // Skip rows where FB has already been handled (idempotency)
+    const priorResults: string = draft.buffer_results || "";
+    if (priorResults.includes("facebook_direct(facebook_direct)")) continue;
+
+    const brand = draft.brand as "sovereign_synthesis" | "containment_field";
+    const variants: Record<string, string> = draft.platform_variants || {};
+    const fbText = variants["facebook"] || draft.universal_text || "";
+    if (!fbText) continue;
+
+    const scheduledTs = Math.floor(new Date(draft.scheduled_time).getTime() / 1000);
+
+    try {
+      const result = await publishToFacebook(fbText, {
+        imageUrl: draft.media_url || undefined,
+        brand,
+        scheduledPublishTime: scheduledTs,
+      });
+
+      const stagedFor = result.scheduledFor
+        ? new Date(result.scheduledFor * 1000).toISOString()
+        : new Date(scheduledTs * 1000).toISOString();
+      const newLine = result.success
+        ? `✅ facebook_direct(facebook_direct): ${result.postId} STAGED for ${stagedFor}`
+        : `❌ facebook_direct(facebook_direct): ${result.error} (pre-stage)`;
+
+      const updatedResults = priorResults
+        ? `${priorResults}\n${newLine}`
+        : newLine;
+
+      await supabasePatch("content_engine_queue", draft.id, {
+        buffer_results: updatedResults,
+      });
+
+      if (result.success) staged++;
+      console.log(
+        `🗓️ [ContentEngine] Pre-staged FB ${brand}/${draft.time_slot} for ${stagedFor} → ${result.postId || result.error}`
+      );
+    } catch (err: any) {
+      console.error(
+        `[ContentEngine] Pre-stage failed for ${draft.id}: ${err.message}`
+      );
+    }
+  }
+
+  return staged;
 }
 
 /**

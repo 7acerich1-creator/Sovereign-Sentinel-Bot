@@ -88,7 +88,7 @@ import { runMilestoneSync } from "./proactive/milestone-sync";
 import { YouTubeCommentTool, postDiagnosticComment } from "./tools/youtube-comment-tool";
 
 // ── Content Engine ──
-import { dailyContentProduction, distributionSweep, draftAutoPublisher, fluxBatchImageGen, contentEngineStatus, discoverChannels, nukeBufferQueue } from "./engine/content-engine";
+import { dailyContentProduction, distributionSweep, draftAutoPublisher, fluxBatchImageGen, contentEngineStatus, discoverChannels, nukeBufferQueue, prestageFacebookSweep } from "./engine/content-engine";
 import { warmChannelCache } from "./engine/buffer-graphql";
 import { drainBacklog } from "./engine/backlog-drainer";
 
@@ -2514,7 +2514,28 @@ async function main() {
     },
   });
 
-  console.log("⚡ [ContentEngine] Scheduled: Production 18:30 UTC, Sweep 12:00+19:00 UTC, Drain 20:00 UTC.");
+  // S118d — FB Planner pre-stage sweep. Runs every 30 min. Picks up future-
+  // scheduled CEQ rows with images ready and stages them in Business Suite
+  // Planner. Disabled when FACEBOOK_PLANNER_LEAD_MIN=0/unset.
+  scheduler.add({
+    name: "FB Planner Pre-Stage Sweep (30m)",
+    intervalMs: 30 * 60 * 1000,
+    nextRun: new Date(Date.now() + 5 * 60 * 1000), // first run 5 min after boot
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      try {
+        const staged = await prestageFacebookSweep();
+        if (staged > 0) {
+          console.log(`🗓️ [ContentEngine] Pre-staged ${staged} FB post(s) in Planner`);
+        }
+      } catch (err: any) {
+        console.error(`[ContentEngine] FB pre-stage sweep failed: ${err.message}`);
+      }
+    },
+  });
+
+  console.log("⚡ [ContentEngine] Scheduled: Production 18:30 UTC, Sweep 12:00+19:00 UTC, Drain 20:00 UTC, FB Planner pre-stage every 30m.");
 
   // SESSION 104: Draft Auto-Publisher — promotes agent content_drafts to distribution queue.
   // Runs every 4h. Picks up social-type drafts (caption, social_post, post, tweet, hook)

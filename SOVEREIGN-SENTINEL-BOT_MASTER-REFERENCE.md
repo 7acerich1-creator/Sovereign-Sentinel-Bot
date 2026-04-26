@@ -36,9 +36,28 @@ MC side closed the user-facing audit (Tally URL gate, Tier-2 PDFs, nurture-05 pa
 4. **FB direct publishing — token scopes problem CONFIRMED.** Pulled live `content_engine_queue.buffer_results` for last 24h: every FB-direct attempt failing with `(#200) ... pages_read_engagement and pages_manage_posts ...`. The S115b `resolvePageAccessToken` exchange logic is correct but requires the seed token to already have `pages_read_engagement` to even GET a Page Access Token — without that scope, exchange falls back silently to the seed token, which then fails to post. Fix is NOT code: regenerate FB seed tokens with proper scopes via Graph API Explorer → System User flow → update `FACEBOOK_PAGE_ACCESS_TOKEN` + `FACEBOOK_CF_PAGE_ACCESS_TOKEN` Railway env vars. Requires Architect at the Meta Console — Chrome session staged this turn.
 
 **What's still open at session close:**
-- Architect token regen for FB (browser pre-staged at `developers.facebook.com/tools/explorer/`)
 - Master reference cleanup of 4 untracked junk files in repo root (`-90`, `@sovereign_synthesis`, `_thumbnail_test_S117/`, `blank`) — gitignore candidates
 - Three MC dashboard tiles per `proposals/MC-DASHBOARD-TILE-PLAN.md` (carry-over from S115c — next MC mount)
+
+## S118b — FB Token Permanent Fix (2026-04-25, ~04:14 UTC 04/26)
+
+**Problem:** FB direct posting broke 3 times in 4 weeks. S115b shipped the page-token exchange resolver in `facebook-publisher.ts`, but the seed token in Railway was a SHORT-LIVED User token from Graph API Explorer — which expires in 1-2h, takes its derived Page tokens with it, and rotates whenever Meta does any security action.
+
+**Diagnosis:** Pulled live `content_engine_queue.buffer_results` for last 24h. Every FB-direct attempt failing with `(#200) ... pages_read_engagement and pages_manage_posts ...`. The exchange logic was running correctly but falling back to the seed token because the seed itself lacked `pages_read_engagement` (required to even GET a Page Access Token).
+
+**Permanent fix shipped this session:**
+1. Discovered `content bot` System User already exists in "The Containment Field" Business portfolio (`business_id=1671038527580262`, `system_user_id=61572040423390`) with both Pages assigned ("Partial access (Content)") and the "Sovereign synthesis publisher" app at Full control.
+2. Generated a NEVER-EXPIRING System User token via `business.facebook.com/latest/settings/system_users` → Generate token → "Never" expiration → 5 default scopes (including `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `pages_manage_metadata`, `pages_read_user_content`).
+3. Used the System User token to call `/PAGE_ID?fields=access_token` for both Pages. The returned per-Page tokens are page-scoped AND inherit the System User's never-expiring property.
+4. Updated Railway env vars `FACEBOOK_PAGE_ACCESS_TOKEN` (SS) and `FACEBOOK_CF_PAGE_ACCESS_TOKEN` (CF) with the permanent tokens. Railway redeployed (active: "S118 close note in master reference" — env-var-triggered rebuild).
+
+**Verification:**
+- Both tokens authenticate as their Pages (not as user) when calling `/me`
+- Both can read their own feeds successfully
+- All publishing scopes granted on the System User token
+- Permanent tokens are now live in Railway
+
+**Why this won't break again:** System User tokens don't depend on a user session, don't expire on a schedule, and don't rotate on password resets or Meta security actions. The only way they break is if the System User loses Page access or the App is uninstalled — both intentional admin actions. Full diagnostic + regen runbook in memory file `reference_fb_system_user_token.md`.
 
 ---
 

@@ -22,7 +22,9 @@ export interface AgentIdentity {
 }
 
 export class AgentLoop {
-  private llm: LLMProvider;
+  // S121: Made public so the Sapphire DM block in index.ts can call
+  // switchPrimary() on the underlying FailoverLLM for introspective routing.
+  public llm: LLMProvider;
   private tools: Map<string, Tool>;
   private memoryProviders: MemoryProvider[];
   private llmProviders: Map<string, LLMProvider> = new Map();

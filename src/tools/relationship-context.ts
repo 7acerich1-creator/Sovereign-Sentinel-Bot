@@ -105,6 +105,28 @@ export class RelationshipContextTool implements Tool {
       const isNovelCategory = !RECOMMENDED_CATEGORIES.includes(category);
       const flair = isNovelCategory ? " (novel category)" : "";
       console.log(`💎 [RelContext] Sapphire noted${flair}: [${category}] ${observation}`);
+
+      // S121: Pinecone deepening — embed every observation into sapphire-personal
+      // with rich metadata so semantic recall can filter by category/sentiment/scenario.
+      // Fire-and-forget — never blocks the tool reply.
+      (async () => {
+        try {
+          const { upsertSapphireObservation, inferSentiment } = await import("./sapphire/_pinecone");
+          const ts = new Date().toISOString();
+          const sentiment = inferSentiment(observation);
+          const id = `relctx:${ts.replace(/[^0-9]/g, "")}_${category}`;
+          await upsertSapphireObservation(id, observation, {
+            type: "relationship_context",
+            category,
+            sentiment,
+            scenario: "observation",
+            timestamp: ts,
+          });
+        } catch (err: any) {
+          console.warn(`[RelContext] Pinecone embed failed: ${err.message}`);
+        }
+      })();
+
       return `Observation recorded: [${category}] ${observation}`;
     } catch (err: any) {
       return `Relationship context error: ${err.message}`;

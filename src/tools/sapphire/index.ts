@@ -13,7 +13,9 @@ import { ResearchBriefTool } from "./research";
 import { SaveFamilyMemberTool, GetFamilyTool } from "./family";
 import { CreatePlanTool, ApprovePlanTool, AdvancePlanTool, RecordStepResultTool, CancelPlanTool } from "./planner";
 import { AddNewsSourceTool, RemoveNewsSourceTool, ListNewsSourcesTool } from "./news";
-import { SetPieceTool, RemovePieceTool, CreatePieceTool, ListPiecesTool, ViewSelfPromptTool } from "./self_mod";
+import { SetPieceTool, RemovePieceTool, CreatePieceTool, ListPiecesTool, ViewSelfPromptTool, ViewIdentityHistoryTool } from "./self_mod";
+import { RecordFollowupTool, ListFollowupsTool, CompleteFollowupTool, CancelFollowupTool } from "./followups";
+import { WriteDiaryEntryTool, ReadDiaryTool, ReadSignificanceTool } from "./diary";
 import type { Tool } from "../../types";
 
 export {
@@ -50,6 +52,14 @@ export {
   CreatePieceTool,
   ListPiecesTool,
   ViewSelfPromptTool,
+  ViewIdentityHistoryTool,
+  RecordFollowupTool,
+  ListFollowupsTool,
+  CompleteFollowupTool,
+  CancelFollowupTool,
+  WriteDiaryEntryTool,
+  ReadDiaryTool,
+  ReadSignificanceTool,
 };
 
 // ── Bundle factory — returns all 27 PA tools ───────────────────────────────
@@ -93,11 +103,21 @@ export function buildSapphirePATools(): Tool[] {
     new AddNewsSourceTool(),
     new RemoveNewsSourceTool(),
     new ListNewsSourcesTool(),
-    // Self-modification meta tools (5) — S114u ddxfish pattern
+    // Self-modification meta tools (6) — S114u ddxfish pattern + S121 identity ledger
     new SetPieceTool(),
     new RemovePieceTool(),
     new CreatePieceTool(),
     new ListPiecesTool(),
     new ViewSelfPromptTool(),
+    new ViewIdentityHistoryTool(),
+    // Anticipatory followups (4) — S121 BUILD D
+    new RecordFollowupTool(),
+    new ListFollowupsTool(),
+    new CompleteFollowupTool(),
+    new CancelFollowupTool(),
+    // Diary + significance (3) — S121 BUILD D
+    new WriteDiaryEntryTool(),
+    new ReadDiaryTool(),
+    new ReadSignificanceTool(),
   ];
 }

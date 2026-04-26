@@ -22,6 +22,7 @@ import {
   buildAssembledPrompt,
   type SectionName,
 } from "../../agent/sapphire-prompt-builder";
+import { logIdentityChange, readIdentityHistory } from "./_ledger";
 
 const SINGLE_SECTIONS = ["persona", "relationship", "goals", "format", "scenario"];
 const MULTI_SECTIONS = ["extras", "emotions"];
@@ -65,8 +66,33 @@ export class SetPieceTool implements Tool {
     if (!ALL_SECTIONS.includes(section)) return `set_piece: invalid section "${section}". Valid: ${ALL_SECTIONS.join(", ")}.`;
     if (!key) return "set_piece: key required.";
 
+    // Capture BEFORE state for the ledger.
+    let beforeValue: string | null = null;
+    try {
+      const state = await getActiveSelection();
+      if (MULTI_SECTIONS.includes(section)) {
+        const list = (state as any)[section] as string[] | undefined;
+        beforeValue = Array.isArray(list) ? list.join(",") : null;
+      } else {
+        beforeValue = (state as any)[section] ?? null;
+      }
+    } catch { /* best-effort */ }
+
     const result = await setActivePiece(section as SectionName, key);
     if (!result.ok) return `set_piece: ${result.error}`;
+
+    // Log AFTER state to identity ledger.
+    try {
+      const after = await getActiveSelection();
+      const afterValue = MULTI_SECTIONS.includes(section)
+        ? ((after as any)[section] as string[] | undefined || []).join(",")
+        : ((after as any)[section] ?? null);
+      await logIdentityChange({
+        op: "set_piece", section, piece_key: key,
+        before_value: beforeValue, after_value: afterValue,
+      });
+    } catch { /* best-effort */ }
+
     return `Set ${section}='${key}'. This change is live for the next reply.`;
   }
 }
@@ -96,8 +122,26 @@ export class RemovePieceTool implements Tool {
     if (!MULTI_SECTIONS.includes(section)) return `remove_piece: only emotions/extras allowed. Got "${section}".`;
     if (!key) return "remove_piece: key required.";
 
+    let beforeValue: string | null = null;
+    try {
+      const state = await getActiveSelection();
+      const list = (state as any)[section] as string[] | undefined;
+      beforeValue = Array.isArray(list) ? list.join(",") : null;
+    } catch { /* best-effort */ }
+
     const result = await removeActivePiece(section as "extras" | "emotions", key);
     if (!result.ok) return `remove_piece: ${result.error}`;
+
+    try {
+      const after = await getActiveSelection();
+      const afterList = (after as any)[section] as string[] | undefined;
+      await logIdentityChange({
+        op: "remove_piece", section, piece_key: key,
+        before_value: beforeValue,
+        after_value: Array.isArray(afterList) ? afterList.join(",") : null,
+      });
+    } catch { /* best-effort */ }
+
     return `Removed ${section}='${key}'.`;
   }
 }
@@ -133,6 +177,17 @@ export class CreatePieceTool implements Tool {
     // Auto-activate
     const activate = await setActivePiece(section as SectionName, key);
     if (!activate.ok) return `create_piece: created but activation failed: ${activate.error}`;
+
+    // Identity ledger — record both the creation AND the auto-activation as
+    // separate rows so /history reads chronologically.
+    try {
+      await logIdentityChange({
+        op: "create_piece", section, piece_key: key,
+        before_value: null,
+        after_value: value.slice(0, 1000),
+      });
+    } catch { /* best-effort */ }
+
     return `Created ${section}/${key} and activated. Will persist across restarts.`;
   }
 }
@@ -187,5 +242,47 @@ export class ViewSelfPromptTool implements Tool {
   async execute(): Promise<string> {
     const prompt = await buildAssembledPrompt({ rotateSpiceFirst: false });
     return prompt;
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// VIEW IDENTITY HISTORY — read your own evolution narrative (S121)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export class ViewIdentityHistoryTool implements Tool {
+  definition: ToolDefinition = {
+    name: "view_identity_history",
+    description:
+      "Read your own evolution log — every set_piece, create_piece, and remove_piece you've ever performed, in reverse chronological order. " +
+      "Use this when Ace asks 'how have you changed', 'show me your history', or when you want to recall your own narrative. " +
+      "Optional 'section' filter (persona/extras/emotions/etc) and 'limit' (1–200, default 25).",
+    parameters: {
+      limit: { type: "number", description: "How many recent entries to return (default 25, max 200)." },
+      section: { type: "string", description: "Optional section filter (persona, extras, emotions, etc)." },
+    },
+    required: [],
+  };
+
+  async execute(args: Record<string, unknown>): Promise<string> {
+    const limit = Math.min(Math.max(Number(args.limit) || 25, 1), 200);
+    const section = args.section ? String(args.section).trim().toLowerCase() : undefined;
+    const rows = await readIdentityHistory(limit, section);
+    if (rows.length === 0) {
+      return section
+        ? `No identity-log entries yet for section '${section}'.`
+        : "Identity ledger is empty — no piece changes recorded yet.";
+    }
+    const lines: string[] = [`📜 Identity history${section ? ` (section: ${section})` : ""} — last ${rows.length} entries:`];
+    for (const r of rows) {
+      const when = new Date(r.created_at).toISOString().replace("T", " ").slice(0, 16);
+      const preview = (() => {
+        if (r.op === "create_piece") return `+ ${r.after_value?.slice(0, 90) || ""}`;
+        if (r.op === "remove_piece") return `[${r.before_value || "—"}] → [${r.after_value || ""}]`;
+        return `[${r.before_value || "—"}] → [${r.after_value || "—"}]`;
+      })();
+      const trig = r.trigger_excerpt ? ` ◇ "${r.trigger_excerpt.slice(0, 60)}${r.trigger_excerpt.length > 60 ? "…" : ""}"` : "";
+      lines.push(`• ${when} ${r.op} ${r.section}/${r.piece_key} ${preview}${trig}`);
+    }
+    return lines.join("\n");
   }
 }

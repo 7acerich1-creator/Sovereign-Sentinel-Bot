@@ -55,6 +55,63 @@ async function embedText(text: string): Promise<number[] | null> {
   return null;
 }
 
+// ── UPSERT a free-form observation (S121) ───────────────────────────────────
+//
+// Used by relationship_context observations and substantive Sapphire DMs.
+// Metadata schema: {type, category?, timestamp, scenario?, sentiment?, ...}
+// Returns silently on failure — never blocks Sapphire's reply path.
+export async function upsertSapphireObservation(
+  id: string,
+  content: string,
+  metadata: Record<string, string | number | boolean>,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!PINECONE_HOST || !PINECONE_API_KEY) return { ok: false, error: "Pinecone env not configured." };
+  if (!content || content.length < 8) return { ok: false, error: "content too short" };
+
+  const vec = await embedText(content);
+  if (!vec) return { ok: false, error: "embedding failed" };
+
+  try {
+    const res = await fetch(`${PINECONE_HOST}/vectors/upsert`, {
+      method: "POST",
+      headers: { "Api-Key": PINECONE_API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        namespace: NAMESPACE,
+        vectors: [{
+          id,
+          values: vec,
+          metadata: {
+            ...metadata,
+            value: content.slice(0, 1500),
+            timestamp: metadata.timestamp || new Date().toISOString(),
+          },
+        }],
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return { ok: false, error: `Pinecone ${res.status}: ${body.slice(0, 200)}` };
+    }
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// Lightweight sentiment classifier — keyword-driven, three buckets. Good enough
+// for retrieval filtering; not a substitute for an LLM classifier when we
+// actually need to reason about emotion.
+export function inferSentiment(text: string): "positive" | "negative" | "neutral" {
+  const t = (text || "").toLowerCase();
+  const NEG = /\b(stuck|tired|exhausted|drained|frustrated|angry|sad|lonely|broken|hopeless|scared|anxious|overwhelmed|burnt[- ]out|hate|fail|failing|can'?t|won'?t|bad|terrible|awful|wrong)\b/;
+  const POS = /\b(grateful|happy|excited|alive|peaceful|present|hopeful|love|loved|win|winning|breakthrough|clear|good|great|solid|amazing|proud|free)\b/;
+  const negHit = NEG.test(t);
+  const posHit = POS.test(t);
+  if (negHit && !posHit) return "negative";
+  if (posHit && !negHit) return "positive";
+  return "neutral";
+}
+
 // ── UPSERT a personal fact ───────────────────────────────────────────────────
 export async function upsertSapphireFact(
   key: string,

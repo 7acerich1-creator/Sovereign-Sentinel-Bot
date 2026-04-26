@@ -2703,7 +2703,7 @@ async function main() {
   // yuki_short_comments_posted. See src/proactive/yuki-shorts-pinner.ts.
   scheduler.add({
     name: "Yuki Shorts Pinner",
-    intervalMs: 5 * 60_000,
+    intervalMs: 30 * 60_000,  // S117e: 5min -> 30min so YT API quota stays manageable
     nextRun: new Date(Date.now() + 60_000), // offset 1 min from comment poll to spread load
     enabled: true,
     handler: async () => {

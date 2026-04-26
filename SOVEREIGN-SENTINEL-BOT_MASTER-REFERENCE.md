@@ -59,6 +59,30 @@ MC side closed the user-facing audit (Tally URL gate, Tier-2 PDFs, nurture-05 pa
 
 **Why this won't break again:** System User tokens don't depend on a user session, don't expire on a schedule, and don't rotate on password resets or Meta security actions. The only way they break is if the System User loses Page access or the App is uninstalled — both intentional admin actions. Full diagnostic + regen runbook in memory file `reference_fb_system_user_token.md`.
 
+## S118c — Planner-Staged Hybrid (2026-04-25)
+
+**Commit:** `3ed6c93` on origin/main.
+
+Adds `scheduledPublishTime` option to `publishToFacebook` + env-driven default `FACEBOOK_PLANNER_LEAD_MIN`. When set, every FB post lands in Business Suite Planner ahead of its publish time instead of going live immediately. Architect can review/edit/cancel from `business.facebook.com/latest/posts/scheduled_posts` before auto-publish. Min lead clamped to 11 minutes (Meta API requirement). All three endpoints (`/feed`, `/photos`, `/videos`) accept the new param. Backward compatible — env unset/0 = legacy live posting.
+
+Railway env: `FACEBOOK_PLANNER_LEAD_MIN=15` (active).
+
+## S118d — Week-Ahead Pre-Stage Sweep (2026-04-25)
+
+**Commit:** `4edaa42` on origin/main.
+
+Two changes that together turn FB into Buffer-equivalent for week-ahead scheduling:
+
+1. **`dailyContentProduction` accepts `daysAhead`** (default 1, env override `FACEBOOK_PLANNER_DAYS_AHEAD`, capped at 14). The 18:30 UTC daily run now generates 7 days of content per the env. Weekend days inside the horizon are skipped (the dedicated weekend repost job handles them on-day).
+
+2. **New `prestageFacebookSweep()`** runs every 30 min. Picks up CEQ rows where `status=ready`, `scheduled_time` is in (now+11min, now+7d), `media_url` is populated (image ready from FLUX), and FB hasn't been handled yet. Stages each row in Planner with `scheduled_publish_time = ceq.scheduled_time`. Records `✅ facebook_direct(facebook_direct): {postId} STAGED for {iso}` into `buffer_results` so the live distribution sweep's `alreadyHandled` set skips FB at fire time. Idempotent — running twice is a no-op.
+
+Effect: Architect sees ~30 SS + ~30 CF posts laid out on the Planner calendar at any given time, distributed across the next 7 days at proper hour-of-day slots. Same pattern as Buffer's queue, Meta-native, no extra cost. TikTok/IG continue posting live at scheduled_time via Buffer; only FB diverges into Planner.
+
+Railway env: `FACEBOOK_PLANNER_DAYS_AHEAD=7` (active).
+
+**Disable path:** set `FACEBOOK_PLANNER_LEAD_MIN=0` to drop back to live posting (everything goes through legacy distribution). The pre-stage sweep self-disables when LEAD_MIN is 0.
+
 ---
 
 ## SAPPHIRE — PERSONAL ASSISTANT FIRST, COO SECOND (S114 CLOSED, 2026-04-25)

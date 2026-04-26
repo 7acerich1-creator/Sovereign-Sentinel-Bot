@@ -66,6 +66,7 @@ import { ProposeTaskTool, SaveContentDraftTool, FileBriefingTool, CheckApprovedT
 import { StripeMetricsTool } from "./tools/stripe-metrics";
 import { BufferAnalyticsTool } from "./tools/buffer-analytics";
 import { YouTubeAnalyticsReaderTool, LandingAnalyticsReaderTool, EmailTrackingTool } from "./tools/analytics-readers";
+import { MetaPixelAnalyticsTool } from "./tools/meta-pixel-analytics";
 import { VideoPublisherTool, TikTokPublishTool, InstagramReelsPublishTool, YouTubeShortsPublishTool, YouTubeLongFormPublishTool } from "./tools/video-publisher";
 import { YouTubeUpdateMetadataTool, YouTubePinCommentTool, YouTubeCTAAuditTool } from "./tools/youtube-cta-tools";
 
@@ -4249,13 +4250,14 @@ async function main() {
           agentTools.push(new YouTubeCommentTool());
         }
 
-        // Vector gets full CRO visibility: Stripe + Buffer + YouTube + Landing + Email
+        // Vector gets full CRO visibility: Stripe + Buffer + YouTube + Landing + Email + Meta Pixel
         if (agentCfg.name === "vector") {
           agentTools.push(new StripeMetricsTool());
           agentTools.push(new BufferAnalyticsTool());
           agentTools.push(new YouTubeAnalyticsReaderTool());
           agentTools.push(new LandingAnalyticsReaderTool());
           agentTools.push(new EmailTrackingTool()); // Session 111: email open/click/bounce tracking
+          agentTools.push(new MetaPixelAnalyticsTool()); // S119: Meta Pixel (1513312646866512) + retargeting pool monitoring
         }
 
         // Pinecone KnowledgeWriter — agent-specific namespaces

@@ -28,6 +28,13 @@ outputs/
 test-out/
 voice-test-out/
 imagen-test-out/
+
+# S118 cleanup — accidental sandbox artifacts
+-90
+@sovereign_synthesis
+_thumbnail_test_*/
+blank
+tsc.log
 sample_thumb_*
 
 # Scripts intermediate output (regenerable)

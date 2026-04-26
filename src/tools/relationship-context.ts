@@ -100,11 +100,10 @@ export class RelationshipContextTool implements Tool {
     }
 
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const supabase = createClient(
-        config.memory.supabaseUrl,
-        config.memory.supabaseKey
-      );
+      // S121b: use service-role key — anon was blocked by RLS even with my new policies
+      // because the bot's createClient was using SUPABASE_ANON_KEY. Service role bypasses RLS.
+      const { getSapphireSupabase } = await import("./sapphire/_supabase");
+      const supabase = await getSapphireSupabase();
 
       const { error } = await supabase
         .from("relationship_context")

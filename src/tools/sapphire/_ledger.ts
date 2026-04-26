@@ -45,8 +45,9 @@ export interface IdentityLogEntry {
 export async function logIdentityChange(entry: IdentityLogEntry): Promise<void> {
   if (!config.memory.supabaseUrl || !config.memory.supabaseKey) return;
   try {
-    const { createClient } = await import("@supabase/supabase-js");
-    const supabase = createClient(config.memory.supabaseUrl, config.memory.supabaseKey);
+    // S121b: service-role key (anon can't write through RLS).
+    const { getSapphireSupabase } = await import("./_supabase");
+    const supabase = await getSapphireSupabase();
 
     const { error } = await supabase.from("sapphire_identity_log").insert({
       op: entry.op,
@@ -86,8 +87,9 @@ export async function readIdentityHistory(
 ): Promise<IdentityHistoryRow[]> {
   if (!config.memory.supabaseUrl || !config.memory.supabaseKey) return [];
   try {
-    const { createClient } = await import("@supabase/supabase-js");
-    const supabase = createClient(config.memory.supabaseUrl, config.memory.supabaseKey);
+    // S121b: service-role key.
+    const { getSapphireSupabase } = await import("./_supabase");
+    const supabase = await getSapphireSupabase();
 
     let q = supabase
       .from("sapphire_identity_log")

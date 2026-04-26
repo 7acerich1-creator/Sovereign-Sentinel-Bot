@@ -12,8 +12,9 @@ import type { Tool, ToolDefinition } from "../../types";
 import { config } from "../../config";
 
 async function sb() {
-  const { createClient } = await import("@supabase/supabase-js");
-  return createClient(config.memory.supabaseUrl!, config.memory.supabaseKey!);
+  // S121b: use service-role key (anon can't write to RLS-enabled sapphire_* tables).
+  const { getSapphireSupabase } = await import("./_supabase");
+  return getSapphireSupabase();
 }
 
 function parseDueAt(input: string): Date | null {

@@ -51,7 +51,7 @@ import { produceVideo, splitOversizedScenes } from "../pod/runpod-client";
 import type { JobSpec, Scene as PodScene, ArtifactUrls } from "../pod/types";
 // Session 113+ — dual-rotation: niche LRU + aesthetic A/B/C for the 30-video
 // performance test. See NORTH_STAR "30-video A/B/C performance test" section.
-import { pickNextAesthetic, recordNicheRun, type AestheticStyle } from "../tools/niche-cooldown";
+import { pickNextAesthetic, pickNextNiche, recordNicheRun, type AestheticStyle } from "../tools/niche-cooldown";
 import { AESTHETIC_MODIFIERS } from "./content-engine";
 
 export const FACELESS_DIR = "/tmp/faceless_factory";
@@ -1405,11 +1405,27 @@ export async function produceFacelessVideo(
   console.log(`📝 [FacelessFactory] Generating script...`);
   let script: Awaited<ReturnType<typeof generateScript>> | null = null;
   const MAX_UNIQUENESS_RETRIES = 2;
-  // S122 fix — same niche + same source on retry = same well. Inject a
-  // divergence directive that names the colliding script and instructs the
-  // writer to take a different angle/hook/metaphor on the next attempt.
+  // S122 fix — same niche + same source on retry = same well. Two-axis fix:
+  //   (1) ROTATE NICHE on retry — pickNextNiche LRU swaps to a different
+  //       niche from the brand allowlist, changing the prompt scaffolding
+  //       entirely. This is the structural lane-shift.
+  //   (2) DIVERGENCE DIRECTIVE — prepended to source intelligence with the
+  //       colliding script preview + rejected candidate, instructing writer
+  //       to change central metaphor / hook / frame. Soft suggestion that
+  //       reinforces (1) but doesn't depend on it.
   let divergenceDirective = "";
   for (let attempt = 0; attempt <= MAX_UNIQUENESS_RETRIES; attempt++) {
+    if (attempt > 0) {
+      // Rotate niche before regenerating. `niche` is reassigned so it flows
+      // through to result.niche AND the post-ship recordNicheRun call.
+      const rotatedNiche = await pickNextNiche(brand, niche);
+      if (rotatedNiche !== niche) {
+        console.log(`🔁 [FacelessFactory] Niche rotated for retry ${attempt}: ${niche} → ${rotatedNiche}`);
+        niche = rotatedNiche;
+      } else {
+        console.warn(`⚠️ [FacelessFactory] No alternate niche available for retry ${attempt} (allowlist size = 1?)`);
+      }
+    }
     const augmentedSource = divergenceDirective
       ? `${divergenceDirective}\n\n---\n\n${sourceIntelligence}`
       : sourceIntelligence;

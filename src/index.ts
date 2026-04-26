@@ -5376,14 +5376,20 @@ async function main() {
                             // aborted seed does not consume a 30-day slot. Fire-and-forget;
                             // cooldown persistence must NEVER block pipeline progress.
                             try {
+                              // S122b — read niche from result, not seed. The faceless
+                              // factory's uniqueness retry loop may have rotated the niche
+                              // (pickNextNiche LRU) to break out of a colliding lane.
+                              // Recording seed.niche here would dilute the LRU signal by
+                              // overweighting the originally-attempted niche.
+                              const shippedNiche = (result as any)?.niche ?? seed.niche;
                               await recordNicheRun({
                                 brand: seed.brand,
-                                niche: seed.niche,
+                                niche: shippedNiche,
                                 thesis: seed.thesis,
                                 jobId: (result as any)?.jobId ?? (result as any)?.uploadId ?? seedId,
                                 source: "alfred_daily",
                               });
-                              console.log(`🧊 [AutoPipeline] cooldown recorded: ${seed.brand}/${seed.niche}`);
+                              console.log(`🧊 [AutoPipeline] cooldown recorded: ${seed.brand}/${shippedNiche}${shippedNiche !== seed.niche ? ` (rotated from ${seed.niche})` : ""}`);
                             } catch (cooldownErr: any) {
                               console.warn(`[AutoPipeline] cooldown record failed (non-fatal): ${cooldownErr?.message}`);
                             }

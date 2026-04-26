@@ -327,3 +327,80 @@ export async function pickNextAesthetic(brand: Brand): Promise<AestheticStyle> {
   // Unreachable if recent is non-empty and seenSet.size === 3, but safety net:
   return "A";
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Session 122b — Niche rotation on uniqueness retry
+// ─────────────────────────────────────────────────────────────────────────────
+// NORTH_STAR S113+ planned this but it was never implemented. The faceless
+// factory's retry loop was generating against the SAME niche on each retry,
+// which kept producing scripts in the same lane and re-colliding with the
+// uniqueness gate. `pickNextNiche` swaps the niche to the LRU pick from the
+// brand's allowlist, so retry 2 prompts the writer with a structurally
+// different niche prefix, not just a soft "be different" directive.
+
+export async function getRecentNicheRuns(
+  brand: Brand,
+  limit: number = 10,
+): Promise<string[]> {
+  const cfg = getSupabaseConfig();
+  if (!cfg) return [];
+  try {
+    const resp = await fetch(
+      `${cfg.url}/rest/v1/niche_cooldown?brand=eq.${encodeURIComponent(brand)}` +
+        `&select=niche_norm,created_at&order=created_at.desc&limit=${Math.max(1, limit)}`,
+      {
+        headers: {
+          apikey: cfg.key,
+          Authorization: `Bearer ${cfg.key}`,
+        },
+      },
+    );
+    if (!resp.ok) {
+      console.warn(`[NicheCooldown] niche fetch status=${resp.status}`);
+      return [];
+    }
+    const rows = (await resp.json()) as Array<{ niche_norm: string }>;
+    return rows.map((r) => r.niche_norm).filter(Boolean);
+  } catch (err: any) {
+    console.warn(`[NicheCooldown] getRecentNicheRuns error: ${err?.message}`);
+    return [];
+  }
+}
+
+/**
+ * Pick a different niche from the brand's allowlist for a uniqueness retry.
+ * Strategy: LRU. Query the last N niche_cooldown rows for the brand and pick
+ * the allowed niche that was used LONGEST ago (or never appears in the recent
+ * window). NEVER returns `currentNiche` — caller is retrying because that one
+ * just collided. If Supabase is down, falls back to the first allowed niche
+ * that isn't `currentNiche`. If only one niche exists in the allowlist (edge
+ * case), returns the same niche (caller's retry loop is then non-rotating).
+ */
+export async function pickNextNiche(brand: Brand, currentNiche: string): Promise<string> {
+  const allowed = getAllowedNiches(brand).map((n) => normalizeNiche(n));
+  const current = normalizeNiche(currentNiche);
+  const candidates = allowed.filter((n) => n !== current);
+  if (candidates.length === 0) {
+    // Single-niche allowlist — nothing to rotate to.
+    return current;
+  }
+  const recent = await getRecentNicheRuns(brand, 20);
+  if (recent.length === 0) {
+    // Supabase unavailable or no history — return first non-current candidate.
+    return candidates[0];
+  }
+  // For each candidate, find its most recent appearance index in `recent`
+  // (lower index = more recent). Pick the candidate with the HIGHEST index
+  // (used longest ago) or that's missing entirely (treat as -Infinity-recency).
+  let bestNiche = candidates[0];
+  let bestRecency = -1; // higher = older
+  for (const cand of candidates) {
+    const recencyIdx = recent.indexOf(cand);
+    const recencyScore = recencyIdx === -1 ? Number.MAX_SAFE_INTEGER : recencyIdx;
+    if (recencyScore > bestRecency) {
+      bestRecency = recencyScore;
+      bestNiche = cand;
+    }
+  }
+  return bestNiche;
+}

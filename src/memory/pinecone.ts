@@ -254,8 +254,21 @@ export class PineconeMemory {
   }
 
   // ── Supabase mirror ──
+  // S117: must use SERVICE ROLE key — anon key fails RLS on insert.
+  // Both knowledge_nodes and sync_log have RLS enabled with service-role-only
+  // write policies. Prior code used config.memory.supabaseKey (which resolves
+  // to SUPABASE_ANON_KEY) and silently swallowed the JS-client error →
+  // mirror has been empty for the bot's lifetime. Now uses SERVICE_ROLE key
+  // explicitly with anon fallback (so local dev without service-role key
+  // doesn't crash, just no-ops).
+  private getMirrorKey(): string | undefined {
+    return process.env.SUPABASE_SERVICE_ROLE_KEY || config.memory.supabaseKey;
+  }
+
   private async writeToSupabase(node: KnowledgeNode): Promise<void> {
-    if (!config.memory.supabaseUrl || !config.memory.supabaseKey) return;
+    if (!config.memory.supabaseUrl) return;
+    const key = this.getMirrorKey();
+    if (!key) return;
 
     // Skip Supabase mirror for non-UUID IDs (e.g., blueprint seed IDs like "blueprint-sapphire-chunk-0")
     const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -265,9 +278,9 @@ export class PineconeMemory {
 
     try {
       const { createClient } = await import("@supabase/supabase-js");
-      const supabase = createClient(config.memory.supabaseUrl, config.memory.supabaseKey);
+      const supabase = createClient(config.memory.supabaseUrl, key);
 
-      await supabase.from("knowledge_nodes").insert({
+      const { error } = await supabase.from("knowledge_nodes").insert({
         id: node.id,
         content: node.content,
         agent_name: node.agent_name,
@@ -277,8 +290,11 @@ export class PineconeMemory {
         tags: node.tags,
         created_at: node.timestamp,
       });
+      if (error) {
+        console.error(`[Pinecone→Supabase] knowledge_nodes insert error: ${error.message} (code=${error.code})`);
+      }
     } catch (err: any) {
-      console.error(`[Pinecone→Supabase] knowledge_nodes write error: ${err.message}`);
+      console.error(`[Pinecone→Supabase] knowledge_nodes write threw: ${err.message}`);
     }
   }
 
@@ -289,13 +305,15 @@ export class PineconeMemory {
     status: string,
     errorMsg?: string
   ): Promise<void> {
-    if (!config.memory.supabaseUrl || !config.memory.supabaseKey) return;
+    if (!config.memory.supabaseUrl) return;
+    const key = this.getMirrorKey();
+    if (!key) return;
 
     try {
       const { createClient } = await import("@supabase/supabase-js");
-      const supabase = createClient(config.memory.supabaseUrl, config.memory.supabaseKey);
+      const supabase = createClient(config.memory.supabaseUrl, key);
 
-      await supabase.from("sync_log").upsert({
+      const { error } = await supabase.from("sync_log").upsert({
         vector_id: vectorId,
         agent_name: agentName,
         namespace,
@@ -303,9 +321,11 @@ export class PineconeMemory {
         error_message: errorMsg || null,
         synced_at: new Date().toISOString(),
       }, { onConflict: "vector_id" });
+      if (error) {
+        console.error(`[Pinecone→Supabase] sync_log upsert error: ${error.message} (code=${error.code})`);
+      }
     } catch (err: any) {
-      // Non-critical
-      console.error(`[Pinecone→Supabase] sync_log write error: ${err.message}`);
+      console.error(`[Pinecone→Supabase] sync_log write threw: ${err.message}`);
     }
   }
 

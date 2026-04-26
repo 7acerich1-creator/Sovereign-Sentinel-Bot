@@ -24,6 +24,24 @@
 
 ---
 
+## S118 CLOSE — Audit Cross-Sync With MC (2026-04-25)
+
+**Final commit:** `2c723b6` on origin/main. Railway auto-deploy triggered.
+
+MC side closed the user-facing audit (Tally URL gate, Tier-2 PDFs, nurture-05 patch — all on sovereign-synthesis.com). MC then handed back 4 bot-side red items via cross-sync log. Disposition this session:
+
+1. **Iter caps bumped (SHIPPED).** `src/index.ts:4938` light 1→2, heavy 6→10, default 4→6. The 47% crew_dispatch failure rate was Gemini 2.5 Flash Lite emitting more tool-call rounds than the prior Anthropic models did, blowing the caps before the task finished. Commit `2c723b6`.
+2. **isDispatch wrapper at `src/agent/loop.ts:285` — INTENTIONALLY NOT FLIPPED.** S35 explicitly skipped `saveToMemory` + `extractAndEmbed` for dispatch payloads (system-generated, not conversation; was burning ~48 context messages and embedding API calls per dispatch). The reason `knowledge_nodes` is at 1 row isn't a regression — it's correct architecture. The S114 business-insight extraction path writes to a different table for the learning loop. Flipping the wrapper would re-pollute chat memory and re-burn embeddings without moving a single one of the 5 NORTH_STAR metrics. NO FIX.
+3. **Stale `D` index markers — NON-ISSUE.** MC's `git status` was reading sandbox phantom-diff output (per `feedback_crlf_noise_is_not_a_real_diff` — sandbox sees CRLF-normalized files as deleted while Windows shows them clean). Verified via Desktop Commander cmd shell on Windows: `git status --short` returned only this session's `M src/index.ts` plus 4 harmless untracked junk files. Nothing to reset.
+4. **FB direct publishing — token scopes problem CONFIRMED.** Pulled live `content_engine_queue.buffer_results` for last 24h: every FB-direct attempt failing with `(#200) ... pages_read_engagement and pages_manage_posts ...`. The S115b `resolvePageAccessToken` exchange logic is correct but requires the seed token to already have `pages_read_engagement` to even GET a Page Access Token — without that scope, exchange falls back silently to the seed token, which then fails to post. Fix is NOT code: regenerate FB seed tokens with proper scopes via Graph API Explorer → System User flow → update `FACEBOOK_PAGE_ACCESS_TOKEN` + `FACEBOOK_CF_PAGE_ACCESS_TOKEN` Railway env vars. Requires Architect at the Meta Console — Chrome session staged this turn.
+
+**What's still open at session close:**
+- Architect token regen for FB (browser pre-staged at `developers.facebook.com/tools/explorer/`)
+- Master reference cleanup of 4 untracked junk files in repo root (`-90`, `@sovereign_synthesis`, `_thumbnail_test_S117/`, `blank`) — gitignore candidates
+- Three MC dashboard tiles per `proposals/MC-DASHBOARD-TILE-PLAN.md` (carry-over from S115c — next MC mount)
+
+---
+
 ## SAPPHIRE — PERSONAL ASSISTANT FIRST, COO SECOND (S114 CLOSED, 2026-04-25)
 
 **Session 114 final commit:** `deb184f` on origin/main. Railway auto-deploy live.

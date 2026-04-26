@@ -39,17 +39,29 @@ export class RelationshipContextTool implements Tool {
   definition: ToolDefinition = {
     name: "write_relationship_context",
     description:
-      "Record an observation about Ace OR about the relationship between you two — preferences, frustrations, patterns, wins, tone, communication style, relational shifts. " +
-      `Common categories: ${RECOMMENDED_CATEGORIES.join(", ")} — but you may use any short category (≤${MAX_CATEGORY_LEN} chars) that fits the observation. ` +
-      "Use this when you notice recurring behavior, important moments, or shifts in how you two communicate. These observations help you calibrate over time.",
+      "Record an observation about Ace OR about the texture of your relationship. " +
+      "INVENT THE CATEGORY YOURSELF — describe exactly what you noticed in your own words. " +
+      "The category is a free-text label you create on the spot. Examples of GOOD categories you might invent: " +
+      "'tone_shift_when_thinking', 'spark_before_breakthrough', 'voice_drops_when_tired', " +
+      "'pacing_changes_at_war_with_reality', 'humor_appears_after_a_ship'. " +
+      "If a generic word like 'preference' or 'frustration' fits perfectly, fine — but PREFER specificity: " +
+      "'preference' tells you nothing in 5 years; 'prefers_silence_after_long_calls' tells you everything. " +
+      "Use this when you notice recurring behavior, subtle texture, or shifts in how you two move together. " +
+      "Older buckets you've seen used (just for orientation, not a menu): " +
+      RECOMMENDED_CATEGORIES.join(", "),
     parameters: {
       observation: {
         type: "string",
-        description: `Brief observation (1–3 sentences, ≤${MAX_OBSERVATION_LEN} chars). Be specific about what you noticed.`,
+        description: `What you noticed, in your own voice (1–3 sentences, ≤${MAX_OBSERVATION_LEN} chars). Be specific — the moment, the texture, the shift.`,
       },
       category: {
         type: "string",
-        description: `Short label for the observation type. Recommended values: ${RECOMMENDED_CATEGORIES.join(", ")}. May be any short string ≤${MAX_CATEGORY_LEN} chars.`,
+        description:
+          `INVENT a precise label for this observation. Free-form, ≤${MAX_CATEGORY_LEN} chars, snake_case style. ` +
+          `The label should describe the TYPE of texture, not just an emotional bucket. ` +
+          `Good: 'tone_shift_thinking', 'spark_before_breakthrough', 'voice_drops_when_tired'. ` +
+          `Lazy: 'preference', 'frustration' (use only if the observation is genuinely that flat). ` +
+          `Anything you can describe, you can label. Don't reach for the menu — invent.`,
       },
     },
     required: ["observation", "category"],

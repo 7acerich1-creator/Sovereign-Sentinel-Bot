@@ -254,12 +254,14 @@ export async function completeDispatch(
 ): Promise<void> {
   if (!SUPABASE_URL || !SUPABASE_KEY || !taskId) return;
 
-  // Capture the full task before patching (we need agent + task_type for extraction)
+  // Capture the full task before patching (we need agent + task_type + payload for extraction)
   let agent = "";
   let taskType = "";
+  let dispatchPayload: any = null;
   if (status === "completed" && result && result.length >= 50) {
     try {
-      const lookupResp = await fetch(`${SUPABASE_URL}/rest/v1/crew_dispatch?id=eq.${taskId}&select=to_agent,task_type`, {
+      // S119c: also fetch payload — needed to recover reply_id for email_reply_draft tasks
+      const lookupResp = await fetch(`${SUPABASE_URL}/rest/v1/crew_dispatch?id=eq.${taskId}&select=to_agent,task_type,payload`, {
         headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
       });
       if (lookupResp.ok) {
@@ -267,6 +269,7 @@ export async function completeDispatch(
         if (rows && rows[0]) {
           agent = String(rows[0].to_agent || "");
           taskType = String(rows[0].task_type || "");
+          dispatchPayload = rows[0].payload || null;
         }
       }
     } catch { /* silent */ }
@@ -297,6 +300,57 @@ export async function completeDispatch(
       .then(({ extractAndStoreInsight }) => extractAndStoreInsight(agent, taskType, result))
       .catch((e) => console.warn(`[InsightExtractor] ${e.message}`));
   }
+
+  // ── S119c: Email reply draft → Telegram approval prompt ──
+  // When Anita finishes drafting an inbound-email reply, fire the
+  // ✉️ Anita's Draft Reply approval card to the Architect's Telegram.
+  // Never blocks the dispatch loop; failures are logged.
+  if (status === "completed" && taskType === "email_reply_draft" && result && dispatchPayload) {
+    const replyId = String(dispatchPayload.reply_id || "");
+    const draftText = extractDraftFromAgentResult(result);
+    if (replyId && draftText) {
+      import("../proactive/email-reply-handler")
+        .then(({ notifyDraftReady }) => notifyDraftReady(replyId, draftText))
+        .catch((e) => console.warn(`[EmailReply] notifyDraftReady error: ${e.message}`));
+    } else {
+      console.warn(
+        `[EmailReply] Could not extract draft from Anita's result for replyId=${replyId}. ` +
+          `Result preview: ${result.slice(0, 200)}`
+      );
+    }
+  }
+}
+
+/**
+ * S119c: Extract Anita's draft text from her freeform crew_dispatch result.
+ * Anita reports back like: "Email reply draft created... Draft content: \"Hey,\n..."
+ * Tries multiple patterns — falls back to null if no match.
+ */
+function extractDraftFromAgentResult(result: string): string | null {
+  if (!result) return null;
+  const patterns: RegExp[] = [
+    /Draft content:\s*"([\s\S]+?)"(?:\s*$|\s*\.\s*$)/i,
+    /Draft content:\s*"([\s\S]+)"/i,
+    /Draft:\s*"([\s\S]+?)"(?:\s*$|\s*\.\s*$)/i,
+    /Email reply:\s*"([\s\S]+?)"(?:\s*$|\s*\.\s*$)/i,
+    /Reply text:\s*"([\s\S]+?)"(?:\s*$|\s*\.\s*$)/i,
+  ];
+  for (const re of patterns) {
+    const m = result.match(re);
+    if (m && m[1]) {
+      return m[1]
+        .replace(/\\n/g, "\n")
+        .replace(/\\"/g, '"')
+        .replace(/\\t/g, "\t")
+        .trim();
+    }
+  }
+  // Last-resort: if the result contains a multi-line draft after a colon, grab it
+  const colonMatch = result.match(/(?:Draft|Reply)[:\s][\s\S]+?\n([\s\S]+)$/i);
+  if (colonMatch && colonMatch[1] && colonMatch[1].length >= 10) {
+    return colonMatch[1].trim();
+  }
+  return null;
 }
 
 /**

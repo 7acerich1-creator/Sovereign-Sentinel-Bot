@@ -22,6 +22,17 @@ import type { Channel } from "../types";
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_EMAIL = "Sovereign Synthesis <ace@sovereign-synthesis.com>";
 
+// S119c: Module-level Telegram channel singleton so crew-dispatch.completeDispatch
+// can fire the approval prompt without threading the channel through every call site.
+let _telegramChannel: Channel | null = null;
+let _defaultChatId: string | null = null;
+
+export function setEmailReplyChannel(channel: Channel, chatId: string): void {
+  _telegramChannel = channel;
+  _defaultChatId = chatId;
+  console.log(`[EmailReply] Channel registered for approval prompts (chatId=${chatId})`);
+}
+
 // In-memory pending reply drafts awaiting Telegram approval.
 // Key = reply_id, Value = { to, subject, draft, original }
 interface PendingReply {
@@ -167,6 +178,22 @@ export async function storeDraftAndRequestApproval(
   } catch (err: any) {
     console.error(`[EmailReply] Approval request failed: ${err.message}`);
   }
+}
+
+/**
+ * S119c: Convenience wrapper — uses the module-level registered channel.
+ * Called from crew-dispatch.completeDispatch when an email_reply_draft task finishes.
+ * If the registered channel is missing, logs and no-ops (don't crash the dispatch loop).
+ */
+export async function notifyDraftReady(replyId: string, draftText: string): Promise<void> {
+  if (!_telegramChannel || !_defaultChatId) {
+    console.warn(
+      `[EmailReply] notifyDraftReady called but channel not registered. ` +
+        `replyId=${replyId} — call setEmailReplyChannel() at bot init.`
+    );
+    return;
+  }
+  await storeDraftAndRequestApproval(replyId, draftText, _telegramChannel, _defaultChatId);
 }
 
 /**

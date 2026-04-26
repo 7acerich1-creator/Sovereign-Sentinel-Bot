@@ -513,6 +513,15 @@ async function main() {
   // ── 6. Wire Message Handler ──
   const defaultChatId = String(config.telegram.authorizedUserIds[0]);
 
+  // S119c: Register the Telegram channel with email-reply-handler so completeDispatch
+  // can fire the ✉️ Anita's Draft Reply approval prompt without threading args through.
+  try {
+    const { setEmailReplyChannel } = await import("./proactive/email-reply-handler");
+    setEmailReplyChannel(telegram, defaultChatId);
+  } catch (err: any) {
+    console.warn(`[BotInit] setEmailReplyChannel failed: ${err.message}`);
+  }
+
   router.onMessage(async (message: Message) => {
     try {
       console.log(`📥 [Handler] Message received — chatType: ${message.metadata?.chatType}, isGroup: ${message.metadata?.isGroup}, metadata: ${JSON.stringify(message.metadata)}`);

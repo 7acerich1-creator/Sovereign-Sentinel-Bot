@@ -28,6 +28,7 @@ import {
   type FacelessResult,
 } from "./faceless-factory";
 import { assertScriptUnique, ScriptTooSimilarError } from "../tools/script-uniqueness-guard";
+import { pickNextNiche } from "../tools/niche-cooldown";
 import {
   getAllowedNiches,
   normalizeNiche,
@@ -140,11 +141,17 @@ async function preGenerateScripts(
     await onProgress?.(`📝 ${brandLabel}: generating ${niches.length} scripts [${niches.join(", ")}] (${usedAngleIds.size} angles previously consumed)`);
 
     for (let i = 0; i < niches.length; i++) {
-      const niche = niches[i];
+      // S122c — `niche` is now `let` so the uniqueness retry loop can rotate
+      // it via pickNextNiche. The post-rotation niche is what gets pushed
+      // into `valid` so downstream pod jobs and cooldown records track the
+      // shipped niche, not the originally-attempted one.
+      let niche = niches[i];
       const { text: sourceIntelligence, angleId } = buildSourceIntelligence(brand, niche, usedAngleIds);
 
       try {
         let script: FacelessScript | null = null;
+        // S122c — divergence directive on retry. Mirrors faceless-factory.
+        let divergenceDirective = "";
 
         for (let attempt = 0; attempt <= MAX_UNIQUENESS_RETRIES; attempt++) {
           // Pacing: 10s between every LLM call
@@ -152,7 +159,21 @@ async function preGenerateScripts(
             await new Promise(r => setTimeout(r, SCRIPT_PACING_MS));
           }
 
-          const candidate = await generateScript(llm, sourceIntelligence, niche, brand, "long", "horizontal");
+          // S122c — rotate niche on retry to break out of the colliding lane.
+          if (attempt > 0) {
+            const rotatedNiche = await pickNextNiche(brand, niche);
+            if (rotatedNiche !== niche) {
+              console.log(`🔁 [BatchProducer] ${brandLabel} niche rotated for retry ${attempt}: ${niche} → ${rotatedNiche}`);
+              niche = rotatedNiche;
+            } else {
+              console.warn(`⚠️ [BatchProducer] ${brandLabel} no alternate niche for retry ${attempt}`);
+            }
+          }
+
+          const augmentedSource = divergenceDirective
+            ? `${divergenceDirective}\n\n---\n\n${sourceIntelligence}`
+            : sourceIntelligence;
+          const candidate = await generateScript(llm, augmentedSource, niche, brand, "long", "horizontal");
 
           // Uniqueness check
           const corpus = [
@@ -173,6 +194,18 @@ async function preGenerateScripts(
               if (attempt === MAX_UNIQUENESS_RETRIES) {
                 errors.push(`${brandLabel}/${niche}: ${MAX_UNIQUENESS_RETRIES + 1} consecutive duplicates — skipped`);
               }
+              // Build divergence directive for next attempt.
+              const colliderPreview = String(err.matchPreview || "").slice(0, 400).replace(/\s+/g, " ").trim();
+              const candidateTitle = String(candidate.title || "").trim();
+              divergenceDirective = [
+                `🚫 DIVERGENCE DIRECTIVE — attempt ${attempt + 1} of this script clustered too closely with already-shipped content (cosine ${err.score.toFixed(3)}).`,
+                ``,
+                `ALREADY SHIPPED (do not retread): "${colliderPreview}"`,
+                ``,
+                `JUST PRODUCED + REJECTED: "${candidateTitle}"`,
+                ``,
+                `For this next attempt produce a script with a meaningfully DIFFERENT angle. Change the central metaphor, the opening hook, the structural frame, and the named target. Do not paraphrase the rejected attempt.`,
+              ].join("\n");
               continue;
             }
             throw err;

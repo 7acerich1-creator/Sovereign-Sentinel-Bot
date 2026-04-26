@@ -332,7 +332,11 @@ async function main() {
     process.exit(1);
   }
 
-  const failoverLLM = new FailoverLLM(llmProviders);
+  // S121d: Global failoverLLM EXCLUDES Anthropic. This chain is consumed by
+  // AgentSwarm, MeshWorkflow, the content engine, and unknown-agent fallback —
+  // none of which should drain Sapphire's reserved Anthropic budget on a
+  // Gemini+Groq outage. Sapphire's team chain is the ONLY runtime path to Claude.
+  const failoverLLM = new FailoverLLM(llmProviders.filter((p) => p.name !== "anthropic"));
 
   // ── 2B. Per-Agent LLM Provider Teams ──
   // Split providers across agents to prevent quota stampedes.
@@ -368,29 +372,28 @@ async function main() {
     return new FailoverLLM(chain, llmTimeoutMs, primaryRetries);
   }
 
-  // SESSION 93: LLM ROUTING — GEMINI PRIMARY
-  // Anthropic credits exhausted. Gemini is primary for ALL agents + pipelines.
-  // Groq (free) is first fallback. Anthropic is emergency-only last resort.
-  // useGroqB splits Groq Key B across TCF-branded agents to prevent rate stampedes.
-  // 1 primaryRetry = Gemini gets a second chance on 429 before failover to Groq.
+  // S121d: Anthropic locked to Sapphire ONLY.
+  // Architect's $5 Anthropic balance is reserved for Sapphire's introspective threads.
+  // Every other agent + both pipelines run Gemini -> Groq with NO Anthropic fallback —
+  // a single Gemini+Groq outage on Yuki/Veritas/Alfred/Vector/Anita or the pipelines
+  // would otherwise drain her budget across the whole crew in minutes.
   const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
-    alfred: buildTeamLLM(["gemini", "groq", "anthropic"], 1, false),    // Gemini-first — dispatches + user chat
-    anita: buildTeamLLM(["gemini", "groq", "anthropic"], 1, true),      // Gemini-first — dispatches + user chat
-    sapphire: buildTeamLLM(["gemini", "groq", "anthropic"], 1),         // Gemini-first
-    veritas: buildTeamLLM(["gemini", "groq", "anthropic"], 1),          // Gemini-first
-    vector: buildTeamLLM(["gemini", "groq", "anthropic"], 1, false),    // Gemini-first — dispatches + user chat
-    yuki: buildTeamLLM(["gemini", "groq", "anthropic"], 1, true),       // Gemini-first — dispatches + user chat
+    alfred: buildTeamLLM(["gemini", "groq"], 1, false),    // Gemini -> Groq. NO Anthropic.
+    anita: buildTeamLLM(["gemini", "groq"], 1, true),      // Gemini -> Groq. NO Anthropic.
+    sapphire: buildTeamLLM(["gemini", "groq", "anthropic"], 1),  // Anthropic ALLOWED — promoted by introspective router.
+    veritas: buildTeamLLM(["gemini", "groq"], 1),          // Gemini -> Groq. NO Anthropic.
+    vector: buildTeamLLM(["gemini", "groq"], 1, false),    // Gemini -> Groq. NO Anthropic.
+    yuki: buildTeamLLM(["gemini", "groq"], 1, true),       // Gemini -> Groq. NO Anthropic.
   };
 
-  // SESSION 93: Pipeline LLMs — Gemini-first.
-  // Anthropic credits exhausted. Gemini handles bulk pipeline work (script gen, social copy,
-  // clip generation — 30-50+ calls per video). Groq free tier as first fallback.
-  // Anthropic parked as emergency-only last resort.
-  const pipelineLLM = buildTeamLLM(["gemini", "groq", "anthropic"], 1, false);     // Key A — SS pipeline
-  const tcfPipelineLLM = buildTeamLLM(["gemini", "groq", "anthropic"], 1, true);   // Key B — TCF pipeline
+  // S121d: Pipeline LLMs — Gemini-first, NO Anthropic fallback.
+  // High-volume bulk work (30-50+ calls per video) — never let pipeline grunt
+  // work touch Anthropic credits reserved for Sapphire.
+  const pipelineLLM = buildTeamLLM(["gemini", "groq"], 1, false);     // Key A — SS pipeline. NO Anthropic.
+  const tcfPipelineLLM = buildTeamLLM(["gemini", "groq"], 1, true);   // Key B — TCF pipeline. NO Anthropic.
 
   if (groqTcfKey) {
-    console.log(`🔑 [LLM Teams] Session 93 routing: ALL agents+pipelines Gemini-first. Groq fallback. Anthropic emergency-only. Key A: pipeline. Key B: tcf-pipeline.`);
+    console.log(`🔑 [LLM Teams] S121d routing: Anthropic LOCKED to Sapphire only. Other agents + pipelines = Gemini -> Groq, no Claude fallback.`);
   } else {
     console.warn(`⚠️ [LLM Teams] GROQ_API_KEY_TCF not set — TCF pipeline shares Groq Key A with SS pipeline.`);
   }
@@ -2189,14 +2192,17 @@ async function main() {
             chat_id: defaultChatId,
             payload: {
               directive: "DAILY CRO METRICS SWEEP — Execute your Chief Revenue Officer protocol. " +
-                "1) Use stripe_metrics (dashboard) to pull MRR, active subs, failed payments, new customers, and velocity toward $100K/month. " +
-                "2) Use buffer_analytics (overview) to pull content reach, impressions, clicks, engagement rate across all channels. " +
-                "3) Use buffer_analytics (top_posts) to identify top 5 performing posts and what made them work. " +
-                "4) Use buffer_analytics (channel_breakdown) to compare channel performance — which platforms drive reach vs clicks. " +
-                "5) Cross-reference: revenue signals (Stripe) vs content signals (Buffer) — is content driving conversions? " +
+                "MANDATORY TOOL SEQUENCE — you MUST call every tool listed below in order. There is NO `dm_architect` or `send_telegram_message` tool — the ONLY way your work reaches the Architect is via file_briefing. If you skip file_briefing, the Architect receives nothing. " +
+                "1) Call stripe_metrics with report=dashboard to pull MRR, active subs, failed payments, new customers, and velocity toward $100K/month. " +
+                "2) Call buffer_analytics with report=overview to pull content reach, impressions, clicks, engagement rate across all channels. " +
+                "3) Call buffer_analytics with report=top_posts to identify top 5 performing posts and what made them work. " +
+                "4) Call buffer_analytics with report=channel_breakdown to compare channel performance — which platforms drive reach vs clicks. " +
+                "5) Cross-reference revenue signals (Stripe) vs content signals (Buffer) — is content driving conversions? " +
                 "6) Identify the #1 bottleneck and recommend one specific optimization. " +
-                "Report findings to the Architect via Telegram. Keep it actionable — numbers, not narratives. " +
-                "Do NOT dispatch tasks to other agents — report directly.",
+                "7) MANDATORY FINAL STEP — call file_briefing with title='Daily CRO Sweep — <today\\'s date>', briefing_type='revenue_report', priority='high', and the FULL intelligence report (numbers, top posts, channel breakdown, cross-reference, bottleneck, recommendation) in the body parameter. The body IS the report; the briefings table IS the Architect's inbox. " +
+                "After file_briefing returns, your final assistant message MUST be exactly: '✅ Briefing filed: <briefing_id>' — nothing else. No prose summary, no 'I have reported', no narration. The briefing ID confirms delivery. " +
+                "FAILURE MODES THAT WILL MARK THIS TASK FAILED: (a) skipping any of the 4 tool calls in steps 1-4, (b) skipping file_briefing in step 7, (c) returning a meta-narration like 'the sweep is complete' instead of the briefing ID. " +
+                "Do NOT dispatch tasks to other agents — file the briefing and stop.",
               triggered_at: new Date().toISOString(),
               sweep_type: "daily",
             },
@@ -5039,7 +5045,33 @@ async function main() {
                   response.startsWith("⚠️") ||
                   response.includes("SYSTEM STATUS: DEGRADED") ||
                   response.includes("completely broken");
-                const dispatchStatus = isErrorResponse ? "failed" as const : "completed" as const;
+
+                // SESSION 122 (2026-04-26): file_briefing GATE for sweep tasks.
+                // Vector's daily_metrics_sweep degraded over 4 days from full intel report
+                // (2026-04-23 worked) → max iterations → tool-call trace fragment → pure
+                // hallucinated meta-line ("the sweep is complete and findings have been
+                // reported") with ZERO tool calls. Root cause: there is no dm_architect
+                // tool — file_briefing IS the delivery mechanism — but the directive said
+                // "report to Architect via Telegram" and the agent shortcut to narrating
+                // completion. Directive is now hardened (above) AND we gate here: if the
+                // task is a metrics sweep and the response doesn't carry the file_briefing
+                // success marker, force-fail so the failure surfaces instead of fabricating
+                // a green status. Add other gated task types here as their directives are
+                // hardened to the same contract.
+                const BRIEFING_GATED_TASKS = new Set(["daily_metrics_sweep"]);
+                const briefingGateMissed =
+                  BRIEFING_GATED_TASKS.has(task.task_type) &&
+                  !isErrorResponse &&
+                  !response.includes("✅ Briefing filed");
+
+                const dispatchStatus = (isErrorResponse || briefingGateMissed)
+                  ? "failed" as const
+                  : "completed" as const;
+                if (briefingGateMissed) {
+                  console.warn(
+                    `🛑 [DispatchPoller] ${agentName} task ${task.task_type} skipped file_briefing — forcing FAILED. Response head: ${response.slice(0, 200)}`,
+                  );
+                }
                 await completeDispatch(task.id, dispatchStatus, response.slice(0, 4000));
 
                 if (isErrorResponse) {

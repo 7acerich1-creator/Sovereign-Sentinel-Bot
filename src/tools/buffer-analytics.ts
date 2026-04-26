@@ -1,35 +1,57 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Buffer Analytics Tool
-// Session 36: Gives Vector real engagement data from Buffer.
-// Uses Buffer GraphQL API to pull sent post stats.
+// Session 36: Built around an assumed engagement-metrics schema.
+// Session 122 (2026-04-26): REWRITE. Verified Buffer's actual GraphQL schema
+//   from developers.buffer.com — Buffer's GraphQL API does NOT expose
+//   engagement metrics on the Post type (likes/clicks/impressions/reach are
+//   on their roadmap, not yet shipped). The S36 query asked for `statistics
+//   { likes ... }` and `channel { id name service }` — both fabricated.
+//   Buffer correctly rejected with "Cannot query field 'statistics' on type
+//   'Post'" and "Field 'first' is not defined by type 'PostsInput'" (the
+//   `first:` arg goes OUTSIDE the input block, not inside).
+//
+// Verified working schema (per Buffer docs Apr 2026):
+//   query { posts(first: N, input: { organizationId, filter: { status, channelIds } })
+//     { edges { node { id text dueAt channelId status } }
+//       pageInfo { hasNextPage endCursor } } }
+//
+// What this tool now reports HONESTLY:
+//   - Post counts per channel (real, queryable)
+//   - Channel distribution / cadence (real)
+//   - Recent sent posts with text + dueAt (real)
+//   - Engagement metrics: explicitly marked as "not exposed by Buffer GraphQL —
+//     pull from native APIs" so Vector knows where to look (YouTube Analytics,
+//     Meta Graph API, X API, etc.)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { Tool, ToolDefinition } from "../types";
-import { bufferGraphQL, BUFFER_ORG_ID } from "../engine/buffer-graphql";
-
-// SESSION 85: bufferGraphQL + BUFFER_ORG_ID imported from shared engine/buffer-graphql.ts
-// Single rate limiter across all Buffer consumers.
+import { bufferGraphQL, BUFFER_ORG_ID, getBufferChannels } from "../engine/buffer-graphql";
 
 export class BufferAnalyticsTool implements Tool {
   definition: ToolDefinition = {
     name: "buffer_analytics",
     description:
-      "Pull content performance analytics from Buffer. Returns sent posts with engagement " +
-      "metrics (likes, comments, shares, clicks, reach, impressions) across all channels. " +
-      "Use for daily content performance sweeps, channel comparison, top-post analysis, " +
-      "and engagement rate calculations. Complements stripe_metrics for full funnel visibility.",
+      "Pull content cadence and channel distribution from Buffer's GraphQL API. " +
+      "Returns post counts, channel breakdown, and recent sent posts. " +
+      "NOTE: Buffer's GraphQL API does NOT expose per-post engagement metrics " +
+      "(likes, clicks, impressions, reach) — those are on Buffer's roadmap. " +
+      "For engagement data, query native platform APIs: YouTube Analytics for YT, " +
+      "Meta Graph API for Facebook/Instagram, X API for Twitter, etc. " +
+      "Use this tool for: how much content was published, which channels are most active, " +
+      "what was the most recent post on a given channel.",
     parameters: {
       report: {
         type: "string",
         description:
-          "Report type: 'overview' (aggregate stats across all channels), " +
-          "'top_posts' (best-performing recent posts by engagement), " +
-          "'channel_breakdown' (per-channel performance comparison), " +
-          "'recent' (latest sent posts with stats). Default: overview",
+          "Report type: 'overview' (total post counts + channel distribution), " +
+          "'channel_breakdown' (per-channel post counts and most-recent dates), " +
+          "'recent' (latest sent posts with text and timestamps), " +
+          "'top_posts' (deprecated alias — returns recent since engagement metrics aren't available). " +
+          "Default: overview",
       },
       limit: {
         type: "number",
-        description: "Number of posts to analyze (default 50, max 100)",
+        description: "Number of posts to fetch (default 50, max 100). Buffer pagination is cursor-based; this fetches the most recent N sent posts.",
       },
     },
     required: [],
@@ -37,213 +59,195 @@ export class BufferAnalyticsTool implements Tool {
 
   async execute(args: Record<string, unknown>): Promise<string> {
     if (!process.env.BUFFER_API_KEY) {
-      return "❌ BUFFER_API_KEY not set. Vector cannot pull content analytics until this is configured.";
+      return "❌ BUFFER_API_KEY not set. Vector cannot pull content cadence until this is configured in Railway.";
     }
 
     const report = String(args.report || "overview");
     const limit = Math.min(Number(args.limit) || 50, 100);
 
     try {
-      // Fetch sent posts with engagement statistics
+      // VERIFIED Buffer GraphQL schema (per developers.buffer.com Apr 2026):
+      //   - `first: N` is a sibling argument to `input:` — NOT inside it
+      //   - Post fields: id, text, dueAt, channelId, status, assets { id mimeType }
+      //   - NO `statistics`, NO `channel { ... }` sub-object — channels resolved
+      //     separately via getBufferChannels() (already cached in buffer-graphql.ts)
       const query = `
         query GetSentPosts {
           posts(
+            first: ${limit},
             input: {
               organizationId: "${BUFFER_ORG_ID}",
-              sort: [{ field: dueAt, direction: desc }],
-              filter: { status: [sent] },
-              first: ${limit}
+              filter: { status: [sent] }
             }
           ) {
             edges {
               node {
                 id
                 text
-                createdAt
                 dueAt
-                channel {
-                  id
-                  name
-                  service
-                }
-                statistics {
-                  likes
-                  comments
-                  shares
-                  clicks
-                  reach
-                  impressions
-                  engagementRate
-                }
+                channelId
+                status
               }
             }
-            totalCount
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
           }
         }
       `;
 
       const data = await bufferGraphQL(query);
       const edges = data?.posts?.edges || [];
-      const totalCount = data?.posts?.totalCount || 0;
 
       if (edges.length === 0) {
-        return "📊 No sent posts found in Buffer. Content Engine may not have published yet, or posts are still in queue.";
+        return "📊 BUFFER CONTENT CADENCE\n" +
+          "No sent posts found in Buffer for this organization.\n" +
+          "If content was published outside Buffer (direct posting), it won't appear here.\n" +
+          "ENGAGEMENT METRICS NOTE: Buffer GraphQL doesn't expose engagement metrics — " +
+          "pull from YouTube Analytics / Meta Graph API for native platform stats.";
       }
 
-      const posts = edges.map((e: any) => ({
-        id: e.node.id,
-        text: (e.node.text || "").slice(0, 120),
-        channel: e.node.channel?.name || "unknown",
-        service: e.node.channel?.service || "unknown",
-        sentAt: e.node.dueAt || e.node.createdAt,
-        stats: {
-          likes: e.node.statistics?.likes || 0,
-          comments: e.node.statistics?.comments || 0,
-          shares: e.node.statistics?.shares || 0,
-          clicks: e.node.statistics?.clicks || 0,
-          reach: e.node.statistics?.reach || 0,
-          impressions: e.node.statistics?.impressions || 0,
-          engagementRate: e.node.statistics?.engagementRate || 0,
-        },
-      }));
+      // Resolve channels via cached lookup (no extra API call in most cases — 4h TTL)
+      const channels = await getBufferChannels();
+      const channelById = new Map<string, { name: string; service: string; displayName?: string }>();
+      for (const ch of channels) {
+        channelById.set(ch.id, { name: ch.name, service: ch.service, displayName: ch.displayName });
+      }
+
+      const posts = edges.map((e: any) => {
+        const ch = channelById.get(e.node.channelId);
+        return {
+          id: e.node.id,
+          text: (e.node.text || "").slice(0, 140),
+          channelId: e.node.channelId,
+          channelName: ch?.displayName || ch?.name || "(unknown channel)",
+          service: (ch?.service || "unknown").toLowerCase(),
+          sentAt: e.node.dueAt,
+          status: e.node.status,
+        };
+      });
+
+      // Honest engagement-metrics footer — same on every report so Vector always
+      // includes the caveat in his briefing instead of fabricating numbers.
+      const ENGAGEMENT_FOOTER =
+        "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
+        "⚠️ ENGAGEMENT METRICS UNAVAILABLE FROM BUFFER GRAPHQL\n" +
+        "Buffer's GraphQL API exposes post metadata (id, text, dueAt, channelId, status) " +
+        "but NOT engagement (likes, clicks, impressions, reach, engagement rate). " +
+        "Per Buffer's roadmap, those fields are not yet shipped.\n" +
+        "For native engagement metrics:\n" +
+        "  • YouTube → query the youtube_analytics Supabase table (already populated)\n" +
+        "  • Facebook / Instagram → Meta Graph API insights endpoint\n" +
+        "  • X (Twitter) → X API v2 tweet metrics\n" +
+        "  • LinkedIn → LinkedIn Marketing API";
 
       switch (report) {
         case "overview": {
-          // Aggregate across all posts
-          const totals = posts.reduce(
-            (acc: any, p: any) => {
-              acc.likes += p.stats.likes;
-              acc.comments += p.stats.comments;
-              acc.shares += p.stats.shares;
-              acc.clicks += p.stats.clicks;
-              acc.reach += p.stats.reach;
-              acc.impressions += p.stats.impressions;
-              return acc;
-            },
-            { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0, impressions: 0 },
+          // Channel distribution from sent posts
+          const byChannel: Record<string, { posts: number; service: string; lastSentAt: string }> = {};
+          for (const p of posts) {
+            const key = `${p.service}/${p.channelName}`;
+            if (!byChannel[key]) {
+              byChannel[key] = { posts: 0, service: p.service, lastSentAt: p.sentAt };
+            }
+            byChannel[key].posts++;
+            if (p.sentAt > byChannel[key].lastSentAt) byChannel[key].lastSentAt = p.sentAt;
+          }
+
+          const sorted = Object.entries(byChannel).sort(([, a], [, b]) => b.posts - a.posts);
+          const channelLines = sorted.map(([key, c]) =>
+            `  ${key}: ${c.posts} sent posts (most recent: ${c.lastSentAt?.slice(0, 10) || "unknown"})`
           );
 
-          const avgEngagement =
-            posts.length > 0
-              ? posts.reduce((sum: number, p: any) => sum + p.stats.engagementRate, 0) / posts.length
-              : 0;
-
-          // Channel distribution
-          const channelCounts: Record<string, number> = {};
-          posts.forEach((p: any) => {
-            channelCounts[`${p.service}/${p.channel}`] = (channelCounts[`${p.service}/${p.channel}`] || 0) + 1;
-          });
+          // Time window
+          const sentDates: string[] = posts.map((p: any) => p.sentAt).filter(Boolean).sort();
+          const earliest = sentDates[0]?.slice(0, 10) || "unknown";
+          const latest = sentDates[sentDates.length - 1]?.slice(0, 10) || "unknown";
 
           return (
-            `📊 BUFFER CONTENT PERFORMANCE (${posts.length} of ${totalCount} sent posts)\n` +
+            `📊 BUFFER CONTENT CADENCE — ${posts.length} sent posts\n` +
             `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `Total Reach: ${totals.reach.toLocaleString()}\n` +
-            `Total Impressions: ${totals.impressions.toLocaleString()}\n` +
-            `Total Clicks: ${totals.clicks.toLocaleString()}\n` +
-            `Total Likes: ${totals.likes.toLocaleString()}\n` +
-            `Total Comments: ${totals.comments.toLocaleString()}\n` +
-            `Total Shares: ${totals.shares.toLocaleString()}\n` +
-            `Avg Engagement Rate: ${avgEngagement.toFixed(2)}%\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `Channel Distribution:\n${Object.entries(channelCounts)
-              .sort(([, a], [, b]) => b - a)
-              .map(([ch, n]) => `  ${ch}: ${n} posts`)
-              .join("\n")}`
-          );
-        }
-
-        case "top_posts": {
-          // Sort by total engagement (likes + comments + shares + clicks)
-          const ranked = [...posts]
-            .map((p: any) => ({
-              ...p,
-              totalEngagement: p.stats.likes + p.stats.comments + p.stats.shares + p.stats.clicks,
-            }))
-            .sort((a: any, b: any) => b.totalEngagement - a.totalEngagement)
-            .slice(0, 10);
-
-          return (
-            `🏆 TOP ${ranked.length} POSTS BY ENGAGEMENT\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-            ranked
-              .map(
-                (p: any, i: number) =>
-                  `${i + 1}. [${p.service}/${p.channel}] ${p.totalEngagement} eng | ` +
-                  `👍${p.stats.likes} 💬${p.stats.comments} 🔄${p.stats.shares} 🔗${p.stats.clicks}\n` +
-                  `   "${p.text}"`,
-              )
-              .join("\n\n")
+            `Window: ${earliest} → ${latest}\n` +
+            `Total channels active: ${sorted.length}\n` +
+            `\nPosts per channel (sorted by volume):\n` +
+            channelLines.join("\n") +
+            ENGAGEMENT_FOOTER
           );
         }
 
         case "channel_breakdown": {
-          // Group by channel
-          const channels: Record<string, any> = {};
-          posts.forEach((p: any) => {
-            const key = `${p.service}/${p.channel}`;
-            if (!channels[key]) {
-              channels[key] = {
-                service: p.service,
-                channel: p.channel,
+          // Per-channel: count + cadence + most-recent-text snippet
+          const byChannel: Record<string, {
+            posts: number;
+            service: string;
+            lastSentAt: string;
+            lastText: string;
+          }> = {};
+          for (const p of posts) {
+            const key = `${p.service}/${p.channelName}`;
+            if (!byChannel[key]) {
+              byChannel[key] = {
                 posts: 0,
-                likes: 0,
-                comments: 0,
-                shares: 0,
-                clicks: 0,
-                reach: 0,
-                impressions: 0,
-                engagementRates: [] as number[],
+                service: p.service,
+                lastSentAt: p.sentAt,
+                lastText: p.text,
               };
             }
-            channels[key].posts++;
-            channels[key].likes += p.stats.likes;
-            channels[key].comments += p.stats.comments;
-            channels[key].shares += p.stats.shares;
-            channels[key].clicks += p.stats.clicks;
-            channels[key].reach += p.stats.reach;
-            channels[key].impressions += p.stats.impressions;
-            channels[key].engagementRates.push(p.stats.engagementRate);
-          });
+            byChannel[key].posts++;
+            if (p.sentAt > byChannel[key].lastSentAt) {
+              byChannel[key].lastSentAt = p.sentAt;
+              byChannel[key].lastText = p.text;
+            }
+          }
 
-          const breakdown = Object.entries(channels)
-            .sort(([, a]: any, [, b]: any) => b.reach - a.reach)
-            .map(([key, c]: any) => {
-              const avgEng =
-                c.engagementRates.length > 0
-                  ? c.engagementRates.reduce((s: number, r: number) => s + r, 0) / c.engagementRates.length
-                  : 0;
-              return (
-                `📌 ${key} (${c.posts} posts)\n` +
-                `   Reach: ${c.reach.toLocaleString()} | Impressions: ${c.impressions.toLocaleString()}\n` +
-                `   Clicks: ${c.clicks} | Likes: ${c.likes} | Comments: ${c.comments} | Shares: ${c.shares}\n` +
-                `   Avg Engagement Rate: ${avgEng.toFixed(2)}%`
-              );
-            });
+          const lines = Object.entries(byChannel)
+            .sort(([, a], [, b]) => b.posts - a.posts)
+            .map(([key, c]) =>
+              `📌 ${key}\n` +
+              `   Posts: ${c.posts} | Most recent: ${c.lastSentAt?.slice(0, 16) || "unknown"}\n` +
+              `   Last post: "${c.lastText}"`
+            );
 
-          return `📊 CHANNEL PERFORMANCE BREAKDOWN\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${breakdown.join("\n\n")}`;
+          return (
+            `📊 BUFFER CHANNEL BREAKDOWN (cadence + most-recent post per channel)\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            lines.join("\n\n") +
+            ENGAGEMENT_FOOTER
+          );
         }
 
-        case "recent": {
-          const recent = posts.slice(0, 15);
+        case "recent":
+        case "top_posts": {
+          // top_posts is deprecated — returns recent since engagement isn't available
+          const recent = [...posts]
+            .sort((a, b) => (b.sentAt || "").localeCompare(a.sentAt || ""))
+            .slice(0, 15);
+
+          const note = report === "top_posts"
+            ? `\n⚠️ NOTE: 'top_posts' returns RECENT posts since Buffer doesn't expose engagement metrics. Use a native platform API to rank by engagement.\n\n`
+            : "\n\n";
+
           return (
-            `📋 RECENT SENT POSTS (${recent.length} of ${totalCount})\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `📋 RECENT SENT POSTS (${recent.length})\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━` +
+            note +
             recent
               .map(
-                (p: any) =>
-                  `[${p.service}/${p.channel}] ${p.sentAt}\n` +
-                  `  👍${p.stats.likes} 💬${p.stats.comments} 🔄${p.stats.shares} 🔗${p.stats.clicks} | reach: ${p.stats.reach}\n` +
+                (p) =>
+                  `[${p.service}/${p.channelName}] ${p.sentAt?.slice(0, 16) || "unknown"}\n` +
                   `  "${p.text}"`,
               )
-              .join("\n\n")
+              .join("\n\n") +
+            ENGAGEMENT_FOOTER
           );
         }
 
         default:
-          return `Unknown report type: ${report}. Use: overview, top_posts, channel_breakdown, recent`;
+          return `Unknown report type: ${report}. Use: overview, channel_breakdown, recent, top_posts`;
       }
     } catch (err: any) {
-      return `❌ Buffer Analytics error: ${err.message}`;
+      return `❌ Buffer Analytics error: ${err.message}\n\nIf the error mentions a schema field, Buffer's GraphQL schema may have changed — re-verify against developers.buffer.com.`;
     }
   }
 }

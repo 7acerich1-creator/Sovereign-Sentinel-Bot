@@ -5173,10 +5173,17 @@ async function main() {
                 // a green status. Add other gated task types here as their directives are
                 // hardened to the same contract.
                 const BRIEFING_GATED_TASKS = new Set(["daily_metrics_sweep"]);
+                // Extract briefing ID once — used both for the gate check AND the
+                // S122b Telegram relay. UUID v4 is 8-4-4-4-12 hex chars; we accept
+                // anything hex+dash so a future ID format change doesn't silently
+                // skip the relay.
+                const briefingMatch = response.match(/✅ Briefing filed:\s*([0-9a-f-]{8,})/i);
+                const briefingId = briefingMatch?.[1] || null;
+
                 const briefingGateMissed =
                   BRIEFING_GATED_TASKS.has(task.task_type) &&
                   !isErrorResponse &&
-                  !response.includes("✅ Briefing filed");
+                  !briefingId;
 
                 const dispatchStatus = (isErrorResponse || briefingGateMissed)
                   ? "failed" as const
@@ -5188,8 +5195,42 @@ async function main() {
                 }
                 await completeDispatch(task.id, dispatchStatus, response.slice(0, 4000));
 
-                if (isErrorResponse) {
-                  console.warn(`🛑 [DispatchPoller] ${agentName} task ${task.task_type} produced error response — marked FAILED, skipping handoffs`);
+                // ── S122b: Telegram briefing relay ──
+                // The briefings table is canonical; this is the fanout step that
+                // forwards the briefing body back to the Architect on Telegram in
+                // the agent's voice. Only fires for gated tasks that actually
+                // produced a briefing ID. Fire-and-forget — relay never blocks the
+                // dispatch loop and never throws.
+                if (briefingId && BRIEFING_GATED_TASKS.has(task.task_type) && dispatchStatus === "completed") {
+                  const relayChatId = task.chat_id || defaultChatId;
+                  const supportedCrew = new Set(["vector", "veritas", "alfred", "anita", "yuki"]);
+                  if (relayChatId && supportedCrew.has(agentName) && channel) {
+                    const crewAgent = agentName as "vector" | "veritas" | "alfred" | "anita" | "yuki";
+                    const briefingIdForRelay = briefingId;
+                    const relayChannel = channel;
+                    void (async () => {
+                      try {
+                        const { relayBriefingToTelegram } = await import("./channels/agent-voice");
+                        await relayBriefingToTelegram(
+                          crewAgent,
+                          briefingIdForRelay,
+                          relayChannel,
+                          relayChatId,
+                        );
+                      } catch (relayErr: any) {
+                        console.warn(`[BriefingRelay] ${agentName}: dispatch-side wrapper failed: ${relayErr.message}`);
+                      }
+                    })();
+                  } else {
+                    console.warn(
+                      `[BriefingRelay] ${agentName}: skipping relay — ` +
+                      `chat=${!!relayChatId} crew=${supportedCrew.has(agentName)} channel=${!!channel}`,
+                    );
+                  }
+                }
+
+                if (isErrorResponse || briefingGateMissed) {
+                  console.warn(`🛑 [DispatchPoller] ${agentName} task ${task.task_type} produced error/gate-fail response — marked FAILED, skipping handoffs`);
                   continue; // Skip handoffs and auto-pipeline trigger
                 }
 

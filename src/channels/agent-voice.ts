@@ -156,6 +156,139 @@ export async function voicedDM(
 }
 
 /**
+ * S122 (2026-04-26): Relay a filed briefing back to Telegram in the agent's voice.
+ *
+ * Why this exists: file_briefing writes to Supabase `briefings` table (canonical),
+ * but the dispatch poller doesn't auto-fan-out to Telegram. Mission Control surfaces
+ * briefings visually, but the Architect is on Telegram, so the briefing body needs
+ * to follow him there. This is the fanout — fetch from Supabase, format with a
+ * Vector-style header + body verbatim + thought-tag, DM through agent's own bot.
+ *
+ * Failure contract: NEVER throws. On any failure, returns false and lets the
+ * dispatch poller continue without blocking. Caller already has the briefing in
+ * Supabase — Telegram delivery is best-effort polish.
+ *
+ * Pattern matches Veritas's morning briefing (`proactive/briefings.ts`) — same
+ * appendThoughtTag wrapping for the closing reflection line.
+ */
+export interface BriefingRelayChannel {
+  sendMessage(chatId: string, text: string, opts?: { parseMode?: string }): Promise<unknown>;
+}
+
+const BRIEFING_AGENT_DISPLAY: Record<CrewAgent, string> = {
+  vector: "Vector — Daily Sweep",
+  veritas: "Veritas — Briefing",
+  alfred: "Alfred — Trend Scan",
+  anita: "Anita — Briefing",
+  yuki: "Yuki — Briefing",
+};
+
+const BRIEFING_METRIC_BY_TYPE: Record<string, NorthStarMetric> = {
+  revenue_report: "MRR",
+  trend_scan: "engaged_views",
+  pipeline_status: "pipeline_signal",
+  risk_alert: "funnel_health",
+  weekly_summary: "MRR",
+  system_status: "funnel_health",
+  strategic_analysis: "MRR",
+};
+
+export async function relayBriefingToTelegram(
+  agent: CrewAgent,
+  briefingId: string,
+  channel: BriefingRelayChannel,
+  chatId: string,
+): Promise<boolean> {
+  if (!briefingId || !channel || !chatId) return false;
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseKey) {
+    console.warn(`[BriefingRelay] ${agent}: Supabase env not set — skipping relay for briefing ${briefingId}`);
+    return false;
+  }
+
+  try {
+    // 1. Fetch briefing body from Supabase
+    const resp = await fetch(
+      `${supabaseUrl}/rest/v1/briefings?id=eq.${briefingId}&select=title,body,briefing_type,priority,requires_action,action_items`,
+      {
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+        },
+      },
+    );
+
+    if (!resp.ok) {
+      console.warn(`[BriefingRelay] ${agent}: Supabase fetch failed ${resp.status} for briefing ${briefingId}`);
+      return false;
+    }
+
+    const rows = (await resp.json()) as any[];
+    const briefing = rows?.[0];
+    if (!briefing) {
+      console.warn(`[BriefingRelay] ${agent}: briefing ${briefingId} not found in Supabase`);
+      return false;
+    }
+
+    // 2. Format the Telegram message — header + body verbatim + footer + thought-tag
+    const display = BRIEFING_AGENT_DISPLAY[agent] || `${agent} — Briefing`;
+    const priorityIcon =
+      briefing.priority === "critical" ? "🚨"
+      : briefing.priority === "high" ? "⚡"
+      : briefing.priority === "medium" ? "📊"
+      : "📝";
+    const header = `${priorityIcon} *${display}*\n_${briefing.title || "Untitled"}_`;
+
+    let actionBlock = "";
+    if (briefing.requires_action && Array.isArray(briefing.action_items) && briefing.action_items.length > 0) {
+      actionBlock =
+        "\n\n*Action items:*\n" +
+        briefing.action_items.map((a: string) => `• ${a}`).join("\n");
+    }
+
+    const baseBody = `${header}\n\n${briefing.body || "(empty briefing body)"}${actionBlock}`;
+
+    // 3. Append a thought-tag in the agent's voice tying this briefing to a NORTH_STAR metric
+    const metric: NorthStarMetric = BRIEFING_METRIC_BY_TYPE[briefing.briefing_type] || "MRR";
+    const voiced = await appendThoughtTag(
+      agent,
+      baseBody,
+      {
+        action: `Filed briefing "${briefing.title}" of type ${briefing.briefing_type}`,
+        metric,
+      },
+    );
+
+    // 4. Send via the agent's own Telegram bot. Telegram's hard cap is 4096 chars
+    //    per message — file_briefing already caps body at ~4000, but the wrapper
+    //    can push us over. Truncate defensively.
+    const final = voiced.length > 4000 ? voiced.slice(0, 3990) + "\n…(truncated)" : voiced;
+
+    try {
+      await channel.sendMessage(chatId, final, { parseMode: "Markdown" });
+    } catch (mdErr: any) {
+      // Markdown can choke on stray underscores/asterisks in agent-generated bodies.
+      // Retry without parseMode so the message still lands.
+      console.warn(`[BriefingRelay] ${agent}: Markdown send failed (${mdErr.message}) — retrying as plain text`);
+      try {
+        await channel.sendMessage(chatId, final.replace(/[*_`]/g, ""));
+      } catch (plainErr: any) {
+        console.warn(`[BriefingRelay] ${agent}: plain-text retry also failed: ${plainErr.message}`);
+        return false;
+      }
+    }
+
+    console.log(`📨 [BriefingRelay] ${agent}: relayed briefing ${briefingId} (${briefing.briefing_type}) to Telegram`);
+    return true;
+  } catch (err: any) {
+    console.warn(`[BriefingRelay] ${agent}: relay exception: ${err.message} — caller should not block`);
+    return false;
+  }
+}
+
+/**
  * Lightweight variant for paths that already produced their own voiced body
  * (e.g. Veritas briefings that already invoke the LLM with the agent prompt).
  * Just appends a thought-tag line. Falls back to returning the body unchanged.

@@ -513,14 +513,10 @@ async function main() {
   // ── 6. Wire Message Handler ──
   const defaultChatId = String(config.telegram.authorizedUserIds[0]);
 
-  // S119c: Register the Telegram channel with email-reply-handler so completeDispatch
-  // can fire the ✉️ Anita's Draft Reply approval prompt without threading args through.
-  try {
-    const { setEmailReplyChannel } = await import("./proactive/email-reply-handler");
-    setEmailReplyChannel(telegram, defaultChatId);
-  } catch (err: any) {
-    console.warn(`[BotInit] setEmailReplyChannel failed: ${err.message}`);
-  }
+  // S119g: NO bootstrap registration with Veritas's channel. Email is Anita-only.
+  // The actual setEmailReplyChannel call happens AFTER Maven Crew is online,
+  // pointing at @Anita_SovereignBot's channel. If Anita doesn't come up, no
+  // email approval prompts fire (better than routing through Veritas).
 
   router.onMessage(async (message: Message) => {
     try {
@@ -1921,69 +1917,9 @@ async function main() {
         return true;
       }
 
-      // SESSION 109 / S119e: /approve [replyId] — send an Anita-drafted email reply
-      // S119e: replyId optional. Bare /approve uses the most recent pending draft.
-      case "/approve": {
-        try {
-          let replyId = arg.trim();
-          if (!replyId) {
-            const recent = getMostRecentPendingReplyId();
-            if (!recent) {
-              await telegram.sendMessage(
-                message.chatId,
-                "No pending email replies. (Use /approve <reply_id> to target a specific one.)"
-              );
-              return true;
-            }
-            replyId = recent;
-          }
-          const result = await sendApprovedReply(replyId);
-          if (result.sent) {
-            await telegram.sendMessage(message.chatId, `✅ Reply sent for ${replyId}`);
-          } else {
-            await telegram.sendMessage(message.chatId, `❌ Send failed: ${result.error}`);
-          }
-        } catch (err: any) {
-          await telegram.sendMessage(message.chatId, `❌ /approve error: ${err.message?.slice(0, 400)}`);
-        }
-        return true;
-      }
-
-      // SESSION 109 / S119e: /edit [replyId] <text> — send a custom reply instead of Anita's draft
-      // S119e: replyId optional. /edit <text> targets the most recent pending draft.
-      case "/edit": {
-        try {
-          let editReplyId = args[0] || "";
-          let customText = args.slice(1).join(" ");
-          // If args[0] doesn't look like a reply_id (i.e. doesn't start with "reply_"),
-          // treat the entire arg string as the custom text and use the most recent pending reply
-          if (!editReplyId.startsWith("reply_")) {
-            const recent = getMostRecentPendingReplyId();
-            if (!recent) {
-              await telegram.sendMessage(
-                message.chatId,
-                "No pending email replies. (Use /edit <reply_id> <text> to target a specific one.)"
-              );
-              return true;
-            }
-            editReplyId = recent;
-            customText = arg.trim();
-          }
-          if (!customText) {
-            await telegram.sendMessage(message.chatId, "Usage: /edit <your custom reply text>  — or  /edit <reply_id> <text>");
-            return true;
-          }
-          const result = await sendApprovedReply(editReplyId, customText);
-          if (result.sent) {
-            await telegram.sendMessage(message.chatId, `✅ Custom reply sent for ${editReplyId}`);
-          } else {
-            await telegram.sendMessage(message.chatId, `❌ Send failed: ${result.error}`);
-          }
-        } catch (err: any) {
-          await telegram.sendMessage(message.chatId, `❌ /edit error: ${err.message?.slice(0, 400)}`);
-        }
-        return true;
-      }
+      // S119g: /approve and /edit removed from Veritas. Email is 100% Anita's job.
+      // These commands are handled deterministically in the per-agent crew bot router
+      // (in @Anita_SovereignBot's chat, where the approval card lands).
 
       default:
         // Unknown command — let agent loop handle it
@@ -3365,7 +3301,11 @@ async function main() {
         payload = incoming as any;
       }
 
-      const result = await handleInboundEmail(payload, telegram, defaultChatId);
+      // S119g: route inbound email alerts through Anita's bot (NOT Veritas).
+      // Veritas watches the whole business; Anita owns email end-to-end.
+      // Falls back to main telegram only if Anita's bot didn't come online.
+      const inboundChannel = agentLoops.get("anita")?.channel || telegram;
+      const result = await handleInboundEmail(payload, inboundChannel, defaultChatId);
       return JSON.stringify(result);
     } catch (err: any) {
       console.error(`[InboundEmail] Webhook error: ${err.message}`);
@@ -4723,8 +4663,11 @@ async function main() {
                 const selection = selectToolsForMessage(rawText, hasAttachment);
                 console.log(`[SapphirePA] Tool tiering — loaded [${selection.loadedTiers.join(",")}] = ${selection.toolCount} tools (~${selection.approxTokens} tokens, was 32)`);
 
-                // Context budget cap — drop recent msg cap to 6, skip semantic search
-                agentBotLoop.setContextOverrides({ maxRecentMessages: 6, skipSemanticSearch: true });
+                // Context budget cap — keep semantic search off (Pinecone sapphire-personal
+                // namespace already runs in her PA prefix), but allow 15 recent turns so she
+                // can hold a real conversation arc, not just the last few volleys. With tool
+                // tiering already trimming ~22 tools off each call, this fits easily.
+                agentBotLoop.setContextOverrides({ maxRecentMessages: 15, skipSemanticSearch: true });
 
                 // Snapshot full tool set so we can restore. Strip PA tools, replace with tier selection.
                 sapphireToolSnapshot = agentBotLoop.snapshotTools();

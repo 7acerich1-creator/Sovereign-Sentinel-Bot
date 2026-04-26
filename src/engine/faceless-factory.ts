@@ -1405,8 +1405,15 @@ export async function produceFacelessVideo(
   console.log(`📝 [FacelessFactory] Generating script...`);
   let script: Awaited<ReturnType<typeof generateScript>> | null = null;
   const MAX_UNIQUENESS_RETRIES = 2;
+  // S122 fix — same niche + same source on retry = same well. Inject a
+  // divergence directive that names the colliding script and instructs the
+  // writer to take a different angle/hook/metaphor on the next attempt.
+  let divergenceDirective = "";
   for (let attempt = 0; attempt <= MAX_UNIQUENESS_RETRIES; attempt++) {
-    const candidate = await generateScript(llm, sourceIntelligence, niche, brand, targetDuration, orientation);
+    const augmentedSource = divergenceDirective
+      ? `${divergenceDirective}\n\n---\n\n${sourceIntelligence}`
+      : sourceIntelligence;
+    const candidate = await generateScript(llm, augmentedSource, niche, brand, targetDuration, orientation);
     const corpusForCheck = [
       candidate.title,
       ...candidate.segments.map((s: any) => String(s.voiceover || s.text || "")),
@@ -1428,6 +1435,21 @@ export async function produceFacelessVideo(
           console.error(`❌ [FacelessFactory] ${MAX_UNIQUENESS_RETRIES + 1} consecutive duplicates — halting.`);
           throw err;
         }
+        // Build a sharper directive each retry. Pull the colliding script's
+        // preview text + this candidate's title so the writer sees both
+        // "what's already shipped" and "what I just produced that was too
+        // close" — and is told to push to a different angle entirely.
+        const colliderPreview = String(err.matchPreview || "").slice(0, 400).replace(/\s+/g, " ").trim();
+        const candidateTitle = String(candidate.title || "").trim();
+        divergenceDirective = [
+          `🚫 DIVERGENCE DIRECTIVE — attempt ${attempt + 1} of this script clustered too closely with already-shipped content (cosine ${err.score.toFixed(3)}).`,
+          ``,
+          `ALREADY SHIPPED (do not retread): "${colliderPreview}"`,
+          ``,
+          `JUST PRODUCED + REJECTED: "${candidateTitle}"`,
+          ``,
+          `For this next attempt produce a script with a meaningfully DIFFERENT angle on the niche. Change the central metaphor, the opening hook, the structural frame, and the named target. Do not paraphrase the rejected attempt. The reader should not be able to tell these came from the same niche prompt.`,
+        ].join("\n");
         continue;
       }
       throw err;

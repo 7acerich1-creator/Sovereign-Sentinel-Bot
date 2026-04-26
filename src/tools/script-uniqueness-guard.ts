@@ -29,10 +29,33 @@ import type { Brand } from "../pod/types";
 
 /**
  * Cosine-similarity threshold above which two scripts are "too similar".
- * 0.85 is tight enough that paraphrases register, loose enough that same-niche
- * scripts on different theses pass. Tuned for 1024d gemini-embedding-001.
+ * Per-brand because the topical lanes are NOT equally wide:
+ *   • sovereign_synthesis — wide lane (sovereignty / system architecture /
+ *     mindset shifts). 0.85 catches paraphrases without choking diversity.
+ *   • containment_field — STRUCTURALLY narrow lane (dark psychology +
+ *     nervous-system + workplace conditioning). Two genuinely different
+ *     scripts in this lane routinely cosine 0.86–0.89 just from shared
+ *     vocabulary. Tightening to 0.85 there caused repeat halts (S122
+ *     Telegram failure: "5 Signs Your Job Is Hijacking Your Nervous
+ *     System" rejected at cosine=0.8618). Bumped to 0.90 — still tight
+ *     enough that real paraphrases register.
+ * Tuned for 1024d gemini-embedding-001.
  */
-export const UNIQUENESS_THRESHOLD = 0.85;
+const THRESHOLDS: Record<Brand, number> = {
+  sovereign_synthesis: 0.85,
+  containment_field: 0.90,
+};
+
+/** Public per-brand accessor — single source of truth for callers. */
+export function getUniquenessThreshold(brand: Brand): number {
+  return THRESHOLDS[brand] ?? 0.85;
+}
+
+/**
+ * Back-compat export. Resolves to the Sovereign Synthesis value (the historical
+ * default). Prefer `getUniquenessThreshold(brand)` for new call sites.
+ */
+export const UNIQUENESS_THRESHOLD = THRESHOLDS.sovereign_synthesis;
 
 /** Pinecone namespace convention for shipped scripts, keyed by brand. */
 export function scriptNamespace(brand: Brand): string {
@@ -48,7 +71,7 @@ export class ScriptTooSimilarError extends Error {
   ) {
     super(
       `ScriptTooSimilarError: brand="${brand}" candidate matches shipped script ` +
-      `"${matchId}" at cosine=${score.toFixed(4)} (>= ${UNIQUENESS_THRESHOLD}). ` +
+      `"${matchId}" at cosine=${score.toFixed(4)} (>= ${getUniquenessThreshold(brand)}). ` +
       `Preview: ${matchPreview.slice(0, 140)}...`,
     );
     this.name = "ScriptTooSimilarError";
@@ -193,7 +216,7 @@ export async function checkScriptUniqueness(brand: Brand, script: string): Promi
     // Pinecone cosine returns [-1, 1]; matches are sorted desc.
     const top = matches[0];
     const preview = String(top.metadata?.content || top.metadata?.thesis || "");
-    const unique = top.score < UNIQUENESS_THRESHOLD;
+    const unique = top.score < getUniquenessThreshold(brand);
     return {
       unique,
       topScore: top.score,

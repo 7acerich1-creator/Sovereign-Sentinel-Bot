@@ -24,6 +24,7 @@ import {
   SetPieceTool, RemovePieceTool, CreatePieceTool, ListPiecesTool, ViewSelfPromptTool, ViewIdentityHistoryTool,
   RecordFollowupTool, ListFollowupsTool, CompleteFollowupTool, CancelFollowupTool,
   WriteDiaryEntryTool, ReadDiaryTool, ReadSignificanceTool,
+  ReadTeamRosterTool,
 } from "./index";
 
 // ── TIER definitions ───────────────────────────────────────────────────────
@@ -115,6 +116,11 @@ function tierDiary(): Tool[] {
   ];
 }
 
+/** S121d — Team roster lookup. Loaded whenever team composition / who-does-what comes up. */
+function tierRoster(): Tool[] {
+  return [new ReadTeamRosterTool()];
+}
+
 // ── Intent matchers ─────────────────────────────────────────────────────────
 // Keyword + regex matchers per tier. False positives are cheap (extra tool
 // loaded), false negatives are bad (right tool unavailable). So err on the
@@ -198,6 +204,15 @@ const MATCHERS: TierMatcher[] = [
       /\b(diary|journal|what did you notice|wrap up the day|evening wrap|end of day|reflect on (today|this week)|on this (date|day) (in|years? ago)|a year ago today|what'?s significant)\b/i.test(t)
       || /\b(write down|note (that|to yourself)|log (an? )?(observation|reflection))\b/i.test(t),
     load: tierDiary,
+  },
+  {
+    // S121d — load whenever Ace asks about team composition or any agent's role.
+    // Sapphire's baked-in picture is stale (Buffer/X dead, TikTok/IG deferred,
+    // roles shifted post-S119) — she MUST call read_team_roster to refresh.
+    name: "roster",
+    match: (t) =>
+      /\b(team|crew|maven|roster|who('?s| is) on|who does|who handles|tell me about (yuki|veritas|alfred|vector|anita|sapphire)|what does (yuki|veritas|alfred|vector|anita) do|the (full )?(team|crew) (structure|breakdown|layout)|agents)\b/i.test(t),
+    load: tierRoster,
   },
 ];
 

@@ -16,6 +16,7 @@ import { AddNewsSourceTool, RemoveNewsSourceTool, ListNewsSourcesTool } from "./
 import { SetPieceTool, RemovePieceTool, CreatePieceTool, ListPiecesTool, ViewSelfPromptTool, ViewIdentityHistoryTool } from "./self_mod";
 import { RecordFollowupTool, ListFollowupsTool, CompleteFollowupTool, CancelFollowupTool } from "./followups";
 import { WriteDiaryEntryTool, ReadDiaryTool, ReadSignificanceTool } from "./diary";
+import { ReadTeamRosterTool } from "./roster";
 import type { Tool } from "../../types";
 
 export {
@@ -60,6 +61,7 @@ export {
   WriteDiaryEntryTool,
   ReadDiaryTool,
   ReadSignificanceTool,
+  ReadTeamRosterTool,
 };
 
 // ── Bundle factory — returns all 27 PA tools ───────────────────────────────
@@ -119,5 +121,7 @@ export function buildSapphirePATools(): Tool[] {
     new WriteDiaryEntryTool(),
     new ReadDiaryTool(),
     new ReadSignificanceTool(),
+    // Team roster (1) — S121d, single source of truth from PERSONA_REGISTRY
+    new ReadTeamRosterTool(),
   ];
 }

@@ -301,22 +301,52 @@ export async function completeDispatch(
       .catch((e) => console.warn(`[InsightExtractor] ${e.message}`));
   }
 
-  // ── S119c: Email reply draft → Telegram approval prompt ──
+  // ── S119c/d: Email reply draft → Telegram approval prompt ──
   // When Anita finishes drafting an inbound-email reply, fire the
   // ✉️ Anita's Draft Reply approval card to the Architect's Telegram.
+  //
+  // S119d FIX: Anita stores the draft in content_drafts table FIRST, then her
+  // crew_dispatch.result is just a meta-summary ("task complete"). So the regex
+  // approach (extractDraftFromAgentResult) didn't match. Pull the body straight
+  // from content_drafts instead — most recent Anita email draft for this dispatch.
   // Never blocks the dispatch loop; failures are logged.
-  if (status === "completed" && taskType === "email_reply_draft" && result && dispatchPayload) {
+  if (status === "completed" && taskType === "email_reply_draft" && dispatchPayload) {
     const replyId = String(dispatchPayload.reply_id || "");
-    const draftText = extractDraftFromAgentResult(result);
-    if (replyId && draftText) {
-      import("../proactive/email-reply-handler")
-        .then(({ notifyDraftReady }) => notifyDraftReady(replyId, draftText))
-        .catch((e) => console.warn(`[EmailReply] notifyDraftReady error: ${e.message}`));
-    } else {
-      console.warn(
-        `[EmailReply] Could not extract draft from Anita's result for replyId=${replyId}. ` +
-          `Result preview: ${result.slice(0, 200)}`
-      );
+    if (replyId) {
+      // Try freeform text first (cheap), fall back to content_drafts lookup
+      let draftText = result ? extractDraftFromAgentResult(result) : null;
+
+      if (!draftText) {
+        try {
+          const draftResp = await fetch(
+            `${SUPABASE_URL}/rest/v1/content_drafts?agent_name=eq.anita&draft_type=eq.email&order=created_at.desc&limit=1&select=body,created_at`,
+            { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+          );
+          if (draftResp.ok) {
+            const drafts = (await draftResp.json()) as any[];
+            if (drafts?.[0]?.body) {
+              draftText = String(drafts[0].body).trim();
+              console.log(
+                `[EmailReply] Pulled draft from content_drafts for replyId=${replyId} ` +
+                  `(${draftText.length} chars, draft created_at=${drafts[0].created_at})`
+              );
+            }
+          }
+        } catch (err: any) {
+          console.warn(`[EmailReply] content_drafts lookup failed: ${err.message}`);
+        }
+      }
+
+      if (draftText) {
+        import("../proactive/email-reply-handler")
+          .then(({ notifyDraftReady }) => notifyDraftReady(replyId, draftText!))
+          .catch((e) => console.warn(`[EmailReply] notifyDraftReady error: ${e.message}`));
+      } else {
+        console.warn(
+          `[EmailReply] Could not recover draft for replyId=${replyId}. ` +
+            `Result: ${result?.slice(0, 200) || "(empty)"}`
+        );
+      }
     }
   }
 }

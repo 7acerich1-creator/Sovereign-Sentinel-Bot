@@ -83,7 +83,7 @@ import { pollYouTubeStats } from "./proactive/youtube-stats-fetcher";
 import { runHookDrops } from "./proactive/yuki-hook-dropper";
 import { pollBlueskyReplies } from "./proactive/yuki-bluesky-replier";
 import { runBlueskyHookDrops } from "./proactive/yuki-bluesky-hook-dropper";
-import { handleInboundEmail, sendApprovedReply, getPendingReplies } from "./proactive/email-reply-handler";
+import { handleInboundEmail, sendApprovedReply, getPendingReplies, getMostRecentPendingReplyId } from "./proactive/email-reply-handler";
 import { runWeeklyNewsletterCycle } from "./proactive/anita-newsletter";
 import { runMilestoneSync } from "./proactive/milestone-sync";
 import { YouTubeCommentTool, postDiagnosticComment } from "./tools/youtube-comment-tool";
@@ -1921,13 +1921,21 @@ async function main() {
         return true;
       }
 
-      // SESSION 109: /approve <replyId> — send an Anita-drafted email reply
+      // SESSION 109 / S119e: /approve [replyId] — send an Anita-drafted email reply
+      // S119e: replyId optional. Bare /approve uses the most recent pending draft.
       case "/approve": {
         try {
-          const replyId = arg.trim();
+          let replyId = arg.trim();
           if (!replyId) {
-            await telegram.sendMessage(message.chatId, "Usage: /approve <reply_id>");
-            return true;
+            const recent = getMostRecentPendingReplyId();
+            if (!recent) {
+              await telegram.sendMessage(
+                message.chatId,
+                "No pending email replies. (Use /approve <reply_id> to target a specific one.)"
+              );
+              return true;
+            }
+            replyId = recent;
           }
           const result = await sendApprovedReply(replyId);
           if (result.sent) {
@@ -1941,13 +1949,28 @@ async function main() {
         return true;
       }
 
-      // SESSION 109: /edit <replyId> <text> — send a custom reply instead of Anita's draft
+      // SESSION 109 / S119e: /edit [replyId] <text> — send a custom reply instead of Anita's draft
+      // S119e: replyId optional. /edit <text> targets the most recent pending draft.
       case "/edit": {
         try {
-          const editReplyId = args[0];
-          const customText = args.slice(1).join(" ");
-          if (!editReplyId || !customText) {
-            await telegram.sendMessage(message.chatId, "Usage: /edit <reply_id> <your custom reply text>");
+          let editReplyId = args[0] || "";
+          let customText = args.slice(1).join(" ");
+          // If args[0] doesn't look like a reply_id (i.e. doesn't start with "reply_"),
+          // treat the entire arg string as the custom text and use the most recent pending reply
+          if (!editReplyId.startsWith("reply_")) {
+            const recent = getMostRecentPendingReplyId();
+            if (!recent) {
+              await telegram.sendMessage(
+                message.chatId,
+                "No pending email replies. (Use /edit <reply_id> <text> to target a specific one.)"
+              );
+              return true;
+            }
+            editReplyId = recent;
+            customText = arg.trim();
+          }
+          if (!customText) {
+            await telegram.sendMessage(message.chatId, "Usage: /edit <your custom reply text>  — or  /edit <reply_id> <text>");
             return true;
           }
           const result = await sendApprovedReply(editReplyId, customText);
@@ -4569,6 +4592,69 @@ async function main() {
               return;
             }
 
+            // ── S119f: /approve and /edit handlers for Anita's bot (and any crew bot) ──
+            // The approval card now lands in Anita's DM, so /approve must work there too.
+            // Bare /approve uses the most-recent pending reply.
+            else if (/^\/approve\b/i.test(message.content)) {
+              const approveArg = message.content.replace(/^\/approve\s*/i, "").trim();
+              try {
+                let replyId = approveArg;
+                if (!replyId) {
+                  const recent = getMostRecentPendingReplyId();
+                  if (!recent) {
+                    await agentChannel.sendMessage(
+                      message.chatId,
+                      "No pending email replies. (Use /approve <reply_id> to target a specific one.)"
+                    );
+                    return;
+                  }
+                  replyId = recent;
+                }
+                const result = await sendApprovedReply(replyId);
+                if (result.sent) {
+                  await agentChannel.sendMessage(message.chatId, `✅ Reply sent for ${replyId}`);
+                } else {
+                  await agentChannel.sendMessage(message.chatId, `❌ Send failed: ${result.error}`);
+                }
+              } catch (err: any) {
+                await agentChannel.sendMessage(message.chatId, `❌ /approve error: ${err.message?.slice(0, 400)}`);
+              }
+              return;
+            }
+            else if (/^\/edit\b/i.test(message.content)) {
+              const editRest = message.content.replace(/^\/edit\s*/i, "").trim();
+              const editArgs = editRest.split(/\s+/);
+              try {
+                let editReplyId = editArgs[0] || "";
+                let customText = editArgs.slice(1).join(" ");
+                if (!editReplyId.startsWith("reply_")) {
+                  const recent = getMostRecentPendingReplyId();
+                  if (!recent) {
+                    await agentChannel.sendMessage(
+                      message.chatId,
+                      "No pending email replies. (Use /edit <reply_id> <text> to target a specific one.)"
+                    );
+                    return;
+                  }
+                  editReplyId = recent;
+                  customText = editRest;
+                }
+                if (!customText) {
+                  await agentChannel.sendMessage(message.chatId, "Usage: /edit <your custom reply text>  — or  /edit <reply_id> <text>");
+                  return;
+                }
+                const result = await sendApprovedReply(editReplyId, customText);
+                if (result.sent) {
+                  await agentChannel.sendMessage(message.chatId, `✅ Custom reply sent for ${editReplyId}`);
+                } else {
+                  await agentChannel.sendMessage(message.chatId, `❌ Send failed: ${result.error}`);
+                }
+              } catch (err: any) {
+                await agentChannel.sendMessage(message.chatId, `❌ /edit error: ${err.message?.slice(0, 400)}`);
+              }
+              return;
+            }
+
             // ── /dryrun, /pipeline, /alfred commands are handled by Veritas handleCommand() ──
             // Crew bots should NOT run pipeline commands — redirect to Veritas
             // SESSION 80: Added /alfred — was being swallowed by crew bots instead of routing
@@ -5515,6 +5601,20 @@ async function main() {
   console.log("🧬 LLM: " + failoverLLM.listProviders().join(" → "));
   console.log("📡 Channels: " + router.listChannels().join(", "));
   console.log("✅ Maven Crew ONLINE — [" + activeBotHandles.join(", ") + "]");
+
+  // S119f: Once Anita's bot is initialized, route the inbound-email approval
+  // card through HER bot DM (not Veritas's). Falls back to main telegram if
+  // Anita didn't come online.
+  try {
+    const anitaChannel = agentLoops.get("anita")?.channel;
+    if (anitaChannel) {
+      const { setEmailReplyChannel } = await import("./proactive/email-reply-handler");
+      setEmailReplyChannel(anitaChannel, defaultChatId);
+      console.log("[EmailReply] Switched approval card routing to @Anita_SovereignBot DM");
+    }
+  } catch (err: any) {
+    console.warn(`[EmailReply] Anita channel re-registration failed: ${err.message}`);
+  }
   console.log("📊 Process Memory — RSS: " + Math.round(mem.rss / 1024 / 1024) + "MB | Heap: " + Math.round(mem.heapUsed / 1024 / 1024) + "/" + Math.round(mem.heapTotal / 1024 / 1024) + "MB | External: " + Math.round(mem.external / 1024 / 1024) + "MB");
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 

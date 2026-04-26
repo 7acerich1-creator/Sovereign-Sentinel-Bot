@@ -167,11 +167,12 @@ export async function storeDraftAndRequestApproval(
   pending.draftText = draftText;
 
   const approvalMsg =
-    `✉️ *Anita's Draft Reply* (ID: \`${replyId}\`)\n\n` +
+    `✉️ *Anita's Draft Reply*\n\n` +
     `*To:* ${pending.to}\n` +
     `*Subject:* ${pending.subject}\n\n` +
     `---\n${draftText}\n---\n\n` +
-    `Reply with \`/approve ${replyId}\` to send, or \`/edit ${replyId} <your text>\` to rewrite.`;
+    `Reply \`/approve\` to send, or \`/edit <your rewrite>\` to send a custom version.\n` +
+    `_(ID: \`${replyId}\` — use it if you have multiple pending drafts.)_`;
 
   try {
     await telegram.sendMessage(chatId, approvalMsg, { parseMode: "Markdown" });
@@ -255,4 +256,21 @@ export async function sendApprovedReply(
 export function getPendingReplies(): PendingReply[] {
   cleanExpiredReplies();
   return [...pendingReplies.values()];
+}
+
+/**
+ * S119e: Get the reply_id of the most-recently-created pending reply.
+ * Lets the user type bare /approve or /edit without copy-pasting the long ID
+ * when there's only one pending draft (the common case).
+ * Returns null if no pending replies.
+ */
+export function getMostRecentPendingReplyId(): string | null {
+  cleanExpiredReplies();
+  let mostRecent: PendingReply | null = null;
+  for (const reply of pendingReplies.values()) {
+    if (!mostRecent || reply.createdAt > mostRecent.createdAt) {
+      mostRecent = reply;
+    }
+  }
+  return mostRecent?.replyId ?? null;
 }

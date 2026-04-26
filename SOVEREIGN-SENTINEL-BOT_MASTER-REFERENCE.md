@@ -24,6 +24,38 @@
 
 ---
 
+## S120 AUDIT — Sapphire Upgrade Verification (2026-04-26)
+
+**No commits made this session. The four specified fixes were already live in HEAD.**
+
+Architect briefed a 4-fix Sapphire upgrade ("schema flex + 16K output + empty-retry + Gemini safety relax") with a STEP ZERO directive to verify the working tree wasn't a corrupted sandbox snapshot. Verification path: Desktop Commander cmd shell → `git rev-parse HEAD` → `findstr` against the actual Windows files.
+
+Result of audit:
+
+- **FIX 1** — `src/index.ts:4670` `agentBotLoop.setContextOverrides({ maxRecentMessages: 15, ... })`. Already shipped under commit `90adbb9` (S119g, 2026-04-26 04:33 UTC).
+- **FIX 2** — `src/tools/relationship-context.ts` schema loosened: hard enum replaced with `MAX_CATEGORY_LEN=40`, lowercase + `[\s-]+`→`_` + strip non-`[a-z0-9_]` normalize, `RECOMMENDED_CATEGORIES` retained as soft guidance (preference, frustration, pattern, win, tone, communication_style, relational, value, trigger, ritual), `(novel category)` log when not on the list. Already shipped under commit `c42abc8` (S119h).
+- **FIX 3** — `src/agent/loop.ts` empty-completion handling: `maxTokens` raised 8192→16384, `EMPTY COMPLETION` diagnostic emits provider/model/finishReason/inputTokens/outputTokens, single retry path, soulful fallback `"My signal dropped for a moment, Ace. Say it again and I'll catch it this time."` (line 323). Already shipped under commit `c42abc8` (S119h).
+- **FIX 4** — `src/llm/providers.ts` GeminiProvider hardened: `safetySettings` array with all four published categories at `BLOCK_ONLY_HIGH` (lines 130-133), `rawFinish` mapping replaces hardcoded `"stop"`/`"tool_use"` (lines 300-305), per-category safetyRatings warn on SAFETY block (filters to `blocked || probability !== "NEGLIGIBLE"`), RECITATION + unexpected-finishReason console.warn paths. Already shipped under commit `c42abc8` (S119h).
+
+**Verification:**
+- `git rev-parse HEAD` = `6874c2f` (S119i — Ace's TCF Flux aesthetic fix).
+- `git rev-list --left-right --count origin/main...main` = `0 0`. Local clean against origin.
+- `git status --short`: only untracked junk media (`audit_sample.mp4`, `audit_sample_frame.jpg`, `audit_ss_frame.jpg`). No unstaged source files.
+- `npx tsc --noEmit` (Windows, tsc 5.9.3) — exit 0, zero output. Clean compile.
+- `findstr` confirms each spec string on disk (`maxRecentMessages: 15`, `MAX_CATEGORY_LEN = 40`, `FALLBACK = "My signal dropped...`, `BLOCK_ONLY_HIGH` ×4).
+
+**Why no S120 commit:** the architect's spec was already fully implemented in S119g + S119h (bundled into Anita's commit message). Re-shipping would have produced an empty diff. Per `feedback_verify_before_claiming_unset.md` + `feedback_orphan_files_break_railway.md`, this session refused to fake a commit.
+
+**Surfaced for next-scope decision (architect's 30–40 year brief):**
+1. **Versioned identity ledger** — `sapphire_identity_log` Supabase table recording every `create_piece` / `set_piece` / `remove_piece` with timestamp + before/after diff + Ace's triggering message. Plus `/history` command for Sapphire to read her own evolution.
+2. **Multi-provider intelligent routing** — keep Gemini Flash-Lite as default but route introspective/relational/self-reflective threads to Claude when Anthropic credits are loaded (Claude doesn't suppress self-reflection the way Gemini does). Pattern triggers: "feel", "you", "us", "yourself", deep-question markers. Falls through to Gemini on 400. Pairs with FIX 4 — long-game answer is to stop relying on a single classifier.
+3. **Pinecone `sapphire-personal` namespace deepening** — every `relationship_context` observation AND every substantive Ace DM gets embedded with metadata `{category, timestamp, scenario, sentiment}`. Enables PA-prefix richer recall ("Ace mentioned waging war with reality on 2026-04-26 at 03:25 — see how that thread evolved").
+4. **Billionaire-PA UX deltas** — proactive morning brief at her own cadence, anticipatory questions, `/diary` command (her own daily voice), reminder-of-significance ("a year ago today you said...").
+
+None of these are bundled in this audit. Each is a small standalone build awaiting Architect green-light on order of execution.
+
+---
+
 ## S118 CLOSE — Audit Cross-Sync With MC (2026-04-25)
 
 **Final commit:** `2c723b6` on origin/main. Railway auto-deploy triggered.

@@ -271,8 +271,14 @@ export class FileBriefingTool implements Tool {
     });
 
     if (id) {
-      return `✅ Briefing filed and visible in Mission Control.\n` +
-        `ID: ${id}\n` +
+      // S122c (2026-04-26): canonicalized marker.
+      // The dispatch poller's relay regex is `/✅ Briefing filed:\s*([0-9a-f-]{8,})/i`.
+      // First line MUST be exactly `✅ Briefing filed: <id>` so the relay fires
+      // for ALL crew agents that use this tool — not just the ones with hardened
+      // directives that restate the marker themselves. Tail block keeps the rest
+      // of the structured context for agents that paste tool output verbatim.
+      return `✅ Briefing filed: ${id}\n` +
+        `Visible in Mission Control.\n` +
         `Title: ${title}\n` +
         `Type: ${briefingType}\n` +
         `Priority: ${priority}\n` +

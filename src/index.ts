@@ -5195,13 +5195,20 @@ async function main() {
                 }
                 await completeDispatch(task.id, dispatchStatus, response.slice(0, 4000));
 
-                // ── S122b: Telegram briefing relay ──
+                // ── S122b/c: Telegram briefing relay ──
                 // The briefings table is canonical; this is the fanout step that
                 // forwards the briefing body back to the Architect on Telegram in
-                // the agent's voice. Only fires for gated tasks that actually
-                // produced a briefing ID. Fire-and-forget — relay never blocks the
-                // dispatch loop and never throws.
-                if (briefingId && BRIEFING_GATED_TASKS.has(task.task_type) && dispatchStatus === "completed") {
+                // the agent's voice. S122c (2026-04-26): DECOUPLED from
+                // BRIEFING_GATED_TASKS — relay fires for ANY crew agent that
+                // produces a briefing ID via file_briefing, regardless of
+                // task_type. The gate set is for force-fail (a task TYPE that
+                // requires a briefing). The relay is the fanout (any briefing,
+                // any agent). Two separate concerns.
+                // Sapphire is excluded per `feedback_sapphire_off_limits.md` —
+                // she's the PA, not Maven Crew, and has her own delivery path.
+                // Fire-and-forget — relay never blocks the dispatch loop and
+                // never throws.
+                if (briefingId && dispatchStatus === "completed") {
                   const relayChatId = task.chat_id || defaultChatId;
                   const supportedCrew = new Set(["vector", "veritas", "alfred", "anita", "yuki"]);
                   if (relayChatId && supportedCrew.has(agentName) && channel) {

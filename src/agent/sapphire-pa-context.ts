@@ -57,6 +57,24 @@ export async function buildPersonalContextPrefix(userMessage = ""): Promise<stri
   // ── 2. Live state hints ──
   parts.push(`# LIVE STATE (this message)`);
 
+  // S121e: TEAM ROSTER — single source of truth from PERSONA_REGISTRY.
+  // Without this Sapphire hallucinates Buffer/X/CapCut/Munch/old role descriptions
+  // because her training/baked picture is months out of date. Inject FRESH every turn.
+  try {
+    const { PERSONA_REGISTRY } = await import("./personas");
+    const HIDDEN = new Set(["curator"]);
+    const lines: string[] = ["[CURRENT MAVEN CREW (do NOT guess from memory — this is the truth):]"];
+    for (const [key, p] of Object.entries(PERSONA_REGISTRY)) {
+      if (HIDDEN.has(key)) continue;
+      const oneline = `  - ${p.name} (${p.role}): ${p.goal.slice(0, 200)}`;
+      lines.push(oneline);
+    }
+    lines.push(`  (Sapphire = the PA, NOT a Maven Crew operative. Crew = Yuki, Veritas, Alfred, Vector, Anita.)`);
+    parts.push(lines.join("\n"));
+  } catch (e: any) {
+    console.warn(`[SapphirePA] team roster inject failed: ${e.message}`);
+  }
+
   // Auth status — small but critical for routing decisions
   try {
     const auth = await getSapphireAuthStatus();

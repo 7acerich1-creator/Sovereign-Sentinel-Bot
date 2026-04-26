@@ -2023,6 +2023,42 @@ async function main() {
     },
   });
 
+  // ── S121e: SAPPHIRE PA — Anticipatory Followup Surfacer (every 30 min) ──
+  // Reads sapphire_followups whose due_at <= now AND surfaced_at IS NULL,
+  // marks them surfaced, then DMs Ace through Sapphire's channel with the
+  // anticipatory question. Distinct from set_reminder which is fixed-time pings.
+  scheduler.add({
+    name: "Sapphire PA — Followup Surface (30m)",
+    intervalMs: 30 * 60 * 1000,
+    nextRun: new Date(Date.now() + 4 * 60 * 1000),
+    enabled: true,
+    handler: async () => {
+      if (!sapphirePARef.channel) return;
+      try {
+        const { fetchAndSurfaceDueFollowups } = await import("./tools/sapphire/followups");
+        const due = await fetchAndSurfaceDueFollowups();
+        if (due.length === 0) return;
+        if (!defaultChatId) {
+          console.warn(`[SapphireWatch] ${due.length} followups due but defaultChatId not set — skipping DM`);
+          return;
+        }
+        for (const f of due) {
+          const detail = f.detail ? `\n\n_${f.detail}_` : "";
+          const src = f.source_excerpt ? `\n\n> ${f.source_excerpt}` : "";
+          const msg = `💎 _Circling back, Ace — you flagged this for around now._\n\n*${f.topic}*${detail}${src}\n\nStill want it? Reply: 'done', 'snooze 2d', or just talk through it.`;
+          try {
+            await sapphirePARef.channel.sendMessage(defaultChatId, msg, { parseMode: "Markdown" });
+          } catch (sendErr: any) {
+            console.error(`[SapphireWatch] Followup DM failed for ${f.id}: ${sendErr.message}`);
+          }
+        }
+        console.log(`💎 [SapphireWatch] Surfaced ${due.length} due followup(s)`);
+      } catch (e: any) {
+        console.error(`[SapphireWatch] Followup surface error: ${e.message}`);
+      }
+    },
+  });
+
   // ── SAPPHIRE PA — Morning Brief (16:00 UTC = 11 AM CDT) ──
   scheduler.add({
     name: "Sapphire PA — Morning Brief (11 AM CDT)",
@@ -4664,6 +4700,8 @@ async function main() {
             // Snapshot tools + observer + context state BEFORE the LLM call, restore in
             // finally so they NEVER leak across messages even if processMessage throws.
             let sapphireToolSnapshot: Map<string, any> | null = null;
+            // S121e: hoisted so the post-processMessage Pinecone embed can reference it.
+            let sapphireRawText = "";
             const isSapphireDM = agentCfg.name === "sapphire" && !message.metadata?.isGroup;
             if (isSapphireDM) {
               try {
@@ -4680,14 +4718,48 @@ async function main() {
                   .replace(/^URGENT ALERT[\s\S]*?\n\n/m, "")
                   .replace(/^\[CONTEXT:[\s\S]*?\]\s*/m, "")
                   .trim();
+                sapphireRawText = rawText; // S121e — exposed to post-process embed
                 const selection = selectToolsForMessage(rawText, hasAttachment);
                 console.log(`[SapphirePA] Tool tiering — loaded [${selection.loadedTiers.join(",")}] = ${selection.toolCount} tools (~${selection.approxTokens} tokens, was 32)`);
 
-                // Context budget cap — keep semantic search off (Pinecone sapphire-personal
-                // namespace already runs in her PA prefix), but allow 15 recent turns so she
-                // can hold a real conversation arc, not just the last few volleys. With tool
-                // tiering already trimming ~22 tools off each call, this fits easily.
-                agentBotLoop.setContextOverrides({ maxRecentMessages: 15, skipSemanticSearch: true });
+                // S121e: Conversation continuity tuning.
+                // - maxRecentMessages 15→25: doubles the visible thread window so consecutive
+                //   DMs feel like a real ongoing conversation, not a reset every turn.
+                // - skipSemanticSearch FALSE: lets the agent loop's semantic search inject 3
+                //   most-relevant past messages from anywhere in history. Pairs with her PA
+                //   prefix (which queries sapphire-personal Pinecone) — the two layers
+                //   together give her real "I remember what we talked about last week" recall.
+                agentBotLoop.setContextOverrides({ maxRecentMessages: 25, skipSemanticSearch: false });
+
+                // S121e: Identity ledger — capture this turn's user message so any
+                // set_piece/create_piece/remove_piece tool calls during this turn can
+                // attribute their entry to the message that triggered them.
+                try {
+                  const { setIdentityLogTrigger } = await import("./tools/sapphire/_ledger");
+                  setIdentityLogTrigger(rawText);
+                } catch { /* best-effort */ }
+
+                // S121e: Introspective routing — promote Anthropic to primary for this
+                // turn when the message is introspective / relational / self-reflective.
+                // Reason: Gemini's safety classifier silently zeroes self-modification
+                // language and deep-question framings even at BLOCK_ONLY_HIGH; Claude
+                // doesn't. Failover chain (Anthropic -> Groq -> Gemini) handles 400s.
+                // Non-introspective messages stay on Gemini Flash-Lite for cost.
+                try {
+                  const { scoreIntrospection } = await import("./tools/sapphire/_introspection");
+                  const introspect = scoreIntrospection(rawText);
+                  if (introspect.isIntrospective) {
+                    const sapphireFailover = agentBotLoop.llm as any;
+                    if (sapphireFailover && typeof sapphireFailover.switchPrimary === "function") {
+                      const switched = sapphireFailover.switchPrimary("anthropic");
+                      if (switched) {
+                        console.log(`💎 [Sapphire] Introspective routing -> Claude. Triggers: [${introspect.triggered.join(",")}] score=${introspect.score}`);
+                      }
+                    }
+                  }
+                } catch (e: any) {
+                  console.warn(`[Sapphire] Introspection routing failed: ${e.message} — staying on default LLM`);
+                }
 
                 // Snapshot full tool set so we can restore. Strip PA tools, replace with tier selection.
                 sapphireToolSnapshot = agentBotLoop.snapshotTools();
@@ -4702,7 +4774,10 @@ async function main() {
                   "save_family_member","get_family",
                   "create_plan","approve_plan","advance_plan","record_step_result","cancel_plan",
                   "add_news_source","remove_news_source","list_news_sources",
-                  "set_piece","remove_piece","create_piece","list_pieces","view_self_prompt",
+                  "set_piece","remove_piece","create_piece","list_pieces","view_self_prompt","view_identity_history",
+                  "record_followup","list_followups","complete_followup","cancel_followup",
+                  "write_diary_entry","read_diary","read_significance",
+                  "read_team_roster",
                 ]);
                 const nonPATools = allCurrent.filter((t: any) => !PA_TOOL_NAMES.has(t.definition?.name));
                 agentBotLoop.setTools([...nonPATools, ...selection.tools]);
@@ -4720,7 +4795,46 @@ async function main() {
                 agentBotLoop.setToolCallObserver(undefined);
                 agentBotLoop.setContextOverrides(undefined);
                 if (sapphireToolSnapshot) agentBotLoop.restoreTools(sapphireToolSnapshot);
+                // S121e: Restore Gemini primary after every Sapphire turn (idempotent).
+                try {
+                  const sapphireFailover = agentBotLoop.llm as any;
+                  if (sapphireFailover && typeof sapphireFailover.switchPrimary === "function") {
+                    sapphireFailover.switchPrimary("gemini");
+                  }
+                } catch { /* swallow */ }
+                // S121e: clear identity-ledger trigger so the next turn doesn't borrow this one's message.
+                try {
+                  const { clearIdentityLogTrigger } = await import("./tools/sapphire/_ledger");
+                  clearIdentityLogTrigger();
+                } catch { /* swallow */ }
               }
+            }
+
+            // S121e: sapphire-personal namespace deepening — every substantive
+            // Sapphire DM (response >= 30 chars + user msg >= 12 chars) gets embedded
+            // with {sentiment, scenario, timestamp, chat_id} so semantic recall has
+            // a rich corpus across years. Fire-and-forget.
+            if (isSapphireDM && response && response.length >= 30 && sapphireRawText.length >= 12) {
+              (async () => {
+                try {
+                  const { upsertSapphireObservation, inferSentiment } = await import("./tools/sapphire/_pinecone");
+                  const ts = new Date().toISOString();
+                  const exchange = `Ace: ${sapphireRawText.slice(0, 600)}\nSapphire: ${response.slice(0, 800)}`;
+                  const id = `dm:${ts.replace(/[^0-9]/g, "")}_${(message.chatId || "x").slice(0, 12)}`;
+                  const aceSent = inferSentiment(sapphireRawText);
+                  const sapSent = inferSentiment(response);
+                  const sentiment = aceSent !== "neutral" ? aceSent : sapSent;
+                  await upsertSapphireObservation(id, exchange, {
+                    type: "dm_exchange",
+                    sentiment,
+                    scenario: "conversation",
+                    chat_id: String(message.chatId || ""),
+                    timestamp: ts,
+                  });
+                } catch (err: any) {
+                  console.warn(`[Sapphire DM embed] failed: ${err.message}`);
+                }
+              })();
             }
 
             // Update task status + log to Mission Control

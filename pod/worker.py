@@ -572,13 +572,18 @@ def _image_to_branded_video(
         # textfile= does not need shell escaping for the content. The path
         # itself must avoid drawtext separators (':' and ','). out_dir is
         # /tmp/<job_id> so safe.
+        # S117f (2026-04-26): hook text now vertically CENTERED on the image
+        # (was anchored 90px from the bottom). Bigger fontsize + heavier
+        # stroke since the text is now competing with the FLUX scene rather
+        # than sitting on a less-busy bottom strip.
         text_filter = (
             f"drawtext=fontfile={BRAND_FONT}"
             f":textfile={hook_textfile}"
-            f":fontsize=42:fontcolor=white"
-            f":shadowcolor=black@0.8:shadowx=2:shadowy=2"
-            f":line_spacing=10"
-            f":x=(w-text_w)/2:y=h-text_h-90"
+            f":fontsize=56:fontcolor=white"
+            f":borderw=4:bordercolor=black"
+            f":shadowcolor=black@0.85:shadowx=3:shadowy=3"
+            f":line_spacing=14"
+            f":x=(w-text_w)/2:y=(h-text_h)/2"
         )
         filters.append(text_filter)
 

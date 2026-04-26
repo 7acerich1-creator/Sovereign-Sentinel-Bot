@@ -116,21 +116,30 @@ interface RecentUpload {
   publishedAt: string; // ISO timestamp
 }
 
+// S117e (2026-04-25): switched from search.list (100 quota units/call) to
+// playlistItems.list on the channel's uploads playlist (1 unit/call). The
+// uploads playlist ID is the channel ID with the "UC" prefix replaced by "UU".
+// Daily cost: was ~57,000 units, now ~570 units. Critical fix — search.list
+// was burning the entire YouTube Data API daily quota in the first hour.
 async function fetchRecentUploads(brand: Brand, token: string, max: number): Promise<RecentUpload[]> {
   const channelId = BRAND_CONFIG[brand].channelId;
-  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&order=date&type=video&maxResults=${max}`;
+  // YouTube convention: replace UC prefix with UU to get the uploads playlist.
+  const uploadsPlaylistId = channelId.startsWith("UC")
+    ? "UU" + channelId.slice(2)
+    : channelId;
+  const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylistId}&maxResults=${max}`;
   try {
     const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!resp.ok) {
-      console.error(`[YukiShorts] search.list ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+      console.error(`[YukiShorts] playlistItems.list ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
       return [];
     }
     const data = (await resp.json()) as any;
     const items: any[] = data.items || [];
     return items
-      .filter((it) => it.id?.videoId)
+      .filter((it) => it.snippet?.resourceId?.videoId)
       .map((it) => ({
-        videoId: it.id.videoId,
+        videoId: it.snippet.resourceId.videoId,
         title: it.snippet?.title || "",
         description: it.snippet?.description || "",
         publishedAt: it.snippet?.publishedAt || new Date().toISOString(),

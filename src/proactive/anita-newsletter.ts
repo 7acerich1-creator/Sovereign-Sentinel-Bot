@@ -13,6 +13,8 @@
 //   - anita_weekly_send_count (helper view)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+import type { Channel } from "../types";
+
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_EMAIL = "Sovereign Synthesis <ace@sovereign-synthesis.com>";
 const WEEKLY_CAP = 3;
@@ -361,7 +363,7 @@ Output STRICT JSON, no other text:
 // ── 9. The weekly cron orchestrator ───────────────────────────────────────
 // Invoked by the scheduler in index.ts. Produces a draft, sends if cap allows.
 export async function runWeeklyNewsletterCycle(opts: {
-  alertChannel?: { sendMessage: (chatId: string, text: string, opts?: any) => Promise<void> };
+  alertChannel?: Channel;
   alertChatId?: string;
   dryRun?: boolean;
 }): Promise<{ status: string; details: string }> {

@@ -3312,6 +3312,21 @@ async function main() {
           }
         }
 
+        // S119 FALLBACK: If body fetch returned empty (short email, missing API key,
+        // or Resend API change), synthesize a placeholder so Anita STILL dispatches
+        // and the Architect STILL gets the Telegram alert. Loop must never die silently.
+        if (!bodyText || bodyText.trim() === "") {
+          console.warn(
+            `[InboundEmail] Empty body for email_id=${emailId} from=${fromAddr} ` +
+              `subject="${subject}" resendKey=${!!resendKey} — using subject fallback.`
+          );
+          bodyText =
+            `[Email body unavailable — webhook delivered metadata only]\n` +
+            `Subject: ${subject}\n` +
+            `From: ${fromAddr}\n` +
+            `(Reply briefly acknowledging receipt and asking what brought them to write.)`;
+        }
+
         payload = { from: fromAddr, to: toAddr, subject, text: bodyText };
       } else {
         // Direct/manual payload format: { from, to, subject, text }

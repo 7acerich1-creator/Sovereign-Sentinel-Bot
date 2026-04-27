@@ -62,8 +62,8 @@ export class ClickUpTool implements Tool {
     });
     
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    const tasks = (data.tasks || []) as ClickUpTask[];
+    const data = (await resp.json()) as { tasks: ClickUpTask[] };
+    const tasks = data.tasks || [];
 
     if (tasks.length === 0) return "No tasks found in this list.";
 

@@ -25,7 +25,7 @@ import { AgentSwarm, SwarmTool } from "./agent/swarm";
 // Source file retained at ./agent/comms.ts for reference but no longer imported or instantiated.
 import { NotionAppendToPageTool } from "./tools/sapphire/notion";
 import { ClickUpTool } from "./tools/sapphire/clickup";
-import { GoogleCalendarListEventsTool, GoogleCalendarCreateEventTool } from "./tools/sapphire/calendar";
+import { CalendarListTool, CalendarCreateEventTool } from "./tools/sapphire/calendar";
 import { MeshWorkflow, MeshTool } from "./agent/mesh";
 
 // ── Channels ──

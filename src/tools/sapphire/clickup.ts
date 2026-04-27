@@ -6,7 +6,7 @@ export class ClickUpTool implements Tool {
     name: "clickup_manage_tasks",
     description: "Interact with ClickUp tasks (list, create, update). Requires task_id or list_id.",
     parameters: {
-      type: "object" as const,
+      type: "object",
       properties: {
         action: { type: "string", enum: ["list", "create", "update"] },
         list_id: { type: "string", description: "The ClickUp List ID" },

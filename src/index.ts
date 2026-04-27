@@ -72,6 +72,7 @@ import { YouTubeAnalyticsReaderTool, LandingAnalyticsReaderTool, EmailTrackingTo
 import { MetaPixelAnalyticsTool } from "./tools/meta-pixel-analytics";
 import { VideoPublisherTool, TikTokPublishTool, InstagramReelsPublishTool, YouTubeShortsPublishTool, YouTubeLongFormPublishTool } from "./tools/video-publisher";
 import { YouTubeUpdateMetadataTool, YouTubePinCommentTool, YouTubeCTAAuditTool } from "./tools/youtube-cta-tools";
+import { YoutubeTranscriptTool } from "./tools/sapphire/youtube";
 
 // ── Voice ──
 import { transcribeAudio, downloadTelegramFile } from "./voice/transcription";

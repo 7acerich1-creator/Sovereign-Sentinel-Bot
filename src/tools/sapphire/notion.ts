@@ -147,10 +147,19 @@ export class NotionAppendToPageTool implements Tool {
   };
 
   async execute(args: Record<string, unknown>, _context?: any): Promise<string> {
-    const pageId = String(args.page_id || "").replace(/-/g, "");
+    let pageId = String(args.page_id || "").replace(/-/g, "");
     const heading = args.heading ? String(args.heading) : "";
     const body = String(args.body || "");
     const withDivider = args.with_divider !== false;
+
+    // Handle today placeholder
+    if (pageId === "today_page_id" || pageId === "<today_page_id>") {
+      const parentId = await getNotionParentPageId();
+      if (!parentId) return "notion_append_to_page: No parent page set. Use notion_set_parent_page first.";
+      const dailyPage = await findOrCreateDailyPage(new Date(), parentId);
+      if (!dailyPage.ok) return `notion_append_to_page: Failed to resolve daily page: ${dailyPage.error}`;
+      pageId = dailyPage.pageId.replace(/-/g, "");
+    }
 
     if (!pageId) return "notion_append_to_page: page_id required.";
     if (!body.trim()) return "notion_append_to_page: body required.";

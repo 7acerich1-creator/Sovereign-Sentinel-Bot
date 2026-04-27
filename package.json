@@ -4,7 +4,8 @@
   "description": "Gravity Claw v3.0 — Sovereign Synthesis AI Agent | Agentic Tool Loop + Multi-LLM + MCP Bridge",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc && cp -r src/data dist/data",
+    "build": "tsc && (if exist dist\\data (rmdir /s /q dist\\data)) && (if exist src\\data (mkdir dist\\data && xcopy /e /i src\\data dist\\data)) || (mkdir -p dist/data && cp -r src/data dist/data || true)",
+    "postinstall": "npx puppeteer install chromium",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "typecheck": "tsc --noEmit",

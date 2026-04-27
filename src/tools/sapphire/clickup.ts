@@ -58,7 +58,10 @@ export class ClickUpTool implements Tool {
     if (!listId) return "ClickUp error: No List ID provided.";
     
     const resp = await fetch(`${CLICKUP_API_BASE}/list/${listId}/task?subtasks=true`, {
-      headers: { "Authorization": token }
+      headers: { 
+        "Authorization": token,
+        "Content-Type": "application/json"
+      }
     });
     
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);

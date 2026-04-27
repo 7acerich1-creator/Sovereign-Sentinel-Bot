@@ -6,7 +6,7 @@
 import { SetReminderTool, ListRemindersTool, CancelReminderTool } from "./reminders";
 import { GmailInboxTool, GmailSearchTool, GmailSendTool, GmailDraftTool } from "./gmail";
 import { CalendarListTool, CalendarCreateEventTool, CalendarRescheduleTool } from "./calendar";
-import { NotionCreatePageTool, NotionAppendToPageTool, NotionSearchTool, NotionSetParentPageTool } from "./notion";
+import { NotionCreatePageTool, NotionAppendToPageTool, NotionSearchTool, NotionSetParentPageTool, NotionGetBlocksTool, NotionUpdateBlockTool, NotionDeleteBlockTool } from "./notion";
 import { RememberFactTool, RecallFactsTool } from "./facts";
 import { AnalyzePdfTool } from "./pdf";
 import { ResearchBriefTool } from "./research";
@@ -17,6 +17,7 @@ import { SetPieceTool, RemovePieceTool, CreatePieceTool, ListPiecesTool, ViewSel
 import { RecordFollowupTool, ListFollowupsTool, CompleteFollowupTool, CancelFollowupTool } from "./followups";
 import { WriteDiaryEntryTool, ReadDiaryTool, ReadSignificanceTool } from "./diary";
 import { ReadTeamRosterTool } from "./roster";
+import { YoutubeTranscriptTool } from "./youtube";
 import type { Tool } from "../../types";
 
 export {
@@ -34,6 +35,9 @@ export {
   NotionAppendToPageTool,
   NotionSearchTool,
   NotionSetParentPageTool,
+  NotionGetBlocksTool,
+  NotionUpdateBlockTool,
+  NotionDeleteBlockTool,
   RememberFactTool,
   RecallFactsTool,
   AnalyzePdfTool,
@@ -62,6 +66,7 @@ export {
   ReadDiaryTool,
   ReadSignificanceTool,
   ReadTeamRosterTool,
+  YoutubeTranscriptTool,
 };
 
 // ── Bundle factory — returns all 27 PA tools ───────────────────────────────
@@ -80,11 +85,14 @@ export function buildSapphirePATools(): Tool[] {
     new CalendarListTool(),
     new CalendarCreateEventTool(),
     new CalendarRescheduleTool(),
-    // Notion (4)
+    // Notion (7)
     new NotionCreatePageTool(),
     new NotionAppendToPageTool(),
     new NotionSearchTool(),
     new NotionSetParentPageTool(),
+    new NotionGetBlocksTool(),
+    new NotionUpdateBlockTool(),
+    new NotionDeleteBlockTool(),
     // Memory (2)
     new RememberFactTool(),
     new RecallFactsTool(),
@@ -123,5 +131,7 @@ export function buildSapphirePATools(): Tool[] {
     new ReadSignificanceTool(),
     // Team roster (1) — S121d, single source of truth from PERSONA_REGISTRY
     new ReadTeamRosterTool(),
+    // YouTube (1) — S121d, daily pipeline analysis
+    new YoutubeTranscriptTool(),
   ];
 }

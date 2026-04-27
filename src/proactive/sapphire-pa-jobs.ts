@@ -354,3 +354,185 @@ export async function runEveningWrap(channel: Channel, chatId: string): Promise<
 
   console.log(`[SapphirePA] Evening wrap sent for ${wrapIso}`);
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 4. DAILY FREQUENCY ALIGNMENT BRIEF
+//    Polls every 15 min from 19:15–00:30 UTC (2:15 PM–7:30 PM CDT)
+//    for today's vidrush_orchestrator upload in content_transmissions.
+//    Once found, fetches the YouTube transcript and summarizes it as a
+//    Frequency Alignment Brief in Sapphire PA tone.
+//
+//    Idempotency: `frequency_brief_at` column on sapphire_daily_pages.
+//    Only fires once per UTC date — skip if already sent.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export async function runDailyFrequencyBrief(channel: Channel, chatId: string): Promise<void> {
+  const supabase = await getSupabase();
+
+  const todayIso = new Date().toLocaleDateString("sv-SE", { timeZone: ACE_TZ }); // YYYY-MM-DD CDT
+
+  // ── Idempotency check ──
+  const { data: existing } = await supabase
+    .from("sapphire_daily_pages")
+    .select("frequency_brief_at")
+    .eq("date", todayIso)
+    .maybeSingle();
+
+  if (existing?.frequency_brief_at) {
+    console.log(`[SapphirePA] Frequency brief already sent for ${todayIso} — skipping`);
+    return;
+  }
+
+  // ── Find today's vidrush video in content_transmissions ──
+  // vidrush_orchestrator logs the video after upload with source='vidrush_orchestrator'
+  // and stores the youtube_url inside strategy_json.
+  const startOfDayUtc = new Date(`${todayIso}T00:00:00-05:00`).toISOString(); // CDT midnight
+  const endOfDayUtc = new Date(`${todayIso}T23:59:59-05:00`).toISOString();
+
+  const { data: videos, error } = await supabase
+    .from("content_transmissions")
+    .select("id, strategy_json, created_at")
+    .eq("source", "vidrush_orchestrator")
+    .eq("status", "completed")
+    .gte("created_at", startOfDayUtc)
+    .lte("created_at", endOfDayUtc)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    console.error(`[SapphirePA] Frequency brief DB query failed: ${error.message}`);
+    return;
+  }
+
+  if (!videos || videos.length === 0) {
+    console.log(`[SapphirePA] Frequency brief: no vidrush video found for ${todayIso} yet — will retry`);
+    return; // Scheduler will retry on the next 15-min interval
+  }
+
+  const videoRow = videos[0] as any;
+  const strategy = videoRow.strategy_json || {};
+  const youtubeUrl = strategy.youtube_url || strategy.youtube_video_id
+    ? (strategy.youtube_url || `https://youtube.com/watch?v=${strategy.youtube_video_id}`)
+    : null;
+
+  if (!youtubeUrl) {
+    console.warn(`[SapphirePA] Frequency brief: video found (id=${videoRow.id}) but no youtube_url in strategy_json`);
+    return;
+  }
+
+  console.log(`[SapphirePA] Frequency brief: fetching transcript for ${youtubeUrl}`);
+
+  // ── Fetch transcript ──
+  let transcript: string;
+  try {
+    const { YoutubeTranscriptTool } = await import("../tools/sapphire/youtube");
+    const tool = new YoutubeTranscriptTool();
+    transcript = await tool.execute({ url: youtubeUrl });
+  } catch (e: any) {
+    console.error(`[SapphirePA] Frequency brief: transcript fetch error: ${e.message}`);
+    return;
+  }
+
+  if (!transcript || transcript.startsWith("❌") || transcript.startsWith("⬚")) {
+    console.warn(`[SapphirePA] Frequency brief: transcript unavailable — ${transcript?.slice(0, 80)}`);
+    return; // YouTube may still be processing; retry next interval
+  }
+
+  // ── Summarize via LLM ──
+  // Direct Gemini fetch — same pattern as sapphire-composers.ts. No agent loop,
+  // no tool schemas, no memory pollution. Pure compose-and-send.
+  let briefText: string;
+  try {
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey) {
+      console.warn("[SapphirePA] Frequency brief: GEMINI_API_KEY not set — skipping");
+      return;
+    }
+
+    const GEMINI_MODEL = "gemini-2.5-flash";
+    const SYSTEM_PROMPT = `You are Sapphire, Ace Richie's personal assistant. Ace runs the Sovereign Synthesis mission — liberating 100,000 minds from the Simulation by January 2027. Today's daily upload was just published to the Sovereign Synthesis YouTube channel.
+
+Your job: read the transcript and produce a FREQUENCY ALIGNMENT BRIEF. This brief helps Ace quickly understand the energy and themes in today's transmission without re-watching.
+
+Use plain, warm English — PA mode, not COO mode. No jargon, no System Speak, no "Important to note". Keep it tight. Use the Sovereign Synthesis lexicon naturally where it fits (Firmware Update, Escape Velocity, Simulation, Old Earth, Sovereign Synthesis).
+
+Brief format — keep each section concise:
+🎯 CORE THESIS — one sentence. What's the central idea?
+🔑 KEY SIGNALS — 3–5 bullet points of the highest-signal ideas from the transcript
+⚡ FREQUENCY — one sentence on the energy/tone of this transmission (punchy? introspective? tactical?)
+📌 ANCHOR — one sentence on how this connects back to the Protocol and the mission
+
+End with: "Ready to move, Ace."`;
+
+    const fullPrompt = `${SYSTEM_PROMPT}\n\nHere is the transcript of today's Sovereign Synthesis upload:\n\n${transcript.slice(0, 12000)}`;
+
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: fullPrompt }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+        }),
+      }
+    );
+
+    if (!resp.ok) {
+      console.warn(`[SapphirePA] Frequency brief: Gemini returned ${resp.status}`);
+      return;
+    }
+
+    const data = await resp.json() as any;
+    briefText = (data?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+
+    if (!briefText) {
+      console.warn("[SapphirePA] Frequency brief: LLM returned empty response");
+      return;
+    }
+  } catch (e: any) {
+    console.error(`[SapphirePA] Frequency brief: LLM summarization failed: ${e.message}`);
+    return;
+  }
+
+  const header = `📡 FREQUENCY ALIGNMENT BRIEF — ${new Date().toLocaleDateString("en-US", {
+    timeZone: ACE_TZ, weekday: "long", month: "long", day: "numeric",
+  })}\n${youtubeUrl}\n\n`;
+  const fullBrief = header + briefText;
+
+  // ── Send to Telegram ──
+  await sendSapphireReply(channel, chatId, fullBrief, { kind: "brief" });
+
+  // ── Append to Notion daily page (best-effort) ──
+  try {
+    const parentPageId = await getNotionParentPageId();
+    if (parentPageId) {
+      const dailyRes = await findOrCreateDailyPage(new Date(), parentPageId);
+      if (dailyRes.ok) {
+        const appendTool = new NotionAppendToPageTool();
+        await appendTool.execute({
+          page_id: dailyRes.pageId,
+          heading: "📡 Frequency Alignment Brief",
+          body: fullBrief,
+          with_divider: true,
+        });
+      }
+    }
+  } catch (e: any) {
+    console.warn(`[SapphirePA] Notion append (frequency brief) failed: ${e.message}`);
+  }
+
+  // ── Mark sent in sapphire_daily_pages (idempotency) ──
+  await supabase
+    .from("sapphire_daily_pages")
+    .upsert(
+      {
+        date: todayIso,
+        frequency_brief_at: new Date().toISOString(),
+        status: "frequency_done",
+      },
+      { onConflict: "date" },
+    );
+
+  console.log(`[SapphirePA] Frequency brief sent for ${todayIso}`);
+}

@@ -216,6 +216,97 @@ export class NotionSearchTool implements Tool {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DYNAMIC BLOCK MANIPULATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export class NotionGetBlocksTool implements Tool {
+  definition: ToolDefinition = {
+    name: "notion_get_blocks",
+    description: "Retrieve the child blocks (and their internal IDs) of a given Notion page or block. Crucial for finding the exact block ID you need to update or delete.",
+    parameters: {
+      block_id: { type: "string", description: "Notion page ID or block ID." },
+    },
+    required: ["block_id"],
+  };
+
+  async execute(args: Record<string, unknown>): Promise<string> {
+    const blockId = String(args.block_id || "").replace(/-/g, "");
+    if (!blockId) return "notion_get_blocks: block_id required.";
+
+    const result = await notionFetch(`/blocks/${blockId}/children?page_size=100`, { method: "GET" });
+    if (!result.ok) return `notion_get_blocks error: ${result.error}`;
+
+    const items = (result.data.results as any[]) || [];
+    if (items.length === 0) return `No child blocks found for block ${blockId}.`;
+
+    const lines = items.map((b: any) => {
+      let content = "(unsupported block type)";
+      if (b.type === "paragraph") content = b.paragraph?.rich_text?.map((r:any) => r.plain_text).join("") || "";
+      else if (b.type.startsWith("heading")) content = b[b.type]?.rich_text?.map((r:any) => r.plain_text).join("") || "";
+      else if (b.type === "bulleted_list_item") content = "- " + (b.bulleted_list_item?.rich_text?.map((r:any) => r.plain_text).join("") || "");
+      else if (b.type === "divider") content = "---";
+      return `• [${b.id}] (${b.type}): ${content.slice(0, 100)}`;
+    });
+    return `Blocks for ${blockId}:\n${lines.join("\n")}`;
+  }
+}
+
+export class NotionUpdateBlockTool implements Tool {
+  definition: ToolDefinition = {
+    name: "notion_update_block",
+    description: "Update the text content of a specific block by its ID. Use this to modify existing information and avoid duplicates.",
+    parameters: {
+      block_id: { type: "string", description: "The exact Notion block ID to update." },
+      text: { type: "string", description: "The new text content for the block." },
+      type: { type: "string", description: "The block type (e.g. 'paragraph', 'heading_2'). Defaults to 'paragraph'." },
+    },
+    required: ["block_id", "text"],
+  };
+
+  async execute(args: Record<string, unknown>): Promise<string> {
+    const blockId = String(args.block_id || "").replace(/-/g, "");
+    const text = String(args.text || "");
+    const type = String(args.type || "paragraph");
+
+    if (!blockId) return "notion_update_block: block_id required.";
+
+    // Payload varies slightly by type, but rich_text is standard
+    const payload: any = { [type]: { rich_text: [{ type: "text", text: { content: text.slice(0, 1900) } }] } };
+
+    const result = await notionFetch(`/blocks/${blockId}`, {
+      method: "PATCH",
+      jsonBody: payload,
+    });
+
+    if (!result.ok) return `notion_update_block error: ${result.error}`;
+    return `✅ Successfully updated block ${blockId}.`;
+  }
+}
+
+export class NotionDeleteBlockTool implements Tool {
+  definition: ToolDefinition = {
+    name: "notion_delete_block",
+    description: "Delete (archive) a specific block by its ID.",
+    parameters: {
+      block_id: { type: "string", description: "The exact Notion block ID to delete." },
+    },
+    required: ["block_id"],
+  };
+
+  async execute(args: Record<string, unknown>): Promise<string> {
+    const blockId = String(args.block_id || "").replace(/-/g, "");
+    if (!blockId) return "notion_delete_block: block_id required.";
+
+    const result = await notionFetch(`/blocks/${blockId}`, {
+      method: "DELETE",
+    });
+
+    if (!result.ok) return `notion_delete_block error: ${result.error}`;
+    return `✅ Successfully deleted block ${blockId}.`;
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // FIND-OR-CREATE DAILY PAGE — internal helper used by Phase 5 brief jobs
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

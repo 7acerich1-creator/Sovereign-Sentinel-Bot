@@ -194,9 +194,19 @@ export class BrowserTool implements Tool {
         // ── CLICK ──
         case "click": {
           const sel = String(args.selector);
-          await page.waitForSelector(sel, { timeout });
-          await page.click(sel);
-          result = `✅ Clicked: ${sel}`;
+          let retries = 2;
+          while (retries >= 0) {
+            try {
+              await page.waitForSelector(sel, { timeout: 10_000 });
+              await page.click(sel);
+              result = `✅ Clicked: ${sel}`;
+              break;
+            } catch (err) {
+              if (retries === 0) throw err;
+              retries--;
+              await new Promise(r => setTimeout(r, 2000));
+            }
+          }
           break;
         }
 
@@ -204,10 +214,20 @@ export class BrowserTool implements Tool {
         case "type": {
           const sel = String(args.selector);
           const text = String(args.text || "");
-          await page.waitForSelector(sel, { timeout });
-          await page.click(sel, { clickCount: 3 }); // Select all existing text
-          await page.type(sel, text, { delay: 30 });
-          result = `✅ Typed ${text.length} chars into: ${sel}`;
+          let retries = 2;
+          while (retries >= 0) {
+            try {
+              await page.waitForSelector(sel, { timeout: 10_000 });
+              await page.click(sel, { clickCount: 3 });
+              await page.type(sel, text, { delay: 30 });
+              result = `✅ Typed into: ${sel}`;
+              break;
+            } catch (err) {
+              if (retries === 0) throw err;
+              retries--;
+              await new Promise(r => setTimeout(r, 2000));
+            }
+          }
           break;
         }
 
@@ -239,8 +259,23 @@ export class BrowserTool implements Tool {
         case "extract": {
           const sel = String(args.selector || "body");
           await page.waitForSelector(sel, { timeout }).catch(() => {});
-          const content = await page.$eval(sel, (el: any) => el.innerText || el.textContent).catch(() => "");
-          result = String(content).slice(0, 8000) || "(empty)";
+          
+          // Improved extraction: strip common boilerplate if extracting body
+          const content = await page.evaluate((selector) => {
+            const el = document.querySelector(selector);
+            if (!el) return "";
+            
+            // If body, clone and strip noise
+            if (selector === "body") {
+              const clone = el.cloneNode(true) as HTMLElement;
+              const noise = clone.querySelectorAll("nav, footer, script, style, .ads, #cookie-banner");
+              noise.forEach(n => n.remove());
+              return (clone as any).innerText || clone.textContent || "";
+            }
+            return (el as any).innerText || el.textContent || "";
+          }, sel);
+          
+          result = String(content).trim().slice(0, 10000) || "(empty)";
           break;
         }
 

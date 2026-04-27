@@ -1965,7 +1965,7 @@ async function main() {
   // Reference type intentionally `any` to avoid forward-declaration headaches.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sapphirePARef: { channel: any | null } = { channel: null };
-  const sapphirePAFiredDates = { morningBrief: "", eveningWrap: "" };
+  const sapphirePAFiredDates = { morningBrief: "", eveningWrap: "", frequencyBrief: "" };
 
   // ── SAPPHIRE PA — Calendar 24h-ahead lookahead (every 6 hours) ──
   // Scans the next 48h of calendar events on both accounts and creates
@@ -2105,6 +2105,49 @@ async function main() {
         } catch (e: any) {
           console.error(`[SapphirePA] Evening wrap error: ${e.message}`);
         }
+      }
+    },
+  });
+
+  // ── SAPPHIRE PA — Daily Frequency Alignment Brief (every 15 min, 19:15–00:30 UTC) ──
+  // Polls for today's vidrush_orchestrator upload. Ace uploads Mon–Fri by 2 PM CDT
+  // (19:00 UTC). We start polling at 19:15 UTC with room for pipeline latency and
+  // retry until midnight UTC (00:30). The job itself is DB-idempotent — only fires once.
+  scheduler.add({
+    name: "Sapphire PA — Frequency Alignment Brief Poll (15m)",
+    intervalMs: 15 * 60_000,
+    nextRun: new Date(Date.now() + 5 * 60_000), // First run 5 min after boot
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      if (!sapphirePARef.channel || !defaultChatId) return;
+      const now = new Date();
+      const dateKey = now.toDateString();
+      const utcHour = now.getUTCHours();
+      const utcMin = now.getUTCMinutes();
+      const dayOfWeek = now.getUTCDay(); // 0=Sun, 6=Sat
+
+      // Skip weekends — no uploads
+      if (dayOfWeek === 0 || dayOfWeek === 6) return;
+
+      // Only poll in the window: 19:15 UTC–00:30 UTC next day
+      const inWindow =
+        (utcHour === 19 && utcMin >= 15) ||
+        (utcHour >= 20 && utcHour <= 23) ||
+        (utcHour === 0 && utcMin <= 30);
+
+      if (!inWindow) return;
+
+      // Already fired this UTC date? Skip to avoid redundant logs.
+      if (sapphirePAFiredDates.frequencyBrief === dateKey) return;
+
+      try {
+        const { runDailyFrequencyBrief } = await import("./proactive/sapphire-pa-jobs");
+        await runDailyFrequencyBrief(sapphirePARef.channel, defaultChatId);
+        // If the job marked itself done (didn't early-return before send), lock the dateKey
+        sapphirePAFiredDates.frequencyBrief = dateKey;
+      } catch (e: any) {
+        console.error(`[SapphirePA] Frequency brief scheduler error: ${e.message}`);
       }
     },
   });

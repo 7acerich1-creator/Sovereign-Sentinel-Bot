@@ -80,10 +80,19 @@ export class ClickUpTool implements Tool {
   private async createTask(token: string, listId: string, name: string): Promise<string> {
     if (!listId || !name) return "ClickUp error: list_id and task_name required.";
     
+    const apiToken = process.env.CLICKUP_API_TOKEN || process.env.CLICKUP_PERSONAL_TOKEN;
+    if (!apiToken) {
+      console.error("[ClickUp] No API token found in environment (checked CLICKUP_API_TOKEN and CLICKUP_PERSONAL_TOKEN)");
+      return "Error: ClickUp API token not configured.";
+    }
+
+    // Debug log with masking
+    console.log(`[ClickUp] Using token: ${apiToken.substring(0, 6)}...${apiToken.substring(apiToken.length - 4)}`);
+
     const resp = await fetch(`${CLICKUP_API_BASE}/list/${listId}/task`, {
       method: "POST",
       headers: { 
-        "Authorization": token,
+        "Authorization": apiToken,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({ name })

@@ -11,7 +11,7 @@ export class YoutubeTranscriptTool implements Tool {
     required: ["url"],
   };
 
-  async execute(args: Record<string, unknown>): Promise<string> {
+  async execute(args: Record<string, unknown>, _context?: any): Promise<string> {
     const url = String(args.url || "").trim();
     if (!url) return "youtube_get_transcript: url required.";
 

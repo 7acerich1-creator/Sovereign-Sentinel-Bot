@@ -68,7 +68,7 @@ export class TikTokPublishTool implements Tool {
     required: ["video_url", "caption"],
   };
 
-  async execute(args: Record<string, unknown>): Promise<string> {
+  async execute(args: Record<string, unknown>, _context?: any): Promise<string> {
     const token = process.env.TIKTOK_ACCESS_TOKEN;
     if (!token) {
       return "❌ TIKTOK_ACCESS_TOKEN not configured. Set it in Railway env to enable TikTok publishing.\n" +
@@ -170,7 +170,7 @@ export class InstagramReelsPublishTool implements Tool {
     required: ["video_url", "caption"],
   };
 
-  async execute(args: Record<string, unknown>): Promise<string> {
+  async execute(args: Record<string, unknown>, _context?: any): Promise<string> {
     const token = process.env.INSTAGRAM_ACCESS_TOKEN;
     const businessId = process.env.INSTAGRAM_BUSINESS_ID;
 
@@ -362,7 +362,7 @@ export class YouTubeShortsPublishTool implements Tool {
     }
   }
 
-  async execute(args: Record<string, unknown>): Promise<string> {
+  async execute(args: Record<string, unknown>, _context?: any): Promise<string> {
     const brand = args.brand ? String(args.brand) : "sovereign_synthesis";
     const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis";
     const token = await this.getAccessToken(brand);
@@ -563,7 +563,7 @@ export class YouTubeLongFormPublishTool implements Tool {
     }
   }
 
-  async execute(args: Record<string, unknown>): Promise<string> {
+  async execute(args: Record<string, unknown>, _context?: any): Promise<string> {
     const brand = args.brand ? String(args.brand) : "sovereign_synthesis";
     const channelLabel = brand === "containment_field" ? "The Containment Field" : "Sovereign Synthesis";
     const token = await this.getAccessToken(brand);
@@ -821,7 +821,7 @@ export class VideoPublisherTool implements Tool {
     required: ["video_url", "platforms", "caption"],
   };
 
-  async execute(args: Record<string, unknown>): Promise<string> {
+  async execute(args: Record<string, unknown>, _context?: any): Promise<string> {
     const videoUrl = String(args.video_url);
     const caption = String(args.caption);
     const title = args.title ? String(args.title) : caption.split("\n")[0].slice(0, 100);

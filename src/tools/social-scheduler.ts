@@ -143,7 +143,7 @@ export class SocialSchedulerPostTool implements Tool {
     required: ["channel_ids", "text"],
   };
 
-  async execute(args: Record<string, unknown>): Promise<string> {
+  async execute(args: Record<string, unknown>, _context?: any): Promise<string> {
     try {
       const channelIds = String(args.channel_ids).split(",").map((s) => s.trim());
       const text = String(args.text);

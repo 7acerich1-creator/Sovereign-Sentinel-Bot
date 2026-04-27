@@ -136,7 +136,7 @@ export class BrowserTool implements Tool {
     required: ["action"],
   };
 
-  async execute(args: Record<string, unknown>): Promise<string> {
+  async execute(args: Record<string, unknown>, _context?: any): Promise<string> {
     if (!config.tools.browserEnabled) {
       return "⬚ Browser automation disabled. Set BROWSER_ENABLED=true in Railway env.";
     }
@@ -262,13 +262,16 @@ export class BrowserTool implements Tool {
           
           // Improved extraction: strip common boilerplate if extracting body
           const content = await page.evaluate((selector) => {
+            // @ts-ignore
             const el = document.querySelector(selector);
             if (!el) return "";
             
             // If body, clone and strip noise
             if (selector === "body") {
+              // @ts-ignore
               const clone = el.cloneNode(true) as HTMLElement;
               const noise = clone.querySelectorAll("nav, footer, script, style, .ads, #cookie-banner");
+              // @ts-ignore
               noise.forEach(n => n.remove());
               return (clone as any).innerText || clone.textContent || "";
             }

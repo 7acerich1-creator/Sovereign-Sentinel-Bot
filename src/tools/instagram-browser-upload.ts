@@ -75,7 +75,7 @@ export class InstagramBrowserUploadTool implements Tool {
     return brand === "containment_field" ? "tcf" : "acerichie";
   }
 
-  async execute(args: Record<string, unknown>): Promise<string> {
+  async execute(args: Record<string, unknown>, _context?: any): Promise<string> {
     if (!config.tools.browserEnabled) {
       return "⬚ Browser automation disabled. Set BROWSER_ENABLED=true to enable Instagram browser uploads.";
     }

@@ -146,7 +146,7 @@ export class NotionAppendToPageTool implements Tool {
     required: ["page_id", "body"],
   };
 
-  async execute(args: Record<string, unknown>): Promise<string> {
+  async execute(args: Record<string, unknown>, _context?: any): Promise<string> {
     const pageId = String(args.page_id || "").replace(/-/g, "");
     const heading = args.heading ? String(args.heading) : "";
     const body = String(args.body || "");

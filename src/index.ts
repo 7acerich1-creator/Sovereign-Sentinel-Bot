@@ -2118,6 +2118,28 @@ async function main() {
       }
     },
   });
+  // ── SAPPHIRE PA — Nightly Diary (06:20 UTC = 1:20 AM CDT next day) ──
+  scheduler.add({
+    name: "Sapphire PA — Nightly Diary (1:20 AM CDT)",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      if (!sapphirePARef.channel || !defaultChatId) return;
+      const now = new Date();
+      // Only fire at 06:20 UTC. Idempotency is fully handled inside the job itself.
+      if (now.getUTCHours() === 6 && now.getUTCMinutes() >= 20 && now.getUTCMinutes() <= 22) {
+        console.log(`📖 [SapphirePA] Nightly diary job tick`);
+        try {
+          const { runSapphireDiary } = await import("./proactive/sapphire-pa-jobs");
+          await runSapphireDiary(sapphirePARef.channel, defaultChatId);
+        } catch (e: any) {
+          console.error(`[SapphirePA] Nightly diary error: ${e.message}`);
+        }
+      }
+    },
+  });
 
   // ── SAPPHIRE PA — Daily Frequency Alignment Brief (every 15 min, 19:15–00:30 UTC) ──
   // Polls for today's vidrush_orchestrator upload. Ace uploads Mon–Fri by 2 PM CDT

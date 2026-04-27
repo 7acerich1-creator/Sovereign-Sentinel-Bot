@@ -133,7 +133,7 @@ export class NotionAppendToPageTool implements Tool {
   definition: ToolDefinition = {
     name: "notion_append_to_page",
     description:
-      "Append content to an existing Notion page. Used for morning brief, evening wrap, ad-hoc notes Ace wants logged.\n\n" +
+      "Append content to an existing Notion page. WARNING: Always use notion_get_blocks first to check if a section exists. DO NOT append duplicate headings (e.g. creating multiple 'Daily Tasks' sections). If the section exists, use notion_update_block instead.\n\n" +
       "Examples:\n" +
       "• 'add to today: called pediatrician, scheduled Tuesday' → notion_append_to_page(page_id='<today_page_id>', body='Called pediatrician — scheduled Tuesday.')\n" +
       "• 'log this: bought groceries $87 at HEB' → notion_append_to_page(page_id='<today_page_id>', heading='Expenses', body='Groceries — $87 at HEB.')",

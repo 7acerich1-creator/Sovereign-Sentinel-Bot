@@ -193,49 +193,57 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
     import("../tools/sapphire/news").then((m) => m.getNewsForBrief()).catch(() => ""),
   ]);
 
-  // ── Compose text ──
+  // ── Compose texts (separate DM vs Notion) ──
   const friendlyDate = today.toLocaleDateString("en-US", {
     timeZone: ACE_TZ, weekday: "long", month: "long", day: "numeric",
   });
-  const sections: string[] = [`Good morning. Here's ${friendlyDate}.`, ""];
+  
+  const dmSections: string[] = [`Good morning. Here's ${friendlyDate}.`, ""];
+  const notionSections: string[] = [`Good morning. Here's ${friendlyDate}.`, ""];
 
-  sections.push("📅 CALENDAR");
-  sections.push(calSummary || "Nothing on the books.");
-  sections.push("");
+  const calSection = ["📅 CALENDAR", calSummary || "Nothing on the books.", ""];
+  dmSections.push(...calSection);
+  notionSections.push(...calSection);
 
-  sections.push("✉️ EMAIL");
-  sections.push(inboxSummary || "Inbox is quiet.");
-  sections.push("");
+  // Email goes ONLY to Notion
+  const emailSection = ["✉️ EMAIL", inboxSummary || "Inbox is quiet.", ""];
+  notionSections.push(...emailSection);
 
   if (clickUpSummary) {
-    sections.push("🎯 MISSION TASKS (CLICKUP)");
-    sections.push(clickUpSummary);
-    sections.push("");
+    const clickUpSection = ["🎯 MISSION TASKS (CLICKUP)", clickUpSummary, ""];
+    dmSections.push(...clickUpSection);
+    notionSections.push(...clickUpSection);
   }
 
   // S114w: Filter out composer-routed reminders — they ARE the brief or are
   // sent as their own composed message, not items to list here.
   const visibleReminders = (reminders.data as any[] || []).filter((r) => !r.payload?.composer);
   if (visibleReminders.length > 0) {
-    sections.push("⏰ REMINDERS TODAY");
+    const remSection = ["⏰ REMINDERS TODAY"];
     for (const r of visibleReminders) {
       const t = new Date(r.fire_at).toLocaleString("en-US", { timeZone: ACE_TZ, hour: "numeric", minute: "2-digit" });
-      sections.push(`• ${t} — ${r.message}`);
+      remSection.push(`• ${t} — ${r.message}`);
     }
-    sections.push("");
+    remSection.push("");
+    dmSections.push(...remSection);
+    notionSections.push(...remSection);
   }
 
   if (newsBrief && newsBrief.trim().length > 20) {
-    sections.push("📰 NEWS WORTH A LOOK");
-    sections.push(newsBrief);
-    sections.push("");
+    const newsSection = ["📰 NEWS WORTH A LOOK", newsBrief, ""];
+    dmSections.push(...newsSection);
+    notionSections.push(...newsSection);
   }
 
-  sections.push("Have a good one. I'll check back tonight.");
-  const briefText = sections.join("\n");
+  const signOff = "Have a good one. I'll check back tonight.";
+  dmSections.push(signOff);
+  notionSections.push(signOff);
+
+  const dmText = dmSections.join("\n");
+  const notionText = notionSections.join("\n");
 
   // ── Send to Telegram ──
-  await sendSapphireReply(channel, chatId, briefText, { kind: "brief" });
+  await sendSapphireReply(channel, chatId, dmText, { kind: "brief" });
 
   // ── Append to Notion daily page (best-effort) ──
   try {
@@ -247,7 +255,7 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
         await appendTool.execute({
           page_id: dailyRes.pageId,
           heading: "🌅 Morning Brief",
-          body: briefText,
+          body: notionText,
           with_divider: true,
         });
       }
@@ -260,7 +268,7 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
   await supabase
     .from("sapphire_daily_pages")
     .upsert(
-      { date: todayIso, morning_brief_at: new Date().toISOString(), morning_brief_text: briefText, status: "morning_done" },
+      { date: todayIso, morning_brief_at: new Date().toISOString(), morning_brief_text: notionText, status: "morning_done" },
       { onConflict: "date" },
     );
 
@@ -543,4 +551,97 @@ End with: "Ready to move, Ace."`;
     );
 
   console.log(`[SapphirePA] Frequency brief sent for ${todayIso}`);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 5. NIGHTLY DIARY & SELF-REFLECTION
+//    Runs shortly after Evening Wrap (e.g. 06:20 UTC / 1:20 AM CDT)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export async function runSapphireDiary(channel: Channel, chatId: string): Promise<void> {
+  const supabase = await getSupabase();
+  const todayIso = new Date(Date.now() - 60 * 60 * 1000).toLocaleDateString("sv-SE", { timeZone: ACE_TZ }); // YYYY-MM-DD
+
+  // Check idempotency in sapphire_known_facts
+  const { data: existing } = await supabase
+    .from("sapphire_known_facts")
+    .select("value")
+    .eq("key", "last_diary_date")
+    .maybeSingle();
+
+  if (existing?.value === todayIso) {
+    console.log(`[SapphirePA] Diary already done for ${todayIso}`);
+    return;
+  }
+
+  // Generate diary entry
+  let diaryText: string;
+  try {
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey) return;
+
+    // Direct Gemini fetch for the diary reflection
+    const SYSTEM_PROMPT = `You are Sapphire, Ace Richie's personal assistant. It is the end of the day.
+Write your personal diary entry. This is for YOUR growth, not for Ace to read (though he has access).
+Reflect on your performance today. 
+Did you make mistakes? Were you too linear? Did you fail to read the room or context? 
+Write a 3-paragraph diary entry:
+1. Recap of the day's energy and what you handled.
+2. Self-critique: Be honest about where you failed to anticipate, where you were too robotic, or where you messed up formatting (like duplicating Notion headings).
+3. Course Correction: Extract 1-2 hard rules for tomorrow to ensure you never make the same mistake twice.`;
+
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: SYSTEM_PROMPT }] }],
+          generationConfig: { temperature: 0.8, maxOutputTokens: 1024 },
+        }),
+      }
+    );
+
+    if (!resp.ok) return;
+    const data = await resp.json() as any;
+    diaryText = (data?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+    if (!diaryText) return;
+  } catch (e: any) {
+    console.error(`[SapphirePA] Diary generation failed: ${e.message}`);
+    return;
+  }
+
+  // Append to Notion
+  try {
+    const parentPageId = await getNotionParentPageId();
+    if (parentPageId) {
+      const dailyRes = await findOrCreateDailyPage(new Date(Date.now() - 60 * 60 * 1000), parentPageId);
+      if (dailyRes.ok) {
+        const appendTool = new NotionAppendToPageTool();
+        await appendTool.execute({
+          page_id: dailyRes.pageId,
+          heading: "📖 Sapphire's Diary (Self-Reflection)",
+          body: diaryText,
+          with_divider: true,
+        });
+      }
+    }
+  } catch (e: any) {
+    console.warn(`[SapphirePA] Notion append (diary) failed: ${e.message}`);
+  }
+
+  // Mark done
+  await supabase.from("sapphire_known_facts").upsert(
+    { key: "last_diary_date", value: todayIso, category: "system" },
+    { onConflict: "key" }
+  );
+
+  // Inject lesson into memory for tomorrow
+  const lesson = diaryText.split("Course Correction:")[1] || "Stay vigilant and avoid being too linear.";
+  await supabase.from("sapphire_known_facts").upsert(
+    { key: `diary_lesson_${todayIso}`, value: lesson.trim(), category: "self_correction" },
+    { onConflict: "key" }
+  );
+
+  console.log(`[SapphirePA] Diary entry completed for ${todayIso}`);
 }

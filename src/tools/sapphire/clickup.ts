@@ -1,141 +1,85 @@
-import { Tool, ToolDefinition } from "../../types";
-
-const CLICKUP_API_BASE = "https://api.clickup.com/api/v2";
-
-export interface ClickUpTask {
-  id: string;
-  name: string;
-  status: { status: string };
-  priority?: { priority: string; color: string };
-  due_date?: string;
-  url: string;
-}
+import { Tool } from "../../types/agent";
+import axios from "axios";
 
 export class ClickUpTool implements Tool {
-  definition: ToolDefinition = {
+  definition = {
     name: "clickup_manage_tasks",
-    description: "Fetch, create, or update tasks in ClickUp. Use this to help Ace stay on top of his mission objectives.",
+    description: "Interact with ClickUp tasks (list, create, update). Requires task_id or list_id.",
     parameters: {
-      action: { 
-        type: "string", 
-        description: "Action to perform: 'list' (default), 'create', or 'update_status'.",
-        enum: ["list", "create", "update_status"]
+      type: "object" as const,
+      properties: {
+        action: { type: "string", enum: ["list", "create", "update"] },
+        list_id: { type: "string", description: "The ClickUp List ID" },
+        task_id: { type: "string", description: "The ClickUp Task ID" },
+        name: { type: "string", description: "Task name" },
+        description: { type: "string", description: "Task description" },
+        status: { type: "string", description: "Task status" },
       },
-      list_id: { type: "string", description: "The ClickUp List ID. Defaults to env config if not provided." },
-      task_name: { type: "string", description: "For 'create': the name of the new task." },
-      task_id: { type: "string", description: "For 'update_status': the ID of the task to update." },
-      status: { type: "string", description: "For 'update_status': the new status (e.g., 'complete')." },
+      required: ["action"],
     },
-    required: ["action"],
   };
 
-  async execute(args: Record<string, unknown>, _context?: any): Promise<string> {
-    const token = process.env.CLICKUP_API_TOKEN;
-    const defaultListId = process.env.CLICKUP_LIST_ID;
-    
-    if (!token) return "❌ ClickUp error: CLICKUP_API_TOKEN not configured.";
-    
-    const action = String(args.action || "list");
-    const listId = String(args.list_id || defaultListId || "").trim();
-
-    try {
-      switch (action) {
-        case "list":
-          return await this.listTasks(token, listId);
-        case "create":
-          return await this.createTask(token, listId, String(args.task_name));
-        case "update_status":
-          return await this.updateTaskStatus(token, String(args.task_id), String(args.status));
-        default:
-          return `Unknown action: ${action}`;
-      }
-    } catch (err: any) {
-      return `❌ ClickUp API error: ${err.message}`;
-    }
-  }
-
-  private async listTasks(token: string, listId: string): Promise<string> {
-    if (!listId) return "ClickUp error: No List ID provided.";
-    
-    const resp = await fetch(`${CLICKUP_API_BASE}/list/${listId}/task?subtasks=true`, {
-      headers: { 
-        "Authorization": token,
-        "Content-Type": "application/json"
-      }
-    });
-    
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = (await resp.json()) as { tasks: ClickUpTask[] };
-    const tasks = data.tasks || [];
-
-    if (tasks.length === 0) return "No tasks found in this list.";
-
-    return tasks.map(t => {
-      const priority = t.priority ? ` [${t.priority.priority.toUpperCase()}]` : "";
-      const due = t.due_date ? ` (Due: ${new Date(parseInt(t.due_date)).toLocaleDateString()})` : "";
-      return `• ${t.name}${priority}${due} [ID: ${t.id}]`;
-    }).join("\n");
-  }
-
-  private async createTask(token: string, listId: string, name: string): Promise<string> {
-    if (!listId || !name) return "ClickUp error: list_id and task_name required.";
-    
-    const apiToken = process.env.CLICKUP_API_TOKEN || process.env.CLICKUP_PERSONAL_TOKEN;
-    if (!apiToken) {
+  async execute(args: any): Promise<any> {
+    const token = process.env.CLICKUP_API_TOKEN || process.env.CLICKUP_PERSONAL_TOKEN;
+    if (!token) {
       console.error("[ClickUp] No API token found in environment (checked CLICKUP_API_TOKEN and CLICKUP_PERSONAL_TOKEN)");
       return "Error: ClickUp API token not configured.";
     }
 
     // Debug log with masking
-    console.log(`[ClickUp] Using token: ${apiToken.substring(0, 6)}...${apiToken.substring(apiToken.length - 4)}`);
+    console.log(`[ClickUp] Executing ${args.action} | Token: ${token.substring(0, 6)}...${token.substring(token.length - 4)}`);
 
-    const resp = await fetch(`${CLICKUP_API_BASE}/list/${listId}/task`, {
-      method: "POST",
-      headers: { 
-        "Authorization": apiToken,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ name })
-    });
-    
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = (await resp.json()) as any;
-    return `✅ Task created: ${data.name} (ID: ${data.id})`;
-  }
+    const headers = {
+      "Authorization": token,
+      "Content-Type": "application/json"
+    };
 
-  private async updateTaskStatus(token: string, taskId: string, status: string): Promise<string> {
-    if (!taskId || !status) return "ClickUp error: task_id and status required.";
-    
-    const resp = await fetch(`${CLICKUP_API_BASE}/task/${taskId}`, {
-      method: "PUT",
-      headers: { 
-        "Authorization": token,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ status })
-    });
-    
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    return `✅ Task ${taskId} status updated to: ${status}`;
-  }
-}
+    try {
+      let url = "";
+      let method = "GET";
+      let body = null;
 
-/**
- * Static helper for background jobs (like Morning Brief)
- */
-export async function getClickUpSummaryForBrief(): Promise<string> {
-  const token = process.env.CLICKUP_API_TOKEN;
-  const listId = process.env.CLICKUP_LIST_ID;
-  if (!token || !listId) return "";
+      const listId = args.list_id || process.env.CLICKUP_LIST_ID;
 
-  try {
-    const tool = new ClickUpTool();
-    const result = await tool.execute({ action: "list", list_id: listId });
-    if (result.startsWith("•")) {
-      return result;
+      switch (args.action) {
+        case "list":
+          if (!listId) return "Error: No list_id provided or configured in environment.";
+          url = `https://api.clickup.com/api/v2/list/${listId}/task`;
+          break;
+        case "create":
+          if (!listId) return "Error: No list_id provided or configured in environment.";
+          url = `https://api.clickup.com/api/v2/list/${listId}/task`;
+          method = "POST";
+          body = { name: args.name, description: args.description };
+          break;
+        case "update":
+          if (!args.task_id) return "Error: task_id is required for update action.";
+          url = `https://api.clickup.com/api/v2/task/${args.task_id}`;
+          method = "PUT";
+          body = { name: args.name, description: args.description, status: args.status };
+          break;
+      }
+
+      const response = await axios({ 
+        method, 
+        url, 
+        data: body, 
+        headers,
+        timeout: 10000 
+      });
+
+      console.log(`[ClickUp] ${args.action} successful.`);
+      return response.data;
+    } catch (error: any) {
+      const status = error.response?.status;
+      const data = error.response?.data;
+      console.error(`[ClickUp] API Error: ${status} - ${JSON.stringify(data)}`);
+      
+      if (status === 401) {
+        return "Error 401: Unauthorized. Your ClickUp API Token is invalid or expired. Check Railway variables.";
+      }
+      
+      return `Error: ${status || error.message} - ${JSON.stringify(data || {})}`;
     }
-    return "";
-  } catch {
-    return "";
   }
 }

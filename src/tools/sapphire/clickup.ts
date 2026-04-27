@@ -87,7 +87,7 @@ export class ClickUpTool implements Tool {
     });
     
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
+    const data = (await resp.json()) as any;
     return `✅ Task created: ${data.name} (ID: ${data.id})`;
   }
 

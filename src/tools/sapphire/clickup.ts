@@ -1,5 +1,22 @@
-import { Tool } from "../../types/agent";
+import { Tool } from "../../types";
 import axios from "axios";
+
+export async function getClickUpSummaryForBrief(): Promise<string> {
+  const token = process.env.CLICKUP_API_TOKEN || process.env.CLICKUP_PERSONAL_TOKEN;
+  const listId = process.env.CLICKUP_LIST_ID;
+  if (!token || !listId) return "";
+
+  try {
+    const url = `https://api.clickup.com/api/v2/list/${listId}/task`;
+    const response = await axios.get(url, { headers: { "Authorization": token } });
+    const tasks = response.data.tasks || [];
+    if (tasks.length === 0) return "No pending tasks.";
+    return tasks.slice(0, 5).map((t: any) => `• ${t.name} (${t.status.status})`).join("\n");
+  } catch (error) {
+    console.error("[ClickUp] Brief summary fetch failed");
+    return "";
+  }
+}
 
 export class ClickUpTool implements Tool {
   definition = {

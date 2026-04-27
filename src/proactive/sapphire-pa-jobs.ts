@@ -15,6 +15,7 @@ import { config } from "../config";
 import { getCalendarSummaryForBrief } from "../tools/sapphire/calendar";
 import { getInboxSummaryForBrief } from "../tools/sapphire/gmail";
 import { findOrCreateDailyPage, getNotionParentPageId } from "../tools/sapphire/notion";
+import { getClickUpSummaryForBrief } from "../tools/sapphire/clickup";
 import { NotionAppendToPageTool } from "../tools/sapphire/notion";
 import { sendSapphireReply } from "../voice/sapphire-voice";
 import { getSapphireAuthStatus } from "./sapphire-oauth";
@@ -177,9 +178,10 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
   }
 
   // ── Pull data in parallel — add news brief (Gap 7) ──
-  const [calSummary, inboxSummary, reminders, newsBrief] = await Promise.all([
+  const [calSummary, inboxSummary, clickUpSummary, reminders, newsBrief] = await Promise.all([
     getCalendarSummaryForBrief().catch((e) => `(calendar unavailable: ${e.message})`),
     getInboxSummaryForBrief(24).catch((e) => `(email unavailable: ${e.message})`),
+    getClickUpSummaryForBrief().catch(() => ""),
     supabase
       .from("sapphire_reminders")
       .select("fire_at, message, payload")
@@ -204,6 +206,12 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
   sections.push("✉️ EMAIL");
   sections.push(inboxSummary || "Inbox is quiet.");
   sections.push("");
+
+  if (clickUpSummary) {
+    sections.push("🎯 MISSION TASKS (CLICKUP)");
+    sections.push(clickUpSummary);
+    sections.push("");
+  }
 
   // S114w: Filter out composer-routed reminders — they ARE the brief or are
   // sent as their own composed message, not items to list here.

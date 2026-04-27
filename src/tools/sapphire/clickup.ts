@@ -2,7 +2,7 @@ import { Tool, ToolContext } from "../../types";
 import axios from "axios";
 
 export async function getClickUpSummaryForBrief(): Promise<string> {
-  const token = process.env.CLICKUP_API_TOKEN || process.env.CLICKUP_PERSONAL_TOKEN;
+  const token = (process.env.CLICKUP_API_TOKEN || process.env.CLICKUP_PERSONAL_TOKEN || "").trim();
   const listId = process.env.CLICKUP_LIST_ID;
   if (!token || !listId) return "";
 
@@ -11,7 +11,9 @@ export async function getClickUpSummaryForBrief(): Promise<string> {
     const response = await axios.get(url, { 
       headers: { 
         "Authorization": token,
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+        "Referer": "https://app.clickup.com/"
       } 
     });
     const tasks = response.data.tasks || [];
@@ -39,17 +41,28 @@ export class ClickUpTool implements Tool {
   };
 
   async execute(args: Record<string, any>, context: ToolContext): Promise<string> {
-    const token = process.env.CLICKUP_API_TOKEN || process.env.CLICKUP_PERSONAL_TOKEN;
-    if (!token) {
+    const rawToken = process.env.CLICKUP_API_TOKEN || process.env.CLICKUP_PERSONAL_TOKEN;
+    if (!rawToken) {
       return "Error: ClickUp API token not configured. Set CLICKUP_API_TOKEN in Railway.";
     }
+    
+    const token = rawToken.trim();
 
     const headers = {
       "Authorization": token,
       "Content-Type": "application/json",
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       "Accept": "application/json, text/plain, */*",
-      "Accept-Language": "en-US,en;q=0.9"
+      "Accept-Encoding": "gzip, deflate, br",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Origin": "https://app.clickup.com",
+      "Referer": "https://app.clickup.com/",
+      "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": '"Windows"',
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "cross-site"
     };
 
     try {
@@ -96,8 +109,8 @@ export class ClickUpTool implements Tool {
       
       console.error(`[ClickUp] API Error ${status}:`, data);
       
-      if (status === 403 && typeof data === 'string' && data.includes('CloudFront')) {
-        return "Error 403: ClickUp's CloudFront firewall blocked the request. I've updated the headers to mimic a browser, try again.";
+      if (status === 403 && (typeof data === 'string' && (data.includes('CloudFront') || data.includes('request could not be satisfied')))) {
+        return "Error 403: ClickUp's CloudFront firewall is still blocking the request. This usually means the outbound IP of the server is flagged. Try a different Personal Token or check if ClickUp is down.";
       }
       
       if (status === 403) {
@@ -105,7 +118,7 @@ export class ClickUpTool implements Tool {
       }
       
       if (status === 401) {
-        return "Error 401: Unauthorized. Your token is invalid.";
+        return "Error 401: Unauthorized. Your token is invalid or has expired.";
       }
 
       return `ClickUp Error ${status || error.message}: ${JSON.stringify(data || {})}`;

@@ -1,4 +1,4 @@
-import { Tool } from "../../types";
+import { Tool, ToolContext } from "../../types";
 import axios from "axios";
 
 export async function getClickUpSummaryForBrief(): Promise<string> {
@@ -23,27 +23,23 @@ export class ClickUpTool implements Tool {
     name: "clickup_manage_tasks",
     description: "Interact with ClickUp tasks (list, create, update). Requires task_id or list_id.",
     parameters: {
-      type: "object",
-      properties: {
-        action: { type: "string", enum: ["list", "create", "update"] },
-        list_id: { type: "string", description: "The ClickUp List ID" },
-        task_id: { type: "string", description: "The ClickUp Task ID" },
-        name: { type: "string", description: "Task name" },
-        description: { type: "string", description: "Task description" },
-        status: { type: "string", description: "Task status" },
-      },
-      required: ["action"],
+      action: { type: "string" as const, description: "Action to perform", enum: ["list", "create", "update"] },
+      list_id: { type: "string" as const, description: "The ClickUp List ID" },
+      task_id: { type: "string" as const, description: "The ClickUp Task ID" },
+      name: { type: "string" as const, description: "Task name" },
+      description: { type: "string" as const, description: "Task description" },
+      status: { type: "string" as const, description: "Task status" },
     },
+    required: ["action"],
   };
 
-  async execute(args: any): Promise<any> {
+  async execute(args: Record<string, any>, context: ToolContext): Promise<string> {
     const token = process.env.CLICKUP_API_TOKEN || process.env.CLICKUP_PERSONAL_TOKEN;
     if (!token) {
       console.error("[ClickUp] No API token found in environment (checked CLICKUP_API_TOKEN and CLICKUP_PERSONAL_TOKEN)");
       return "Error: ClickUp API token not configured.";
     }
 
-    // Debug log with masking
     console.log(`[ClickUp] Executing ${args.action} | Token: ${token.substring(0, 6)}...${token.substring(token.length - 4)}`);
 
     const headers = {
@@ -77,25 +73,12 @@ export class ClickUpTool implements Tool {
           break;
       }
 
-      const response = await axios({ 
-        method, 
-        url, 
-        data: body, 
-        headers,
-        timeout: 10000 
-      });
-
-      console.log(`[ClickUp] ${args.action} successful.`);
-      return response.data;
+      const response = await axios({ method, url, data: body, headers, timeout: 10000 });
+      return JSON.stringify(response.data);
     } catch (error: any) {
       const status = error.response?.status;
       const data = error.response?.data;
-      console.error(`[ClickUp] API Error: ${status} - ${JSON.stringify(data)}`);
-      
-      if (status === 401) {
-        return "Error 401: Unauthorized. Your ClickUp API Token is invalid or expired. Check Railway variables.";
-      }
-      
+      if (status === 401) return "Error 401: Unauthorized. Your ClickUp API Token is invalid.";
       return `Error: ${status || error.message} - ${JSON.stringify(data || {})}`;
     }
   }

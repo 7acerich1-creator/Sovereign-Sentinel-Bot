@@ -475,6 +475,12 @@ async function main() {
   tools.push(new YouTubePinCommentTool());
   tools.push(new YouTubeCTAAuditTool());
 
+  // Sapphire PA Tools
+  tools.push(new NotionAppendToPageTool());
+  tools.push(new ClickUpTool());
+  tools.push(new CalendarListTool());
+  tools.push(new CalendarCreateEventTool());
+
   // Sovereign Image Generator (Gemini Imagen 3 + DALL-E 3 fallback)
   tools.push(new ImageGeneratorTool());
 

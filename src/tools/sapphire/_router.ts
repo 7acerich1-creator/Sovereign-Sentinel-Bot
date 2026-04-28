@@ -194,7 +194,7 @@ const MATCHERS: TierMatcher[] = [
   {
     name: "followups",
     match: (t) =>
-      /\b(circle back|come back to|remind me about|follow ?up|loop back|check on|chase up|in (a |the )?(few|couple) (days|weeks|hours)|by (next|this) (week|month)|deadline|when (it|that)'?s done)\b/i.test(t)
+      /\b(circle back|come back to|remind me about|follow ?up|loop back|check on|chase up|looking out for|waiting on|tracking|in (a |the )?(few|couple) (days|weeks|hours)|by (next|this) (week|month)|deadline|when (it|that)'?s done)\b/i.test(t)
       || /\b(list (my|the) follow ?ups?|cancel (a |the )?follow ?up|done with [\w ]+ followup|complete (the )?follow ?up)\b/i.test(t),
     load: tierFollowups,
   },

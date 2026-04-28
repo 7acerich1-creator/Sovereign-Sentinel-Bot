@@ -14,7 +14,7 @@ import type { Channel } from "../types";
 import { config } from "../config";
 import { getCalendarSummaryForBrief } from "../tools/sapphire/calendar";
 import { getInboxSummaryForBrief } from "../tools/sapphire/gmail";
-import { getOrCreateHubPage, findOrCreateChildPage, getNotionParentPageId } from "../tools/sapphire/notion";
+import { getOrCreateHubPage, findOrCreateChildPage, getNotionParentPageId, findOrCreateDailyPage } from "../tools/sapphire/notion";
 import { getClickUpSummaryForBrief } from "../tools/sapphire/clickup";
 import { NotionAppendToPageTool } from "../tools/sapphire/notion";
 import { sendSapphireReply } from "../voice/sapphire-voice";

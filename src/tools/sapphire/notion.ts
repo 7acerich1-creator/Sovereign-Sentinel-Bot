@@ -377,6 +377,16 @@ export async function findOrCreateChildPage(parentPageId: string, title: string)
   return { ok: true, pageId: result.data.id, url: result.data.url };
 }
 
+// S121: Restored for backward compatibility with older jobs (Evening Wrap, Diary, Frequency Brief)
+// Routes all generic "daily page" requests into the Daily Briefs hub.
+export async function findOrCreateDailyPage(date: Date, parentPageId: string): Promise<{ ok: true; pageId: string; url: string } | { ok: false; error: string }> {
+  const hub = await getOrCreateHubPage(parentPageId, "📁 Daily Briefs");
+  if (!hub.ok) return { ok: false, error: hub.error };
+  
+  const friendlyDateShort = date.toLocaleDateString("en-US", { timeZone: "America/Chicago", month: "long", day: "numeric" });
+  return findOrCreateChildPage(hub.pageId, `${friendlyDateShort} - Brief`);
+}
+
 // ── Parent page ID storage (the page Ace shares with the integration) ──────
 export async function getNotionParentPageId(): Promise<string | null> {
   const { createClient } = await import("@supabase/supabase-js");

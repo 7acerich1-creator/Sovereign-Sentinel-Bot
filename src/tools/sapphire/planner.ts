@@ -244,8 +244,8 @@ export class RecordWorkflowArtifactTool implements Tool {
     name: "record_workflow_artifact",
     description: "Mark a workflow target as 'built' and store its artifact. This persists data across session restarts.",
     parameters: {
-      plan_id: { type: "string" },
-      target_name: { type: "string" },
+      plan_id: { type: "string", description: "Plan UUID or 8-char prefix." },
+      target_name: { type: "string", description: "Name of the target step being built." },
       artifact: { type: "string", description: "JSON string of findings, results, or data." }
     },
     required: ["plan_id", "target_name", "artifact"],
@@ -270,5 +270,31 @@ export class RecordWorkflowArtifactTool implements Tool {
 
     if (error) return `record_workflow_artifact: ${error.message}`;
     return `Target "${targetName}" built and artifact stored. Use execute_workflow to build the next target.`;
+  }
+}
+
+export class CancelPlanTool implements Tool {
+  definition: ToolDefinition = {
+    name: "cancel_plan",
+    description: "Cancel a pending or in-progress plan.",
+    parameters: { plan_id: { type: "string", description: "Plan UUID or 8-char prefix." } },
+    required: ["plan_id"],
+  };
+
+  async execute(args: Record<string, unknown>): Promise<string> {
+    const idRaw = String(args.plan_id || "").trim();
+    if (!idRaw) return "cancel_plan: plan_id required.";
+    const supabase = await getSupabase();
+    let q = supabase.from("sapphire_plans").update({ status: "cancelled" });
+    if (idRaw.length === 8) {
+      const { data } = await supabase.from("sapphire_plans").select("id").ilike("id", `${idRaw}%`).limit(1);
+      if (!data || data.length === 0) return `cancel_plan: no plan matches "${idRaw}".`;
+      q = q.eq("id", data[0].id);
+    } else {
+      q = q.eq("id", idRaw);
+    }
+    const { error } = await q;
+    if (error) return `cancel_plan: ${error.message}`;
+    return `Plan cancelled.`;
   }
 }

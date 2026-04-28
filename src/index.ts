@@ -1981,7 +1981,7 @@ async function main() {
   // Reference type intentionally `any` to avoid forward-declaration headaches.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sapphirePARef: { channel: any | null } = { channel: null };
-  const sapphirePAFiredDates = { morningBrief: "", eveningWrap: "", frequencyBrief: "" };
+  const sapphirePAFiredDates = { morningBrief: "", eveningWrap: "", frequencyBrief: "", weeklyRecap: "" };
 
   // ── SAPPHIRE PA — Calendar 24h-ahead lookahead (every 6 hours) ──
   // Scans the next 48h of calendar events on both accounts and creates
@@ -2142,6 +2142,31 @@ async function main() {
           await runSapphireDiary(sapphirePARef.channel, defaultChatId);
         } catch (e: any) {
           console.error(`[SapphirePA] Nightly diary error: ${e.message}`);
+        }
+      }
+    },
+  });
+
+  // ── SAPPHIRE PA — Weekly Recap (Sunday 8 PM CDT = Monday 01:00 UTC) ──
+  scheduler.add({
+    name: "Sapphire PA — Weekly Recap (Sun 8 PM CDT)",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      if (!sapphirePARef.channel || !defaultChatId) return;
+      const now = new Date();
+      const dateKey = now.toDateString();
+      // Fire at Monday 01:00 UTC (Sunday 8 PM CDT)
+      if (now.getUTCDay() === 1 && now.getUTCHours() === 1 && now.getUTCMinutes() <= 2 && sapphirePAFiredDates.weeklyRecap !== dateKey) {
+        sapphirePAFiredDates.weeklyRecap = dateKey;
+        console.log(`📊 [SapphirePA] Weekly recap firing for ${dateKey}`);
+        try {
+          const { runWeeklyRecap } = await import("./proactive/sapphire-pa-jobs");
+          await runWeeklyRecap(sapphirePARef.channel, defaultChatId);
+        } catch (e: any) {
+          console.error(`[SapphirePA] Weekly recap error: ${e.message}`);
         }
       }
     },

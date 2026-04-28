@@ -321,68 +321,60 @@ export class NotionDeleteBlockTool implements Tool {
 
 import { config } from "../../config";
 
-export async function findOrCreateDailyPage(
-  date: Date,
-  parentPageId: string,
-): Promise<{ ok: true; pageId: string; url: string } | { ok: false; error: string }> {
-  const isoDate = date.toISOString().slice(0, 10); // YYYY-MM-DD
-  const friendly = date.toLocaleDateString("en-US", {
-    timeZone: "America/Chicago",
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
-
-  const { createClient } = await import("@supabase/supabase-js");
-  const supabase = createClient(config.memory.supabaseUrl!, (process.env.SUPABASE_SERVICE_ROLE_KEY || config.memory.supabaseKey)!);
-
-  // Check if we already have a page for this date
-  const { data: existing } = await supabase
-    .from("sapphire_daily_pages")
-    .select("notion_page_id")
-    .eq("date", isoDate)
-    .maybeSingle();
-
-  if (existing?.notion_page_id) {
-    return { ok: true, pageId: existing.notion_page_id, url: `https://www.notion.so/${existing.notion_page_id.replace(/-/g, "")}` };
+async function findChildPageByTitle(parentId: string, title: string): Promise<string | null> {
+  let cursor = undefined;
+  while (true) {
+    const url = `/blocks/${parentId.replace(/-/g, "")}/children?page_size=100${cursor ? `&start_cursor=${cursor}` : ""}`;
+    const res = await notionFetch(url);
+    if (!res.ok) return null;
+    for (const block of res.data.results) {
+      if (block.type === "child_page" && block.child_page.title === title) {
+        return block.id;
+      }
+    }
+    if (!res.data.has_more) break;
+    cursor = res.data.next_cursor;
   }
+  return null;
+}
 
-  // Create new daily page
+export async function getOrCreateHubPage(parentPageId: string, hubName: string): Promise<{ ok: true, pageId: string } | { ok: false, error: string }> {
+  const existingId = await findChildPageByTitle(parentPageId, hubName);
+  if (existingId) return { ok: true, pageId: existingId };
+
   const result = await notionFetch("/pages", {
     method: "POST",
     jsonBody: {
       parent: { page_id: parentPageId.replace(/-/g, "") },
       properties: {
-        title: {
-          title: [{ type: "text", text: { content: friendly } }],
-        },
+        title: { title: [{ type: "text", text: { content: hubName } }] },
+      },
+    },
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+  return { ok: true, pageId: result.data.id };
+}
+
+export async function findOrCreateChildPage(parentPageId: string, title: string): Promise<{ ok: true, pageId: string, url: string } | { ok: false, error: string }> {
+  const existingId = await findChildPageByTitle(parentPageId, title);
+  if (existingId) return { ok: true, pageId: existingId, url: `https://www.notion.so/${existingId.replace(/-/g, "")}` };
+
+  const result = await notionFetch("/pages", {
+    method: "POST",
+    jsonBody: {
+      parent: { page_id: parentPageId.replace(/-/g, "") },
+      properties: {
+        title: { title: [{ type: "text", text: { content: title } }] },
       },
       children: [
-        headingBlock(`📅 ${friendly}`, 1),
-        {
-          object: "block",
-          type: "paragraph",
-          paragraph: {
-            rich_text: [{ type: "text", text: { content: `Daily operations log. Updated by Sapphire automatically.` } }],
-          },
-        },
+        headingBlock(`📅 ${title}`, 1),
       ],
     },
   });
 
   if (!result.ok) return { ok: false, error: result.error };
-
-  const pageId = result.data.id;
-  const url = result.data.url;
-
-  // Persist to sapphire_daily_pages
-  await supabase.from("sapphire_daily_pages").upsert(
-    { date: isoDate, notion_page_id: pageId, status: "pending" },
-    { onConflict: "date" },
-  );
-
-  return { ok: true, pageId, url };
+  return { ok: true, pageId: result.data.id, url: result.data.url };
 }
 
 // ── Parent page ID storage (the page Ace shares with the integration) ──────

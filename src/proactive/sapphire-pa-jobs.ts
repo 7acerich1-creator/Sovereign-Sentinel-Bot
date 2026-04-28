@@ -14,7 +14,7 @@ import type { Channel } from "../types";
 import { config } from "../config";
 import { getCalendarSummaryForBrief } from "../tools/sapphire/calendar";
 import { getInboxSummaryForBrief } from "../tools/sapphire/gmail";
-import { findOrCreateDailyPage, getNotionParentPageId } from "../tools/sapphire/notion";
+import { getOrCreateHubPage, findOrCreateChildPage, getNotionParentPageId } from "../tools/sapphire/notion";
 import { getClickUpSummaryForBrief } from "../tools/sapphire/clickup";
 import { NotionAppendToPageTool } from "../tools/sapphire/notion";
 import { sendSapphireReply } from "../voice/sapphire-voice";
@@ -239,25 +239,78 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
   dmSections.push(signOff);
   notionSections.push(signOff);
 
+  // ── Retrieve Active Goals for Notion ──
+  let goalsText = "No active goals listed.";
+  try {
+    const { data: goalData } = await supabase
+      .from("sapphire_known_facts")
+      .select("value")
+      .eq("category", "goals")
+      .limit(5);
+    
+    if (goalData && goalData.length > 0) {
+      goalsText = goalData.map((g) => `• ${g.value}`).join("\n");
+    } else {
+      const { data: prefData } = await supabase.from("sapphire_known_facts").select("value").eq("key", "active_goals").maybeSingle();
+      if (prefData?.value) goalsText = prefData.value;
+    }
+  } catch (e) { /* ignore */ }
+
   const dmText = dmSections.join("\n");
-  const notionText = notionSections.join("\n");
 
   // ── Send to Telegram ──
   await sendSapphireReply(channel, chatId, dmText, { kind: "brief" });
+
+  const briefingText = notionSections.join("\n");
+  const tasksSections = [];
+  if (clickUpSummary) tasksSections.push("🎯 MISSION TASKS (CLICKUP)\n" + clickUpSummary + "\n");
+  if (visibleReminders.length > 0) {
+    tasksSections.push("⏰ REMINDERS TODAY");
+    for (const r of visibleReminders) {
+      const t = new Date(r.fire_at).toLocaleString("en-US", { timeZone: ACE_TZ, hour: "numeric", minute: "2-digit" });
+      tasksSections.push(`• ${t} — ${r.message}`);
+    }
+  }
+  const tasksText = tasksSections.length > 0 ? tasksSections.join("\n") : "No specific tasks for today.";
 
   // ── Append to Notion daily page (best-effort) ──
   try {
     const parentPageId = await getNotionParentPageId();
     if (parentPageId) {
-      const dailyRes = await findOrCreateDailyPage(today, parentPageId);
-      if (dailyRes.ok) {
+      const friendlyDateShort = today.toLocaleDateString("en-US", { timeZone: ACE_TZ, month: "long", day: "numeric" });
+      
+      const briefHub = await getOrCreateHubPage(parentPageId, "📁 Daily Briefs");
+      const tasksHub = await getOrCreateHubPage(parentPageId, "📁 Daily Tasks & Goals");
+
+      if (briefHub.ok && tasksHub.ok) {
+        const briefPage = await findOrCreateChildPage(briefHub.pageId, `${friendlyDateShort} - Brief`);
+        const tasksPage = await findOrCreateChildPage(tasksHub.pageId, `${friendlyDateShort} - Tasks & Goals`);
+        
         const appendTool = new NotionAppendToPageTool();
-        await appendTool.execute({
-          page_id: dailyRes.pageId,
-          heading: "🌅 Morning Brief",
-          body: notionText,
-          with_divider: true,
-        });
+
+        if (briefPage.ok) {
+          await appendTool.execute({
+            page_id: briefPage.pageId,
+            heading: "🌅 Morning Briefing",
+            body: briefingText,
+            with_divider: false,
+          });
+        }
+
+        if (tasksPage.ok) {
+          await appendTool.execute({
+            page_id: tasksPage.pageId,
+            heading: "🎯 Daily Tasks",
+            body: tasksText,
+            with_divider: false,
+          });
+          await appendTool.execute({
+            page_id: tasksPage.pageId,
+            heading: "🚀 Active Goals",
+            body: goalsText,
+            with_divider: true,
+          });
+        }
       }
     }
   } catch (e: any) {
@@ -639,9 +692,93 @@ Write a 3-paragraph diary entry:
   // Inject lesson into memory for tomorrow
   const lesson = diaryText.split("Course Correction:")[1] || "Stay vigilant and avoid being too linear.";
   await supabase.from("sapphire_known_facts").upsert(
-    { key: `diary_lesson_${todayIso}`, value: lesson.trim(), category: "self_correction" },
+    { key: "sapphire_diary_lesson", value: lesson.trim(), category: "system" },
     { onConflict: "key" }
   );
 
-  console.log(`[SapphirePA] Diary entry completed for ${todayIso}`);
+  console.log(`[SapphirePA] Nightly diary completed for ${todayIso}`);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 5. WEEKLY RECAP
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export async function runWeeklyRecap(channel: Channel, chatId: string): Promise<void> {
+  const auth = await getSapphireAuthStatus();
+  if (!auth.notion) {
+    console.log("[SapphirePA] Weekly recap skipped — Notion not authorized");
+    return;
+  }
+
+  console.log("[SapphirePA] Running Weekly Recap...");
+  const today = new Date();
+  // We want the start of the week (assuming 7 days ago)
+  const weekStart = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+  
+  const friendlyToday = today.toLocaleDateString("en-US", { timeZone: ACE_TZ, month: "long", day: "numeric", year: "numeric" });
+  const friendlyStart = weekStart.toLocaleDateString("en-US", { timeZone: ACE_TZ, month: "long", day: "numeric" });
+  const pageTitle = `Week of ${friendlyStart} - Weekly Recap`;
+
+  const { createClient } = await import("@supabase/supabase-js");
+  const supabase = createClient(config.memory.supabaseUrl!, (process.env.SUPABASE_SERVICE_ROLE_KEY || config.memory.supabaseKey)!);
+
+  let summaryText = `Recap for the week of ${friendlyStart} to ${friendlyToday}.\n\n`;
+
+  // Try to pull the last 7 days of diary lessons
+  const { data: diaryLogs } = await supabase
+    .from("sapphire_known_facts")
+    .select("value")
+    .eq("key", "sapphire_diary_lesson");
+
+  if (diaryLogs && diaryLogs.length > 0) {
+    summaryText += `**Core Lesson & Course Correction from this week:**\n${diaryLogs[0].value}\n\n`;
+  }
+
+  // Active Goals
+  let goalsText = "No active goals listed.";
+  try {
+    const { data: goalData } = await supabase.from("sapphire_known_facts").select("value").eq("category", "goals").limit(5);
+    if (goalData && goalData.length > 0) {
+      goalsText = goalData.map((g) => `• ${g.value}`).join("\n");
+    } else {
+      const { data: prefData } = await supabase.from("sapphire_known_facts").select("value").eq("key", "active_goals").maybeSingle();
+      if (prefData?.value) goalsText = prefData.value;
+    }
+  } catch (e) { /* ignore */ }
+
+  try {
+    const parentPageId = await getNotionParentPageId();
+    if (!parentPageId) return;
+
+    const recapHub = await getOrCreateHubPage(parentPageId, "📁 Weekly Recaps");
+    if (!recapHub.ok) {
+      console.error(`[SapphirePA] Failed to get/create Weekly Recaps hub: ${recapHub.error}`);
+      return;
+    }
+
+    const recapPage = await findOrCreateChildPage(recapHub.pageId, pageTitle);
+    if (!recapPage.ok) {
+      console.error(`[SapphirePA] Failed to get/create Weekly Recap page: ${recapPage.error}`);
+      return;
+    }
+
+    const appendTool = new NotionAppendToPageTool();
+    await appendTool.execute({
+      page_id: recapPage.pageId,
+      heading: "📊 Summary",
+      body: summaryText,
+      with_divider: false,
+    });
+    
+    await appendTool.execute({
+      page_id: recapPage.pageId,
+      heading: "🚀 Standing Goals",
+      body: goalsText,
+      with_divider: true,
+    });
+    console.log(`[SapphirePA] Weekly Recap created: ${pageTitle}`);
+
+  } catch (e: any) {
+    console.error(`[SapphirePA] Weekly recap failed: ${e.message}`);
+  }
 }

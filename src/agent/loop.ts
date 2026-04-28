@@ -418,9 +418,51 @@ export class AgentLoop {
         });
       }
 
-      // Load recent messages — default 10, override via contextOverrides (Sapphire DM uses 6)
+      // Load recent messages — default 10, override via contextOverrides (Sapphire DM uses 25)
       const recentCap = this.contextOverrides?.maxRecentMessages ?? 10;
-      const recent = await provider.getRecentMessages(message.chatId, recentCap);
+      let recent = await provider.getRecentMessages(message.chatId, recentCap);
+
+      // ── S122: HYDRATION PROTOCOL ──
+      // If primary provider (SQLite) is missing history (e.g. after Railway reboot),
+      // attempt to hydrate from secondary providers (Supabase).
+      if (recent.length < recentCap && this.memoryProviders.length > 1) {
+        for (let i = 1; i < this.memoryProviders.length; i++) {
+          const secondary = this.memoryProviders[i];
+          try {
+            const extra = await secondary.getRecentMessages(message.chatId, recentCap);
+            if (extra.length > 0) {
+              // Merge and deduplicate by content + role + rough timestamp (SQLite/Supabase might have slight drift)
+              // We use a simple Map with a key that represents the message uniqueness.
+              const seen = new Map<string, Message>();
+              [...extra, ...recent].forEach(m => {
+                const key = `${m.role}:${m.content.slice(0, 100)}`;
+                seen.set(key, m);
+              });
+              
+              const merged = Array.from(seen.values())
+                .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+                .slice(-recentCap);
+
+              if (merged.length > recent.length) {
+                const addedCount = merged.length - recent.length;
+                console.log(`🧠 [MemoryHydration] SQLite was missing history. Hydrated ${addedCount} messages from ${secondary.name}.`);
+                
+                // BACK-HYDRATION: Save the missing messages back to SQLite so the next turn is instant
+                const newMessages = merged.filter(m => !recent.some(r => `${r.role}:${r.content.slice(0, 100)}` === `${m.role}:${m.content.slice(0, 100)}`));
+                for (const newMsg of newMessages) {
+                  await provider.saveMessage(newMsg).catch(() => {});
+                }
+                
+                recent = merged;
+                break; // Stop after first successful hydration
+              }
+            }
+          } catch (hydErr: any) {
+            console.warn(`[MemoryHydration] ${secondary.name} failed: ${hydErr.message}`);
+          }
+        }
+      }
+
       for (const msg of recent) {
         context.push({
           role: msg.role as "user" | "assistant",

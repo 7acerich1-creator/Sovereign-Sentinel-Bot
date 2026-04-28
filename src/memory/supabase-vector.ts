@@ -12,13 +12,16 @@ export class SupabaseVectorMemory implements MemoryProvider {
   private client: SupabaseClient | null = null;
 
   async initialize(): Promise<void> {
-    if (!config.memory.supabaseUrl || !config.memory.supabaseKey) {
+    const url = config.memory.supabaseUrl;
+    const key = config.memory.supabaseServiceKey || config.memory.supabaseKey;
+
+    if (!url || !key) {
       console.log("ℹ️ Supabase not configured — vector memory disabled");
       return;
     }
 
-    this.client = createClient(config.memory.supabaseUrl, config.memory.supabaseKey);
-    console.log("✅ Supabase Vector Memory initialized");
+    this.client = createClient(url, key);
+    console.log(`✅ Supabase Vector Memory initialized (using ${config.memory.supabaseServiceKey ? "SERVICE_ROLE" : "ANON"} key)`);
   }
 
   private ensureClient(): SupabaseClient {

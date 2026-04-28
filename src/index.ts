@@ -384,7 +384,7 @@ async function main() {
   const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
     alfred: buildTeamLLM(["gemini", "groq"], 1, false),    // Gemini -> Groq. NO Anthropic.
     anita: buildTeamLLM(["gemini", "groq"], 1, true),      // Gemini -> Groq. NO Anthropic.
-    sapphire: buildTeamLLM(["gemini", "groq", "anthropic"], 1),  // Anthropic ALLOWED — promoted by introspective router.
+    sapphire: buildTeamLLM(["anthropic", "gemini", "groq"], 1),  // Anthropic Primary — S121d ddxfish intelligence level restored.
     veritas: buildTeamLLM(["gemini", "groq"], 1),          // Gemini -> Groq. NO Anthropic.
     vector: buildTeamLLM(["gemini", "groq"], 1, false),    // Gemini -> Groq. NO Anthropic.
     yuki: buildTeamLLM(["gemini", "groq"], 1, true),       // Gemini -> Groq. NO Anthropic.
@@ -4819,28 +4819,6 @@ async function main() {
                   const { setIdentityLogTrigger } = await import("./tools/sapphire/_ledger");
                   setIdentityLogTrigger(rawText);
                 } catch { /* best-effort */ }
-
-                // S121e: Introspective routing — promote Anthropic to primary for this
-                // turn when the message is introspective / relational / self-reflective.
-                // Reason: Gemini's safety classifier silently zeroes self-modification
-                // language and deep-question framings even at BLOCK_ONLY_HIGH; Claude
-                // doesn't. Failover chain (Anthropic -> Groq -> Gemini) handles 400s.
-                // Non-introspective messages stay on Gemini Flash-Lite for cost.
-                try {
-                  const { scoreIntrospection } = await import("./tools/sapphire/_introspection");
-                  const introspect = scoreIntrospection(rawText);
-                  if (introspect.isIntrospective) {
-                    const sapphireFailover = agentBotLoop.llm as any;
-                    if (sapphireFailover && typeof sapphireFailover.switchPrimary === "function") {
-                      const switched = sapphireFailover.switchPrimary("anthropic");
-                      if (switched) {
-                        console.log(`💎 [Sapphire] Introspective routing -> Claude. Triggers: [${introspect.triggered.join(",")}] score=${introspect.score}`);
-                      }
-                    }
-                  }
-                } catch (e: any) {
-                  console.warn(`[Sapphire] Introspection routing failed: ${e.message} — staying on default LLM`);
-                }
 
                 // Snapshot full tool set so we can restore. Strip PA tools, replace with tier selection.
                 sapphireToolSnapshot = agentBotLoop.snapshotTools();

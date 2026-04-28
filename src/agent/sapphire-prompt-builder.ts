@@ -276,6 +276,10 @@ export async function buildAssembledPrompt(opts: BuildOptions = {}): Promise<str
   const extraLines = state.extras
     .map((k) => pieces.extras?.[k])
     .filter(Boolean) as string[];
+  // ALWAYS inject hidden_thinking for S121d intuitive reasoning upgrade
+  if (pieces.extras?.["hidden_thinking"] && !state.extras.includes("hidden_thinking")) {
+    extraLines.push(pieces.extras["hidden_thinking"]);
+  }
   if (extraLines.length > 0) {
     sections.push("# RULES");
     for (const line of extraLines) sections.push(`- ${line}`);

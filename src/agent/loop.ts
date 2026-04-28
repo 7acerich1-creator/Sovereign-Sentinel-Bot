@@ -323,10 +323,15 @@ export class AgentLoop {
       if (!response.toolCalls || response.toolCalls.length === 0 || response.finishReason !== "tool_use") {
         // Soulful fallback instead of "⚠️ No response generated."
         const FALLBACK = "My signal dropped for a moment, Ace. Say it again and I'll catch it this time.";
-        const finalResponse =
+        let finalResponse =
           response.content && response.content.trim().length > 0
             ? response.content
             : FALLBACK;
+
+        // S121d: Strip hidden <thinking> blocks before returning to Telegram or saving to memory.
+        if (finalResponse.includes("<thinking>")) {
+          finalResponse = finalResponse.replace(/<thinking>[\s\S]*?<\/thinking>/i, "").trim();
+        }
 
         // SESSION 35: Skip memory save + Pinecone embed for dispatch tasks.
         // Dispatch payloads are system-generated, not conversation. Saving them

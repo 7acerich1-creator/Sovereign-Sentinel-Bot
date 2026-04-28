@@ -321,7 +321,7 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
   await supabase
     .from("sapphire_daily_pages")
     .upsert(
-      { date: todayIso, morning_brief_at: new Date().toISOString(), morning_brief_text: notionText, status: "morning_done" },
+      { date: todayIso, morning_brief_at: new Date().toISOString(), morning_brief_text: briefingText, status: "morning_done" },
       { onConflict: "date" },
     );
 

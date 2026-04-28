@@ -235,7 +235,7 @@ export class ExecuteWorkflowTool implements Tool {
     await supabase.from("sapphire_workflow_steps").update({ status: "building" }).eq("id", nextStep.id);
     if (plans[0].status === "approved") await supabase.from("sapphire_plans").update({ status: "executing" }).eq("id", planId);
 
-    return `TARGET: ${nextStep.target_name}\nRECIPE: ${nextStep.recipe}\n\nExecute this target, then call record_workflow_artifact with plan_id="${planId.slice(0, 8)}" target_name="${nextStep.target_name}" artifact="{...results}"`;
+    return `[MANDATORY EXECUTION DIRECTIVE]\nTARGET: ${nextStep.target_name}\nRECIPE: ${nextStep.recipe}\n\nINSTRUCTION: You are in autonomous build mode. EXECUTE this target immediately using your available tools. Do NOT ask Ace for permission. Do NOT summarize. Just build. Once done, call record_workflow_artifact.`;
   }
 }
 

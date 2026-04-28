@@ -4835,59 +4835,34 @@ async function main() {
                 const { makeSapphireToolObserver } = await import("./agent/sapphire-tool-indicators");
                 agentBotLoop.setToolCallObserver(makeSapphireToolObserver(agentChannel, message.chatId));
 
-                // Tier the tool set to only what this message needs (~5K tokens vs 27 always)
-                const { selectToolsForMessage } = await import("./tools/sapphire/_router");
-                const hasAttachment = !!message.attachments?.length;
-                // Match against ORIGINAL user text — strip context prefix that we injected
+                // S121e: FORCED LEAN TIERING — Slash tokens by 50%
+                const { buildSapphireCoreTools, buildSapphireWorkflowTools, buildSapphireResearchTools } = await import("./tools/sapphire");
+                const leanTools = [
+                  ...buildSapphireCoreTools(),
+                  ...buildSapphireWorkflowTools(),
+                  ...buildSapphireResearchTools()
+                ];
+                
+                sapphireToolSnapshot = agentBotLoop.snapshotTools();
+                agentBotLoop.setTools(leanTools);
+                console.log(`[SapphirePA] FORCED LEAN TIERING — Loaded ${leanTools.length} tools (~5500 tokens). Life tools purged.`);
+
                 const rawText = message.content
                   .replace(/^# IDENTITY[\s\S]*?(?=^[^#]|\Z)/m, "")
                   .replace(/^# LIVE STATE[\s\S]*?(?=^[^#]|\Z)/m, "")
                   .replace(/^URGENT ALERT[\s\S]*?\n\n/m, "")
                   .replace(/^\[CONTEXT:[\s\S]*?\]\s*/m, "")
                   .trim();
-                sapphireRawText = rawText; // S121e — exposed to post-process embed
-                const selection = selectToolsForMessage(rawText, hasAttachment);
-                console.log(`[SapphirePA] Tool tiering — loaded [${selection.loadedTiers.join(",")}] = ${selection.toolCount} tools (~${selection.approxTokens} tokens, was 32)`);
+                sapphireRawText = rawText;
 
-                // S121e: Conversation continuity tuning.
-                // - maxRecentMessages 15→25: doubles the visible thread window so consecutive
-                //   DMs feel like a real ongoing conversation, not a reset every turn.
-                // - skipSemanticSearch FALSE: lets the agent loop's semantic search inject 3
-                //   most-relevant past messages from anywhere in history. Pairs with her PA
-                //   prefix (which queries sapphire-personal Pinecone) — the two layers
-                //   together give her real "I remember what we talked about last week" recall.
                 agentBotLoop.setContextOverrides({ maxRecentMessages: 25, skipSemanticSearch: false });
 
-                // S121e: Identity ledger — capture this turn's user message so any
-                // set_piece/create_piece/remove_piece tool calls during this turn can
-                // attribute their entry to the message that triggered them.
                 try {
                   const { setIdentityLogTrigger } = await import("./tools/sapphire/_ledger");
                   setIdentityLogTrigger(rawText);
                 } catch { /* best-effort */ }
-
-                // Snapshot full tool set so we can restore. Strip PA tools, replace with tier selection.
-                sapphireToolSnapshot = agentBotLoop.snapshotTools();
-                const allCurrent = Array.from(sapphireToolSnapshot.values());
-                const PA_TOOL_NAMES = new Set([
-                  "set_reminder","list_reminders","cancel_reminder",
-                  "gmail_inbox","gmail_search","gmail_send","gmail_draft",
-                  "calendar_list","calendar_create_event","calendar_reschedule",
-                  "notion_create_page","notion_append_to_page","notion_search","notion_set_parent_page",
-                  "remember_fact","recall_facts",
-                  "analyze_pdf","research_brief",
-                  "save_family_member","get_family",
-                  "create_plan","approve_plan","advance_plan","record_step_result","cancel_plan",
-                  "add_news_source","remove_news_source","list_news_sources",
-                  "set_piece","remove_piece","create_piece","list_pieces","view_self_prompt","view_identity_history",
-                  "record_followup","list_followups","complete_followup","cancel_followup",
-                  "write_diary_entry","read_diary","read_significance",
-                  "read_team_roster",
-                ]);
-                const nonPATools = allCurrent.filter((t: any) => !PA_TOOL_NAMES.has(t.definition?.name));
-                agentBotLoop.setTools([...nonPATools, ...selection.tools]);
-              } catch (e: any) {
-                console.warn(`[SapphirePA] Tool tiering setup failed: ${e.message} — falling back to full set`);
+              } catch (tierErr: any) {
+                console.error(`[SapphirePA] Tiering failed: ${tierErr.message}`);
               }
             }
 

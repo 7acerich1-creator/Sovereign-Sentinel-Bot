@@ -4350,8 +4350,22 @@ async function main() {
             agentTeamLLM.generate(messages, { ...options, systemPrompt: blueprint + "\n\n" + SHARED_AGENT_CONTEXT }),
         };
 
-        // Build per-agent tool set: shared tools + agent-specific tools
-        const agentTools: Tool[] = [...tools, new CrewDispatchTool(agentCfg.name)];
+        // Build per-agent tool set: selectively include tools from the global registry
+        // S121: LEAN TOOL TIERING. Stop spreading the entire 64-tool arsenal into
+        // every crew bot. Veritas (lead) gets everything; Sapphire gets PA +
+        // core; others get Dispatch + core. Saves ~15K tokens per turn.
+        const CORE_TOOL_NAMES = new Set([
+          "web_search", "web_fetch", "memory_search", "memory_save",
+          "recall_facts", "remember_fact", "knowledge_graph_query",
+          "read_protocols", "file_read", "file_list", "file_search"
+        ]);
+        const agentTools: Tool[] = tools.filter(t => 
+          CORE_TOOL_NAMES.has(t.definition.name) || 
+          // If the tool was explicitly added for THIS specific agent (like Notion for Sapphire)
+          // we'll catch those below in the pushes.
+          false
+        );
+        agentTools.push(new CrewDispatchTool(agentCfg.name));
 
         // Content crew: agents that produce/distribute content and need protocol access
         const CONTENT_CREW = ["alfred", "anita", "yuki"];

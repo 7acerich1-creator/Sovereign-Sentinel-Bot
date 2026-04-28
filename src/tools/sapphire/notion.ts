@@ -85,22 +85,43 @@ export class NotionCreatePageTool implements Tool {
   definition: ToolDefinition = {
     name: "notion_create_page",
     description:
-      "Create a new Notion page under a parent page. Used for daily operations log pages and one-off notes.",
+      "Create a new Notion page. Can be created directly under the parent page or within a 'Hub' folder (like '📁 Complex Tasks').",
     parameters: {
-      parent_page_id: { type: "string", description: "Parent Notion page ID (UUID format with or without dashes)." },
+      parent_page_id: { 
+        type: "string", 
+        description: "Parent Notion page ID. If omitted, will attempt to use the default 'notion_parent_page_id' fact." 
+      },
+      hub_name: {
+        type: "string",
+        description: "Optional. If provided, Sapphire will search for a child page with this name (e.g. '📁 Complex Tasks') and create the new page inside it. If the hub doesn't exist, it will be created under the parent page."
+      },
       title: { type: "string", description: "Page title." },
       body: { type: "string", description: "Optional initial body text. Plain text; double newlines = paragraph breaks." },
     },
-    required: ["parent_page_id", "title"],
+    required: ["title"],
   };
 
   async execute(args: Record<string, unknown>): Promise<string> {
-    const parent = String(args.parent_page_id || "").replace(/-/g, "");
+    let parent = String(args.parent_page_id || "").replace(/-/g, "");
+    const hubName = args.hub_name ? String(args.hub_name).trim() : null;
     const title = String(args.title || "").slice(0, 200);
     const body = args.body ? String(args.body) : "";
 
-    if (!parent) return "notion_create_page: parent_page_id required.";
     if (!title) return "notion_create_page: title required.";
+
+    // Fallback to configured parent page if not provided
+    if (!parent) {
+      parent = (await getNotionParentPageId()) || "";
+      if (!parent) return "notion_create_page: parent_page_id required (or use notion_set_parent_page first).";
+    }
+
+    // If a hub name is provided, find or create the hub page first
+    let finalParentId = parent;
+    if (hubName) {
+      const hubRes = await getOrCreateHubPage(parent, hubName);
+      if (!hubRes.ok) return `notion_create_page: Failed to resolve hub "${hubName}": ${hubRes.error}`;
+      finalParentId = hubRes.pageId.replace(/-/g, "");
+    }
 
     const children: unknown[] = [];
     if (body.trim()) {
@@ -110,7 +131,7 @@ export class NotionCreatePageTool implements Tool {
     const result = await notionFetch("/pages", {
       method: "POST",
       jsonBody: {
-        parent: { page_id: parent },
+        parent: { page_id: finalParentId },
         properties: {
           title: {
             title: [{ type: "text", text: { content: title } }],
@@ -121,7 +142,7 @@ export class NotionCreatePageTool implements Tool {
     });
 
     if (!result.ok) return `notion_create_page: ${result.error}`;
-    return `Created Notion page "${title}". ID: ${result.data.id}. URL: ${result.data.url}`;
+    return `Created Notion page "${title}"${hubName ? ` in hub "${hubName}"` : ""}. ID: ${result.data.id}. URL: ${result.data.url}`;
   }
 }
 

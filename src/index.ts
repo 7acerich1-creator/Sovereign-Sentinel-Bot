@@ -23,7 +23,7 @@ import { AgentLoop } from "./agent/loop";
 import { AgentSwarm, SwarmTool } from "./agent/swarm";
 // AgentComms REMOVED (Session 26) — legacy in-memory message bus, fully replaced by Supabase crew-dispatch.
 // Source file retained at ./agent/comms.ts for reference but no longer imported or instantiated.
-import { NotionAppendToPageTool } from "./tools/sapphire/notion";
+import { NotionAppendToPageTool, NotionCreatePageTool, NotionSearchTool, NotionGetBlocksTool, NotionUpdateBlockTool, NotionDeleteBlockTool, NotionSetParentPageTool } from "./tools/sapphire/notion";
 import { ClickUpTool } from "./tools/sapphire/clickup";
 import { CalendarListTool, CalendarCreateEventTool } from "./tools/sapphire/calendar";
 import { MeshWorkflow, MeshTool } from "./agent/mesh";
@@ -477,7 +477,13 @@ async function main() {
   tools.push(new YouTubeCTAAuditTool());
 
   // Sapphire PA Tools
+  tools.push(new NotionCreatePageTool());
   tools.push(new NotionAppendToPageTool());
+  tools.push(new NotionSearchTool());
+  tools.push(new NotionGetBlocksTool());
+  tools.push(new NotionUpdateBlockTool());
+  tools.push(new NotionDeleteBlockTool());
+  tools.push(new NotionSetParentPageTool());
   tools.push(new ClickUpTool());
   tools.push(new CalendarListTool());
   tools.push(new CalendarCreateEventTool());

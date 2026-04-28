@@ -37,7 +37,7 @@ export const config: GravityClawConfig = {
     // Gemini re-admitted to text-gen (was excluded S29c due to Anita billing leak,
     // root cause was Supabase overwriting prompts — fixed in S29c commit 624fc28).
     // Order: Gemini (primary, has API credit) → Groq (free backup) → Anthropic (emergency only).
-    failoverOrder: envList("LLM_FAILOVER_ORDER", ["gemini", "groq", "anthropic"]),
+    failoverOrder: envList("LLM_FAILOVER_ORDER", ["gemini", "groq", "anthropic", "openai"]),
     maxIterations: envInt("LLM_MAX_ITERATIONS", 10),
     providers: {
       gemini: {

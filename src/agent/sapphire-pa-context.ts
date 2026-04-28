@@ -93,9 +93,17 @@ export async function buildPersonalContextPrefix(userMessage = ""): Promise<stri
     ]);
 
     const planLines = (activePlans.data ?? []).map(p => `  • [${p.id.slice(0, 8)}] (${p.status}): ${p.goal}`);
-    const planSummary = planLines.length > 0 
+    let planSummary = planLines.length > 0 
       ? `\n[ACTIVE PLANS — you are currently executing these]:\n${planLines.join("\n")}` 
       : "";
+
+    // S121e: HARD EXECUTION MANDATE
+    if (planLines.length > 0) {
+      planSummary += `\n\n[HARD EXECUTIVE MANDATE]: You are in EXECUTION MODE for the active plans above. ` +
+        `If Ace says 'do it', 'go', or similar, you are FORBIDDEN from replying with 'Ready' or 'I will begin'. ` +
+        `You MUST immediately call a work-producing tool (web_search, web_fetch, research_brief, etc.) to complete Step 1. ` +
+        `Deliverables (actual data/results) are the only acceptable output.`;
+    }
 
     parts.push(`[MEMORY: ${factsCount.count || 0} standing facts saved | ${reminders24h.count || 0} reminders queued today | ${reminders7d.count || 0} more this week. Call recall_facts / list_reminders to read specifics when needed.]${planSummary}`);
   } catch (e: any) {

@@ -29,12 +29,12 @@ export class CreatePlanTool implements Tool {
   definition: ToolDefinition = {
     name: "create_plan",
     description:
-      "Decompose a multi-step goal into 3-8 ordered steps. Use when Ace asks for something that requires several actions in sequence (book flight, reserve hotel, set reminders, draft notes). Returns the plan ID and a numbered list. Ace must call approve_plan before steps execute.",
+      "Decompose a multi-step goal into a 'Makefile' style workflow. Identifies targets, dependencies, and recipes. Returns a plan ID. Use when Ace asks for something complex. After this, Ace approves, then you call execute_workflow.",
     parameters: {
-      goal: { type: "string", description: "What Ace wants accomplished, in plain English." },
+      goal: { type: "string", description: "What Ace wants accomplished." },
       steps: {
         type: "string",
-        description: "Numbered list of steps you want to take. Each step on its own line, prefixed with a number. Example: '1. Search flights HOU→AUS Friday morning under $400\\n2. Reserve top option\\n3. Book hotel near airport\\n4. Set reminder 2h before departure\\n5. Add to calendar'",
+        description: "Numbered list of steps. Prefix with [TARGET] if it's a major milestone. Use 'Needs: X' for dependencies. Example: '1. [TARGET] Search BlueSky accounts\\n2. Extract bios Needs: 1\\n3. [TARGET] Compile Notion Hub Needs: 2'",
       },
     },
     required: ["goal", "steps"],
@@ -44,31 +44,37 @@ export class CreatePlanTool implements Tool {
     const goal = String(args.goal || "").trim();
     const stepsRaw = String(args.steps || "").trim();
     if (!goal) return "create_plan: goal required.";
-    if (!stepsRaw) return "create_plan: steps required.";
 
-    const steps = stepsRaw
-      .split("\n")
-      .map((s) => s.replace(/^\d+\.\s*/, "").trim())
-      .filter(Boolean);
-    if (steps.length === 0) return "create_plan: parsed zero steps.";
-    if (steps.length > 12) return "create_plan: too many steps (max 12). Break into smaller plans.";
-
+    const steps = stepsRaw.split("\n").map(s => s.trim()).filter(Boolean);
     const supabase = await getSupabase();
-    const { data, error } = await supabase
+
+    // Create parent plan
+    const { data: plan, error: planError } = await supabase
       .from("sapphire_plans")
-      .insert({
-        goal,
-        steps: steps.map((text, i) => ({ idx: i + 1, text, done: false })),
-        chat_id: ACE_CHAT_ID,
-        status: "awaiting_approval",
-      })
+      .insert({ goal, chat_id: ACE_CHAT_ID, status: "awaiting_approval", steps: steps.map((s, i) => ({ idx: i+1, text: s, done: false })) })
       .select("id")
       .single();
 
-    if (error) return `create_plan: ${error.message}`;
+    if (planError) return `create_plan: ${planError.message}`;
 
-    const lines = steps.map((s, i) => `${i + 1}. ${s}`);
-    return `Plan drafted (id ${data.id.slice(0, 8)}):\n\nGoal: ${goal}\n\nSteps:\n${lines.join("\n")}\n\nApprove with: approve_plan plan_id="${data.id}". Cancel with: cancel_plan plan_id="${data.id}".`;
+    // Create workflow steps (The Makefile)
+    const workflowSteps = steps.map((s, i) => {
+      const isTarget = s.includes("[TARGET]");
+      const depsMatch = s.match(/Needs:\s*(\d+)/);
+      const deps = depsMatch ? [depsMatch[1]] : [];
+      return {
+        plan_id: plan.id,
+        target_name: s.replace(/\[TARGET\]|Needs:\s*\d+/g, "").trim(),
+        dependencies: deps,
+        recipe: `Execute Step ${i+1}: ${s}`,
+        status: "stale"
+      };
+    });
+
+    const { error: wfError } = await supabase.from("sapphire_workflow_steps").insert(workflowSteps);
+    if (wfError) console.warn(`[Planner] Warning: workflow steps table might not exist: ${wfError.message}`);
+
+    return `Plan drafted (id ${plan.id.slice(0, 8)}). Workflow targets locked. Waiting for Ace to approve_plan.`;
   }
 }
 
@@ -190,28 +196,79 @@ export class RecordStepResultTool implements Tool {
   }
 }
 
-export class CancelPlanTool implements Tool {
+export class ExecuteWorkflowTool implements Tool {
   definition: ToolDefinition = {
-    name: "cancel_plan",
-    description: "Cancel a pending or in-progress plan.",
+    name: "execute_workflow",
+    description: "Autonomously advance a workflow using 'Make' logic. Identifies the first stale target with all dependencies built, and provides the recipe. Use when Ace says 'do it' or 'continue' on a plan.",
     parameters: { plan_id: { type: "string", description: "Plan UUID or 8-char prefix." } },
     required: ["plan_id"],
   };
 
   async execute(args: Record<string, unknown>): Promise<string> {
     const idRaw = String(args.plan_id || "").trim();
-    if (!idRaw) return "cancel_plan: plan_id required.";
     const supabase = await getSupabase();
-    let q = supabase.from("sapphire_plans").update({ status: "cancelled" });
-    if (idRaw.length === 8) {
-      const { data } = await supabase.from("sapphire_plans").select("id").ilike("id", `${idRaw}%`).limit(1);
-      if (!data || data.length === 0) return `cancel_plan: no plan matches "${idRaw}".`;
-      q = q.eq("id", data[0].id);
-    } else {
-      q = q.eq("id", idRaw);
+
+    let q = supabase.from("sapphire_plans").select("id, status").in("status", ["approved", "executing"]);
+    if (idRaw.length === 8) q = q.ilike("id", `${idRaw}%`); else q = q.eq("id", idRaw);
+    const { data: plans } = await q.limit(1);
+    if (!plans || plans.length === 0) return `execute_workflow: no executable plan matches "${idRaw}".`;
+
+    const planId = plans[0].id;
+
+    // Fetch steps
+    const { data: steps } = await supabase.from("sapphire_workflow_steps").select("*").eq("plan_id", planId);
+    if (!steps || steps.length === 0) return `execute_workflow: no workflow steps found for plan ${planId}. Use advance_plan for legacy plans.`;
+
+    // Dependency check loop
+    const builtIds = new Set(steps.filter(s => s.status === "built").map((s, i) => String(i + 1)));
+    const nextStep = steps.find(s => s.status === "stale" && (s.dependencies as string[]).every(d => builtIds.has(d)));
+
+    if (!nextStep) {
+      const allDone = steps.every(s => s.status === "built");
+      if (allDone) {
+        await supabase.from("sapphire_plans").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", planId);
+        return `Workflow complete. All targets built for plan ${planId.slice(0, 8)}.`;
+      }
+      return `Workflow stalled. All remaining steps have unfulfilled dependencies. Check step statuses.`;
     }
-    const { error } = await q;
-    if (error) return `cancel_plan: ${error.message}`;
-    return `Plan cancelled.`;
+
+    await supabase.from("sapphire_workflow_steps").update({ status: "building" }).eq("id", nextStep.id);
+    if (plans[0].status === "approved") await supabase.from("sapphire_plans").update({ status: "executing" }).eq("id", planId);
+
+    return `TARGET: ${nextStep.target_name}\nRECIPE: ${nextStep.recipe}\n\nExecute this target, then call record_workflow_artifact with plan_id="${planId.slice(0, 8)}" target_name="${nextStep.target_name}" artifact="{...results}"`;
+  }
+}
+
+export class RecordWorkflowArtifactTool implements Tool {
+  definition: ToolDefinition = {
+    name: "record_workflow_artifact",
+    description: "Mark a workflow target as 'built' and store its artifact. This persists data across session restarts.",
+    parameters: {
+      plan_id: { type: "string" },
+      target_name: { type: "string" },
+      artifact: { type: "string", description: "JSON string of findings, results, or data." }
+    },
+    required: ["plan_id", "target_name", "artifact"],
+  };
+
+  async execute(args: Record<string, unknown>): Promise<string> {
+    const idRaw = String(args.plan_id || "").trim();
+    const targetName = String(args.target_name || "").trim();
+    const artifactRaw = String(args.artifact || "{}");
+    const supabase = await getSupabase();
+
+    let q = supabase.from("sapphire_workflow_steps").select("id").eq("target_name", targetName);
+    if (idRaw.length === 8) q = q.ilike("plan_id", `${idRaw}%`); else q = q.eq("plan_id", idRaw);
+    const { data: steps } = await q.limit(1);
+
+    if (!steps || steps.length === 0) return `record_workflow_artifact: target "${targetName}" not found for plan ${idRaw}.`;
+
+    const artifact = JSON.parse(artifactRaw);
+    const { error } = await supabase.from("sapphire_workflow_steps")
+      .update({ status: "built", artifact, updated_at: new Date().toISOString() })
+      .eq("id", steps[0].id);
+
+    if (error) return `record_workflow_artifact: ${error.message}`;
+    return `Target "${targetName}" built and artifact stored. Use execute_workflow to build the next target.`;
   }
 }

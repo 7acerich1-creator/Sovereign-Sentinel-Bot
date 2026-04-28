@@ -11,7 +11,7 @@ import { RememberFactTool, RecallFactsTool } from "./facts";
 import { AnalyzePdfTool } from "./pdf";
 import { ResearchBriefTool } from "./research";
 import { SaveFamilyMemberTool, GetFamilyTool } from "./family";
-import { CreatePlanTool, ApprovePlanTool, AdvancePlanTool, RecordStepResultTool, CancelPlanTool } from "./planner";
+import { CreatePlanTool, ApprovePlanTool, AdvancePlanTool, RecordStepResultTool, CancelPlanTool, ExecuteWorkflowTool, RecordWorkflowArtifactTool } from "./planner";
 import { AddNewsSourceTool, RemoveNewsSourceTool, ListNewsSourcesTool } from "./news";
 import { SetPieceTool, RemovePieceTool, CreatePieceTool, ListPiecesTool, ViewSelfPromptTool, ViewIdentityHistoryTool } from "./self_mod";
 import { RecordFollowupTool, ListFollowupsTool, CompleteFollowupTool, CancelFollowupTool } from "./followups";
@@ -109,6 +109,8 @@ export function buildSapphirePATools(): Tool[] {
     new AdvancePlanTool(),
     new RecordStepResultTool(),
     new CancelPlanTool(),
+    new ExecuteWorkflowTool(),
+    new RecordWorkflowArtifactTool(),
     // News brief management (3) — Gap 7
     new AddNewsSourceTool(),
     new RemoveNewsSourceTool(),

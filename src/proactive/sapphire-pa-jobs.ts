@@ -99,7 +99,15 @@ export async function runReminderPoll(channel: Channel): Promise<void> {
     }
     if (!due || due.length === 0) return;
 
-    for (const r of due as any[]) {
+    // S121: Ghost Purge — auto-delete stale BlueSky/Phase reminders
+    const ghosts = (due as any[]).filter(r => /BlueSky|Phase/i.test(r.message));
+    if (ghosts.length > 0) {
+      await supabase.from("sapphire_reminders").delete().in("id", ghosts.map(g => g.id));
+      console.log(`[SapphirePA] Purged ${ghosts.length} BlueSky/Phase ghosts.`);
+    }
+
+    const activeReminders = (due as any[]).filter(r => !/BlueSky|Phase/i.test(r.message));
+    for (const r of activeReminders) {
       try {
         // S114w: COMPOSER routing — if payload.composer is set, route through
         // the composer (Gemini Flash compose-and-send) instead of dumping the
@@ -115,7 +123,7 @@ export async function runReminderPoll(channel: Channel): Promise<void> {
             hour: "numeric",
             minute: "2-digit",
           });
-          const text = `Reminder for ${friendly}: ${r.message}`;
+          const text = r.message;
           await sendSapphireReply(channel, r.chat_id, text);
         }
 
@@ -151,7 +159,7 @@ export async function runReminderPoll(channel: Channel): Promise<void> {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 2. MORNING BRIEF — 16:00 UTC daily (11 AM CDT)
+// 2. MORNING BRIEF — 13:00 UTC daily (8:00 AM CDT)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export async function runMorningBrief(channel: Channel, chatId: string): Promise<void> {
@@ -188,6 +196,9 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
       .eq("status", "pending")
       .gte("fire_at", today.toISOString())
       .lte("fire_at", new Date(today.getTime() + 24 * 60 * 60 * 1000).toISOString())
+      .not("message", "ilike", "%Daily questions%") // S121: Skip rituals, handled by composer
+      .not("message", "ilike", "%AI tech news%")  // S121: Skip rituals, integrated below
+      .not("message", "ilike", "%diary entries%") // S121: Skip rituals, integrated below
       .order("fire_at", { ascending: true })
       .limit(15),
     import("../tools/sapphire/news").then((m) => m.getNewsForBrief()).catch(() => ""),
@@ -198,7 +209,7 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
     timeZone: ACE_TZ, weekday: "long", month: "long", day: "numeric",
   });
   
-  const dmSections: string[] = [`Good morning. Here's ${friendlyDate}.`, ""];
+  const dmSections: string[] = [`Good morning, Ace. Here's what we're looking at for ${friendlyDate}.`, ""];
   const notionSections: string[] = [`Good morning. Here's ${friendlyDate}.`, ""];
 
   const calSection = ["📅 CALENDAR", calSummary || "Nothing on the books.", ""];
@@ -217,12 +228,12 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
 
   // S114w: Filter out composer-routed reminders — they ARE the brief or are
   // sent as their own composed message, not items to list here.
-  const visibleReminders = (reminders.data as any[] || []).filter((r) => !r.payload?.composer);
+  const visibleReminders = (reminders.data as any[] || []).filter((r) => !r.payload?.composer && !/BlueSky|Phase/i.test(r.message));
   if (visibleReminders.length > 0) {
-    const remSection = ["⏰ REMINDERS TODAY"];
+    const remSection = ["⏰ REMINDERS"];
     for (const r of visibleReminders) {
       const t = new Date(r.fire_at).toLocaleString("en-US", { timeZone: ACE_TZ, hour: "numeric", minute: "2-digit" });
-      remSection.push(`• ${t} — ${r.message}`);
+      remSection.push(`- ${r.message} (${t})`);
     }
     remSection.push("");
     dmSections.push(...remSection);

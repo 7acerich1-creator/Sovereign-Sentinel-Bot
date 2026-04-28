@@ -34,7 +34,7 @@ export class CreatePlanTool implements Tool {
       goal: { type: "string", description: "What Ace wants accomplished." },
       steps: {
         type: "string",
-        description: "Numbered list of steps. Prefix with [TARGET] if it's a major milestone. Use 'Needs: X' for dependencies. Example: '1. [TARGET] Search BlueSky accounts\\n2. Extract bios Needs: 1\\n3. [TARGET] Compile Notion Hub Needs: 2'",
+        description: "Numbered list of steps. MANDATORY: For research, analysis, or data compilation, use 'BURST EXECUTION'. This means executing all steps immediately in one session. Do NOT schedule research over days. Example: '1. [TARGET] Search BlueSky accounts (Immediate)\\n2. Extract bios (Immediate) Needs: 1\\n3. [TARGET] Compile Notion Hub (Immediate) Needs: 2'",
       },
     },
     required: ["goal", "steps"],

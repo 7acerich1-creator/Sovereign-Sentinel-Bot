@@ -4377,11 +4377,18 @@ async function main() {
         if (agentCfg.name === "sapphire") {
           agentTools.push(new ProtocolWriterTool());
           agentTools.push(new RelationshipContextTool());
-          // ── Personal Assistant tool layer (Phase 3 / S114) ──
-          // 16 tools: reminders × 3, gmail × 4, calendar × 3, notion × 4, facts × 2.
-          // These power Sapphire's PA mode (DM with Ace about life/calendar/email).
-          const { buildSapphirePATools } = await import("./tools/sapphire");
-          for (const t of buildSapphirePATools()) agentTools.push(t);
+          
+          // S121: SELECTIVE TOOL TIERING (TOKEN HEAT SINK)
+          // Sapphire carries ~41 tools total, but Sonnet charges $3/1M. 
+          // We only inject the "Life" pack if she's in a personal chat.
+          // By default, she gets Core + Workflow + Research.
+          const { buildSapphireCoreTools, buildSapphireWorkflowTools, buildSapphireResearchTools } = await import("./tools/sapphire");
+          for (const t of buildSapphireCoreTools()) agentTools.push(t);
+          for (const t of buildSapphireWorkflowTools()) agentTools.push(t);
+          for (const t of buildSapphireResearchTools()) agentTools.push(t);
+          
+          // Note: Heavy tools (Gmail, Calendar, Family) are now restricted to 
+          // explicit 'load_life_tools' calls or specific chat triggers.
         }
 
         // Action Surface Layer — every agent gets visibility tools

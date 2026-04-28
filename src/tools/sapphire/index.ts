@@ -69,71 +69,57 @@ export {
   YoutubeTranscriptTool,
 };
 
-// ── Bundle factory — returns all 27 PA tools ───────────────────────────────
-export function buildSapphirePATools(): Tool[] {
+// ── Modular Packs for Selective Tool Tiering (S121) ──────────────────────
+
+// Core Pack (Reminders, Notion, Memory) — the essentials
+export function buildSapphireCoreTools(): Tool[] {
   return [
-    // Reminders (3)
     new SetReminderTool(),
     new ListRemindersTool(),
     new CancelReminderTool(),
-    // Gmail (4)
-    new GmailInboxTool(),
-    new GmailSearchTool(),
-    new GmailSendTool(),
-    new GmailDraftTool(),
-    // Calendar (3)
-    new CalendarListTool(),
-    new CalendarCreateEventTool(),
-    new CalendarRescheduleTool(),
-    // Notion (7)
     new NotionCreatePageTool(),
     new NotionAppendToPageTool(),
     new NotionSearchTool(),
-    new NotionSetParentPageTool(),
     new NotionGetBlocksTool(),
     new NotionUpdateBlockTool(),
-    new NotionDeleteBlockTool(),
-    // Memory (2)
     new RememberFactTool(),
     new RecallFactsTool(),
-    // Documents (1) — Gap 2
-    new AnalyzePdfTool(),
-    // Research (1) — Gap 3
-    new ResearchBriefTool(),
-    // Family (2) — Gap 8
-    new SaveFamilyMemberTool(),
-    new GetFamilyTool(),
-    // Multi-step planner meta-tools (5) — Gap 10
+  ];
+}
+
+// Workflow Pack (The 'Make' Protocol)
+export function buildSapphireWorkflowTools(): Tool[] {
+  return [
     new CreatePlanTool(),
     new ApprovePlanTool(),
     new AdvancePlanTool(),
     new RecordStepResultTool(),
-    new CancelPlanTool(),
     new ExecuteWorkflowTool(),
     new RecordWorkflowArtifactTool(),
-    // News brief management (3) — Gap 7
-    new AddNewsSourceTool(),
-    new RemoveNewsSourceTool(),
-    new ListNewsSourcesTool(),
-    // Self-modification meta tools (6) — S114u ddxfish pattern + S121 identity ledger
-    new SetPieceTool(),
-    new RemovePieceTool(),
-    new CreatePieceTool(),
-    new ListPiecesTool(),
-    new ViewSelfPromptTool(),
-    new ViewIdentityHistoryTool(),
-    // Anticipatory followups (4) — S121 BUILD D
-    new RecordFollowupTool(),
-    new ListFollowupsTool(),
-    new CompleteFollowupTool(),
-    new CancelFollowupTool(),
-    // Diary + significance (3) — S121 BUILD D
-    new WriteDiaryEntryTool(),
-    new ReadDiaryTool(),
-    new ReadSignificanceTool(),
-    // Team roster (1) — S121d, single source of truth from PERSONA_REGISTRY
-    new ReadTeamRosterTool(),
-    // YouTube (1) — S121d, daily pipeline analysis
+    new CancelPlanTool(),
+  ];
+}
+
+// Research Pack (Search, Fetch, Briefs)
+export function buildSapphireResearchTools(): Tool[] {
+  return [
+    new ResearchBriefTool(),
     new YoutubeTranscriptTool(),
+  ];
+}
+
+// Life Pack (Gmail, Calendar, Family) — HEAVY TOOLS
+// Load these only when managing schedules/comms.
+export function buildSapphireLifeTools(): Tool[] {
+  return [
+    new GmailInboxTool(),
+    new GmailSearchTool(),
+    new GmailSendTool(),
+    new GmailDraftTool(),
+    new CalendarListTool(),
+    new CalendarCreateEventTool(),
+    new CalendarRescheduleTool(),
+    new SaveFamilyMemberTool(),
+    new GetFamilyTool(),
   ];
 }

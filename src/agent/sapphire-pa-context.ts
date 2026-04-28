@@ -94,16 +94,23 @@ export async function buildPersonalContextPrefix(userMessage = ""): Promise<stri
     const todayHorizon = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
     const weekHorizon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    const [factsCount, reminders24h, reminders7d] = await Promise.all([
+    const [factsCount, reminders24h, reminders7d, activePlans] = await Promise.all([
       supabase.from("sapphire_known_facts").select("key", { count: "exact", head: true }),
       supabase.from("sapphire_reminders").select("id", { count: "exact", head: true })
         .eq("status", "pending").lte("fire_at", todayHorizon),
       supabase.from("sapphire_reminders").select("id", { count: "exact", head: true })
         .eq("status", "pending").gt("fire_at", todayHorizon).lte("fire_at", weekHorizon),
+      supabase.from("sapphire_plans").select("id, goal, status").in("status", ["approved", "executing"]),
     ]);
-    parts.push(`[MEMORY: ${factsCount.count || 0} standing facts saved | ${reminders24h.count || 0} reminders queued today | ${reminders7d.count || 0} more this week. Call recall_facts / list_reminders to read specifics when needed.]`);
+
+    const planLines = (activePlans.data ?? []).map(p => `  • [${p.id.slice(0, 8)}] (${p.status}): ${p.goal}`);
+    const planSummary = planLines.length > 0 
+      ? `\n[ACTIVE PLANS — you are currently executing these]:\n${planLines.join("\n")}` 
+      : "";
+
+    parts.push(`[MEMORY: ${factsCount.count || 0} standing facts saved | ${reminders24h.count || 0} reminders queued today | ${reminders7d.count || 0} more this week. Call recall_facts / list_reminders to read specifics when needed.]${planSummary}`);
   } catch (e: any) {
-    console.warn(`[SapphirePA] counts fetch failed: ${e.message}`);
+    console.warn(`[SapphirePA] counts/plans fetch failed: ${e.message}`);
   }
 
   // ── SEMANTIC RECALL — query sapphire-personal namespace against THIS message ──

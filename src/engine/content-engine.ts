@@ -1521,7 +1521,7 @@ export async function nukeBufferQueue(): Promise<string> {
 
   // Step 1: Clear all non-posted rows from content_engine_queue
   const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_ANON_KEY;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
   if (url && key) {
     try {
       const resp = await fetch(

@@ -51,7 +51,8 @@ import { isBufferQuotaExhausted } from "./buffer-graphql";
 import { publishToFacebook } from "./facebook-publisher";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
+// Session 34 pattern: SERVICE_ROLE_KEY bypasses RLS on content_transmissions
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 const STORAGE_BUCKET = "public-assets";
 const R2_BUCKET_CLIPS = process.env.R2_BUCKET_VIDEOS || "sovereign-videos"; // clips/ prefix inside same bucket as long-form
 const ORCHESTRATOR_DIR = "/tmp/vidrush_orchestrator";

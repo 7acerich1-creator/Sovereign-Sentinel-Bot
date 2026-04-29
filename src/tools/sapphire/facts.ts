@@ -100,10 +100,10 @@ export class RecallFactsTool implements Tool {
     // ── SEMANTIC PATH ──
     if (query) {
       try {
-        const { querySapphireFacts } = await import("./_pinecone");
-        const results = await querySapphireFacts(query, Number(args.max) || 10);
+        const { recallSapphireFacts } = await import("./_pinecone");
+        const results = await recallSapphireFacts(query, Number(args.max) || 10);
         if (!results || results.length === 0) return `No semantically relevant facts found for "${query}".`;
-        return results.map(r => `[${r.category}] ${r.key}: ${r.value}`).join("\n");
+        return results.map((r: any) => `[${r.category}] ${r.key}: ${r.value}`).join("\n");
       } catch (e: any) {
         return `recall_facts semantic error: ${e.message}`;
       }

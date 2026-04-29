@@ -4855,7 +4855,7 @@ async function main() {
                   .trim();
                 sapphireRawText = rawText;
 
-                agentBotLoop.setContextOverrides({ maxRecentMessages: 25, skipSemanticSearch: false });
+                agentBotLoop.setContextOverrides({ maxRecentMessages: 50, skipSemanticSearch: false });
 
                 try {
                   const { setIdentityLogTrigger } = await import("./tools/sapphire/_ledger");

@@ -419,7 +419,7 @@ export class AgentLoop {
       }
 
       // Load recent messages — default 10, override via contextOverrides (Sapphire DM uses 25)
-      const recentCap = this.contextOverrides?.maxRecentMessages ?? 10;
+      const recentCap = this.contextOverrides?.maxRecentMessages ?? 30;
       let recent = await provider.getRecentMessages(message.chatId, recentCap);
 
       // ── S122: HYDRATION PROTOCOL ──

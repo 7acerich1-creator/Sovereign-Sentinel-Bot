@@ -84,13 +84,13 @@ type MultiSection = (typeof MULTI_SECTIONS)[number];
 export type SectionName = SingleSection | MultiSection;
 
 const DEFAULTS: Record<string, string> = {
-  active_persona: "warm_pa",
-  active_relationship: "trusted_assistant",
-  active_goals: "be_present_useful",
-  active_format: "warm_concise",
+  active_persona: "executive_pa",
+  active_relationship: "strategic_partner",
+  active_goals: "high_agency_execution",
+  active_format: "results_only",
   active_scenario: "default",
   active_extras: "discernment,memory_routing,what_you_can_do,family_first,no_loops,no_tool_retry_loops,complex_task_protocol",
-  active_emotions: "focused,warm",
+  active_emotions: "focused",
 };
 
 async function getSupabase() {

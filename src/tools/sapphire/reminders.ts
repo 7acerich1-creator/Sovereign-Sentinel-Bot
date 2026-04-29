@@ -165,7 +165,15 @@ export class ListRemindersTool implements Tool {
     parameters: {
       window_hours: {
         type: "number",
-        description: "Optional time window in hours from now. Default 168 (one week). Use 24 for 'today/tomorrow' style queries.",
+        description: "Optional time window in hours from now. Default 168 (one week).",
+      },
+      query: {
+        type: "string",
+        description: "Optional keyword to search for in reminder messages.",
+      },
+      include_all_statuses: {
+        type: "boolean",
+        description: "If true, searches fired/cancelled/failed reminders too. Use for troubleshooting.",
       },
     },
     required: [],
@@ -173,16 +181,25 @@ export class ListRemindersTool implements Tool {
 
   async execute(args: Record<string, unknown>): Promise<string> {
     const windowHours = Number(args.window_hours) || 168;
+    const query = args.query ? String(args.query).trim() : null;
+    const includeAll = !!args.include_all_statuses;
     const horizon = new Date(Date.now() + windowHours * 60 * 60 * 1000).toISOString();
 
     const supabase = await getSupabase();
-    const { data, error } = await supabase
+    let q = supabase
       .from("sapphire_reminders")
-      .select("id, fire_at, message, recurrence_rule, source")
-      .eq("status", "pending")
-      .lte("fire_at", horizon)
+      .select("id, fire_at, message, recurrence_rule, source, status")
       .order("fire_at", { ascending: true })
       .limit(25);
+
+    if (!includeAll) {
+      q = q.eq("status", "pending").lte("fire_at", horizon);
+    }
+    if (query) {
+      q = q.ilike("message", `%${query}%`);
+    }
+
+    const { data, error } = await q;
 
     if (error) return `list_reminders: ${error.message}`;
     if (!data || data.length === 0) return `No pending reminders in the next ${windowHours} hours.`;

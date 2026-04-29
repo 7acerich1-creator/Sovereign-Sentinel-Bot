@@ -88,12 +88,28 @@ export class RecallFactsTool implements Tool {
     parameters: {
       category: { type: "string", description: "Filter by category. Optional." },
       key_match: { type: "string", description: "Substring match on key. Optional." },
+      query: { type: "string", description: "Semantic search query. Best for finding facts by meaning." },
       max: { type: "number", description: "Max results. Default 25." },
     },
     required: [],
   };
 
   async execute(args: Record<string, unknown>): Promise<string> {
+    const query = args.query ? String(args.query).trim() : null;
+    
+    // ── SEMANTIC PATH ──
+    if (query) {
+      try {
+        const { querySapphireFacts } = await import("./_pinecone");
+        const results = await querySapphireFacts(query, Number(args.max) || 10);
+        if (!results || results.length === 0) return `No semantically relevant facts found for "${query}".`;
+        return results.map(r => `[${r.category}] ${r.key}: ${r.value}`).join("\n");
+      } catch (e: any) {
+        return `recall_facts semantic error: ${e.message}`;
+      }
+    }
+
+    // ── STRUCTURED PATH (Fallback/Direct) ──
     const supabase = await getSupabase();
     let q = supabase.from("sapphire_known_facts").select("key, value, category").order("category", { ascending: true });
 

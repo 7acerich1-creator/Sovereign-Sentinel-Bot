@@ -99,15 +99,8 @@ export async function runReminderPoll(channel: Channel): Promise<void> {
     }
     if (!due || due.length === 0) return;
 
-    // S121: Ghost Purge — auto-delete stale BlueSky/Phase reminders
-    const ghosts = (due as any[]).filter(r => /BlueSky|Phase/i.test(r.message));
-    if (ghosts.length > 0) {
-      await supabase.from("sapphire_reminders").delete().in("id", ghosts.map(g => g.id));
-      console.log(`[SapphirePA] Purged ${ghosts.length} BlueSky/Phase ghosts.`);
-    }
+    for (const r of due as any[]) {
 
-    const activeReminders = (due as any[]).filter(r => !/BlueSky|Phase/i.test(r.message));
-    for (const r of activeReminders) {
       try {
         // S114w: COMPOSER routing — if payload.composer is set, route through
         // the composer (Gemini Flash compose-and-send) instead of dumping the
@@ -117,12 +110,6 @@ export async function runReminderPoll(channel: Channel): Promise<void> {
           const { runComposer } = await import("./sapphire-composers");
           await runComposer(composerName, channel, r.chat_id);
         } else {
-          const friendly = new Date(r.fire_at).toLocaleString("en-US", {
-            timeZone: ACE_TZ,
-            weekday: "short",
-            hour: "numeric",
-            minute: "2-digit",
-          });
           const text = r.message;
           await sendSapphireReply(channel, r.chat_id, text);
         }
@@ -209,8 +196,8 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
     timeZone: ACE_TZ, weekday: "long", month: "long", day: "numeric",
   });
   
-  const dmSections: string[] = [`Good morning, Ace. Here's what we're looking at for ${friendlyDate}.`, ""];
-  const notionSections: string[] = [`Good morning. Here's ${friendlyDate}.`, ""];
+  const dmSections: string[] = [`${friendlyDate}.`, ""];
+  const notionSections: string[] = [`${friendlyDate}.`, ""];
 
   const calSection = ["📅 CALENDAR", calSummary || "Nothing on the books.", ""];
   dmSections.push(...calSection);
@@ -246,9 +233,8 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
     notionSections.push(...newsSection);
   }
 
-  const signOff = "Have a good one. I'll check back tonight.";
-  dmSections.push(signOff);
-  notionSections.push(signOff);
+  dmSections.push("");
+  notionSections.push("");
 
   // ── Retrieve Active Goals for Notion ──
   let goalsText = "No active goals listed.";
@@ -388,7 +374,7 @@ export async function runEveningWrap(channel: Channel, chatId: string): Promise<
     timeZone: ACE_TZ, weekday: "long", month: "long", day: "numeric",
   });
 
-  const sections: string[] = [`Wrapping ${friendlyDate}.`, ""];
+  const sections: string[] = [`${friendlyDate} — Status.`, ""];
 
   if (firedReminders.data && firedReminders.data.length > 0) {
     sections.push("✅ REMINDERS THAT FIRED");
@@ -401,7 +387,7 @@ export async function runEveningWrap(channel: Channel, chatId: string): Promise<
   sections.push("📅 TOMORROW");
   sections.push(tomorrowCal || "Light day ahead.");
   sections.push("");
-  sections.push("Get some rest.");
+  sections.push("");
 
   const wrapText = sections.join("\n");
   await sendSapphireReply(channel, chatId, wrapText, { kind: "brief" });
@@ -542,7 +528,7 @@ Brief format — keep each section concise:
 ⚡ FREQUENCY — one sentence on the energy/tone of this transmission (punchy? introspective? tactical?)
 📌 ANCHOR — one sentence on how this connects back to the Protocol and the mission
 
-End with: "Ready to move, Ace."`;
+End with a single line: "Built." (or similar one-word status). No polite sign-offs.`;
 
     const fullPrompt = `${SYSTEM_PROMPT}\n\nHere is the transcript of today's Sovereign Synthesis upload:\n\n${transcript.slice(0, 12000)}`;
 

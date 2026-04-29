@@ -108,7 +108,7 @@ export async function runReminderPoll(channel: Channel): Promise<void> {
         const composerName = r.payload?.composer;
         if (composerName) {
           const { runComposer } = await import("./sapphire-composers");
-          await runComposer(composerName, channel, r.chat_id);
+          await runComposer(composerName as any, channel, r.chat_id);
         } else {
           const text = r.message;
           await sendSapphireReply(channel, r.chat_id, text);
@@ -515,7 +515,7 @@ export async function runDailyFrequencyBrief(channel: Channel, chatId: string): 
       return;
     }
 
-    const GEMINI_MODEL = "gemini-2.5-flash";
+    const GEMINI_MODEL = config.llm.providers.gemini.model || "gemini-2.0-flash";
     const SYSTEM_PROMPT = `You are Sapphire, Ace Richie's personal assistant. Ace runs the Sovereign Synthesis mission — liberating 100,000 minds from the Simulation by January 2027. Today's daily upload was just published to the Sovereign Synthesis YouTube channel.
 
 Your job: read the transcript and produce a FREQUENCY ALIGNMENT BRIEF. This brief helps Ace quickly understand the energy and themes in today's transmission without re-watching.

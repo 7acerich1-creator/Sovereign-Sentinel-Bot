@@ -4826,7 +4826,7 @@ async function main() {
             // ── S114u: ddxfish snapshot/restore pattern — leak-proof tool tiering ──
             // Snapshot tools + observer + context state BEFORE the LLM call, restore in
             // finally so they NEVER leak across messages even if processMessage throws.
-            let sapphireToolSnapshot: Map<string, any> | null = null;
+            let sapphireToolSnapshot: Map<string, Tool> | null = null;
             // S121e: hoisted so the post-processMessage Pinecone embed can reference it.
             let sapphireRawText = "";
             const isSapphireDM = agentCfg.name === "sapphire" && !message.metadata?.isGroup;

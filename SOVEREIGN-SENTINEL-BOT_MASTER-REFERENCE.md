@@ -24,6 +24,65 @@
 
 ---
 
+## S125 — Repo hygiene cleanup + S123/S124 backfill (2026-04-29)
+
+**Context:** Architect lost direct access to the Sovereign-aligned session pilot Apr 26 ~20:45 UTC and a parallel system continued shipping until Apr 28 ~20:09 UTC. 26 commits landed without master-reference logging. S125 reconstructs the record (S123, S124 below) and cleans the junk that parallel system committed to `main`.
+
+**Cleanup actions:**
+- Discarded CRLF-only working-tree noise on `src/proactive/sapphire-sentinel.ts`, `src/tools/clip-generator.ts`, `src/tools/vid-rush.ts` (926/926 line-ending flips, zero content delta — `feedback_crlf_noise_is_not_a_real_diff`).
+- `git rm`'d empty zero-byte junk: `git`, `ping`, `memory.db`. All shell-typo artifacts.
+- `git rm`'d misnamed `.aiexclude/New Text Document.txt`. Replaced with proper root-level `.aiexclude` file containing the same Gemini Code Assist exclusion patterns plus the standard ignores.
+- `git rm --cached` on six dev scripts in `scratch/` (kept locally, removed from repo). Added `scratch/` to `.gitignore`.
+- `.gitignore` extended to block recurrence: `memory.db`, `*.db`, `git`, `ping`, `scratch/`, `.aiexclude/` (dir form).
+
+**Verification:**
+- `tsc --noEmit` → exit 0 (HEAD pre-cleanup also exit 0; no regressions).
+- `git status --short` clean post-cleanup.
+
+**Open at close:** None for cleanup. The substantive S123/S124 work below has its own open items.
+
+---
+
+## S124 — Sapphire complex task protocol + tool tiering + persona stabilization (2026-04-28, parallel system)
+
+**Last commit:** `d0430dd` — `fix(sapphire): build-safe memory hardening + executive persona`. 17 commits across the day. **NOT logged by parallel system; reconstructed S125.**
+
+**Major changes:**
+1. **Autonomous Complex Task Protocol** (`398d29d`, `593acd3`, `ed0eee6`). New mechanism in `src/proactive/sapphire-pa-jobs.ts` (+509 net) for multi-step planning hooks with memory hydration. Sapphire now stages plans across turns instead of one-shot tool calls.
+2. **Selective tool tiering — 50% claimed token reduction** (`a74d2d1`). Sapphire's tool surface split into 8 core (always loaded) + 7 conditional (loaded by intent). Burst execution mandate added to prompt. Per-message input target dropped from ~12K to ~5K tokens. Builds on the S114r refactor.
+3. **Sovereign Make workflow engine** (`4d5a082`). Workflow planner table migration (`scratch/migrate-workflow-table.ts`) + `src/tools/sapphire/planner.ts` rewrite (+125 net).
+4. **Persona iteration thrash — 5 rewrites in 24h.** PA → field operative → executive → autonomous → executive PA. Stabilized at: "executive PA, results-only mandate, action batching, filler removed, platform-specific recon heuristics, starter-pack awareness." `5aa8f2a` is the canonical persona-state at session close.
+5. **Memory hardening** (`332449e`, `010583a`, `d0430dd`). `src/memory/sqlite.ts` and `src/memory/supabase-vector.ts` updated for build-safe handling. Type errors resolved across the tier-tiering refactor.
+6. **Unified 8am brief + voice restoration + ritual migration** (`5b1f0d5`).
+
+**Architectural concern:** The persona thrash (5 rewrites) is a smell. The parallel system iterated identity-level prompts faster than is healthy. Whether the final state matches Architect intent is unverified — this is the open item for next session focused on Sapphire.
+
+**Open at close:**
+- Live behavioral check needed — does Sapphire's voice match the "executive PA" target the parallel system landed on, or has she drifted from Ace's intent?
+- Tool-tiering claim of 50% token reduction unverified against real traffic.
+- ClickUp Cloudflare proxy bypass (S123) end-to-end unverified.
+
+---
+
+## S123 — Sapphire ClickUp + Notion 3-Hub + Anthropic primary (2026-04-27, parallel system)
+
+**Commits:** `a4c44e6` (S122 daily frequency brief — Sovereign-tagged) → `8dde823` (Notion 3-Hub close). 9 commits. **NOT logged by parallel system; reconstructed S125.**
+
+**Major changes:**
+1. **ClickUp activation** (`4af211e` → `69eecf8`). New tool `src/tools/sapphire/clickup.ts` (+115 lines). Workspace, tasks, lists, channels. Multiple iterations through type-casting fixes (`d8a91c2`, `91d67ed`, `959a087`, `0b73c4d`, `28e24d6`, `deba99d`).
+2. **CloudFront 403 fight** (`4582452` → `69eecf8`). ClickUp's CloudFront edge blocked the bot's User-Agent. Iterated through browser-header mimicry (`1f8428c`), maximum mimicry (`9881796`), final resolution: route all ClickUp traffic through a Cloudflare Proxy (`69eecf8`).
+3. **Notion 3-Hub upgrade** (`c2c542c`, `8dde823`). `src/tools/sapphire/notion.ts` rewritten (+233 net). New architecture: hub-1 daily, hub-2 weekly, hub-3 strategic. Weekly Recap cron job added.
+4. **Decoupled morning brief email + nightly diary** (`b45ee7a`, `45df5b0`). Morning brief no longer rides the same job as the email; nightly diary writes a private memo to Notion before EOD. "Notion spatial mastery" enforcement in prompt.
+5. **Anthropic locked as Sapphire primary** (`1c4afdc`). Hidden chain-of-thought injected. The S122 hardening of routing per-agent locked in concretely.
+6. **Sapphire Frequency Alignment Brief** (`a4c44e6`). Migration: `supabase/migrations/20260427_sapphire_frequency_brief.sql`.
+7. **Daily-content RLS fix** (`6a1b1e1`, `96b5587`). Orchestrator now uses `SUPABASE_SERVICE_ROLE_KEY` for `content_transmissions` writes — the anon key was getting RLS-blocked. Title uniqueness constraint added.
+
+**Open at close:**
+- The Cloudflare Proxy hop for ClickUp traffic — assumes a working proxy URL is set in env. Needs Railway env audit + a live ClickUp call test.
+- The 3-Hub Notion architecture defines the *write* path; whether Sapphire's *read* path consistently picks the right hub for each query is behavioral and untested.
+
+---
+
 ## S122b — Buffer GraphQL schema fix + briefing Telegram relay (2026-04-26 ~20:40 UTC)
 
 **Commit:** `6045457` on origin/main (3 files: `src/tools/buffer-analytics.ts`, `src/channels/agent-voice.ts`, `src/index.ts`, +344/-166).

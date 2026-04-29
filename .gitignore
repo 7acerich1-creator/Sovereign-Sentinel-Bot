@@ -56,3 +56,12 @@ _legacy/
 mission-control/
 mcp.json
 credentials_vault.json
+
+# S125 cleanup — parallel-system Apr 27-28 junk
+memory.db
+*.db
+git
+ping
+scratch/
+.aiexclude/
+

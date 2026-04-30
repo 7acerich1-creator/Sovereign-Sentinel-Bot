@@ -29,10 +29,81 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { config } from "../config";
-import { getBrowser, loadCookies, saveCookies } from "../tools/browser";
+import { loadCookies, saveCookies, EXEC_PATH } from "../tools/browser";
 import { generateShortText } from "../llm/gemini-flash";
-import type { Page } from "puppeteer-core";
+import type { Browser, Page } from "puppeteer-core";
 import { createHash } from "crypto";
+
+// ── S126e: Residential-proxy launch path ──
+// TikTok flags datacenter IPs hard. Cookies extracted from Ace's residential
+// Chrome session, replayed from Railway's datacenter IP, looks like session
+// hijacking to TT's anti-bot. Mitigation: route the TT browser through
+// YTDLP_PROXY (a residential proxy already configured for yt-dlp). When set,
+// puppeteer launches a dedicated instance (NOT the shared singleton) with
+// --proxy-server pointing at the residential exit node.
+//
+// Format: YTDLP_PROXY=socks5://user:pass@host:port  OR  http://user:pass@host:port
+// SOCKS5 is preferred (lower fingerprint).
+
+interface ParsedProxy {
+  argValue: string; // For --proxy-server flag (no creds)
+  username?: string;
+  password?: string;
+}
+
+function parseProxyUrl(raw: string): ParsedProxy | null {
+  try {
+    const url = new URL(raw);
+    const proto = url.protocol.replace(":", "").toLowerCase();
+    if (!["socks5", "socks4", "http", "https"].includes(proto)) return null;
+    const argValue = `${proto}://${url.host}`;
+    const username = url.username ? decodeURIComponent(url.username) : undefined;
+    const password = url.password ? decodeURIComponent(url.password) : undefined;
+    return { argValue, username, password };
+  } catch {
+    return null;
+  }
+}
+
+async function launchTTBrowser(): Promise<{ browser: Browser; usedProxy: boolean }> {
+  const puppeteer = await import("puppeteer-core");
+  const proxyRaw = process.env.YTDLP_PROXY || "";
+  const proxy = proxyRaw ? parseProxyUrl(proxyRaw) : null;
+
+  const args = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--disable-software-rasterizer",
+    "--single-process",
+  ];
+  if (proxy) {
+    args.push(`--proxy-server=${proxy.argValue}`);
+    console.log(`[YukiTTReplier] launching dedicated browser via proxy ${proxy.argValue}`);
+  } else if (proxyRaw) {
+    console.warn(`[YukiTTReplier] YTDLP_PROXY set but unparseable — falling back to direct (datacenter IP, FLAG RISK)`);
+  } else {
+    console.warn(`[YukiTTReplier] no YTDLP_PROXY set — direct datacenter IP (FLAG RISK on TikTok)`);
+  }
+
+  const browser = await puppeteer.default.launch({
+    executablePath: EXEC_PATH,
+    headless: true,
+    args,
+  });
+
+  return { browser, usedProxy: !!proxy };
+}
+
+async function applyProxyAuth(page: Page): Promise<void> {
+  const proxyRaw = process.env.YTDLP_PROXY || "";
+  if (!proxyRaw) return;
+  const proxy = parseProxyUrl(proxyRaw);
+  if (proxy?.username && proxy?.password) {
+    await page.authenticate({ username: proxy.username, password: proxy.password });
+  }
+}
 
 type Brand = "sovereign_synthesis" | "containment_field";
 
@@ -40,8 +111,8 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
 const COOKIE_DOMAIN = "tiktok";
-const MAX_VIDEOS_PER_RUN = 4;     // Last 4 videos per brand
-const MAX_REPLIES_PER_RUN = 5;    // Cap to avoid TT spam-flagging
+const MAX_VIDEOS_PER_RUN = 3;     // S126e: scan fewer videos per run for organic feel
+const MAX_REPLIES_PER_RUN = 2;    // S126e: cut from 5 → 2. ~6-12 replies/day max even with no skips.
 const FIRST_RUN_SEED = true;
 
 const firstRunPerBrand: Partial<Record<Brand, boolean>> = {
@@ -386,16 +457,19 @@ export async function runTikTokReplyPoll(brand: Brand): Promise<{ scanned: numbe
     return stats;
   }
 
-  // Defensive launch — Chromium may not be installed in the production container
-  // (Dockerfile.bot historically had PUPPETEER_SKIP_DOWNLOAD=true + no apt install
-  // for chromium). Fail soft so this worker doesn't spam errors every 30min.
-  let browser;
-  let page;
+  // S126e: Use a DEDICATED browser instance with residential proxy applied.
+  // Don't reuse the singleton (which other tools might use without proxy —
+  // would leak datacenter IP to anything else launched concurrently).
+  // Fail-soft if launch throws.
+  let browser: Browser;
+  let page: Page;
   try {
-    browser = await getBrowser();
+    const launched = await launchTTBrowser();
+    browser = launched.browser;
     page = await browser.newPage();
+    await applyProxyAuth(page);
   } catch (err: any) {
-    console.log(`[YukiTTReplier] ${brand}: browser unavailable (${err.message?.slice(0, 120) || "unknown"}), skipping. Fix Dockerfile or install Chromium to activate.`);
+    console.log(`[YukiTTReplier] ${brand}: browser launch failed (${err.message?.slice(0, 120) || "unknown"}), skipping`);
     return stats;
   }
 
@@ -510,6 +584,9 @@ export async function runTikTokReplyPoll(brand: Brand): Promise<{ scanned: numbe
     console.log(`[YukiTTReplier] ${brand}: scanned=${stats.scanned} replied=${stats.replied} skipped=${stats.skipped} errors=${stats.errors}`);
     return stats;
   } finally {
+    // S126e: close dedicated browser fully (not singleton) — frees memory + avoids
+    // the proxy-leaked browser instance lingering for non-TT callers.
     try { await page.close(); } catch {}
+    try { await browser.close(); } catch {}
   }
 }

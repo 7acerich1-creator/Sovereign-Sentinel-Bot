@@ -3141,11 +3141,20 @@ async function main() {
   // Cadence: 30min — browser sessions are expensive; TT spam-flags burst replies.
   // Skips quietly if BROWSER_ENABLED=false or no cookies / handle env.
   scheduler.add({
-    name: "Yuki TikTok Reply Poll (30m)",
-    intervalMs: 30 * 60_000,
-    nextRun: new Date(Date.now() + 180_000), // first run 3min after boot, well after IG/FB
+    name: "Yuki TikTok Reply Poll (3h, organic-volume)",
+    // S126e: 3-hour interval (was 30min). With max 2 replies/run × 2 brands × 8 runs/day,
+    // worst case = 32 replies/day, realistic with LLM should_reply filtering = 6-12/day.
+    // Datacenter→residential proxy hop and low cadence kill the bot-flag signature.
+    intervalMs: 3 * 60 * 60_000,
+    nextRun: new Date(Date.now() + 5 * 60_000), // first run 5min after boot
     enabled: true,
     handler: async () => {
+      // S126e: 25% random skip per run to break perfectly-periodic firing patterns.
+      // Real humans don't open the comments section every 3 hours on the dot.
+      if (Math.random() < 0.25) {
+        console.log("[YukiTTReplier] random skip — organic-volume jitter");
+        return;
+      }
       try {
         const brands: AlertBrand[] = ["sovereign_synthesis", "containment_field"];
         for (const brand of brands) {
@@ -3155,13 +3164,16 @@ async function main() {
             const sender = yukiChannel || telegram;
             await sender.sendMessage(defaultChatId, formatAuthAlert("tiktok", brand, result.authFailure), { parseMode: "Markdown" });
           }
+          // Inter-brand delay: 30-90s random pause so the two account pulls
+          // don't fire from the same exit IP within milliseconds.
+          await new Promise((r) => setTimeout(r, 30_000 + Math.floor(Math.random() * 60_000)));
         }
       } catch (err: any) {
         console.error(`[YukiTTReplier] poll failed: ${err.message}`);
       }
     },
   });
-  console.log("🎵 [YukiTTReplier] Scheduled: every 30min (TikTok browser-cookie)");
+  console.log("🎵 [YukiTTReplier] Scheduled: every 3h, 25% skip jitter, residential proxy if YTDLP_PROXY set");
 
   // ── YouTube Analytics Stats — Fix B for the 30-Video A/B/C Test ──
   // S114 (2026-04-24). Existing fetch-youtube-stats edge function populates

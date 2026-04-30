@@ -3,7 +3,7 @@
 // Single import surface for all Sapphire PA tools.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-import { SetReminderTool, ListRemindersTool, CancelReminderTool } from "./reminders";
+import { SetReminderTool, ListRemindersTool, CancelReminderTool, CancelReminderSeriesTool } from "./reminders";
 import { GmailInboxTool, GmailSearchTool, GmailSendTool, GmailDraftTool } from "./gmail";
 import { CalendarListTool, CalendarCreateEventTool, CalendarRescheduleTool } from "./calendar";
 import { NotionCreatePageTool, NotionAppendToPageTool, NotionSearchTool, NotionSetParentPageTool, NotionGetBlocksTool, NotionUpdateBlockTool, NotionDeleteBlockTool } from "./notion";
@@ -18,12 +18,15 @@ import { RecordFollowupTool, ListFollowupsTool, CompleteFollowupTool, CancelFoll
 import { WriteDiaryEntryTool, ReadDiaryTool, ReadSignificanceTool } from "./diary";
 import { ReadTeamRosterTool } from "./roster";
 import { YoutubeTranscriptTool } from "./youtube";
+// S125c — Mission Control surface tools so "send to MC" stops routing to Notion
+import { FileBriefingTool, ProposeTaskTool } from "../action-surface";
 import type { Tool } from "../../types";
 
 export {
   SetReminderTool,
   ListRemindersTool,
   CancelReminderTool,
+  CancelReminderSeriesTool,
   GmailInboxTool,
   GmailSearchTool,
   GmailSendTool,
@@ -71,12 +74,18 @@ export {
 
 // ── Modular Packs for Selective Tool Tiering (S121) ──────────────────────
 
-// Core Pack (Reminders, Notion, Memory) — the essentials
+// Core Pack (Reminders, Notion, Memory, Mission Control) — the essentials
+// S125c added FileBriefingTool + ProposeTaskTool so "send to Mission Control"
+// has a tool that actually writes to the MC data layer (Supabase briefings/tasks
+// tables read by sovereign-mission-control.vercel.app). Without these she was
+// pattern-matching MC requests onto NotionCreatePageTool and creating private
+// Notion pages titled "Mission Control" instead of filing in MC.
 export function buildSapphireCoreTools(): Tool[] {
   return [
     new SetReminderTool(),
     new ListRemindersTool(),
     new CancelReminderTool(),
+    new CancelReminderSeriesTool(),
     new NotionCreatePageTool(),
     new NotionAppendToPageTool(),
     new NotionSearchTool(),
@@ -84,6 +93,8 @@ export function buildSapphireCoreTools(): Tool[] {
     new NotionUpdateBlockTool(),
     new RememberFactTool(),
     new RecallFactsTool(),
+    new FileBriefingTool("sapphire"),
+    new ProposeTaskTool("sapphire"),
   ];
 }
 

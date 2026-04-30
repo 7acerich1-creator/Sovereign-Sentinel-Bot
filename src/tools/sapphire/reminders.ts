@@ -109,6 +109,11 @@ export class SetReminderTool implements Tool {
         description:
           "Optional. 'daily' | 'weekly:mon,wed,fri' | 'monthly:15' | 'weekday' | 'weekend'. Leave empty for one-off reminders.",
       },
+      force_create: {
+        type: "boolean",
+        description:
+          "Optional. Set true to override the dedup-preflight check that warns about overlapping reminders in the same hour. Only use when intentionally creating a distinct reminder at a similar time (e.g., morning brief at 8am vs. AI news at 8am — different content, both useful).",
+      },
     },
     required: ["message", "fire_at"],
   };
@@ -126,6 +131,54 @@ export class SetReminderTool implements Tool {
     if (!ACE_CHAT_ID) return "set_reminder: TELEGRAM_AUTHORIZED_USER_ID is not set; cannot route reminder DM.";
 
     const supabase = await getSupabase();
+
+    // S125c — DEDUP PREFLIGHT
+    // Sapphire was creating semantic duplicates over time without checking. The
+    // canonical bug pattern was 4 different "questions for Ace" reminders firing
+    // 8/9/11am/1pm — same intent, slightly different wording, all fired daily.
+    // Block-soft: if a pending reminder exists in the same UTC hour with overlapping
+    // recurrence_rule, return a confirmation prompt instead of inserting. The agent
+    // can override by re-calling with a `force_create=true` flag.
+    const force = args.force_create === true || args.force_create === "true";
+    if (!force) {
+      const fireDate = new Date(norm.iso);
+      const hourStart = new Date(fireDate);
+      hourStart.setUTCMinutes(0, 0, 0);
+      const hourEnd = new Date(hourStart.getTime() + 60 * 60 * 1000);
+      const { data: nearby } = await supabase
+        .from("sapphire_reminders")
+        .select("id, fire_at, recurrence_rule, message")
+        .eq("status", "pending")
+        .gte("fire_at", hourStart.toISOString())
+        .lt("fire_at", hourEnd.toISOString())
+        .limit(5);
+
+      if (nearby && nearby.length > 0) {
+        // Same recurrence flag = high collision risk; one-off + recurring also collide.
+        const collisions = nearby.filter((n: any) => {
+          // Same recurrence value (both daily, both null, etc.) is a stronger signal.
+          return (n.recurrence_rule || null) === (recurrence || null);
+        });
+        if (collisions.length > 0) {
+          const list = collisions.map((c: any) =>
+            `  • [${c.id.slice(0, 8)}] ${c.message.slice(0, 70)}${c.recurrence_rule ? ` (${c.recurrence_rule})` : ""}`,
+          ).join("\n");
+          const friendlyHour = new Date(hourStart).toLocaleString("en-US", {
+            timeZone: "America/Chicago",
+            hour: "numeric",
+            timeZoneName: "short",
+          });
+          return [
+            `set_reminder: ⚠️ ${collisions.length} similar reminder(s) already pending in the ${friendlyHour} hour:`,
+            list,
+            ``,
+            `If this is a true duplicate, cancel the existing one first or merge the wording.`,
+            `If this is intentional (different content, same time), re-call set_reminder with force_create: true.`,
+          ].join("\n");
+        }
+      }
+    }
+
     const { data, error } = await supabase
       .from("sapphire_reminders")
       .insert({
@@ -265,5 +318,92 @@ export class CancelReminderTool implements Tool {
     const { data, error } = await q.eq("id", idRaw).select("message").single();
     if (error) return `cancel_reminder: ${error.message}`;
     return `Cancelled: "${(data as any)?.message?.slice(0, 80) || idRaw}"`;
+  }
+}
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CANCEL REMINDER SERIES (S125c)
+// Cancels ALL pending reminders matching a message keyword OR a recurrence rule.
+// Solves the "ghost reminder series" problem where Ace had to cancel each
+// reminder individually by ID — e.g., 6 BlueSky reminders, or a daily Edward
+// Mannix chain that auto-respawns after each fire.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export class CancelReminderSeriesTool implements Tool {
+  definition: ToolDefinition = {
+    name: "cancel_reminder_series",
+    description:
+      "Cancel a SET of pending reminders by message keyword or recurrence rule. Use when Ace says 'cancel ALL the X reminders' or 'kill the daily Y reminder for good'. " +
+      "For a daily-recurring reminder, this stops the chain (cancelling just the one pending row would let the poller respawn the next occurrence after fire). " +
+      "Always returns the list of cancelled rows so Ace can verify scope.",
+    parameters: {
+      message_contains: {
+        type: "string",
+        description: "Optional case-insensitive keyword to match in reminder messages. e.g. 'bluesky' cancels all reminders mentioning bluesky.",
+      },
+      recurrence_rule: {
+        type: "string",
+        description: "Optional exact recurrence_rule value to match (e.g., 'daily', 'weekday'). Useful with message_contains to scope.",
+      },
+      dry_run: {
+        type: "boolean",
+        description: "Optional. If true, lists the matching rows without cancelling. Use to preview scope before destructive action.",
+      },
+    },
+    required: [],
+  };
+
+  async execute(args: Record<string, unknown>): Promise<string> {
+    const keyword = args.message_contains ? String(args.message_contains).trim() : null;
+    const recurrence = args.recurrence_rule ? String(args.recurrence_rule).trim() : null;
+    const dryRun = args.dry_run === true || args.dry_run === "true";
+
+    if (!keyword && !recurrence) {
+      return "cancel_reminder_series: must provide at least one of message_contains or recurrence_rule. Refusing to cancel everything.";
+    }
+
+    const supabase = await getSupabase();
+    let q = supabase
+      .from("sapphire_reminders")
+      .select("id, fire_at, message, recurrence_rule")
+      .eq("status", "pending")
+      .order("fire_at", { ascending: true })
+      .limit(50);
+
+    if (keyword) q = q.ilike("message", `%${keyword}%`);
+    if (recurrence) q = q.eq("recurrence_rule", recurrence);
+
+    const { data: matches, error: fetchErr } = await q;
+    if (fetchErr) return `cancel_reminder_series: fetch error — ${fetchErr.message}`;
+    if (!matches || matches.length === 0) {
+      return `No pending reminders match (keyword: ${keyword ?? "—"}, recurrence: ${recurrence ?? "—"}).`;
+    }
+
+    const previewLines = (matches as any[]).map((m) => {
+      const friendly = new Date(m.fire_at).toLocaleString("en-US", {
+        timeZone: "America/Chicago",
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+      const tag = m.recurrence_rule ? ` (${m.recurrence_rule})` : "";
+      return `  • [${m.id.slice(0, 8)}] ${friendly}${tag} — ${m.message.slice(0, 70)}`;
+    });
+
+    if (dryRun) {
+      return `Would cancel ${matches.length} reminder(s):\n${previewLines.join("\n")}\n\n(Dry run — no changes made. Re-call with dry_run: false to execute.)`;
+    }
+
+    const ids = (matches as any[]).map((m) => m.id);
+    const { error: updErr } = await supabase
+      .from("sapphire_reminders")
+      .update({ status: "cancelled", error_msg: "cancel_reminder_series", updated_at: new Date().toISOString() })
+      .in("id", ids);
+
+    if (updErr) return `cancel_reminder_series: update error — ${updErr.message}`;
+    return `Cancelled ${matches.length} reminder(s):\n${previewLines.join("\n")}`;
   }
 }

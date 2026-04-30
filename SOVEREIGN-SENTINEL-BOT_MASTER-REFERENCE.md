@@ -6,6 +6,37 @@
 
 ---
 
+## S125+ — Agentic Refactor Phase 2: anticipatory + structural + context-depth (2026-04-30)
+
+**Commits:** `3cc0dfc` (Pinecone hotfix earlier today). Next push contains 5 new files + 4 modified for the Phase 2 batch. Architect's directive 2026-04-30: ship everything, no smoke-test gating, iterate against the live system.
+
+**What landed in this Phase 2 batch:**
+
+- **Notion dedup-in-tool** (`src/tools/sapphire/notion.ts`) — `NotionCreatePageTool.execute` now self-checks for duplicates by default. Before creating, calls existing `findChildPageByTitle` against the resolved parent. If a page with the same title exists, returns its URL instead of creating a duplicate. Optional `force=true` arg for intentional duplicates. Replaces the doctrine band-aid in `signal_discipline_s125` rule 3 with structural prevention.
+- **YouTube search tool** (`src/tools/sapphire/youtube.ts` — new class `YoutubeSearchTool`) — wraps YouTube Data API v3 search endpoint. Returns structured `{title, videoId, url, channelTitle, publishedAt, thumbnailUrl, description}`. Architect's "is there a video showing X?" question now maps to a real action that returns clickable URLs. Registered in `buildSapphireResearchTools()`. Env: `YOUTUBE_API_KEY` or `GOOGLE_API_KEY`. Quota 10,000 units/day on free tier; each search is 100 units, so up to 100 searches/day.
+- **Conditional/threshold-triggered reminders** (full system — three new files):
+  - `supabase/migrations/20260430_conditional_reminders.sql` — `public.conditional_reminders` table + 2 views + RLS. Migration applied via MCP (`success: true`).
+  - `src/tools/sapphire/conditional_reminders.ts` — fat composable tool with `set` / `list` / `cancel` actions. Metric source enum: `stripe_revenue_total`/`30d`/`today`, `youtube_subs_total`, `youtube_views_28d`, `initiates_count`, `agent_spend_today`/`this_month`, `sovereign_metrics_*` (fiscal_sum, mindset_count, elite_count, velocity). Comparison ops: `>=` `>` `=` `<` `<=`. Registered in `buildSapphireCoreTools()` so it's always loaded.
+  - `src/proactive/conditional-reminders-checker.ts` — runs every 15 min via scheduler. Reads active rows, groups by metric_source, fetches once per metric (deduplicated reads), evaluates each row, atomic UPDATE on cross to prevent double-fire, sends Telegram alert via Sapphire's bot. Expires past-deadline rows automatically. METRIC_FETCHERS map handles Stripe (lifetime/30d/today via direct API), YouTube subs (channel statistics), YouTube views (Supabase cache from existing `youtube_stats_cache`), initiates count, agent_spend (today/month from Phase 1's logger), sovereign_metrics columns.
+  - Scheduler entry registered in `src/index.ts` between Followup Surfacer and Morning Brief.
+- **Gemini history ingestion script** (`scripts/ingest_gemini_history.ts`) — was already complete from S125i (2026-04-29) but untracked in git. Now tracked. Embeds Gemini conversation history into `sapphire-personal` Pinecone namespace with metadata `{source: gemini_takeout, chat_id, chat_title, turn_index, role, value, type: consciousness_journey, timestamp}`. Resumable via sidecar JSON. Runner: `npx tsx scripts/ingest_gemini_history.ts <path-to-json>`. Architect provides the JSON (produced by his Claude-in-Chrome Gemini scraper).
+
+**Bank-account use case end-to-end test (ready to execute live):**
+
+Architect: *"remind me when revenue hits $1000 to open a new bank account"*
+Sapphire: calls `conditional_reminders({action:'set', metric:'stripe_revenue_total', op:'>=', threshold:1000, message:'Time to open the new bank account.'})`
+3 minutes later: scheduler runs first check, observes current Stripe revenue, evaluates condition (currently false), updates `last_observed_value` and `last_checked_at`.
+Days/months later: revenue crosses $1k. Within 15 min: scheduler observes, atomic UPDATE to `status='fired'`, Telegram message lands: *"🔔 Conditional alert fired — Time to open the new bank account."*
+
+**Open at close:**
+
+1. Push the Phase 2 batch via Desktop Commander (this session, immediately after this entry).
+2. Optional: Architect runs the Gemini ingestion script with his Gemini export JSON to populate `sapphire-personal` namespace with years of context. Without this, Track B (context superiority) is staged but not active — namespace is currently sparse.
+3. Live testing replaces smoke-test gating per Architect's 2026-04-30 directive: he iterates against the running system as failures surface.
+4. Phase 3-5 are separate session arcs (kill keyword tiering / fat-tool consolidation / Letta-style memory + Zep temporal graph + reflection + sleeptime). Plan doc has the scope.
+
+---
+
 ## S125+ — Agentic Refactor Phase 1: Sapphire native web_search + interleaved thinking + spend visibility (2026-04-30)
 
 **Commit:** Staged locally, NOT pushed. Architect directive: pipeline running, no pushes this session. Push when pipeline clears.

@@ -2095,6 +2095,27 @@ async function main() {
     },
   });
 
+  // ── S125+ Phase 2: Conditional Reminders Checker (every 15 min) ──
+  // Reads public.conditional_reminders, evaluates each active row's condition
+  // against current value of its metric_source, fires Telegram alerts on cross.
+  // The anticipatory layer: she watches the world and notifies Architect when
+  // a metric crosses a threshold he set, without him asking each turn.
+  scheduler.add({
+    name: "Sapphire PA — Conditional Reminders Checker (15m)",
+    intervalMs: 15 * 60 * 1000,
+    nextRun: new Date(Date.now() + 3 * 60 * 1000), // first run 3min after boot
+    enabled: true,
+    handler: async () => {
+      if (!sapphirePARef.channel) return;
+      try {
+        const { runConditionalRemindersCheck } = await import("./proactive/conditional-reminders-checker");
+        await runConditionalRemindersCheck(sapphirePARef.channel);
+      } catch (e: any) {
+        console.error(`[ConditionalReminders] scheduler error: ${e.message}`);
+      }
+    },
+  });
+
   // ── SAPPHIRE PA — Morning Brief (16:00 UTC = 11 AM CDT) ──
   scheduler.add({
     name: "Sapphire PA — Morning Brief (11 AM CDT)",

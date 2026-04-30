@@ -85,11 +85,12 @@ export class NotionCreatePageTool implements Tool {
   definition: ToolDefinition = {
     name: "notion_create_page",
     description:
-      "Create a new Notion page. Can be created directly under the parent page or within a 'Hub' folder (like '📁 Complex Tasks').",
+      "Create a new Notion page. Can be created directly under the parent page or within a 'Hub' folder (like '📁 Complex Tasks'). " +
+      "S125+ Phase 2: tool now self-checks for duplicates by default — if a page with the same title already exists under the resolved parent, returns its URL instead of creating a duplicate. Pass force=true ONLY when an intentional duplicate is required.",
     parameters: {
-      parent_page_id: { 
-        type: "string", 
-        description: "Parent Notion page ID. If omitted, will attempt to use the default 'notion_parent_page_id' fact." 
+      parent_page_id: {
+        type: "string",
+        description: "Parent Notion page ID. If omitted, will attempt to use the default 'notion_parent_page_id' fact."
       },
       hub_name: {
         type: "string",
@@ -97,6 +98,7 @@ export class NotionCreatePageTool implements Tool {
       },
       title: { type: "string", description: "Page title." },
       body: { type: "string", description: "Optional initial body text. Plain text; double newlines = paragraph breaks." },
+      force: { type: "boolean", description: "Optional. If true, create even when a page with the same title exists under the resolved parent. Default false (dedup ON)." },
     },
     required: ["title"],
   };
@@ -106,6 +108,7 @@ export class NotionCreatePageTool implements Tool {
     const hubName = args.hub_name ? String(args.hub_name).trim() : null;
     const title = String(args.title || "").slice(0, 200);
     const body = args.body ? String(args.body) : "";
+    const force = args.force === true;
 
     if (!title) return "notion_create_page: title required.";
 
@@ -121,6 +124,18 @@ export class NotionCreatePageTool implements Tool {
       const hubRes = await getOrCreateHubPage(parent, hubName);
       if (!hubRes.ok) return `notion_create_page: Failed to resolve hub "${hubName}": ${hubRes.error}`;
       finalParentId = hubRes.pageId.replace(/-/g, "");
+    }
+
+    // S125+ Phase 2: dedup-in-tool. Before creating, check if a page with this
+    // exact title already exists under finalParentId. If yes, return its URL
+    // instead of creating a duplicate. This replaces the doctrine band-aid
+    // (signal_discipline_s125 rule 3) with a structural guarantee.
+    if (!force) {
+      const existingId = await findChildPageByTitle(finalParentId, title);
+      if (existingId) {
+        const existingUrl = `https://www.notion.so/${existingId.replace(/-/g, "")}`;
+        return `Page "${title}" already exists${hubName ? ` in hub "${hubName}"` : ""}. Returning existing page instead of creating a duplicate. ID: ${existingId}. URL: ${existingUrl}. (Pass force=true if you genuinely need a second copy.)`;
+      }
     }
 
     const children: unknown[] = [];

@@ -66,7 +66,7 @@ A new Supabase table `agent_spend` captures per-turn cost data: `agent_name`, `m
 
 ### Phase 2 — Conditional reminders + Pinecone recall tightening + structured `youtube_search` tool + Notion dedup-in-tool
 
-**Status:** Planned. Dependent on Phase 1 ship.
+**Status (2026-04-30 close):** ✅ ALL FOUR SHIPPED. Pinecone tightening (commit `3cc0dfc`), Notion dedup-in-tool + youtube_search + conditional reminders system + Gemini history ingestion script tracked (next commit). Track B (Gemini history ingestion) awaits Architect's Gemini export JSON to actually populate the `sapphire-personal` namespace; the runner is `npx tsx scripts/ingest_gemini_history.ts <path-to-json>` and is resumable via sidecar.
 
 **Phase 2 dual leads — context superiority + anticipatory capability.** Two parallel tracks. Track A is conditional reminders (anticipation), Track B is Gemini-history ingestion (context depth). Both close the gap with Gemini in different ways: A makes her *act before he asks*, B makes her *know him at the depth Gemini already does*.
 

@@ -17,7 +17,7 @@ import { SetPieceTool, RemovePieceTool, CreatePieceTool, ListPiecesTool, ViewSel
 import { RecordFollowupTool, ListFollowupsTool, CompleteFollowupTool, CancelFollowupTool } from "./followups";
 import { WriteDiaryEntryTool, ReadDiaryTool, ReadSignificanceTool } from "./diary";
 import { ReadTeamRosterTool } from "./roster";
-import { YoutubeTranscriptTool } from "./youtube";
+import { YoutubeTranscriptTool, YoutubeSearchTool } from "./youtube";
 // S125c — Mission Control surface tools so "send to MC" stops routing to Notion
 import { FileBriefingTool, ProposeTaskTool } from "../action-surface";
 // S125g — Web search grounding so she stops hallucinating facts (Jay Kelly fix)
@@ -29,6 +29,9 @@ import { LogEmailClassificationTool, RequestCodeChangeTool, ListDeferredBuildsTo
 // in a single call. Closes the gap where Sapphire was promising "I'll propose
 // a task" and not actually calling the tool.
 import { CreateTaskForAceTool } from "./task_orchestrator";
+// S125+ Phase 2 — Conditional/threshold-triggered reminders. Architect's
+// bank-account use case (revenue hits $X → fire alert).
+import { ConditionalRemindersTool } from "./conditional_reminders";
 import type { Tool } from "../../types";
 
 export {
@@ -79,6 +82,7 @@ export {
   ReadSignificanceTool,
   ReadTeamRosterTool,
   YoutubeTranscriptTool,
+  YoutubeSearchTool,
 };
 
 // ── Modular Packs for Selective Tool Tiering (S121) ──────────────────────
@@ -110,6 +114,7 @@ export function buildSapphireCoreTools(): Tool[] {
     new RequestCodeChangeTool(),
     new ListDeferredBuildsTool(),
     new CreateTaskForAceTool(),
+    new ConditionalRemindersTool(),
   ];
 }
 
@@ -127,10 +132,14 @@ export function buildSapphireWorkflowTools(): Tool[] {
 }
 
 // Research Pack (Search, Fetch, Briefs)
+// S125+ Phase 2: YoutubeSearchTool added — closes the gap where "is there a YouTube
+// video showing X?" had no structured-URL-returning tool. Sapphire should prefer
+// youtube_search over web_search when Architect explicitly asks for video content.
 export function buildSapphireResearchTools(): Tool[] {
   return [
     new ResearchBriefTool(),
     new YoutubeTranscriptTool(),
+    new YoutubeSearchTool(),
   ];
 }
 

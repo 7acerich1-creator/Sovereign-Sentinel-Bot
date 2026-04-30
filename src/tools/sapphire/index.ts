@@ -91,6 +91,7 @@ export function buildSapphireCoreTools(): Tool[] {
     new NotionSearchTool(),
     new NotionGetBlocksTool(),
     new NotionUpdateBlockTool(),
+    new NotionDeleteBlockTool(),
     new RememberFactTool(),
     new RecallFactsTool(),
     new FileBriefingTool("sapphire"),

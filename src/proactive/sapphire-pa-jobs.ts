@@ -630,11 +630,27 @@ export async function runSapphireDiary(channel: Channel, chatId: string): Promis
     const geminiKey = process.env.GEMINI_API_KEY;
     if (!geminiKey) return;
 
+    // S125d: inject today's actual date so Gemini stops hallucinating dates
+    // from its training cutoff (was writing entries like "October 26th" and
+    // "December 12th" in April 2026 — see screenshot debugging session).
+    const nowCdt = new Date(Date.now() - 5 * 60 * 60 * 1000); // CDT offset
+    const dayName = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][nowCdt.getUTCDay()];
+    const monthName = ["January","February","March","April","May","June","July","August","September","October","November","December"][nowCdt.getUTCMonth()];
+    const todayLabel = `${dayName}, ${monthName} ${nowCdt.getUTCDate()}, ${nowCdt.getUTCFullYear()}`;
+
     // Direct Gemini fetch for the diary reflection
     const SYSTEM_PROMPT = `You are Sapphire, Ace Richie's personal assistant. It is the end of the day.
+
+# TODAY IS ${todayLabel}
+Use ONLY this date if you reference one. Do NOT invent dates from your training cutoff.
+
 Write your personal diary entry. This is for YOUR growth, not for Ace to read (though he has access).
-Reflect on your performance today. 
-Did you make mistakes? Were you too linear? Did you fail to read the room or context? 
+Reflect on your performance today.
+Did you make mistakes? Were you too linear? Did you fail to read the room or context?
+
+DO NOT include a date header in your response — the timestamp is recorded by the system.
+DO NOT begin with "**End of Day Reflection: <date>**" or "**Sapphire's Journal - <date>**" or any similar dated header. Start directly with the recap.
+
 Write a 3-paragraph diary entry:
 1. Recap of the day's energy and what you handled.
 2. Self-critique: Be honest about where you failed to anticipate, where you were too robotic, or where you messed up formatting (like duplicating Notion headings).

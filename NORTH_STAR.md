@@ -211,12 +211,92 @@ ORDER BY 1, 2;
 
 ---
 
+## 🛠️ Next Session Build — Mission Control Agent Spend Tile (S125+, 2026-04-30)
+
+**Read this once you mount `Sovereign-Mission-Control` for the next dashboard pass.** This is the visibility-layer half of the agentic refactor's Phase 1 ship. The Sentinel-side spend logging is staged in this session; the MC tile that surfaces it is the next session.
+
+**Target repo:** `Sovereign-Mission-Control`. Mount that folder and build there.
+
+**What to build:** A KPI tile titled "Agent Spend" on the existing MC dashboard. Three time windows side-by-side: Today / This Week / This Month. Each window shows:
+- Total cost across all agents (USD)
+- Per-agent breakdown (Sapphire, Anita, Yuki, Vector, Veritas, Alfred)
+- Per-agent split: model tokens vs server-tool fees
+- Average cost per turn per agent
+- Anomaly highlight: if any agent's cost-per-turn is >2σ above its 14-day average, flag it red
+
+**Data source:** Supabase `agent_spend` table on project `wzthxohtgojenukmdubz`. Schema (created Phase 1, applied after pipeline clears):
+
+```sql
+CREATE TABLE public.agent_spend (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_name text NOT NULL,
+  model text NOT NULL,
+  input_tokens int NOT NULL DEFAULT 0,
+  output_tokens int NOT NULL DEFAULT 0,
+  server_tool_calls int NOT NULL DEFAULT 0,
+  server_tool_cost_usd numeric(10,4) NOT NULL DEFAULT 0,
+  total_cost_usd numeric(10,4) NOT NULL DEFAULT 0,
+  channel text,
+  chat_id text,
+  turn_id text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_agent_spend_agent_created ON public.agent_spend (agent_name, created_at DESC);
+CREATE INDEX idx_agent_spend_created ON public.agent_spend (created_at DESC);
+```
+
+Query sketch for the tile:
+```sql
+SELECT
+  agent_name,
+  COUNT(*) AS turns,
+  SUM(total_cost_usd) AS total_cost,
+  SUM(server_tool_cost_usd) AS tool_cost,
+  AVG(total_cost_usd) AS avg_per_turn
+FROM agent_spend
+WHERE created_at > now() - interval '24 hours'
+GROUP BY agent_name
+ORDER BY total_cost DESC;
+```
+
+**Why it matters:** Architect explicitly does NOT want to manually reconcile Anthropic dashboard numbers against bot logs. This tile makes per-agent cost visible "average, about right" so anomalies (Anita suddenly burning $5/day, a runaway tool-call loop) surface within hours, not at the next credit card statement.
+
+**Acceptance criteria:**
+1. Tile renders three time windows, populated from the `agent_spend` table.
+2. Per-agent rows ordered by total_cost descending.
+3. >2σ anomaly cells get a red border or icon.
+4. A small footer line states "Sapphire: Anthropic Claude (premium); Anita/Yuki: Gemini Flash (cheap)" so the cost spread between agents is contextualized.
+5. Refreshes on dashboard reload (no manual refresh button needed — the existing MC reload behavior covers this).
+
+**When to build it:** As soon as Phase 1 of the agentic refactor ships and `agent_spend` has at least 24h of data (so the SQL has something to display). Before that, build a placeholder tile that reads "Spend tracking starts after Phase 1 deploy."
+
+**Where it lives on MC:** Top-right corner of the home dashboard, next to the existing audience funnel snapshot. Operational visibility tier, not strategic outcome tier.
+
+**Rollback:** Tile is read-only. No writes, no migrations from the MC side. If it breaks, comment out the component import.
+
+**Context for picking up cold:** Full Phase 1 + the rest of the architectural refactor plan is at `Sovereign-Sentinel-Bot/SAPPHIRE-AGENTIC-REFACTOR-S125+.md`. You only need to read that doc's Phase 1 section to understand what's writing the data — the tile just queries the output.
+
+---
+
 ## The Current Highest-Leverage Action (UPDATE EVERY SESSION)
 *If this field says the same thing two sessions in a row, the last session didn't earn its keep.*
 
-**Action: POLISH SAPPHIRE + CREW AGENTS for marketing launch (S125+, 2026-04-29).** Beginning capital is in hand. Paid traffic is about to hit the funnel — agents must fire reliably before that happens. **Sapphire is the priority for this session.** The parallel system that worked Apr 27–28 (S123/S124, backfilled into the master reference S125) iterated her persona five times in 24 hours and shipped: Autonomous Complex Task Protocol, selective tool tiering (50% token reduction claimed, unverified), ClickUp via Cloudflare Proxy (unverified end-to-end), 3-Hub Notion architecture, Anthropic locked as primary with hidden chain-of-thought. Status quo is "executive PA, results-only mandate" — but Architect hasn't validated this matches intent. **First moves this session:** (1) live behavioral check on Sapphire's current voice and tool-call discernment, (2) decide whether to keep, revert, or refine the parallel-system persona, (3) verify ClickUp + Notion 3-Hub end-to-end before relying on them for marketing ops.
+**Action: AGENTIC REFACTOR — Phase 1 (S125+, 2026-04-30).** The 2026-04-30 Sapphire-vs-Gemini side-by-side test (briefcase → "is there a YouTube video showing this?") exposed that the previous session's polish was on top of an architectural ceiling, not the substrate. Sapphire IS using web_search but Pinecone recall is hijacking her query intent, AND her shape is dispatch-routed rather than agentically reasoned. Architect's diagnosis: *"the neurons are not quantum, it's just so linear, as if I have to specifically program every process. Nothing is translating across domains."* He's right — this is the well-named "agentic AI vs assistant AI" gap.
 
-**Status of previous Highest-Leverage Action:** ✅ MC DASHBOARD TILES — Architect confirmed shipped (parallel system / prior session, not logged in master reference at the time). Audience Funnel Snapshot, Aesthetic Performance 3×2 grid, and Tasks/Projects kanban-lite are live on Mission Control.
+**Full plan documented at `SAPPHIRE-AGENTIC-REFACTOR-S125+.md` at repo root.** Five phases. Sapphire ships first as proof, then her shape gets copied across Anita, Yuki, Vector, Veritas, Alfred. Read the plan doc before doing any agent work this session or next.
+
+**Phase 1 (this session — staged, awaiting pipeline-clear push):**
+1. Replace bridged-Gemini WebSearchTool with Anthropic native `web_search_20250305` server tool on Sapphire's Anthropic-primary path. Keep custom tool as fallback for Gemini/Groq chains.
+2. Attach `interleaved-thinking-2025-05-14` beta header + `thinking` config (8k token budget) so Claude reasons between tool calls.
+3. Raise Sapphire's iteration cap to 6 (Architect directive — generalist with complex-task latitude). Anita/Yuki stay at 3.
+4. New Supabase table `agent_spend` + per-turn spend logger hooked into `AgentLoop.processMessage`. Feeds the Mission Control spend tile (next-session build).
+5. Cost target: -10% to -25% input tokens on plain conversational turns.
+
+**Hard constraint this session:** no pushes while pipeline is running (Architect directive 2026-04-30). All edits staged locally, reviewed when pipeline clears.
+
+**Status of previous Highest-Leverage Action:** ⚠️ "POLISH SAPPHIRE + CREW AGENTS" was retired mid-session because the architectural ceiling was the actual bottleneck. The S123/S124 persona iterations and tool tiering were polish on top of a dispatch architecture that needed to be replaced, not refined.
+
+**Status of session 109 era Highest-Leverage Action:** ✅ MC DASHBOARD TILES — Architect confirmed shipped (parallel system / prior session, not logged in master reference at the time). Audience Funnel Snapshot, Aesthetic Performance 3×2 grid, and Tasks/Projects kanban-lite are live on Mission Control.
 
 **Secondary:** ✅ S115 SHIPPED Yuki YouTube auto-reply + twice-daily hook drops + standalone hook frame-0 fix + persistent shorts CTA + content engine daily FLUX cadence + draftAutoPublisher source-field bug fix. Commits `f297cf2` (Yuki on Gemini 2.5 Flash Lite) + `cba7f14` (render fixes — Railway initially failed on orphan AnalyzePdfTool, recovered when Ace pushed `fc259d9` with the missing files). HEAD now `2db2ce4` (S114 CLOSE). Anita email-reply monitoring still pending.
 

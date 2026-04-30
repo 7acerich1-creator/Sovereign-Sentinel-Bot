@@ -1,11 +1,82 @@
 # Sovereign Sentinel Bot — Master Reference (LEAN)
 
-> **This file holds INVARIANTS ONLY.** Things that don't change session-to-session: identity, infrastructure IDs, env var map, schemas, protocols, the canonical account map, the product ladder, architectural rules.
-> ****For session-by-session history** (Sessions 1–47, every fix, every DVP tag, every resolved blocker) see `HISTORY.md`. That file is the append-only journal. This file is the trimmed reference.
-> ****For live runtime truth** (TTS routing, LLM chain, git SHA, env var presence at boot) see `LIVE_STATE.md`. Auto-generated from `src/voice/tts.ts` + `src/index.ts`. If `LIVE_STATE.md` contradicts anything in this file, `LIVE_STATE.md` **wins** — patch this file and move on.
-> ****For revenue-first sanity check** (the 5 input metrics, current highest-leverage action) see `NORTH_STAR.md`. Read before authorizing any build task.
+> **This file holds INVARIANTS ONLY.** Things that don't change session-to-session: identity, infrastructure IDs, env var map, schemas, protocols, the canonical account map, the product ladder, architectural rules. \*\***For session-by-session history** (Sessions 1–47, every fix, every DVP tag, every resolved blocker) see `HISTORY.md`. That file is the append-only journal. This file is the trimmed reference. \*\***For live runtime truth** (TTS routing, LLM chain, git SHA, env var presence at boot) see `LIVE_STATE.md`. Auto-generated from `src/voice/tts.ts` + `src/index.ts`. If `LIVE_STATE.md` contradicts anything in this file, `LIVE_STATE.md` **wins** — patch this file and move on. \*\***For revenue-first sanity check** (the 5 input metrics, current highest-leverage action) see `NORTH_STAR.md`. Read before authorizing any build task.
 
 **Last trimmed:** 2026-04-11 (Lean rewrite — everything archived to [HISTORY.md](http://HISTORY.md))
+
+---
+
+## S125+ — Agentic Refactor Phase 1: Sapphire native web_search + interleaved thinking + spend visibility (2026-04-30)
+
+**Commit:** Staged locally, NOT pushed. Architect directive: pipeline running, no pushes this session. Push when pipeline clears.
+
+**Why:** Architect ran a side-by-side test (Sapphire vs. Gemini) — asked both "How much cash fits in a briefcase? Is there a YouTube video showing this visually?" Sapphire failed twice over: she said "I can't pull up direct YouTube video tutorial links" while Gemini surfaced two video URLs inline. Initial diagnosis was that Sapphire had `web_search` available but didn't use it; backend verification (Supabase `messages_log` row `7e2efcef`/`69089c79` at 12:53–12:54 UTC) showed the OPPOSITE — she likely DID call web_search (her response contained doctrine-specific phrases like "trying a few different search angles" and "the search did return" that only appear when she follows the QUERY-ITERATION RULE), but Pinecone semantic recall injected three unrelated past Ace conversations about *uploading YouTube videos and content strategy* into her turn-2 context, which hijacked her query intent. She searched for "YouTube uploading" not "briefcase visualization." Architect's deeper read: *"the neurons are not quantum, it's just so linear, as if I have to specifically program every process. Nothing is translating across domains."* He's right — the failure is a symptom of dispatch-routed architecture (keyword-regex tier matchers, 30 narrow tools, bridged Gemini grounding) where modern agents (Letta, Anthropic's own Claude Code, Cognition's Devin) use agentic loops with always-on tools, native server-tool grounding, and interleaved reasoning. Phase 1 attacks the cheapest, highest-leverage parts of that gap.
+
+**The full five-phase plan lives at `SAPPHIRE-AGENTIC-REFACTOR-S125+.md` at repo root.** Read that doc before any future agent work. NORTH_STAR's Highest-Leverage Action points there.
+
+**Code changes (staged, awaiting push):**
+
+- **NEW:** `src/tools/spend-logger.ts` (~150 lines) — pure module, fire-and-forget. `logSpend(response, entry)` reads `LLMResponse.usage` (input_tokens, output_tokens, server_tool_calls, server_tool_breakdown), looks up per-million-token pricing for the model, computes total USD, writes one row to `public.agent_spend` per LLM call. Pricing table covers Anthropic Sonnet/Opus/Haiku families, Gemini 2.5 Flash/Lite/Pro, Groq Llama, DeepSeek. Updated S125+ (2026-04-30) — keep current. Unknown models log $0 (signal to update the table).
+- **NEW:** `supabase/migrations/20260430_agent_spend.sql` — `public.agent_spend` table + three convenience views (`agent_spend_today`, `agent_spend_this_week`, `agent_spend_this_month`). RLS on, service_role full access, anon read-only (no PII in this table). Migration STAGED, not applied.
+- `src/types.ts` — `LLMOptions` extended with `serverTools?: AnthropicServerTool[]`, `thinkingBudget?: number`, `anthropicBetas?: string[]`. `LLMResponse.usage` extended with `serverToolCalls?: number` and `serverToolBreakdown?: Record<string, number>`. New `AnthropicServerTool` interface. Other providers ignore the new options gracefully.
+- `src/llm/providers.ts` — `AnthropicProvider.generate` extended: (a) merges `serverTools` into `body.tools` array (pass-through, preserves type-specific fields), (b) injects `body.thinking = {type: "enabled", budget_tokens: N}` when `thinkingBudget > 0`, (c) attaches `anthropic-beta` header from `options.anthropicBetas` (comma-joined), (d) parses `data.usage.server_tool_use` into `usage.serverToolCalls` + `usage.serverToolBreakdown`.
+- `src/agent/loop.ts` — new `setLLMOptionsOverrides(opts?)` setter mirrors the existing `setContextOverrides` snapshot/restore pattern. `processMessage` generates a `turnId` (UUID) once, calls `logSpend` after every `activeLLM.generate` call (main + empty-completion retry), passes `turnId` + `iterationCount` for correlation. Both generate calls now spread `...this.llmOptionsOverrides` into the LLMOptions.
+- `src/index.ts` (Sapphire DM lane, ~line 4940-5013) — (a) filters out the custom Gemini-bridged `WebSearchTool` (name: `web_search`) from the lean tool set so the Anthropic-native `web_search_20250305` server tool can take that name without conflict, (b) sets `agentBotLoop.setLLMOptionsOverrides({serverTools: [{type: "web_search_20250305", name: "web_search", max_uses: 5}], thinkingBudget: 8000, anthropicBetas: ["interleaved-thinking-2025-05-14"]})` before processMessage, (c) raises Sapphire's iteration cap to 6 (Architect directive — generalist with complex-task latitude; Anita/Yuki specialists stay at 3 via default), (d) clears the override in the finally block. If Anthropic fails over to Gemini mid-turn, that turn loses web_search but keeps everything else (acceptable degradation; `research_brief` still works).
+
+**Schema:**
+
+```sql
+CREATE TABLE public.agent_spend (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_name text NOT NULL,
+  model text NOT NULL,
+  input_tokens int NOT NULL DEFAULT 0,
+  output_tokens int NOT NULL DEFAULT 0,
+  server_tool_calls int NOT NULL DEFAULT 0,
+  server_tool_cost_usd numeric(10,4) NOT NULL DEFAULT 0,
+  total_cost_usd numeric(10,4) NOT NULL DEFAULT 0,
+  channel text,
+  chat_id text,
+  turn_id text,
+  iteration_count int NOT NULL DEFAULT 1,
+  finish_reason text,
+  server_tool_breakdown jsonb,
+  metadata jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+```
+
+Three views (`agent_spend_today`, `agent_spend_this_week`, `agent_spend_this_month`) pre-compute the per-agent rollups Mission Control needs.
+
+**Verification:**
+
+- `tsc --noEmit` not yet run — Architect to run pre-push when pipeline clears.
+- Anita and Yuki already on Gemini → Groq per `AGENT_LLM_TEAMS` at `src/index.ts:406, 410` — no model migration needed; spend logger captures them automatically once the migration applies. Architect's directive ("Sapphire on Anthropic top of the line, Anita/Yuki on Gemini Flash") is already the runtime state.
+- Generalization plan for the rest of the swarm documented in plan doc's "How this generalizes" section.
+
+**Open at close:**
+
+1. Architect topped up Anthropic API credits at console.anthropic.com — **CONFIRMED 2026-04-30.** Anthropic is now primary for Sapphire again (was failing with HTTP 400 "credit balance too low" prior).
+2. When pipeline clears: `git diff` → review → `tsc --noEmit` → push → apply Supabase migration → smoke-test Sapphire on Telegram with the same briefcase question to confirm fluid grounding.
+3. Once Phase 1 has 24h of `agent_spend` data, mount `Sovereign-Mission-Control` and build the "Agent Spend" tile per NORTH_STAR's Next Session Build sketch.
+
+**Additional fixes staged in second pass (2026-04-30, after Architect surfaced live Sapphire failure screenshots):**
+
+Three real failures from prior turns — addressed structurally, not papered over:
+
+- **Calendar tool not loaded.** Sapphire's response "the calendar tool I tried to use wasn't found by the system" was true at the wiring level — `buildSapphireLifeTools()` (which contains `calendar_create_event`, `gmail_send`, `calendar_reschedule`, `save_family_member`, `get_family`) was excluded from her DM lean tier set since S121e's "FORCED LEAN TIERING — Life tools purged" path. Re-added in `src/index.ts` at the same spot as Core/Workflow/Research. Token cost ~2K input tokens; trade is acceptable since calendar/gmail are core PA capability for a generalist. If we ever need to re-trim, that's Phase 3 (LLM-dispatched tool discovery), not eager keyword tiers.
+- **Empathy theater + dramatic bolded closures.** Sapphire was saying "This level of friction is unacceptable", "completely unacceptable", "You shouldn't have to carry that extra load" as bolded paragraph closures, violating her own `warm_concise` format. Added new doctrine piece `signal_discipline_s125` to `src/data/sapphire-prompt-pieces.json` covering three rules in one piece: (1) no dramatic closures, (2) respect Ace's stated direction when he says "I'll handle it" (he means he'll file a Claude task — don't push him back into the topic he's exiting), (3) Notion duplicate prevention (call `notion_search` before creating top-level pages under Daily Life). Piece is in the JSON; needs to be added to active extras list via `set_piece` or direct Supabase upsert post-deploy. Doctrine band-aid for #1 and #2 (no clean structural alternative); Phase 1 interleaved thinking + Phase 2 NotionCreatePageTool dedup-check should make this doctrine piece largely redundant later.
+- **Notion duplicates** — `📁 Daily Tasks & Goals` and `📁 Daily Briefs` wrapper pages alongside the canonical entries under 🧭 Daily Life. Cleaned up in this session via `notion-update-page` with `update_content` (allow_deleting_content=true) on the parent page. Verified post-cleanup: only the 5 canonical folders remain. Phase 2 candidate: move duplicate-prevention logic into `NotionCreatePageTool.execute` itself — query existing children of the parent before creating, refuse if a same-titled child exists. Structural fix > doctrine fix.
+
+**Calendar events created in this session** (Sapphire couldn't, so cowork-Claude did):
+- `Dentist - Aliza & Maddy` on 2026-05-18 (all-day, primary calendar — empoweredservices2013@gmail.com). Event id `vluqfnji04oqc5nhffculs594g`.
+- `Aliza's graduation + Maddy's ceremony` on 2026-05-20 (all-day, primary calendar). Event id `ngdv9chhqckjc5a39opsnvaqtc`.
+
+Both have descriptions noting "update with specific time when known."
+
+**Active extras pre-staged for next deploy.** Updated `public.sapphire_known_facts` row `key='active_extras'` to append `signal_discipline_s125` to the comma-separated list. Idempotent (re-running won't duplicate). The piece itself is in `src/data/sapphire-prompt-pieces.json` (staged, not pushed) — DB activation will go inert until the JSON ships, then becomes live the moment Railway redeploys. Zero manual step required from Architect at deploy time.
+
+**Phase 2 lead item locked in plan doc.** Architect surfaced the conditional-reminders capability gap (bank-account-when-revenue-hits-threshold use case). Designed in `SAPPHIRE-AGENTIC-REFACTOR-S125+.md` Phase 2 section: new `conditional_reminders` Supabase table, fat `conditional_reminders(action, ...)` tool for Sapphire, 15-minute scheduler that watches the metric_source enum (Stripe revenue at 3 time grains, YouTube subs, YouTube views 28d, Supabase initiates count, agent_spend from Phase 1's logger, sovereign_metrics columns). Architecture composes cleanly with Phase 1's spend_logger so Sapphire can self-monitor cost. Implementation deferred until Phase 1 is verified live — avoiding the "polish on top of unverified substrate" pattern that got us into the current architectural mess.
 
 ---
 
@@ -13,14 +84,14 @@
 
 **Commit:** Pending push — 4 files staged + Supabase migration `add_pipeline_rotation_state` already applied to project `wzthxohtgojenukmdubz`.
 
-**Why:** S125+ failure (visible in Telegram screenshot 2026-04-30 10:13) — `ScriptTooSimilarError` rejected SS candidate at cosine 0.871 against shipped `fv_sovereign_synthesis_resource-dynamics_1777388770163`. Surface diagnosis was "uniqueness threshold too tight." Real diagnosis (Architect pushed back on the patch-the-symptom answer) was that **three parallel variety systems existed and only one was wired**: 14-15 niches per brand × 14-15 angles per niche = ~225 curated unique seeds in `src/data/thesis-angles.ts` were sitting unused for the YouTube pipeline (only `content-engine.ts` imported them for Buffer posts). The YouTube pipeline drove its thesis from Alfred's runtime LLM output (1-2 sentences, voice-bounded). When `extractNarrativeBlueprint`'s JSON parse failed (often, due to thin input), it fell back to a hardcoded "Monad / timeline / frequency" blueprint — the SAME blueprint every time. Every fallback-driven script landed in the same lane. Uniqueness guard caught it three retries deep, after wasted compute and a false sense of "writer voice convergence." Architect's call: stop patching, fix the wiring. The infrastructure was always there, it just wasn't connected.
+**Why:** S125+ failure (visible in Telegram screenshot 2026-04-30 10:13) — `ScriptTooSimilarError` rejected SS candidate at cosine 0.871 against shipped `fv_sovereign_synthesis_resource-dynamics_1777388770163`. Surface diagnosis was "uniqueness threshold too tight." Real diagnosis (Architect pushed back on the patch-the-symptom answer) was that **three parallel variety systems existed and only one was wired**: 14-15 niches per brand × 14-15 angles per niche = \~225 curated unique seeds in `src/data/thesis-angles.ts` were sitting unused for the YouTube pipeline (only `content-engine.ts` imported them for Buffer posts). The YouTube pipeline drove its thesis from Alfred's runtime LLM output (1-2 sentences, voice-bounded). When `extractNarrativeBlueprint`'s JSON parse failed (often, due to thin input), it fell back to a hardcoded "Monad / timeline / frequency" blueprint — the SAME blueprint every time. Every fallback-driven script landed in the same lane. Uniqueness guard caught it three retries deep, after wasted compute and a false sense of "writer voice convergence." Architect's call: stop patching, fix the wiring. The infrastructure was always there, it just wasn't connected.
 
 **Code changes:**
 
-- **NEW: `src/tools/rotation-state.ts`** (275 lines) — pure rotator. `computeSeedAtSlot(brand, slot)` is no-I/O and returns the (niche, angle) pair for any slot. `advanceAndPickSeed(brand)` reads Supabase, computes the seed, atomically PATCHes `total_ships+1` with `last_niche`/`last_angle_id`, returns the seed. `assertRotationCoverage()` verifies all 30 niches have angle pools — called at boot. `previewRotation(brand, start, count)` for diagnostics.
-- **`src/engine/vidrush-orchestrator.ts`** — rotator wired into `isRawIdeaMode` branch of `executeFullPipeline`. When Alfred fires the auto-pipeline, the rotator overrides his thin thesis with the next curated 2-4 sentence angle from `THESIS_ANGLES`. Alfred's thesis is appended below as flavor context, not the primary thesis. Rotator's `niche` overrides any caller-provided niche.
-- **`src/engine/faceless-factory.ts`** — added `BlueprintExtractionFailed` error class. **Killed the silent fallback** in `extractNarrativeBlueprint`. New behavior: parse fails → retry once at `temperature=1.0` → if still fails, throw. The auto-pipeline catches and surfaces via Telegram. The hardcoded "Monad" blueprint is gone.
-- **`src/index.ts`** — dropped Alfred's redundant `recordNicheRun` write at line 5513 (was polluting the LRU window with NULL `aesthetic_style` rows — every shipped video produced one row WITH aesthetic + one row WITHOUT). Faceless factory is now the single source of truth for `niche_cooldown` writes. Added boot-time `assertRotationCoverage()`.
+- **NEW:** `src/tools/rotation-state.ts` (275 lines) — pure rotator. `computeSeedAtSlot(brand, slot)` is no-I/O and returns the (niche, angle) pair for any slot. `advanceAndPickSeed(brand)` reads Supabase, computes the seed, atomically PATCHes `total_ships+1` with `last_niche`/`last_angle_id`, returns the seed. `assertRotationCoverage()` verifies all 30 niches have angle pools — called at boot. `previewRotation(brand, start, count)` for diagnostics.
+- `src/engine/vidrush-orchestrator.ts` — rotator wired into `isRawIdeaMode` branch of `executeFullPipeline`. When Alfred fires the auto-pipeline, the rotator overrides his thin thesis with the next curated 2-4 sentence angle from `THESIS_ANGLES`. Alfred's thesis is appended below as flavor context, not the primary thesis. Rotator's `niche` overrides any caller-provided niche.
+- `src/engine/faceless-factory.ts` — added `BlueprintExtractionFailed` error class. **Killed the silent fallback** in `extractNarrativeBlueprint`. New behavior: parse fails → retry once at `temperature=1.0` → if still fails, throw. The auto-pipeline catches and surfaces via Telegram. The hardcoded "Monad" blueprint is gone.
+- `src/index.ts` — dropped Alfred's redundant `recordNicheRun` write at line 5513 (was polluting the LRU window with NULL `aesthetic_style` rows — every shipped video produced one row WITH aesthetic + one row WITHOUT). Faceless factory is now the single source of truth for `niche_cooldown` writes. Added boot-time `assertRotationCoverage()`.
 
 **Schema:**
 

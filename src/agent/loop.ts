@@ -12,6 +12,8 @@ import type {
 import { config } from "../config";
 import { PERSONA_REGISTRY, DEFAULT_PERSONA, getSystemPrompt, Persona } from "./personas";
 import type { PineconeMemory, KnowledgeNode } from "../memory/pinecone";
+// S125+: per-LLM-call spend logging. Fire-and-forget, never blocks the loop.
+import { logSpend } from "../tools/spend-logger";
 
 // Persona-based system prompt generation is now handled by getSystemPrompt(persona)
 
@@ -55,6 +57,17 @@ export class AgentLoop {
   private contextOverrides?: { maxRecentMessages?: number; skipSemanticSearch?: boolean };
   setContextOverrides(opts?: { maxRecentMessages?: number; skipSemanticSearch?: boolean }): void {
     this.contextOverrides = opts;
+  }
+
+  // S125+ Agentic Refactor Phase 1: Per-message LLMOptions overrides. Used by the
+  // Sapphire DM lane to inject Anthropic-native server tools (web_search_20250305),
+  // extended thinking budget, and the interleaved-thinking beta header on every
+  // Anthropic call this turn. Other providers ignore unknown options. The Sapphire
+  // DM call site sets these before processMessage and clears them in finally so
+  // they NEVER leak across messages, mirroring the snapshotTools pattern.
+  private llmOptionsOverrides?: Partial<import("../types").LLMOptions>;
+  setLLMOptionsOverrides(opts?: Partial<import("../types").LLMOptions>): void {
+    this.llmOptionsOverrides = opts;
   }
 
   setIdentity(identity: AgentIdentity): void {
@@ -137,6 +150,11 @@ export class AgentLoop {
     // Dispatch tasks use a lower cap (3) to conserve LLM quota.
     // Direct user messages use the full config limit (default 10).
     const maxIterations = iterationCap ?? config.security.maxAgentIterations;
+
+    // S125+: turn_id correlates all LLM calls within a single processMessage.
+    // Multiple iterations of the agent loop share one turn_id; the dashboard
+    // can sum them or display them separately.
+    const turnId = randomUUID();
 
     // SESSION 44: LIGHT MODE — tools disabled, single-pass text response.
     // Used by introspection tasks (stasis_self_check) where tool calls
@@ -268,10 +286,12 @@ export class AgentLoop {
       // S119c: maxTokens raised 8192→16384. Cost on flash-lite is fractions of a
       // cent per long reply; latency only increases when the model actually fills
       // the budget (rare). Removes ceiling for "deep/long reply" requests.
+      // S125+: merge per-message LLMOptions overrides (server tools, thinking, betas).
       let response = await activeLLM.generate(context, {
         systemPrompt: systemPrompt,
         tools: toolDefs.length > 0 ? toolDefs : undefined,
         maxTokens: 16384,
+        ...(this.llmOptionsOverrides || {}),
       });
       console.log(`✅ [AgentLoop] LLM responded — finishReason: ${response.finishReason}, toolCalls: ${response.toolCalls?.length || 0}`);
 
@@ -279,6 +299,15 @@ export class AgentLoop {
       if (response.usage) {
         console.log(`📊 LLM [${response.model}] tokens: ${response.usage.inputTokens}→${response.usage.outputTokens} (iter ${iterations})`);
       }
+
+      // S125+: fire-and-forget spend log — every iteration is a separate row.
+      logSpend(response, {
+        agentName: this.identity.agentName,
+        channel: message.channel,
+        chatId: message.chatId,
+        turnId,
+        iterationCount: iterations,
+      });
 
       // S119c: Empty-response retry + diagnostic.
       // Symptom we're hunting: Gemini returns finishReason=STOP|SAFETY|OTHER
@@ -301,12 +330,22 @@ export class AgentLoop {
           `outputTokens=${response.usage?.outputTokens || "?"} — likely safety classifier or token edge. Retrying once.`
         );
         try {
+          // S125+: same overrides merge on the empty-response retry path.
           const retry = await activeLLM.generate(context, {
             systemPrompt: systemPrompt,
             tools: toolDefs.length > 0 ? toolDefs : undefined,
             maxTokens: 16384,
+            ...(this.llmOptionsOverrides || {}),
           });
           console.log(`🔁 [AgentLoop] Retry — finishReason: ${retry.finishReason}, contentLen: ${retry.content?.length || 0}`);
+          // S125+: log the retry call's spend too — it's a separate billed call.
+          logSpend(retry, {
+            agentName: this.identity.agentName,
+            channel: message.channel,
+            chatId: message.chatId,
+            turnId,
+            iterationCount: iterations,
+          });
           if (retry.content && retry.content.trim().length > 0) {
             response = retry;
           } else if (retry.toolCalls && retry.toolCalls.length > 0 && retry.finishReason === "tool_use") {

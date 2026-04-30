@@ -552,16 +552,45 @@ export class AnthropicProvider implements LLMProvider {
       }));
     }
 
+    // ── S125+ Agentic Refactor Phase 1 ──
+    // Merge Anthropic-native server tools (e.g. web_search_20250305) into the
+    // tools array. They run on Anthropic's infra; results stream back as input
+    // tokens for Claude to reason over. Different shape from user tools — pass
+    // through as-is so type-specific fields (max_uses, allowed_domains, etc.)
+    // are preserved.
+    if (options?.serverTools && options.serverTools.length > 0) {
+      const serverToolEntries = options.serverTools.map((st) => ({ ...st }));
+      body.tools = [...(body.tools || []), ...serverToolEntries];
+    }
+
+    // Extended thinking — Claude reasons internally before/between tool calls.
+    // When the `interleaved-thinking-2025-05-14` beta is also attached via
+    // anthropicBetas, this becomes the Think → Act → Think → Act loop that
+    // closes the gap between "she has tools" and "she reasons between results."
+    if (options?.thinkingBudget && options.thinkingBudget > 0) {
+      body.thinking = {
+        type: "enabled",
+        budget_tokens: options.thinkingBudget,
+      };
+    }
+
     try {
+      // S125+ — attach beta headers when caller requests them (e.g. interleaved
+      // thinking). Multiple betas joined comma-separated per Anthropic spec.
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-api-key": this.apiKey,
+        "anthropic-version": "2023-06-01",
+      };
+      if (options?.anthropicBetas && options.anthropicBetas.length > 0) {
+        headers["anthropic-beta"] = options.anthropicBetas.join(",");
+      }
+
       const resp = await fetchWithRetry(
         "https://api.anthropic.com/v1/messages",
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": this.apiKey,
-            "anthropic-version": "2023-06-01",
-          },
+          headers,
           body: JSON.stringify(body),
         },
         "anthropic"
@@ -587,6 +616,21 @@ export class AnthropicProvider implements LLMProvider {
         }
       }
 
+      // S125+ — parse server_tool_use counts. Anthropic returns:
+      //   usage: { input_tokens, output_tokens, server_tool_use: { web_search_requests: N } }
+      // Spend logger reads serverToolCalls and multiplies by per-tool cost
+      // ($0.01 per web_search). serverToolBreakdown preserves the breakdown
+      // for future cost-per-tool-type reporting.
+      const serverToolUseObj = data.usage?.server_tool_use || {};
+      let serverToolCallsTotal = 0;
+      const serverToolBreakdown: Record<string, number> = {};
+      for (const [key, val] of Object.entries(serverToolUseObj)) {
+        if (typeof val === "number") {
+          serverToolCallsTotal += val;
+          serverToolBreakdown[key] = val;
+        }
+      }
+
       return {
         content: textContent,
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
@@ -594,6 +638,9 @@ export class AnthropicProvider implements LLMProvider {
           inputTokens: data.usage?.input_tokens || 0,
           outputTokens: data.usage?.output_tokens || 0,
           totalTokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0),
+          ...(serverToolCallsTotal > 0
+            ? { serverToolCalls: serverToolCallsTotal, serverToolBreakdown }
+            : {}),
         },
         model: this.model,
         finishReason: data.stop_reason === "tool_use" ? "tool_use" : data.stop_reason === "max_tokens" ? "max_tokens" : "stop",

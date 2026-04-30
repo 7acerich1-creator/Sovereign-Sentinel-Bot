@@ -4958,16 +4958,29 @@ async function main() {
                 agentBotLoop.setToolCallObserver(makeSapphireToolObserver(agentChannel, message.chatId));
 
                 // S121e: FORCED LEAN TIERING — Slash tokens by 50%
-                const { buildSapphireCoreTools, buildSapphireWorkflowTools, buildSapphireResearchTools } = await import("./tools/sapphire");
-                const leanTools = [
+                // S125+: Filter out the custom Gemini-bridged WebSearchTool (name: "web_search")
+                // so the Anthropic-native web_search_20250305 server tool can take that name
+                // without conflict. If Anthropic fails over to Gemini mid-turn, that turn
+                // degrades to no web search (acceptable — research_brief tool still works).
+                // S125+ (2026-04-30, second pass): Re-added buildSapphireLifeTools() —
+                // calendar_create_event / gmail_send / calendar_reschedule / family member
+                // tools were missing from her DM lane, which is why she said "the calendar
+                // tool wasn't found by the system" when Ace asked her to put Aliza/Maddy's
+                // events on his calendar. Token cost ~2K input tokens; trade is acceptable
+                // since these ARE core PA capability for a generalist. If we ever need to
+                // re-trim, that's Phase 3 (LLM-dispatched discovery), not eager keyword tiers.
+                const { buildSapphireCoreTools, buildSapphireWorkflowTools, buildSapphireResearchTools, buildSapphireLifeTools } = await import("./tools/sapphire");
+                const allLeanTools = [
                   ...buildSapphireCoreTools(),
                   ...buildSapphireWorkflowTools(),
-                  ...buildSapphireResearchTools()
+                  ...buildSapphireResearchTools(),
+                  ...buildSapphireLifeTools(),
                 ];
-                
+                const leanTools = allLeanTools.filter(t => t.definition.name !== "web_search");
+
                 sapphireToolSnapshot = agentBotLoop.snapshotTools();
                 agentBotLoop.setTools(leanTools);
-                console.log(`[SapphirePA] FORCED LEAN TIERING — Loaded ${leanTools.length} tools (~5500 tokens). Life tools purged.`);
+                console.log(`[SapphirePA] DM TOOL SET — Loaded ${leanTools.length} tools (Core+Workflow+Research+Life; web_search swapped to Anthropic native server tool).`);
 
                 const rawText = message.content
                   .replace(/^# IDENTITY[\s\S]*?(?=^[^#]|\Z)/m, "")
@@ -4979,6 +4992,25 @@ async function main() {
 
                 agentBotLoop.setContextOverrides({ maxRecentMessages: 50, skipSemanticSearch: false });
 
+                // ── S125+ Agentic Refactor Phase 1 ──
+                // Anthropic-native web_search server tool ($0.01/call) — Claude decides
+                // mid-reasoning to invoke it; results stream back as input tokens. This is
+                // what makes "is there a YouTube video showing X?" work — the model sees
+                // a fluid grounding capability instead of a regex-gated client tool.
+                //
+                // Interleaved extended thinking — Claude reasons BETWEEN tool calls, not
+                // just before the first one. Closes the "Sapphire has hands but no
+                // connecting brain" gap that was the trigger for this refactor.
+                //
+                // Other providers (Gemini, Groq) ignore these options gracefully.
+                agentBotLoop.setLLMOptionsOverrides({
+                  serverTools: [
+                    { type: "web_search_20250305", name: "web_search", max_uses: 5 },
+                  ],
+                  thinkingBudget: 8000,
+                  anthropicBetas: ["interleaved-thinking-2025-05-14"],
+                });
+
                 try {
                   const { setIdentityLogTrigger } = await import("./tools/sapphire/_ledger");
                   setIdentityLogTrigger(rawText);
@@ -4989,13 +5021,21 @@ async function main() {
             }
 
             // ── try/finally guarantees state restore even on processMessage throw ──
+            // S125+: iterationCap=6 for Sapphire (generalist with complex-task latitude
+            // per Architect directive 2026-04-30). Anita/Yuki specialists stay at 3 via
+            // their default config.security.maxAgentIterations path.
             let response: string;
             try {
-              response = await agentBotLoop.processMessage(message, () => agentChannel.sendTyping(message.chatId));
+              response = await agentBotLoop.processMessage(
+                message,
+                () => agentChannel.sendTyping(message.chatId),
+                isSapphireDM ? 6 : undefined,
+              );
             } finally {
               if (isSapphireDM) {
                 agentBotLoop.setToolCallObserver(undefined);
                 agentBotLoop.setContextOverrides(undefined);
+                agentBotLoop.setLLMOptionsOverrides(undefined);
                 if (sapphireToolSnapshot) agentBotLoop.restoreTools(sapphireToolSnapshot);
                 // S121e: Restore Gemini primary after every Sapphire turn (idempotent).
                 try {

@@ -51,12 +51,41 @@ export interface LLMOptions {
   tools?: ToolDefinition[];
   systemPrompt?: string;
   stopSequences?: string[];
+  // ── S125+ Agentic Refactor Phase 1 ──
+  // Anthropic-native server tools (e.g. web_search_20250305). Run on Anthropic's
+  // infra, results stream back as input tokens. Other providers ignore this option.
+  serverTools?: AnthropicServerTool[];
+  // Extended thinking budget in tokens. When >0, Anthropic provider injects
+  // {thinking: {type: "enabled", budget_tokens: N}} into the request body.
+  // Required for interleaved thinking to actually engage.
+  thinkingBudget?: number;
+  // Anthropic beta headers (e.g. "interleaved-thinking-2025-05-14"). Joined
+  // comma-separated and sent as the `anthropic-beta` header. Other providers ignore.
+  anthropicBetas?: string[];
+}
+
+// Anthropic server tool — runs on Anthropic's infrastructure, not as a client tool.
+// Examples: { type: "web_search_20250305", name: "web_search", max_uses: 5 }
+export interface AnthropicServerTool {
+  type: string;
+  name?: string;
+  max_uses?: number;
+  [key: string]: unknown; // allow type-specific pass-through fields
 }
 
 export interface LLMResponse {
   content: string;
   toolCalls?: ToolCall[];
-  usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    // ── S125+ ── Server-tool invocation count (e.g. web_search calls).
+    // Spend logger multiplies by per-tool cost ($0.01 per web_search) to compute USD.
+    serverToolCalls?: number;
+    // Provider-reported breakdown if available — e.g. {web_search_requests: 2}
+    serverToolBreakdown?: Record<string, number>;
+  };
   model: string;
   finishReason: "stop" | "tool_use" | "max_tokens" | "error";
 }

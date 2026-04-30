@@ -362,7 +362,12 @@ export class PineconeMemory {
         .select("agent_name, prompt_blueprint");
 
       if (error || !blueprints || blueprints.length === 0) {
-        console.warn("[Pinecone Seeder] No blueprints found in personality_config");
+        // Supabase personality_config was retired in Session 28 (bloated prompts caused
+        // Groq 413 → Gemini failover on every dispatch, ~$12/day burn). Personalities now
+        // load from bundled JSON (src/data/personalities.json). This branch is the expected
+        // steady-state — log quietly, do not warn. If Supabase blueprint seeding is ever
+        // re-enabled, repopulate personality_config and remove this comment.
+        console.log("ℹ️ [Pinecone Seeder] Supabase blueprints retired — personalities load from bundled JSON (expected)");
         return 0;
       }
 

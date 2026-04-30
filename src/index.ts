@@ -87,6 +87,9 @@ import { pollYouTubeStats } from "./proactive/youtube-stats-fetcher";
 import { runHookDrops } from "./proactive/yuki-hook-dropper";
 import { pollBlueskyReplies } from "./proactive/yuki-bluesky-replier";
 import { runBlueskyHookDrops } from "./proactive/yuki-bluesky-hook-dropper";
+import { runInstagramReplyPoll } from "./proactive/yuki-instagram-replier";
+import { runFacebookReplyPoll } from "./proactive/yuki-facebook-replier";
+import { runTikTokReplyPoll } from "./proactive/yuki-tiktok-replier";
 import { handleInboundEmail, sendApprovedReply, getPendingReplies, getMostRecentPendingReplyId } from "./proactive/email-reply-handler";
 import { runWeeklyNewsletterCycle } from "./proactive/anita-newsletter";
 import { runMilestoneSync } from "./proactive/milestone-sync";
@@ -337,8 +340,7 @@ async function main() {
           providerConfig.baseUrl
         );
         llmProviders.push(provider);
-        console.log(`# ✅ Active model (not in failoverOrder): ${providerName} → ${providerConfig.model}`);
-        console.warn(`⚠️ WARNING: ${providerName} has an API key but is NOT in LLM_FAILOVER_ORDER. Added as fallback. Update the env var to include it.`);
+        console.log(`# ✅ Active model (auto-added as fallback, not in LLM_FAILOVER_ORDER env): ${providerName} → ${providerConfig.model}`);
       } catch (err: any) {
         console.warn(`⚠️ LLM provider ${providerName} skipped: ${err.message}`);
       }
@@ -3069,6 +3071,67 @@ async function main() {
   });
 
   console.log("🦋 [YukiBskyHookDropper] Scheduled: 14:30 + 22:30 UTC (9:30 AM + 5:30 PM CDT)");
+
+  // ── Yuki Instagram Reply Poll (S126, 2026-04-30) ──
+  // Polls IG Business media → comments → drafts plain-Ace voice reply →
+  // posts via Graph API. Skips quietly if INSTAGRAM_ACCESS_TOKEN unset.
+  // Cadence: 15min — IG Graph API rate limit is 200/hr/token.
+  // Across 6 media * 2 brands = 24 calls/poll * 4 polls/hr = 96/hr/token. Safe.
+  scheduler.add({
+    name: "Yuki Instagram Reply Poll (15m)",
+    intervalMs: 15 * 60_000,
+    nextRun: new Date(Date.now() + 90_000), // first run 90s after boot
+    enabled: true,
+    handler: async () => {
+      try {
+        await runInstagramReplyPoll("sovereign_synthesis");
+        await runInstagramReplyPoll("containment_field");
+      } catch (err: any) {
+        console.error(`[YukiIGReplier] poll failed: ${err.message}`);
+      }
+    },
+  });
+  console.log("📷 [YukiIGReplier] Scheduled: every 15min (IG Graph API)");
+
+  // ── Yuki Facebook Reply Poll (S126, 2026-04-30) ──
+  // Polls Page feed → comments → drafts plain-Ace voice reply →
+  // posts via Graph API with Page Access Token (resolved from System User
+  // token, S115b pattern). Skips quietly if FACEBOOK_PAGE_ACCESS_TOKEN unset.
+  scheduler.add({
+    name: "Yuki Facebook Reply Poll (15m)",
+    intervalMs: 15 * 60_000,
+    nextRun: new Date(Date.now() + 120_000), // first run 2min after boot, 30s offset from IG
+    enabled: true,
+    handler: async () => {
+      try {
+        await runFacebookReplyPoll("sovereign_synthesis");
+        await runFacebookReplyPoll("containment_field");
+      } catch (err: any) {
+        console.error(`[YukiFBReplier] poll failed: ${err.message}`);
+      }
+    },
+  });
+  console.log("📘 [YukiFBReplier] Scheduled: every 15min (FB Graph API)");
+
+  // ── Yuki TikTok Reply Poll (S126, 2026-04-30) ──
+  // Browser-based DOM scrape + reply (TikTok has no public reply API).
+  // Cadence: 30min — browser sessions are expensive; TT spam-flags burst replies.
+  // Skips quietly if BROWSER_ENABLED=false or no cookies / handle env.
+  scheduler.add({
+    name: "Yuki TikTok Reply Poll (30m)",
+    intervalMs: 30 * 60_000,
+    nextRun: new Date(Date.now() + 180_000), // first run 3min after boot, well after IG/FB
+    enabled: true,
+    handler: async () => {
+      try {
+        await runTikTokReplyPoll("sovereign_synthesis");
+        await runTikTokReplyPoll("containment_field");
+      } catch (err: any) {
+        console.error(`[YukiTTReplier] poll failed: ${err.message}`);
+      }
+    },
+  });
+  console.log("🎵 [YukiTTReplier] Scheduled: every 30min (TikTok browser-cookie)");
 
   // ── YouTube Analytics Stats — Fix B for the 30-Video A/B/C Test ──
   // S114 (2026-04-24). Existing fetch-youtube-stats edge function populates

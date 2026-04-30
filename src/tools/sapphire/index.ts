@@ -25,6 +25,10 @@ import { WebSearchTool } from "./web_search";
 // S125k — Learning loop tools so Sapphire can be honest about her limits
 // and accumulate signal toward code changes (HubSpot 2FA noise pattern + capability gaps)
 import { LogEmailClassificationTool, RequestCodeChangeTool, ListDeferredBuildsTool } from "./learning";
+// S125l — Task orchestrator: one tool to write a task to ClickUp + MC + Notion
+// in a single call. Closes the gap where Sapphire was promising "I'll propose
+// a task" and not actually calling the tool.
+import { CreateTaskForAceTool } from "./task_orchestrator";
 import type { Tool } from "../../types";
 
 export {
@@ -105,6 +109,7 @@ export function buildSapphireCoreTools(): Tool[] {
     new LogEmailClassificationTool(),
     new RequestCodeChangeTool(),
     new ListDeferredBuildsTool(),
+    new CreateTaskForAceTool(),
   ];
 }
 

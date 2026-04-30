@@ -90,6 +90,7 @@ import { runBlueskyHookDrops } from "./proactive/yuki-bluesky-hook-dropper";
 import { runInstagramReplyPoll } from "./proactive/yuki-instagram-replier";
 import { runFacebookReplyPoll } from "./proactive/yuki-facebook-replier";
 import { runTikTokReplyPoll } from "./proactive/yuki-tiktok-replier";
+import { shouldAlertOnce, formatAuthAlert, type AlertPlatform, type AlertBrand } from "./proactive/yuki-auth-alert";
 import { handleInboundEmail, sendApprovedReply, getPendingReplies, getMostRecentPendingReplyId } from "./proactive/email-reply-handler";
 import { runWeeklyNewsletterCycle } from "./proactive/anita-newsletter";
 import { runMilestoneSync } from "./proactive/milestone-sync";
@@ -3084,8 +3085,15 @@ async function main() {
     enabled: true,
     handler: async () => {
       try {
-        await runInstagramReplyPoll("sovereign_synthesis");
-        await runInstagramReplyPoll("containment_field");
+        const brands: AlertBrand[] = ["sovereign_synthesis", "containment_field"];
+        for (const brand of brands) {
+          const result = await runInstagramReplyPoll(brand);
+          if (result.authFailure && shouldAlertOnce("instagram", brand) && defaultChatId && telegram) {
+            const yukiChannel = agentLoops.get("yuki")?.channel;
+            const sender = yukiChannel || telegram;
+            await sender.sendMessage(defaultChatId, formatAuthAlert("instagram", brand, result.authFailure), { parseMode: "Markdown" });
+          }
+        }
       } catch (err: any) {
         console.error(`[YukiIGReplier] poll failed: ${err.message}`);
       }
@@ -3104,8 +3112,15 @@ async function main() {
     enabled: true,
     handler: async () => {
       try {
-        await runFacebookReplyPoll("sovereign_synthesis");
-        await runFacebookReplyPoll("containment_field");
+        const brands: AlertBrand[] = ["sovereign_synthesis", "containment_field"];
+        for (const brand of brands) {
+          const result = await runFacebookReplyPoll(brand);
+          if (result.authFailure && shouldAlertOnce("facebook", brand) && defaultChatId && telegram) {
+            const yukiChannel = agentLoops.get("yuki")?.channel;
+            const sender = yukiChannel || telegram;
+            await sender.sendMessage(defaultChatId, formatAuthAlert("facebook", brand, result.authFailure), { parseMode: "Markdown" });
+          }
+        }
       } catch (err: any) {
         console.error(`[YukiFBReplier] poll failed: ${err.message}`);
       }
@@ -3124,8 +3139,15 @@ async function main() {
     enabled: true,
     handler: async () => {
       try {
-        await runTikTokReplyPoll("sovereign_synthesis");
-        await runTikTokReplyPoll("containment_field");
+        const brands: AlertBrand[] = ["sovereign_synthesis", "containment_field"];
+        for (const brand of brands) {
+          const result = await runTikTokReplyPoll(brand);
+          if (result.authFailure && shouldAlertOnce("tiktok", brand) && defaultChatId && telegram) {
+            const yukiChannel = agentLoops.get("yuki")?.channel;
+            const sender = yukiChannel || telegram;
+            await sender.sendMessage(defaultChatId, formatAuthAlert("tiktok", brand, result.authFailure), { parseMode: "Markdown" });
+          }
+        }
       } catch (err: any) {
         console.error(`[YukiTTReplier] poll failed: ${err.message}`);
       }

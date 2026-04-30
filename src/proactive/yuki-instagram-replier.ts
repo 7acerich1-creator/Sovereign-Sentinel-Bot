@@ -182,19 +182,30 @@ interface IGComment {
   timestamp: string;
 }
 
-async function fetchRecentMedia(creds: IGCredentials): Promise<IGMedia[]> {
+async function fetchRecentMedia(creds: IGCredentials): Promise<{ media: IGMedia[]; authFailure?: string }> {
   try {
     const url = `https://graph.facebook.com/v21.0/${creds.businessId}/media?fields=id,caption,media_type,permalink,timestamp&limit=${MAX_MEDIA_PER_RUN}&access_token=${creds.token}`;
     const resp = await fetch(url);
     if (!resp.ok) {
-      console.error(`[YukiIGReplier] media fetch ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
-      return [];
+      const body = await resp.text();
+      console.error(`[YukiIGReplier] media fetch ${resp.status}: ${body.slice(0, 200)}`);
+      // Detect Meta OAuth failures: error code 190 = invalid/expired token,
+      // 102 = session invalidated, 401/403 = auth-class HTTP statuses.
+      const isAuth =
+        resp.status === 401 ||
+        resp.status === 403 ||
+        /"code"\s*:\s*(190|102|10|459|464|467)/.test(body) ||
+        /OAuthException|invalid.*token|session.*expired|access token/i.test(body);
+      if (isAuth) {
+        return { media: [], authFailure: `Graph API ${resp.status}: ${body.slice(0, 150)}` };
+      }
+      return { media: [] };
     }
     const data = (await resp.json()) as { data?: IGMedia[] };
-    return data.data || [];
+    return { media: data.data || [] };
   } catch (err: any) {
     console.error(`[YukiIGReplier] media fetch threw: ${err.message}`);
-    return [];
+    return { media: [] };
   }
 }
 
@@ -325,15 +336,22 @@ async function decideReply(comment: IGComment, mediaCaption: string): Promise<Re
   }
 }
 
-export async function runInstagramReplyPoll(brand: Brand): Promise<{ scanned: number; replied: number; skipped: number; errors: number }> {
-  const stats = { scanned: 0, replied: 0, skipped: 0, errors: 0 };
+export async function runInstagramReplyPoll(brand: Brand): Promise<{ scanned: number; replied: number; skipped: number; errors: number; authFailure?: string }> {
+  const stats: { scanned: number; replied: number; skipped: number; errors: number; authFailure?: string } = {
+    scanned: 0, replied: 0, skipped: 0, errors: 0,
+  };
 
   const creds = await getCredentials(brand);
   if (!creds) {
     return stats; // getCredentials already logs the reason
   }
 
-  const media = await fetchRecentMedia(creds);
+  const mediaResult = await fetchRecentMedia(creds);
+  if (mediaResult.authFailure) {
+    stats.authFailure = mediaResult.authFailure;
+    return stats;
+  }
+  const media = mediaResult.media;
   if (media.length === 0) {
     console.log(`[YukiIGReplier] ${brand}: no recent media`);
     return stats;

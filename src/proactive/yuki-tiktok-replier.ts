@@ -171,9 +171,33 @@ async function applyCookies(page: Page, brand: Brand): Promise<boolean> {
   return true;
 }
 
-async function getRecentVideoLinks(page: Page, handle: string): Promise<Array<{ videoId: string; videoUrl: string }>> {
+async function getRecentVideoLinks(page: Page, handle: string): Promise<{ links: Array<{ videoId: string; videoUrl: string }>; authFailure?: string }> {
   await page.goto(`https://www.tiktok.com/@${handle}`, { waitUntil: "networkidle2", timeout: 45_000 });
   await new Promise((r) => setTimeout(r, 4000));
+
+  // Detect auth failure: TT redirects to /login when cookies are stale, or
+  // shows a login modal even on profile pages. Either signal = re-import needed.
+  const currentUrl = page.url();
+  if (/\/login(\?|$|\/)/.test(currentUrl)) {
+    return { links: [], authFailure: `redirected to login page: ${currentUrl}` };
+  }
+
+  const loginModal = (await page.evaluate(`
+    (() => {
+      const modal = document.querySelector('[data-e2e="login-modal"], [data-e2e="modal-close-inner-button"]');
+      const loginCTA = Array.from(document.querySelectorAll('a, button')).find((el) => {
+        const t = (el.textContent || "").trim().toLowerCase();
+        return t === "log in" || t === "sign up";
+      });
+      // Heuristic: login CTA visible AND no profile content rendered = logged out
+      const hasProfileContent = !!document.querySelector('[data-e2e="user-post-item"], [data-e2e="user-avatar"]');
+      return modal !== null || (loginCTA && !hasProfileContent);
+    })()
+  `)) as boolean;
+
+  if (loginModal) {
+    return { links: [], authFailure: "TikTok login modal/CTA visible — cookies stale" };
+  }
 
   const links = (await page.evaluate(`
     (() => {
@@ -194,7 +218,7 @@ async function getRecentVideoLinks(page: Page, handle: string): Promise<Array<{ 
     })()
   `)) as Array<{ videoId: string; videoUrl: string }>;
 
-  return links;
+  return { links };
 }
 
 async function scrapeCommentsOnVideo(page: Page, video: { videoId: string; videoUrl: string }): Promise<ScrapedComment[]> {
@@ -346,8 +370,10 @@ async function postReplyDOM(page: Page, comment: ScrapedComment, replyText: stri
   }
 }
 
-export async function runTikTokReplyPoll(brand: Brand): Promise<{ scanned: number; replied: number; skipped: number; errors: number }> {
-  const stats = { scanned: 0, replied: 0, skipped: 0, errors: 0 };
+export async function runTikTokReplyPoll(brand: Brand): Promise<{ scanned: number; replied: number; skipped: number; errors: number; authFailure?: string }> {
+  const stats: { scanned: number; replied: number; skipped: number; errors: number; authFailure?: string } = {
+    scanned: 0, replied: 0, skipped: 0, errors: 0,
+  };
 
   if (!config.tools.browserEnabled) {
     console.log(`[YukiTTReplier] BROWSER_ENABLED=false, skipping`);
@@ -384,7 +410,12 @@ export async function runTikTokReplyPoll(brand: Brand): Promise<{ scanned: numbe
       return stats;
     }
 
-    const videos = await getRecentVideoLinks(page, handle);
+    const linksResult = await getRecentVideoLinks(page, handle);
+    if (linksResult.authFailure) {
+      stats.authFailure = linksResult.authFailure;
+      return stats;
+    }
+    const videos = linksResult.links;
     if (videos.length === 0) {
       console.log(`[YukiTTReplier] ${brand}: no videos found on @${handle}`);
       return stats;

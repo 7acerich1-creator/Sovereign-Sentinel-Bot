@@ -120,19 +120,28 @@ interface FBComment {
   created_time: string;
 }
 
-async function fetchRecentPosts(token: string, pageId: string): Promise<FBPost[]> {
+async function fetchRecentPosts(token: string, pageId: string): Promise<{ posts: FBPost[]; authFailure?: string }> {
   try {
     const url = `${FB_API}/${pageId}/posts?fields=id,message,created_time&limit=${MAX_POSTS_PER_RUN}&access_token=${token}`;
     const resp = await fetch(url);
     if (!resp.ok) {
-      console.error(`[YukiFBReplier] posts fetch ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
-      return [];
+      const body = await resp.text();
+      console.error(`[YukiFBReplier] posts fetch ${resp.status}: ${body.slice(0, 200)}`);
+      const isAuth =
+        resp.status === 401 ||
+        resp.status === 403 ||
+        /"code"\s*:\s*(190|102|10|459|464|467)/.test(body) ||
+        /OAuthException|invalid.*token|session.*expired|access token/i.test(body);
+      if (isAuth) {
+        return { posts: [], authFailure: `Graph API ${resp.status}: ${body.slice(0, 150)}` };
+      }
+      return { posts: [] };
     }
     const data = (await resp.json()) as { data?: FBPost[] };
-    return data.data || [];
+    return { posts: data.data || [] };
   } catch (err: any) {
     console.error(`[YukiFBReplier] posts fetch threw: ${err.message}`);
-    return [];
+    return { posts: [] };
   }
 }
 
@@ -257,8 +266,10 @@ async function decideReply(comment: FBComment, postMessage: string): Promise<Rep
   }
 }
 
-export async function runFacebookReplyPoll(brand: Brand): Promise<{ scanned: number; replied: number; skipped: number; errors: number }> {
-  const stats = { scanned: 0, replied: 0, skipped: 0, errors: 0 };
+export async function runFacebookReplyPoll(brand: Brand): Promise<{ scanned: number; replied: number; skipped: number; errors: number; authFailure?: string }> {
+  const stats: { scanned: number; replied: number; skipped: number; errors: number; authFailure?: string } = {
+    scanned: 0, replied: 0, skipped: 0, errors: 0,
+  };
 
   const creds = getCredentials(brand);
   if (!creds) {
@@ -268,7 +279,12 @@ export async function runFacebookReplyPoll(brand: Brand): Promise<{ scanned: num
 
   const pageToken = await resolvePageAccessToken(creds.seedToken, creds.pageId);
 
-  const posts = await fetchRecentPosts(pageToken, creds.pageId);
+  const postsResult = await fetchRecentPosts(pageToken, creds.pageId);
+  if (postsResult.authFailure) {
+    stats.authFailure = postsResult.authFailure;
+    return stats;
+  }
+  const posts = postsResult.posts;
   if (posts.length === 0) {
     console.log(`[YukiFBReplier] ${brand}: no recent posts`);
     return stats;

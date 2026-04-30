@@ -134,10 +134,22 @@ export async function runCalendarLookahead(): Promise<void> {
 // Track seen IDs in sapphire_known_facts under key=email_seen:<gmail_id>.
 // If important + new, DM Ace.
 
+// S125k tightening: dropped bare "reminder" and "confirmation" — too broad,
+// caught HubSpot 2FA-backup-code emails and other auto-generated SaaS noise.
+// "permission" also dropped — too broad.
+// Sapphire learns specific noise patterns via log_email_classification, then
+// files request_code_change → Claude updates this list or NOISE_DOMAINS.
 const PRIORITY_KEYWORDS = [
   "invitation", "invite", "rsvp", "school", "urgent", "asap",
-  "today", "tomorrow", "deadline", "appointment", "reminder", "due",
-  "permission", "confirmation",
+  "today", "tomorrow", "deadline", "appointment", "due",
+];
+
+// Sender domains that should ALWAYS be filtered out, even if a keyword matches.
+// Populated over time via request_code_change → code update.
+const NOISE_DOMAINS: string[] = [
+  // Add domains here that produce too much noise. Examples (uncomment as data accumulates):
+  // "hubspot.com",     // 2FA reminders, marketing automation
+  // "noreply.notion.so",
 ];
 
 let emailTriageRunning = false;
@@ -164,7 +176,13 @@ async function markSeenEmail(supabase: any, gmailId: string, summary: string): P
   );
 }
 
-function isPriorityEmail(subject: string, snippet: string): boolean {
+function isPriorityEmail(subject: string, snippet: string, fromHeader?: string): boolean {
+  // S125k: sender-domain noise filter (kills auto-generated SaaS pings even if
+  // they contain priority keywords like "reminder" / "appointment confirmation").
+  if (fromHeader) {
+    const lowerFrom = fromHeader.toLowerCase();
+    if (NOISE_DOMAINS.some((d) => lowerFrom.includes(d))) return false;
+  }
   const lower = `${subject} ${snippet}`.toLowerCase();
   return PRIORITY_KEYWORDS.some((kw) => lower.includes(kw));
 }
@@ -222,7 +240,7 @@ export async function runEmailTriagePoll(channel: Channel): Promise<void> {
         const subject = headers.find((h) => h.name.toLowerCase() === "subject")?.value || "(no subject)";
         const snippet = mData.snippet || "";
 
-        if (isPriorityEmail(subject, snippet)) {
+        if (isPriorityEmail(subject, snippet, from)) {
           alerts.push(`[${account}]\nFrom: ${from.replace(/<.*>/, "").trim()}\nSubject: ${subject}\n${snippet.slice(0, 120)}`);
         }
         await markSeenEmail(supabase, id, `${from} | ${subject}`);

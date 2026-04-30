@@ -22,6 +22,9 @@ import { YoutubeTranscriptTool } from "./youtube";
 import { FileBriefingTool, ProposeTaskTool } from "../action-surface";
 // S125g — Web search grounding so she stops hallucinating facts (Jay Kelly fix)
 import { WebSearchTool } from "./web_search";
+// S125k — Learning loop tools so Sapphire can be honest about her limits
+// and accumulate signal toward code changes (HubSpot 2FA noise pattern + capability gaps)
+import { LogEmailClassificationTool, RequestCodeChangeTool, ListDeferredBuildsTool } from "./learning";
 import type { Tool } from "../../types";
 
 export {
@@ -99,6 +102,9 @@ export function buildSapphireCoreTools(): Tool[] {
     new FileBriefingTool("sapphire"),
     new ProposeTaskTool("sapphire"),
     new WebSearchTool(),
+    new LogEmailClassificationTool(),
+    new RequestCodeChangeTool(),
+    new ListDeferredBuildsTool(),
   ];
 }
 

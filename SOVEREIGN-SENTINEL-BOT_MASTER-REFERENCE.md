@@ -759,9 +759,9 @@ scripts/
 |---|---|---|---|---|
 | YouTube | Sovereign Synthesis | Ace Richie 77 (`UCbj9a6brDL9hNIY1BpxOJfQ`) | empoweredservices2013 | Yes |
 | YouTube | Containment Field | The Containment Field (`UCLHJIIEjavmrS3R70xnCD1Q`) | 7ace.rich1 | Yes |
-| Instagram | Sovereign Synthesis | `ace_richie_77` | empoweredservices2013 | Yes |
+| Instagram | Sovereign Synthesis | `sovereign_synthesis` | empoweredservices2013 | Yes |
 | Instagram | Containment Field | `the_containment_field` | empoweredservices2013 | Yes |
-| **TikTok** | Sovereign Synthesis | `acerichie77` | **7ace.rich1** (CROSSED) | Yes |
+| **TikTok** | Sovereign Synthesis | `sovereign_synthesis` | **7ace.rich1** (CROSSED) | Yes |
 | **TikTok** | Containment Field | `the_containment_field` | **empoweredservices2013** (CROSSED) | Yes |
 | X (Twitter) | Sovereign Synthesis | `AceRichie77` | 7ace.rich1 | Yes |
 | X (Twitter) | Containment Field | `ContainmentFld` | empoweredservices2013 | Yes |
@@ -771,6 +771,11 @@ scripts/
 **Channel math (verified):** Sovereign Synthesis = 5 channels, Containment Field = 4 channels, **total = 9 Buffer channels**. LinkedIn/Pinterest/Reddit NOT in Buffer.
 
 **CRITICAL — TikTok accounts are CROSSED** vs other platforms. Every other platform: `empoweredservices2013` = Sovereign Synthesis, `7ace.rich1` = Containment Field. TikTok ONLY: `7ace.rich1` = Sovereign Synthesis, `empoweredservices2013` = Containment Field.
+
+**S126 (2026-04-30) brand-handle update:** SS migrated from `ace_richie_77` (IG) / `acerichie77` (TT) to `sovereign_synthesis` on BOTH platforms. Old handles deprecated, do not reference. CF handles unchanged. Live profile verification (2026-04-30):
+- `instagram.com/sovereign_synthesis` — 148 posts, 164 followers, "Systems Architect / Your mind runs firmware / sovereign-synthesis.com/tier-0/links"
+- `tiktok.com/@sovereign_synthesis` — 26 following, 12 followers, "Your mind runs firmware. I teach the update. sovereign-synthesis.com"
+- Railway env: `TIKTOK_HANDLE_SS=sovereign_synthesis`, `TIKTOK_HANDLE_CF=the_containment_field` (added S126).
 
 **YouTube OAuth tokens (Railway):** `YOUTUBE_REFRESH_TOKEN` (Sovereign Synthesis) + `YOUTUBE_REFRESH_TOKEN_TCF` (Containment Field). Both PERMANENT (app published).
 

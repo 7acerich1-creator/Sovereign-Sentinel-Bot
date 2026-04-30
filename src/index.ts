@@ -111,15 +111,19 @@ import {
 } from "./data/shared-context";
 
 // ── Niche Cooldown (Phase 3 Task 3.5) ──
-// 30-day hard / 14-day soft cooldown ledger. Alfred consumes the snapshot at
-// directive-build time so he sees which niches are already spent; the bridge
-// calls recordNicheRun AFTER a seed successfully enters the factory (so an
-// aborted/rejected seed never burns a cooldown).
+// Alfred consumes the cooldown snapshot at directive-build time so he sees
+// which niches are spent (his thesis becomes flavor context for the rotator).
+// S125+ — Alfred no longer calls recordNicheRun directly; the faceless factory
+// records the actual shipped niche + aesthetic_style after upload (single
+// source of truth, no double-write pollution of the LRU window).
 import {
   getNicheCooldownSnapshot,
   cooldownSummaryLine,
-  recordNicheRun,
 } from "./tools/niche-cooldown";
+// S125+ — boot-time coverage check for the sequential rotator. Throws if any
+// allowed niche is missing a THESIS_ANGLES entry, so missing pools surface at
+// startup, not at runtime when the rotator hits the gap.
+import { assertRotationCoverage } from "./tools/rotation-state";
 
 // ── Plugins ──
 import { PluginManager, MemoryTool, RecallTool } from "./plugins/system";
@@ -191,6 +195,19 @@ async function main() {
 
   console.log("⚡ GRAVITY CLAW v3.0 — Initializing...");
   console.log(`🔒 Security: Max ${config.security.maxAgentIterations} agent iterations`);
+
+  // ── S125+ Sequential Rotator Coverage Check ──
+  // Verify every allowed niche has at least one THESIS_ANGLES entry. If a
+  // niche is added to the allowlist without a corresponding angle pool, the
+  // rotator would throw at runtime when it hits that slot — better to fail
+  // loud at boot. Cheap (~30 lookups).
+  try {
+    assertRotationCoverage();
+    console.log("🔄 Rotation coverage: all 30 niches have thesis-angle pools ✅");
+  } catch (covErr: any) {
+    console.error(`❌ Rotation coverage check failed: ${covErr?.message}`);
+    throw covErr;
+  }
 
   // ── 1. Initialize Memory Providers ──
   const sqliteMemory = new SqliteMemory();
@@ -5499,28 +5516,16 @@ async function main() {
                               { rawIdea: seed.thesis, niche: seed.niche }
                             );
 
-                            // Phase 3 Task 3.5: burn the cooldown AFTER successful factory entry.
-                            // If executeFullPipeline throws, we never reach this line — so an
-                            // aborted seed does not consume a 30-day slot. Fire-and-forget;
-                            // cooldown persistence must NEVER block pipeline progress.
-                            try {
-                              // S122b — read niche from result, not seed. The faceless
-                              // factory's uniqueness retry loop may have rotated the niche
-                              // (pickNextNiche LRU) to break out of a colliding lane.
-                              // Recording seed.niche here would dilute the LRU signal by
-                              // overweighting the originally-attempted niche.
-                              const shippedNiche = (result as any)?.niche ?? seed.niche;
-                              await recordNicheRun({
-                                brand: seed.brand,
-                                niche: shippedNiche,
-                                thesis: seed.thesis,
-                                jobId: (result as any)?.jobId ?? (result as any)?.uploadId ?? seedId,
-                                source: "alfred_daily",
-                              });
-                              console.log(`🧊 [AutoPipeline] cooldown recorded: ${seed.brand}/${shippedNiche}${shippedNiche !== seed.niche ? ` (rotated from ${seed.niche})` : ""}`);
-                            } catch (cooldownErr: any) {
-                              console.warn(`[AutoPipeline] cooldown record failed (non-fatal): ${cooldownErr?.message}`);
-                            }
+                            // S125+ — DROPPED Alfred-side cooldown write. The faceless factory
+                            // already calls recordNicheRun internally with the actual shipped
+                            // niche AND aesthetic_style (faceless-factory.ts:1617). Alfred's
+                            // duplicate write was polluting the LRU window for pickNextAesthetic
+                            // (every shipped video produced one row WITH aesthetic + one row
+                            // WITHOUT, breaking the rotation signal). The 30-video A/B/C
+                            // performance test reads aesthetic_style — only the faceless write
+                            // carries that field, so dropping the Alfred write is lossless.
+                            // The new sequential rotator (rotation-state.ts) is now the single
+                            // source of truth for what shipped when.
 
                             const report = formatPipelineReport(result);
                             try {

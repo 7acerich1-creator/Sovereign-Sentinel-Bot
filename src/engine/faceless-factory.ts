@@ -110,6 +110,24 @@ export class BrandNicheViolation extends Error {
   }
 }
 
+/**
+ * Thrown by extractNarrativeBlueprint when the LLM returns no parseable
+ * thesis after a retry at higher temperature. Replaces the former silent
+ * fallback to a hardcoded "Monad / timeline / frequency" blueprint that
+ * was the actual root cause of S125+ script convergence (every fallback
+ * shipped the same blueprint -> uniqueness guard collisions on retry).
+ *
+ * Caller (executeFullPipeline) catches and surfaces to Telegram. Halting
+ * burns one rotator slot; that's an acceptable cost for never silently
+ * shipping a duplicate.
+ */
+export class BlueprintExtractionFailed extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BlueprintExtractionFailed";
+  }
+}
+
 // Dimension presets per orientation — single source of truth for all image gen + ffmpeg
 export const DIMS: Record<Orientation, {
   width: number; height: number;         // ffmpeg output (Ken Burns, fallback)
@@ -455,37 +473,36 @@ RULES:
 
   const parsed = extractJSON(response.content);
   if (!parsed || !parsed.thesis) {
-    console.warn(`⚠️ [FacelessFactory] Blueprint extraction failed, using fallback`);
-    if (brand === "containment_field") {
-      return {
-        thesis: "Your nervous system is not tired from work — it is running a behavioral program that was installed one micro-compliance at a time.",
-        title: "The 4 Micro-Compliance Traps Built Into Your Workday",
-        hook: "If your chest tightens when your manager says 'quick sync', your body already knows what your mind hasn't named yet. I am going to name all four of them.",
-        narrative_arc: "ACT 1 (name the extraction loop in clinical terms, show the viewer the body sensation they are having right now) → ACT 2 (expose the operant-conditioning mechanism and the specific workplace ritual that installed it) → ACT 3 (deliver ONE concrete countermeasure they can run tomorrow morning)",
-        key_arguments: [
-          "The 'quick sync' is a micro-compliance test, not a meeting",
-          "Performance reviews are a gaslighting vector, not a feedback loop",
-          "The grind-as-virtue script is operant conditioning dressed as culture",
-          "The exhaustion at 3pm is a conditioning loop, not a productivity failure",
-          "One named countermeasure breaks the loop faster than any motivation",
-        ],
-        emotional_journey: "recognized in your exhaustion → clinically exposed → armed with one countermeasure → no longer gaslit by the machine",
-      };
+    // S125+ — DELIBERATELY LOUD. The previous behavior here was to fall back
+    // to a hardcoded "Monad / timeline / frequency" blueprint for SS (and a
+    // clinical "micro-compliance" blueprint for TCF). Every silent fallback
+    // shipped the SAME blueprint, producing convergent scripts that the
+    // uniqueness guard then rejected three retries deep — wasted compute,
+    // false sense of variety, and the actual root cause of the "everything
+    // sounds the same" pattern Ace flagged in S125+. The rotator now feeds
+    // dense 2-4 sentence curated seeds, so blueprint extraction failures
+    // should be RARE — when they happen, it's a real problem that deserves
+    // a halt + alert, not a silent monad.
+    //
+    // One retry at higher temperature before giving up. If that also fails,
+    // throw so the auto-pipeline catches it, alerts via Telegram, and the
+    // rotator's spent slot is the only cost.
+    console.warn(`⚠️ [FacelessFactory] Blueprint extraction returned no thesis — retrying once at temp=1.0`);
+    const retryResp = await llm.generate(
+      [{ role: "user", content: blueprintPrompt }],
+      { maxTokens: 2048, temperature: 1.0 },
+    );
+    const retryParsed = extractJSON(retryResp.content);
+    if (retryParsed && retryParsed.thesis) {
+      console.log(`🧠 [FacelessFactory] Blueprint (retry): "${retryParsed.title}" — Thesis: "${retryParsed.thesis?.slice(0, 80)}..."`);
+      return retryParsed as NarrativeBlueprint;
     }
-    return {
-      thesis: "The timeline you are standing on was selected by a version of you that did not yet know it was the one doing the selecting.",
-      title: "You Are The Monad That Forgot It Chose This",
-      hook: "Every room you walk into is being authored in real time by the frequency you decided to hold on the way in. You are not inside the story. The story is inside you.",
-      narrative_arc: "ACT 1 (edict — a universal law stated as fact in the first breath) → ACT 2 (mirror — the viewer is already living inside this law, unconsciously) → ACT 3 (re-selection — name the frequency signature they must hold to collapse into the next timeline)",
-      key_arguments: [
-        "You are not inside the universe — the universe is unfolding out of you",
-        "Every room is a mirror of the frequency signature you broadcast into it",
-        "The collapse of the old self is a prerequisite, not a wound",
-        "Timeline jumping is not an act, it is a re-selection of the broadcast",
-        "Identity spaghettification is the field re-authoring itself through you",
-      ],
-      emotional_journey: "recognized at the soul level → slowly undone → witnessed as the author → re-selected",
-    };
+    throw new BlueprintExtractionFailed(
+      `Blueprint extraction returned no parseable thesis after 2 attempts. ` +
+      `brand=${brand} niche=${niche} source_preview="${sourceIntelligence.slice(0, 200).replace(/\s+/g, " ")}". ` +
+      `Refusing to ship a hardcoded fallback (former S125+ gravity-well bug). ` +
+      `Investigate: LLM provider health, source intelligence quality, prompt token budget.`,
+    );
   }
 
   console.log(`🧠 [FacelessFactory] Blueprint: "${parsed.title}" — Thesis: "${parsed.thesis?.slice(0, 80)}..."`);

@@ -49,6 +49,11 @@ import type { LLMProvider } from "../types";
 import { isR2Configured, uploadToR2, getR2PresignedUrl } from "../tools/r2-upload";
 import { isBufferQuotaExhausted } from "./buffer-graphql";
 import { publishToFacebook } from "./facebook-publisher";
+// S125+ — Sequential rotation cursor. Replaces Alfred's runtime LLM thesis
+// (thin, voice-bounded) with a deterministic march through THESIS_ANGLES
+// (curated, niche-specific, ~225 unique seeds per brand). See
+// src/tools/rotation-state.ts and the closing comments in NORTH_STAR.md.
+import { advanceAndPickSeed } from "../tools/rotation-state";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 // Session 34 pattern: SERVICE_ROLE_KEY bypasses RLS on content_transmissions
@@ -1505,18 +1510,35 @@ export async function executeFullPipeline(
       niche: options?.niche || preProduced!.niche,
     };
   } else if (isRawIdeaMode) {
-    await progress("STEP 1/8", `🌱 RAW IDEA mode — bypassing yt-dlp + Whisper. Seed: "${rawIdea!.slice(0, 100)}${rawIdea!.length > 100 ? "…" : ""}"`);
-    const inferredNiche = options?.niche || detectNiche(rawIdea!);
+    // S125+ — SEQUENTIAL ROTATOR. Alfred's 1-2 sentence runtime thesis was
+    // structurally thin (the blueprint extractor expects ~8000 chars of
+    // source; got ~150) and voice-bounded (Alfred's pull toward
+    // monad/timeline/frequency vocabulary made every fallback-driven script
+    // a near-duplicate). The rotator pulls the next curated angle from
+    // THESIS_ANGLES — 2-4 dense sentences, niche-specific, ~225 unique
+    // seeds per brand before any wrap. Alfred's thesis is preserved as
+    // flavor context, appended below the rotator's primary thesis.
+    const rotatorSeed = await advanceAndPickSeed(brand);
+    const rotatedTranscript = [
+      rotatorSeed.angle.seed,
+      "",
+      "ADDITIONAL CONTEXT (today's signal — flavor only, do not override the thesis above):",
+      rawIdea!,
+    ].join("\n");
+    await progress(
+      "STEP 1/8",
+      `🔄 Rotator slot ${rotatorSeed.slotIndex} (pass ${rotatorSeed.passIndex + 1}, niche ${rotatorSeed.nicheIndex + 1}) → ${brand}/${rotatorSeed.niche}/${rotatorSeed.angle.id}`,
+    );
     whisperResult = {
       videoId: youtubeUrl, // Synthetic identifier from caller (e.g., raw_<sha1>)
-      transcript: rawIdea!, // The thesis IS the source intelligence
+      transcript: rotatedTranscript, // Rotator's curated angle + Alfred flavor
       segments: [], // Empty — shorts-curator uses script segments, not whisper segments
       sourcePath: "",
       audioPath: "",
       whisperPath: "",
-      niche: inferredNiche,
+      niche: rotatorSeed.niche, // Rotator overrides any caller-provided niche in rawIdea mode
     };
-    await progress("STEP 1/8", `✅ Native seed accepted — niche: ${inferredNiche} (no transcription required)`);
+    await progress("STEP 1/8", `✅ Native seed + rotator angle accepted — niche: ${rotatorSeed.niche} (no transcription required)`);
   } else {
     await progress("STEP 1/8", dryRun ? "[DRY RUN] Simulating Whisper extraction..." : "Downloading video and running Whisper transcription...");
   if (dryRun) {

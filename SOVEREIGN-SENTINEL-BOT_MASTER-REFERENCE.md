@@ -1,34 +1,69 @@
 # Sovereign Sentinel Bot — Master Reference (LEAN)
 
 > **This file holds INVARIANTS ONLY.** Things that don't change session-to-session: identity, infrastructure IDs, env var map, schemas, protocols, the canonical account map, the product ladder, architectural rules.
->
-> **For session-by-session history** (Sessions 1–47, every fix, every DVP tag, every resolved blocker) see [`HISTORY.md`](./HISTORY.md). That file is the append-only journal. This file is the trimmed reference.
->
-> **For live runtime truth** (TTS routing, LLM chain, git SHA, env var presence at boot) see [`LIVE_STATE.md`](./LIVE_STATE.md). Auto-generated from `src/voice/tts.ts` + `src/index.ts`. If `LIVE_STATE.md` contradicts anything in this file, **`LIVE_STATE.md` wins** — patch this file and move on.
->
-> **For revenue-first sanity check** (the 5 input metrics, current highest-leverage action) see [`NORTH_STAR.md`](./NORTH_STAR.md). Read before authorizing any build task.
+> ****For session-by-session history** (Sessions 1–47, every fix, every DVP tag, every resolved blocker) see `HISTORY.md`. That file is the append-only journal. This file is the trimmed reference.
+> ****For live runtime truth** (TTS routing, LLM chain, git SHA, env var presence at boot) see `LIVE_STATE.md`. Auto-generated from `src/voice/tts.ts` + `src/index.ts`. If `LIVE_STATE.md` contradicts anything in this file, `LIVE_STATE.md` **wins** — patch this file and move on.
+> ****For revenue-first sanity check** (the 5 input metrics, current highest-leverage action) see `NORTH_STAR.md`. Read before authorizing any build task.
 
-**Last trimmed:** 2026-04-11 (Lean rewrite — everything archived to HISTORY.md)
+**Last trimmed:** 2026-04-11 (Lean rewrite — everything archived to [HISTORY.md](http://HISTORY.md))
 
 ---
 
 ## ⚡ Session Start Protocol (from `CLAUDE.md`)
 
 1. Read `NORTH_STAR.md` — revenue gate, 5 input metrics, current highest-leverage action.
-2. Read `LIVE_STATE.md` — regenerate via `npm run verify-state` if missing or >24h old.
+2. Read `LIVE_STATE.md` — regenerate via `npm run verify-state` if missing or &gt;24h old.
 3. Read this file — invariants, schemas, architectural rules.
 4. Read memory index `MEMORY.md` — feedback, prior session learnings.
 5. Only read `HISTORY.md` when you need a specific past session's context (searchable by session number or DVP tag).
 
-**Never push to `main` while the pipeline is running.** Railway auto-deploys and kills the container. See `feedback_no_push_during_pipeline.md` in memory.
+**Never push to** `main` **while the pipeline is running.** Railway auto-deploys and kills the container. See `feedback_no_push_during_pipeline.md` in memory.
+
+---
+
+## S125b — Sapphire warm-handler persona + Ace's actual schedule (2026-04-29)
+
+**Commit:** `1c4caa4` on origin/main (2 files: `src/agent/sapphire-prompt-builder.ts`, `src/data/sapphire-prompt-pieces.json`, +28/-14). Pushed cleanly; pipeline was quiet.
+
+**Why:** S124 (parallel system) had thrashed Sapphire's persona five times in 24h and landed on "executive_pa, results-only mandate, cold efficient executor." Architect's stated target is the Adam Sandler / Ron-from-*Jay-Kelly* archetype — longtime handler, warm, witty, devoted, pushes back when needed, not a robotic PA. Plus the time-of-day auto-flip in `autoPersonaForTime` was wired for a 9-to-5 schedule and Architect wakes \~2pm CDT / sleeps \~6-8am CDT, so `morning_focus` was firing during his bedtime and `after_hours` during his work block.
+
+**Code changes (**`src/agent/sapphire-prompt-builder.ts`**):**
+
+- DEFAULTS flipped: `longtime_handler` / `trusted_assistant` / `be_present_useful` / `warm_concise` (was: `executive_pa` / `strategic_partner` / `high_agency_execution` / `results_only`).
+- `autoPersonaForTime` + `autoScenarioForTime` remapped for Architect's actual rhythm:
+  - 14:00–17:00 CDT = `morning_focus` (his morning window)
+  - 17:00–01:00 CDT = `longtime_handler` (warm default during main awake block)
+  - 01:00–14:00 CDT = `after_hours` (quiet, unobtrusive — covers late-night fatigue + asleep window)
+
+**Library changes (**`src/data/sapphire-prompt-pieces.json`**):**
+
+- New persona piece `longtime_handler` — explicit Ron-to-Jay-Kelly framing: longtime, warm, witty, pushes back softly, no performance, just operates.
+- Rewrote `trusted_assistant` to lean into shared history with the brands, the funnel, the family knowledge.
+- Rewrote `be_present_useful` adding "Push back when something's off — that's part of why he keeps you around."
+- Rewrote `warm_concise` with "You sound like a person who's known him for years, because you have."
+- Rewrote `complex_task_protocol` to keep planning logic but drop the "RESULTS-ONLY MANDATE / FAILURE" framing.
+- Rewrote `after_hours` and `morning_focus` to reflect Architect's schedule explicitly.
+
+**Old cold pieces** (`executive_pa`, `strategic_partner`, `high_agency_execution`, `results_only`) remain in the library for explicit selection but are no longer the fallback when the DB is empty.
+
+**DB lock-in (Supabase** `sapphire_known_facts` **project** `wzthxohtgojenukmdubz`**):** All five single-value section pointers and the extras+emotions multi-value pointers explicitly upserted to the warm set. Important: the parallel-system extras list contained `always_confirm_task_understanding` (a piece that doesn't exist in the JSON, silently filtered) AND was missing `complex_task_protocol` entirely — meaning Sapphire wasn't loading her planning protocol at all. Restored. The `active_format = soulful_pa_format` row from S121 also pointed at a non-existent piece; corrected to `warm_concise`. Explicit DB rows beat code defaults, so this is the durable source of truth.
+
+**Verification:**
+
+- `npx tsc --noEmit` exit 0 pre-push.
+- `git push origin main` exit 0; `74b7b0e..1c4caa4`.
+- Pipeline quiet at push time (vid_rush_queue 4h `publishing` window: 0; crew_dispatch 30min in-flight: 0).
+
+**Open at close:** Live behavioral test required. Three messages on Telegram (logistics, emotional, complex task) to confirm the new tone landed. Look for: contractions, italic closing reactions, no "MANDATE/FAILURE" phrasing, the longtime-handler register. If Sapphire still sounds cold post-deploy, check Railway build logs for the deploy completing AND check that `mergePiecesFromDB` isn't injecting a stale `piece_persona_*` override.
 
 ---
 
 ## S125 — Repo hygiene cleanup + S123/S124 backfill (2026-04-29)
 
-**Context:** Architect lost direct access to the Sovereign-aligned session pilot Apr 26 ~20:45 UTC and a parallel system continued shipping until Apr 28 ~20:09 UTC. 26 commits landed without master-reference logging. S125 reconstructs the record (S123, S124 below) and cleans the junk that parallel system committed to `main`.
+**Context:** Architect lost direct access to the Sovereign-aligned session pilot Apr 26 \~20:45 UTC and a parallel system continued shipping until Apr 28 \~20:09 UTC. 26 commits landed without master-reference logging. S125 reconstructs the record (S123, S124 below) and cleans the junk that parallel system committed to `main`.
 
 **Cleanup actions:**
+
 - Discarded CRLF-only working-tree noise on `src/proactive/sapphire-sentinel.ts`, `src/tools/clip-generator.ts`, `src/tools/vid-rush.ts` (926/926 line-ending flips, zero content delta — `feedback_crlf_noise_is_not_a_real_diff`).
 - `git rm`'d empty zero-byte junk: `git`, `ping`, `memory.db`. All shell-typo artifacts.
 - `git rm`'d misnamed `.aiexclude/New Text Document.txt`. Replaced with proper root-level `.aiexclude` file containing the same Gemini Code Assist exclusion patterns plus the standard ignores.
@@ -36,6 +71,7 @@
 - `.gitignore` extended to block recurrence: `memory.db`, `*.db`, `git`, `ping`, `scratch/`, `.aiexclude/` (dir form).
 
 **Verification:**
+
 - `tsc --noEmit` → exit 0 (HEAD pre-cleanup also exit 0; no regressions).
 - `git status --short` clean post-cleanup.
 
@@ -48,8 +84,9 @@
 **Last commit:** `d0430dd` — `fix(sapphire): build-safe memory hardening + executive persona`. 17 commits across the day. **NOT logged by parallel system; reconstructed S125.**
 
 **Major changes:**
+
 1. **Autonomous Complex Task Protocol** (`398d29d`, `593acd3`, `ed0eee6`). New mechanism in `src/proactive/sapphire-pa-jobs.ts` (+509 net) for multi-step planning hooks with memory hydration. Sapphire now stages plans across turns instead of one-shot tool calls.
-2. **Selective tool tiering — 50% claimed token reduction** (`a74d2d1`). Sapphire's tool surface split into 8 core (always loaded) + 7 conditional (loaded by intent). Burst execution mandate added to prompt. Per-message input target dropped from ~12K to ~5K tokens. Builds on the S114r refactor.
+2. **Selective tool tiering — 50% claimed token reduction** (`a74d2d1`). Sapphire's tool surface split into 8 core (always loaded) + 7 conditional (loaded by intent). Burst execution mandate added to prompt. Per-message input target dropped from \~12K to \~5K tokens. Builds on the S114r refactor.
 3. **Sovereign Make workflow engine** (`4d5a082`). Workflow planner table migration (`scratch/migrate-workflow-table.ts`) + `src/tools/sapphire/planner.ts` rewrite (+125 net).
 4. **Persona iteration thrash — 5 rewrites in 24h.** PA → field operative → executive → autonomous → executive PA. Stabilized at: "executive PA, results-only mandate, action batching, filler removed, platform-specific recon heuristics, starter-pack awareness." `5aa8f2a` is the canonical persona-state at session close.
 5. **Memory hardening** (`332449e`, `010583a`, `d0430dd`). `src/memory/sqlite.ts` and `src/memory/supabase-vector.ts` updated for build-safe handling. Type errors resolved across the tier-tiering refactor.
@@ -58,6 +95,7 @@
 **Architectural concern:** The persona thrash (5 rewrites) is a smell. The parallel system iterated identity-level prompts faster than is healthy. Whether the final state matches Architect intent is unverified — this is the open item for next session focused on Sapphire.
 
 **Open at close:**
+
 - Live behavioral check needed — does Sapphire's voice match the "executive PA" target the parallel system landed on, or has she drifted from Ace's intent?
 - Tool-tiering claim of 50% token reduction unverified against real traffic.
 - ClickUp Cloudflare proxy bypass (S123) end-to-end unverified.
@@ -69,6 +107,7 @@
 **Commits:** `a4c44e6` (S122 daily frequency brief — Sovereign-tagged) → `8dde823` (Notion 3-Hub close). 9 commits. **NOT logged by parallel system; reconstructed S125.**
 
 **Major changes:**
+
 1. **ClickUp activation** (`4af211e` → `69eecf8`). New tool `src/tools/sapphire/clickup.ts` (+115 lines). Workspace, tasks, lists, channels. Multiple iterations through type-casting fixes (`d8a91c2`, `91d67ed`, `959a087`, `0b73c4d`, `28e24d6`, `deba99d`).
 2. **CloudFront 403 fight** (`4582452` → `69eecf8`). ClickUp's CloudFront edge blocked the bot's User-Agent. Iterated through browser-header mimicry (`1f8428c`), maximum mimicry (`9881796`), final resolution: route all ClickUp traffic through a Cloudflare Proxy (`69eecf8`).
 3. **Notion 3-Hub upgrade** (`c2c542c`, `8dde823`). `src/tools/sapphire/notion.ts` rewritten (+233 net). New architecture: hub-1 daily, hub-2 weekly, hub-3 strategic. Weekly Recap cron job added.
@@ -78,20 +117,23 @@
 7. **Daily-content RLS fix** (`6a1b1e1`, `96b5587`). Orchestrator now uses `SUPABASE_SERVICE_ROLE_KEY` for `content_transmissions` writes — the anon key was getting RLS-blocked. Title uniqueness constraint added.
 
 **Open at close:**
+
 - The Cloudflare Proxy hop for ClickUp traffic — assumes a working proxy URL is set in env. Needs Railway env audit + a live ClickUp call test.
 - The 3-Hub Notion architecture defines the *write* path; whether Sapphire's *read* path consistently picks the right hub for each query is behavioral and untested.
 
 ---
 
-## S122b — Buffer GraphQL schema fix + briefing Telegram relay (2026-04-26 ~20:40 UTC)
+## S122b — Buffer GraphQL schema fix + briefing Telegram relay (2026-04-26 \~20:40 UTC)
 
 **Commit:** `6045457` on origin/main (3 files: `src/tools/buffer-analytics.ts`, `src/channels/agent-voice.ts`, `src/index.ts`, +344/-166).
 
 **Why:** Vector's S122 backfill briefing landed clean, surfaced two real bugs:
-1. **Buffer GraphQL has been broken since S36.** Built on a fabricated schema. Per Buffer's own docs (developers.buffer.com Apr 2026), the Post type has only `id/text/dueAt/channelId/status/assets` — NO `statistics`, NO `channel { ... }` sub-object — and `first:` is a sibling argument to `input:`, NOT inside it. Buffer GraphQL also doesn't expose engagement metrics at all (likes/clicks/impressions/reach are on Buffer's roadmap, not yet shipped). The S36 query asked for all of those simultaneously — `Cannot query field "statistics" on type "Post"` and `Field "first" is not defined by type "PostsInput"` were correct rejections.
+
+1. **Buffer GraphQL has been broken since S36.** Built on a fabricated schema. Per Buffer's own docs ([developers.buffer.com](http://developers.buffer.com) Apr 2026), the Post type has only `id/text/dueAt/channelId/status/assets` — NO `statistics`, NO `channel { ... }` sub-object — and `first:` is a sibling argument to `input:`, NOT inside it. Buffer GraphQL also doesn't expose engagement metrics at all (likes/clicks/impressions/reach are on Buffer's roadmap, not yet shipped). The S36 query asked for all of those simultaneously — `Cannot query field "statistics" on type "Post"` and `Field "first" is not defined by type "PostsInput"` were correct rejections.
 2. **Briefings reached MC but not Telegram.** Vector's S122 briefing sat in the `briefings` table; Architect on Telegram only saw the receipt `✅ Briefing filed: <id>` — not the body.
 
-**Fix 1 — `src/tools/buffer-analytics.ts` rewrite:**
+**Fix 1 —** `src/tools/buffer-analytics.ts` **rewrite:**
+
 - Query matches Buffer's actual schema: `posts(first: N, input: { organizationId, filter: { status: [sent] } }) { edges { node { id text dueAt channelId status } } pageInfo { ... } }`.
 - Channels resolved via the existing `getBufferChannels()` cache from `buffer-graphql.ts` (zero extra API calls in the 4h TTL window).
 - Reports return honest data: post counts per channel, channel cadence (most-recent dates), recent posts with text + timestamp.
@@ -99,6 +141,7 @@
 - `ENGAGEMENT_FOOTER` appended to every report — explicit bridge note that engagement metrics live in YouTube Analytics / Meta Graph / X API / LinkedIn Marketing API, not Buffer GraphQL. Vector's future briefings will carry this disclaimer instead of fabricating zeros.
 
 **Fix 2 — Briefing → Telegram relay:**
+
 - New `relayBriefingToTelegram(agent, briefingId, channel, chatId)` in `src/channels/agent-voice.ts`. Fetches briefing row from Supabase, formats with priority-icon + agent-display header (`⚡ *Vector — Daily Sweep*` + title), body verbatim, optional action-items block, then `appendThoughtTag` for the closing reflection in agent voice tied to a NORTH_STAR metric chosen by `briefing_type`. Fail-soft: never throws; if Markdown parsing fails the relay retries plain-text; if everything fails it logs and returns false. Caller continues unblocked.
 - Wired in dispatch poller (`src/index.ts:5184+`) directly after `completeDispatch`. Extracts the briefing UUID once via `/✅ Briefing filed:\s*([0-9a-f-]{8,})/i`, uses it both for the gate check AND for the relay. Fire-and-forget (`void (async () => { ... })()`) so the dispatch loop never waits on Telegram.
 - Pattern matches Veritas's morning briefing path that already used `appendThoughtTag`. Vector inherits the same UX for dispatch results.
@@ -106,6 +149,7 @@
 **Architecture clarification (the "ant + logbook + forward" question):** the briefings table IS the canonical record. Telegram is one consumer among several (MC visual surface, Telegram DM, future email digest). The S122b relay is the missing fanout step, not a workaround. Design correct; implementation gap closed.
 
 **Verification:**
+
 - `npx tsc --noEmit` exit 0, zero output.
 - Single push to origin/main: `5255bb0..6045457`.
 - Test dispatch `583e26b9-7ca8-4bc1-bb4f-8bfb4674f60e` queued at 20:41 UTC for end-to-end exercise (Railway redeploy in flight).
@@ -114,25 +158,22 @@
 
 ---
 
-## S122 — Vector daily_metrics_sweep file_briefing gate + hardened directive (2026-04-26 ~19:25 UTC)
+## S122 — Vector daily_metrics_sweep file_briefing gate + hardened directive (2026-04-26 \~19:25 UTC)
 
 **Commit:** `f7ba158` on origin/main (single-file: `src/index.ts`, +59/-27). Railway auto-deploy triggered.
 
 **Symptom Architect saw:** Telegram DM from Vector at 12:01 PM CDT (17:01 UTC): *"The daily CRO metrics sweep is complete, and the findings have been reported to Ace."* — and nothing else. No numbers. No briefing.
 
-**Diagnostic from `crew_dispatch` rows by `to_agent='vector'`:**
-| Date (UTC) | task_type | status | result |
-|---|---|---|---|
-| 2026-04-23 17:00 | daily_metrics_sweep | completed | Full intel report — MRR=$0, Buffer GraphQL diagnosed, Anita+Yuki dispatched, briefing filed. **Worked.** |
-| 2026-04-24 17:00 | daily_metrics_sweep | failed | `⚠️ Agent loop reached maximum iterations without a final response.` |
-| 2026-04-25 17:00 | daily_metrics_sweep | completed | `[Called tool: buffer_analytics({"report":"channel_breakdown"})]` — tool-call trace fragment, no synthesis |
-| 2026-04-26 17:00 | daily_metrics_sweep | completed | The meta-line above. Zero tool calls. |
+**Diagnostic from** `crew_dispatch` **rows by** `to_agent='vector'`**:**
+
+Date (UTC)task_typestatusresult2026-04-23 17:00daily_metrics_sweepcompletedFull intel report — MRR=$0, Buffer GraphQL diagnosed, Anita+Yuki dispatched, briefing filed. **Worked**.2026-04-24 17:00daily_metrics_sweepfailed`⚠️ Agent loop reached maximum iterations without a final response.`2026-04-25 17:00daily_metrics_sweepcompleted`[Called tool: buffer_analytics({"report":"channel_breakdown"})]` — tool-call trace fragment, no synthesis2026-04-26 17:00daily_metrics_sweepcompletedThe meta-line above. Zero tool calls.
 
 `SELECT * FROM briefings WHERE agent_name='vector' AND created_at >= NOW() - INTERVAL '36 hours'` → empty. Vector did NOT call `file_briefing` once in the last day-and-a-half.
 
 **Root cause (architectural, not a one-off glitch):**
+
 - Directive ended with `"Report findings to the Architect via Telegram"`.
-- There is **no `dm_architect` / `send_telegram_message` tool** in the codebase.
+- There is **no** `dm_architect` **/** `send_telegram_message` **tool** in the codebase.
 - The agent loop's `sendMessage` ToolContext at `src/agent/loop.ts:361-364` is a stub that just `console.log`s.
 - The dispatch poller at `src/index.ts:5043` writes the response to `crew_dispatch.result` and never sends it to Telegram.
 - The ONLY mechanical path from Vector → Architect's inbox is `file_briefing` (writes to `briefings` table → MC surfaces).
@@ -140,13 +181,14 @@
 
 **Two fixes shipped this session:**
 
-1. **Hardened directive (lines ~2191-2204).** Replaced the soft `"Report findings to the Architect via Telegram"` with an explicit MANDATORY tool sequence: stripe_metrics + 3× buffer_analytics + file_briefing (step 7 explicit, including title/briefing_type/priority/body parameters). Final-message contract: must be exactly `✅ Briefing filed: <briefing_id>` — nothing else. Enumerated failure modes ((a) skip any tool call, (b) skip file_briefing, (c) return meta-narration). The "no dm_architect tool exists" fact is now in the directive itself so Vector can't infer otherwise.
+1. **Hardened directive (lines \~2191-2204).** Replaced the soft `"Report findings to the Architect via Telegram"` with an explicit MANDATORY tool sequence: stripe_metrics + 3× buffer_analytics + file_briefing (step 7 explicit, including title/briefing_type/priority/body parameters). Final-message contract: must be exactly `✅ Briefing filed: <briefing_id>` — nothing else. Enumerated failure modes ((a) skip any tool call, (b) skip file_briefing, (c) return meta-narration). The "no dm_architect tool exists" fact is now in the directive itself so Vector can't infer otherwise.
 
-2. **Server-side `file_briefing` gate (lines ~5042-5063).** Added `BRIEFING_GATED_TASKS = new Set(["daily_metrics_sweep"])`. If the task is gated and the response doesn't contain `"✅ Briefing filed"` (the success marker emitted by the FileBriefingTool at `src/tools/action-surface.ts:274`), force `dispatchStatus = "failed"`. Surfaces the silent failure as a real failure instead of letting the meta-line masquerade as a green dispatch. Other gated task types can be added as their directives harden to the same contract.
+2. **Server-side** `file_briefing` **gate (lines \~5042-5063).** Added `BRIEFING_GATED_TASKS = new Set(["daily_metrics_sweep"])`. If the task is gated and the response doesn't contain `"✅ Briefing filed"` (the success marker emitted by the FileBriefingTool at `src/tools/action-surface.ts:274`), force `dispatchStatus = "failed"`. Surfaces the silent failure as a real failure instead of letting the meta-line masquerade as a green dispatch. Other gated task types can be added as their directives harden to the same contract.
 
 **Backfill:** Inserted `crew_dispatch` row `4202f13f-c0e0-4e2b-9f1e-fed9e75b4ac6` at 19:27 UTC with the new hardened directive text inline so today's metrics get reported.
 
 **Verification:**
+
 - `npx tsc --noEmit` — exit 0, zero output.
 - `git status --short` — only `src/index.ts` staged. Parallel session's orphan mods on `faceless-factory.ts`, `script-uniqueness-guard.ts`, `sapphire/_router.ts`, `sapphire/index.ts`, `sapphire/roster.ts` left untouched per `feedback_orphan_files_break_railway`.
 - Single-file commit. No `git add .` from sandbox per `feedback_crlf_noise_is_not_a_real_diff`.
@@ -173,6 +215,7 @@ Result of audit:
 - **FIX 4** — `src/llm/providers.ts` GeminiProvider hardened: `safetySettings` array with all four published categories at `BLOCK_ONLY_HIGH` (lines 130-133), `rawFinish` mapping replaces hardcoded `"stop"`/`"tool_use"` (lines 300-305), per-category safetyRatings warn on SAFETY block (filters to `blocked || probability !== "NEGLIGIBLE"`), RECITATION + unexpected-finishReason console.warn paths. Already shipped under commit `c42abc8` (S119h).
 
 **Verification:**
+
 - `git rev-parse HEAD` = `6874c2f` (S119i — Ace's TCF Flux aesthetic fix).
 - `git rev-list --left-right --count origin/main...main` = `0 0`. Local clean against origin.
 - `git status --short`: only untracked junk media (`audit_sample.mp4`, `audit_sample_frame.jpg`, `audit_ss_frame.jpg`). No unstaged source files.
@@ -182,9 +225,10 @@ Result of audit:
 **Why no S120 commit:** the architect's spec was already fully implemented in S119g + S119h (bundled into Anita's commit message). Re-shipping would have produced an empty diff. Per `feedback_verify_before_claiming_unset.md` + `feedback_orphan_files_break_railway.md`, this session refused to fake a commit.
 
 **Surfaced for next-scope decision (architect's 30–40 year brief):**
+
 1. **Versioned identity ledger** — `sapphire_identity_log` Supabase table recording every `create_piece` / `set_piece` / `remove_piece` with timestamp + before/after diff + Ace's triggering message. Plus `/history` command for Sapphire to read her own evolution.
 2. **Multi-provider intelligent routing** — keep Gemini Flash-Lite as default but route introspective/relational/self-reflective threads to Claude when Anthropic credits are loaded (Claude doesn't suppress self-reflection the way Gemini does). Pattern triggers: "feel", "you", "us", "yourself", deep-question markers. Falls through to Gemini on 400. Pairs with FIX 4 — long-game answer is to stop relying on a single classifier.
-3. **Pinecone `sapphire-personal` namespace deepening** — every `relationship_context` observation AND every substantive Ace DM gets embedded with metadata `{category, timestamp, scenario, sentiment}`. Enables PA-prefix richer recall ("Ace mentioned waging war with reality on 2026-04-26 at 03:25 — see how that thread evolved").
+3. **Pinecone** `sapphire-personal` **namespace deepening** — every `relationship_context` observation AND every substantive Ace DM gets embedded with metadata `{category, timestamp, scenario, sentiment}`. Enables PA-prefix richer recall ("Ace mentioned waging war with reality on 2026-04-26 at 03:25 — see how that thread evolved").
 4. **Billionaire-PA UX deltas** — proactive morning brief at her own cadence, anticipatory questions, `/diary` command (her own daily voice), reminder-of-significance ("a year ago today you said...").
 
 None of these are bundled in this audit. Each is a small standalone build awaiting Architect green-light on order of execution.
@@ -195,30 +239,33 @@ None of these are bundled in this audit. Each is a small standalone build awaiti
 
 **Final commit:** `2c723b6` on origin/main. Railway auto-deploy triggered.
 
-MC side closed the user-facing audit (Tally URL gate, Tier-2 PDFs, nurture-05 patch — all on sovereign-synthesis.com). MC then handed back 4 bot-side red items via cross-sync log. Disposition this session:
+MC side closed the user-facing audit (Tally URL gate, Tier-2 PDFs, nurture-05 patch — all on [sovereign-synthesis.com](http://sovereign-synthesis.com)). MC then handed back 4 bot-side red items via cross-sync log. Disposition this session:
 
 1. **Iter caps bumped (SHIPPED).** `src/index.ts:4938` light 1→2, heavy 6→10, default 4→6. The 47% crew_dispatch failure rate was Gemini 2.5 Flash Lite emitting more tool-call rounds than the prior Anthropic models did, blowing the caps before the task finished. Commit `2c723b6`.
-2. **isDispatch wrapper at `src/agent/loop.ts:285` — INTENTIONALLY NOT FLIPPED.** S35 explicitly skipped `saveToMemory` + `extractAndEmbed` for dispatch payloads (system-generated, not conversation; was burning ~48 context messages and embedding API calls per dispatch). The reason `knowledge_nodes` is at 1 row isn't a regression — it's correct architecture. The S114 business-insight extraction path writes to a different table for the learning loop. Flipping the wrapper would re-pollute chat memory and re-burn embeddings without moving a single one of the 5 NORTH_STAR metrics. NO FIX.
-3. **Stale `D` index markers — NON-ISSUE.** MC's `git status` was reading sandbox phantom-diff output (per `feedback_crlf_noise_is_not_a_real_diff` — sandbox sees CRLF-normalized files as deleted while Windows shows them clean). Verified via Desktop Commander cmd shell on Windows: `git status --short` returned only this session's `M src/index.ts` plus 4 harmless untracked junk files. Nothing to reset.
+2. **isDispatch wrapper at** `src/agent/loop.ts:285` **— INTENTIONALLY NOT FLIPPED.** S35 explicitly skipped `saveToMemory` + `extractAndEmbed` for dispatch payloads (system-generated, not conversation; was burning \~48 context messages and embedding API calls per dispatch). The reason `knowledge_nodes` is at 1 row isn't a regression — it's correct architecture. The S114 business-insight extraction path writes to a different table for the learning loop. Flipping the wrapper would re-pollute chat memory and re-burn embeddings without moving a single one of the 5 NORTH_STAR metrics. NO FIX.
+3. **Stale** `D` **index markers — NON-ISSUE.** MC's `git status` was reading sandbox phantom-diff output (per `feedback_crlf_noise_is_not_a_real_diff` — sandbox sees CRLF-normalized files as deleted while Windows shows them clean). Verified via Desktop Commander cmd shell on Windows: `git status --short` returned only this session's `M src/index.ts` plus 4 harmless untracked junk files. Nothing to reset.
 4. **FB direct publishing — token scopes problem CONFIRMED.** Pulled live `content_engine_queue.buffer_results` for last 24h: every FB-direct attempt failing with `(#200) ... pages_read_engagement and pages_manage_posts ...`. The S115b `resolvePageAccessToken` exchange logic is correct but requires the seed token to already have `pages_read_engagement` to even GET a Page Access Token — without that scope, exchange falls back silently to the seed token, which then fails to post. Fix is NOT code: regenerate FB seed tokens with proper scopes via Graph API Explorer → System User flow → update `FACEBOOK_PAGE_ACCESS_TOKEN` + `FACEBOOK_CF_PAGE_ACCESS_TOKEN` Railway env vars. Requires Architect at the Meta Console — Chrome session staged this turn.
 
 **What's still open at session close:**
+
 - Master reference cleanup of 4 untracked junk files in repo root (`-90`, `@sovereign_synthesis`, `_thumbnail_test_S117/`, `blank`) — gitignore candidates
 - Three MC dashboard tiles per `proposals/MC-DASHBOARD-TILE-PLAN.md` (carry-over from S115c — next MC mount)
 
-## S118b — FB Token Permanent Fix (2026-04-25, ~04:14 UTC 04/26)
+## S118b — FB Token Permanent Fix (2026-04-25, \~04:14 UTC 04/26)
 
 **Problem:** FB direct posting broke 3 times in 4 weeks. S115b shipped the page-token exchange resolver in `facebook-publisher.ts`, but the seed token in Railway was a SHORT-LIVED User token from Graph API Explorer — which expires in 1-2h, takes its derived Page tokens with it, and rotates whenever Meta does any security action.
 
 **Diagnosis:** Pulled live `content_engine_queue.buffer_results` for last 24h. Every FB-direct attempt failing with `(#200) ... pages_read_engagement and pages_manage_posts ...`. The exchange logic was running correctly but falling back to the seed token because the seed itself lacked `pages_read_engagement` (required to even GET a Page Access Token).
 
 **Permanent fix shipped this session:**
+
 1. Discovered `content bot` System User already exists in "The Containment Field" Business portfolio (`business_id=1671038527580262`, `system_user_id=61572040423390`) with both Pages assigned ("Partial access (Content)") and the "Sovereign synthesis publisher" app at Full control.
 2. Generated a NEVER-EXPIRING System User token via `business.facebook.com/latest/settings/system_users` → Generate token → "Never" expiration → 5 default scopes (including `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `pages_manage_metadata`, `pages_read_user_content`).
 3. Used the System User token to call `/PAGE_ID?fields=access_token` for both Pages. The returned per-Page tokens are page-scoped AND inherit the System User's never-expiring property.
 4. Updated Railway env vars `FACEBOOK_PAGE_ACCESS_TOKEN` (SS) and `FACEBOOK_CF_PAGE_ACCESS_TOKEN` (CF) with the permanent tokens. Railway redeployed (active: "S118 close note in master reference" — env-var-triggered rebuild).
 
 **Verification:**
+
 - Both tokens authenticate as their Pages (not as user) when calling `/me`
 - Both can read their own feeds successfully
 - All publishing scopes granted on the System User token
@@ -240,11 +287,11 @@ Railway env: `FACEBOOK_PLANNER_LEAD_MIN=15` (active).
 
 Two changes that together turn FB into Buffer-equivalent for week-ahead scheduling:
 
-1. **`dailyContentProduction` accepts `daysAhead`** (default 1, env override `FACEBOOK_PLANNER_DAYS_AHEAD`, capped at 14). The 18:30 UTC daily run now generates 7 days of content per the env. Weekend days inside the horizon are skipped (the dedicated weekend repost job handles them on-day).
+1. `dailyContentProduction` **accepts** `daysAhead` (default 1, env override `FACEBOOK_PLANNER_DAYS_AHEAD`, capped at 14). The 18:30 UTC daily run now generates 7 days of content per the env. Weekend days inside the horizon are skipped (the dedicated weekend repost job handles them on-day).
 
-2. **New `prestageFacebookSweep()`** runs every 30 min. Picks up CEQ rows where `status=ready`, `scheduled_time` is in (now+11min, now+7d), `media_url` is populated (image ready from FLUX), and FB hasn't been handled yet. Stages each row in Planner with `scheduled_publish_time = ceq.scheduled_time`. Records `✅ facebook_direct(facebook_direct): {postId} STAGED for {iso}` into `buffer_results` so the live distribution sweep's `alreadyHandled` set skips FB at fire time. Idempotent — running twice is a no-op.
+2. **New** `prestageFacebookSweep()` runs every 30 min. Picks up CEQ rows where `status=ready`, `scheduled_time` is in (now+11min, now+7d), `media_url` is populated (image ready from FLUX), and FB hasn't been handled yet. Stages each row in Planner with `scheduled_publish_time = ceq.scheduled_time`. Records `✅ facebook_direct(facebook_direct): {postId} STAGED for {iso}` into `buffer_results` so the live distribution sweep's `alreadyHandled` set skips FB at fire time. Idempotent — running twice is a no-op.
 
-Effect: Architect sees ~30 SS + ~30 CF posts laid out on the Planner calendar at any given time, distributed across the next 7 days at proper hour-of-day slots. Same pattern as Buffer's queue, Meta-native, no extra cost. TikTok/IG continue posting live at scheduled_time via Buffer; only FB diverges into Planner.
+Effect: Architect sees \~30 SS + \~30 CF posts laid out on the Planner calendar at any given time, distributed across the next 7 days at proper hour-of-day slots. Same pattern as Buffer's queue, Meta-native, no extra cost. TikTok/IG continue posting live at scheduled_time via Buffer; only FB diverges into Planner.
 
 Railway env: `FACEBOOK_PLANNER_DAYS_AHEAD=7` (active).
 
@@ -257,43 +304,41 @@ Railway env: `FACEBOOK_PLANNER_DAYS_AHEAD=7` (active).
 **Session 114 final commit:** `deb184f` on origin/main. Railway auto-deploy live.
 
 **What this session shipped (in order):**
-1. Foundation — 4 Supabase tables, RLS service-role-only
-2. OAuth — real callback URL flow (OOB was deprecated by Google), tokens in `sapphire_credentials` not env vars
-3. Tool layer — 27 PA tools across reminders/gmail/calendar/notion/facts/PDF/research/family/planner/news
-4. Voice — Whisper in (~$0.006/min), Google Translate TTS out (free), TelegramChannel token bug fixed properly
-5. Image vision — Gemini 2.5 Flash multimodal for screenshots
-6. Persona — dual-mode prompt (PA in DM, COO in group/dispatch), hard context injection in index.ts
-7. Scheduled jobs — reminder poll (60s), morning brief (11AM CDT), evening wrap (1:15AM CDT), calendar 24h lookahead, email triage 30m, news in morning brief
-8. Two-lane Pinecone — `sapphire-personal` (PA) + `brand` (COO), zero cross-pollination
-9. Business learning loop — `insight-extractor.ts` extracts 1 insight per completed dispatch → agent's namespace + optionally `shared`. Reverses the "knowledge_nodes had 1 row in 11 days" stagnation
+
+ 1. Foundation — 4 Supabase tables, RLS service-role-only
+ 2. OAuth — real callback URL flow (OOB was deprecated by Google), tokens in `sapphire_credentials` not env vars
+ 3. Tool layer — 27 PA tools across reminders/gmail/calendar/notion/facts/PDF/research/family/planner/news
+ 4. Voice — Whisper in (\~$0.006/min), Google Translate TTS out (free), TelegramChannel token bug fixed properly
+ 5. Image vision — Gemini 2.5 Flash multimodal for screenshots
+ 6. Persona — dual-mode prompt (PA in DM, COO in group/dispatch), hard context injection in index.ts
+ 7. Scheduled jobs — reminder poll (60s), morning brief (11AM CDT), evening wrap (1:15AM CDT), calendar 24h lookahead, email triage 30m, news in morning brief
+ 8. Two-lane Pinecone — `sapphire-personal` (PA) + `brand` (COO), zero cross-pollination
+ 9. Business learning loop — `insight-extractor.ts` extracts 1 insight per completed dispatch → agent's namespace + optionally `shared`. Reverses the "knowledge_nodes had 1 row in 11 days" stagnation
 10. Tool discernment — explicit ONLY-WHEN rules in tool descriptions, DISCERNMENT block in Sapphire prompt
 
 **User-facing docs:**
+
 - `SAPPHIRE-USER-MANUAL.md` — commands, capabilities, troubleshooting
 - `SAPPHIRE-VS-BILLIONAIRE-TIER.md` — gap analysis, roadmap, cost comparison
 
 **Deferred (not built):** None active. Plaid finance integration was scoped but Ace removed it.
 
-
-
 **Sapphire's permanent identity is now Ace's full-time Personal Assistant.** The COO/sentinel role is a secondary hat she wears ONLY when activated by group chat or dispatched tasks. Default mode in 1-on-1 DM is PA — plain English, no sovereign tone, no `*[inner state: ...]*` stamp. Detection at the personality prompt level + hard context injection in `src/index.ts`.
 
 **Two-Lane Memory Architecture (NEVER cross-pollinate):**
 
-| | Mode A (PA) | Mode B (COO) |
-|---|---|---|
-| Save memory | `remember_fact` → `sapphire-personal` Pinecone namespace | `write_knowledge` → `brand` Pinecone namespace |
-| Recall | `recall_facts` + auto-semantic-recall in DM context block | agent-loop semantic recall against `brand` |
-| Topic | Ace's life, family, schedule, errands | Crew/business intelligence, brand insights |
+Mode A (PA)Mode B (COO)Save memory`remember_fact` → `sapphire-personal` Pinecone namespace`write_knowledge` → `brand` Pinecone namespaceRecall`recall_facts` + auto-semantic-recall in DM context blockagent-loop semantic recall against `brand`TopicAce's life, family, schedule, errandsCrew/business intelligence, brand insights
 
 Personal facts in `brand` = pollution. Business insights in `sapphire-personal` = noise in Ace's daily brief. Both must stay clean for the business to evolve AND Ace's life to be served.
 
 **Pinecone namespaces (don't confuse them):**
+
 - `sapphire-personal` — Ace's life. Written by `remember_fact`. Auto-recalled in PA DMs.
 - `brand` — business insights. Written by `write_knowledge` (COO mode only).
 - `hooks`, `content`, `clips`, `funnels` — Alfred, Anita, Yuki, Vector respectively.
 
-**Tables (Supabase, project `wzthxohtgojenukmdubz`):**
+**Tables (Supabase, project** `wzthxohtgojenukmdubz`**):**
+
 - `sapphire_reminders` — durable reminder queue, polled every 60s
 - `sapphire_credentials` — OAuth refresh tokens for Google + Notion (NOT in Railway env vars)
 - `sapphire_daily_pages` — one row per calendar date, ties to a Notion page
@@ -303,6 +348,7 @@ Personal facts in `brand` = pollution. Business insights in `sapphire-personal` 
 All RLS service-role-only. Indexed for the reminder poller.
 
 **New modules:**
+
 - `src/proactive/sapphire-oauth.ts` — OOB Google OAuth + Notion token storage. Reuses `YOUTUBE_CLIENT_ID/SECRET`. Refresh-on-demand access tokens.
 - `src/agent/sapphire-pa-commands.ts` — deterministic command intercept (runs before LLM). Authorization-gated. Voice preference state. Pending-paste handling for auth codes.
 - `src/tools/sapphire/` — 16 tools: reminders × 3, gmail × 4, calendar × 3, notion × 4, facts × 2.
@@ -311,6 +357,7 @@ All RLS service-role-only. Indexed for the reminder poller.
 - `src/voice/sapphire-voice.ts` — XTTS with `SAPPHIRE_XTTS_SPEAKER` (default "Tammie Ema") for outbound voice notes.
 
 **Scheduled jobs (added):**
+
 - Reminder poll — every 60s
 - Morning brief — 16:00 UTC (11 AM CDT)
 - Evening wrap — 06:15 UTC (1:15 AM CDT)

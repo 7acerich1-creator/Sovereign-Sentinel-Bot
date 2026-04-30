@@ -23,14 +23,25 @@
 
 import type { Tool, ToolDefinition } from "../../types";
 import { config } from "../../config";
+// S125l hotfix2: use the same proven Notion helpers the morning brief uses,
+// so we walk from the integration-shared parent page down to the right hub
+// instead of hitting a hardcoded ID the integration may not have access to.
+import {
+  getNotionParentPageId,
+  getOrCreateHubPage,
+  findOrCreateChildPage,
+} from "./notion";
+import { NotionAppendToPageTool } from "./notion";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-const NOTION_TOKEN = process.env.NOTION_TOKEN;
-const DAILY_TASKS_HUB_ID = "3507db89ef7381b6a21beb07f930a882"; // 📁 Daily Tasks & Goals folder
+// Env var naming matches the rest of the bot
+//   - Notion: NOTION_API_KEY (per src/tools/sapphire/notion.ts)
+//   - ClickUp: CLICKUP_API_TOKEN (per src/tools/sapphire/clickup.ts)
+const NOTION_TOKEN = process.env.NOTION_API_KEY || process.env.NOTION_TOKEN;
 
-const CLICKUP_TOKEN = process.env.CLICKUP_TOKEN;
-const CLICKUP_LIST_ID = process.env.CLICKUP_DEFAULT_LIST_ID || process.env.CLICKUP_LIST_ID;
+const CLICKUP_TOKEN = process.env.CLICKUP_API_TOKEN || process.env.CLICKUP_PERSONAL_TOKEN || process.env.CLICKUP_TOKEN;
+const CLICKUP_LIST_ID = process.env.CLICKUP_LIST_ID || process.env.CLICKUP_DEFAULT_LIST_ID;
 
 // ━━━ HELPERS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -82,7 +93,8 @@ async function createClickUpTask(title: string, description: string, priority: s
         name: title.slice(0, 200),
         description: description.slice(0, 4000),
         priority: cuPriority,
-        status: "to do",
+        // status omitted — ClickUp uses the list's default status. Avoids
+        // status-name mismatch errors across custom lists.
       }),
     });
     if (!res.ok) {
@@ -100,52 +112,43 @@ async function createClickUpTask(title: string, description: string, priority: s
 
 async function findOrCreateTodayPage(): Promise<string | null> {
   if (!NOTION_TOKEN) return null;
-  // Use Ace's CDT date for the title format ("April 29 - Tasks & Goals")
-  const cdtNow = new Date(Date.now() - 5 * 60 * 60 * 1000);
-  const monthName = ["January","February","March","April","May","June","July","August","September","October","November","December"][cdtNow.getUTCMonth()];
-  const dayNum = cdtNow.getUTCDate();
-  const targetTitle = `${monthName} ${dayNum} - Tasks & Goals`;
-
   try {
-    // Search children of the Daily Tasks & Goals hub for one matching today's title
-    const res = await fetch(`https://api.notion.com/v1/blocks/${DAILY_TASKS_HUB_ID}/children?page_size=20`, {
-      headers: {
-        Authorization: `Bearer ${NOTION_TOKEN}`,
-        "Notion-Version": "2022-06-28",
-      },
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as any;
-    const child = (data.results || []).find((b: any) =>
-      b.type === "child_page" && b.child_page?.title === targetTitle,
-    );
-    if (child) return child.id;
-
-    // Not found — create
-    const createRes = await fetch(`https://api.notion.com/v1/pages`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${NOTION_TOKEN}`,
-        "Notion-Version": "2022-06-28",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        parent: { page_id: DAILY_TASKS_HUB_ID },
-        properties: { title: { title: [{ text: { content: targetTitle } }] } },
-      }),
-    });
-    if (!createRes.ok) return null;
-    const created = (await createRes.json()) as any;
-    return created.id;
-  } catch {
+    // Walk from the integration-shared parent (stored in sapphire_known_facts.notion_parent_page_id)
+    // down to the Daily Tasks & Goals hub, then to today's child page. This is the
+    // exact same chain the morning brief uses, so we know the integration has access.
+    const parentPageId = await getNotionParentPageId();
+    if (!parentPageId) {
+      console.warn("[task_orchestrator] notion_parent_page_id not set in sapphire_known_facts");
+      return null;
+    }
+    const hub = await getOrCreateHubPage(parentPageId, "📁 Daily Tasks & Goals");
+    if (!("ok" in hub) || hub.ok !== true) {
+      console.warn(`[task_orchestrator] hub lookup failed: ${(hub as any).error || "unknown"}`);
+      return null;
+    }
+    const cdtNow = new Date(Date.now() - 5 * 60 * 60 * 1000);
+    const monthName = ["January","February","March","April","May","June","July","August","September","October","November","December"][cdtNow.getUTCMonth()];
+    const dayNum = cdtNow.getUTCDate();
+    const targetTitle = `${monthName} ${dayNum} - Tasks & Goals`;
+    const child = await findOrCreateChildPage(hub.pageId, targetTitle);
+    if (!("ok" in child) || child.ok !== true) {
+      console.warn(`[task_orchestrator] child page lookup failed: ${(child as any).error || "unknown"}`);
+      return null;
+    }
+    return child.pageId;
+  } catch (e: any) {
+    console.warn(`[task_orchestrator] findOrCreateTodayPage error: ${e.message}`);
     return null;
   }
 }
 
 async function appendToNotionPage(pageId: string, blocks: any[]): Promise<boolean> {
   if (!NOTION_TOKEN) return false;
+  // Notion accepts both dashed and undashed UUIDs but normalize to undashed
+  // for consistency with the rest of the bot's notion helpers.
+  const cleanId = pageId.replace(/-/g, "");
   try {
-    const res = await fetch(`https://api.notion.com/v1/blocks/${pageId}/children`, {
+    const res = await fetch(`https://api.notion.com/v1/blocks/${cleanId}/children`, {
       method: "PATCH",
       headers: {
         Authorization: `Bearer ${NOTION_TOKEN}`,
@@ -154,8 +157,14 @@ async function appendToNotionPage(pageId: string, blocks: any[]): Promise<boolea
       },
       body: JSON.stringify({ children: blocks }),
     });
-    return res.ok;
-  } catch {
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.warn(`[task_orchestrator] Notion append ${res.status}: ${errText.slice(0, 300)}`);
+      return false;
+    }
+    return true;
+  } catch (e: any) {
+    console.warn(`[task_orchestrator] Notion append error: ${e.message}`);
     return false;
   }
 }
@@ -206,21 +215,29 @@ export class CreateTaskForAceTool implements Tool {
     if (cu) results.clickup = cu;
     else if (CLICKUP_TOKEN && CLICKUP_LIST_ID) results.failures.push("ClickUp create");
 
-    // 3. Notion daily page
+    // 3. Notion daily page (use the proven NotionAppendToPageTool — same path
+    // as the morning brief, which works reliably)
     const notionPageId = await findOrCreateTodayPage();
     if (notionPageId) {
       const noteText = `[${priority.toUpperCase()}] ${title} — ${category}` +
         (cu?.url ? ` (ClickUp: ${cu.url})` : "") +
         (mcId ? ` (MC id: ${mcId.slice(0, 8)})` : "");
-      const ok = await appendToNotionPage(notionPageId, [
-        {
-          object: "block",
-          type: "bulleted_list_item",
-          bulleted_list_item: { rich_text: [{ type: "text", text: { content: noteText.slice(0, 1900) } }] },
-        },
-      ]);
-      if (ok) results.notion = notionPageId;
-      else results.failures.push("Notion append");
+      try {
+        const appendTool = new NotionAppendToPageTool();
+        const appendResult = await appendTool.execute({
+          page_id: notionPageId,
+          body: noteText.slice(0, 1900),
+        });
+        if (typeof appendResult === "string" && appendResult.toLowerCase().includes("error")) {
+          console.warn(`[task_orchestrator] NotionAppendToPageTool error: ${appendResult.slice(0, 200)}`);
+          results.failures.push("Notion append");
+        } else {
+          results.notion = notionPageId;
+        }
+      } catch (e: any) {
+        console.warn(`[task_orchestrator] NotionAppendToPageTool threw: ${e.message}`);
+        results.failures.push("Notion append");
+      }
     } else {
       results.failures.push("Notion daily page lookup");
     }

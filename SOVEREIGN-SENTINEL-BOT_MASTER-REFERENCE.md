@@ -9,6 +9,50 @@
 
 ---
 
+## S125+ — Sequential Rotator wired into YouTube pipeline (2026-04-30)
+
+**Commit:** Pending push — 4 files staged + Supabase migration `add_pipeline_rotation_state` already applied to project `wzthxohtgojenukmdubz`.
+
+**Why:** S125+ failure (visible in Telegram screenshot 2026-04-30 10:13) — `ScriptTooSimilarError` rejected SS candidate at cosine 0.871 against shipped `fv_sovereign_synthesis_resource-dynamics_1777388770163`. Surface diagnosis was "uniqueness threshold too tight." Real diagnosis (Architect pushed back on the patch-the-symptom answer) was that **three parallel variety systems existed and only one was wired**: 14-15 niches per brand × 14-15 angles per niche = ~225 curated unique seeds in `src/data/thesis-angles.ts` were sitting unused for the YouTube pipeline (only `content-engine.ts` imported them for Buffer posts). The YouTube pipeline drove its thesis from Alfred's runtime LLM output (1-2 sentences, voice-bounded). When `extractNarrativeBlueprint`'s JSON parse failed (often, due to thin input), it fell back to a hardcoded "Monad / timeline / frequency" blueprint — the SAME blueprint every time. Every fallback-driven script landed in the same lane. Uniqueness guard caught it three retries deep, after wasted compute and a false sense of "writer voice convergence." Architect's call: stop patching, fix the wiring. The infrastructure was always there, it just wasn't connected.
+
+**Code changes:**
+
+- **NEW: `src/tools/rotation-state.ts`** (275 lines) — pure rotator. `computeSeedAtSlot(brand, slot)` is no-I/O and returns the (niche, angle) pair for any slot. `advanceAndPickSeed(brand)` reads Supabase, computes the seed, atomically PATCHes `total_ships+1` with `last_niche`/`last_angle_id`, returns the seed. `assertRotationCoverage()` verifies all 30 niches have angle pools — called at boot. `previewRotation(brand, start, count)` for diagnostics.
+- **`src/engine/vidrush-orchestrator.ts`** — rotator wired into `isRawIdeaMode` branch of `executeFullPipeline`. When Alfred fires the auto-pipeline, the rotator overrides his thin thesis with the next curated 2-4 sentence angle from `THESIS_ANGLES`. Alfred's thesis is appended below as flavor context, not the primary thesis. Rotator's `niche` overrides any caller-provided niche.
+- **`src/engine/faceless-factory.ts`** — added `BlueprintExtractionFailed` error class. **Killed the silent fallback** in `extractNarrativeBlueprint`. New behavior: parse fails → retry once at `temperature=1.0` → if still fails, throw. The auto-pipeline catches and surfaces via Telegram. The hardcoded "Monad" blueprint is gone.
+- **`src/index.ts`** — dropped Alfred's redundant `recordNicheRun` write at line 5513 (was polluting the LRU window with NULL `aesthetic_style` rows — every shipped video produced one row WITH aesthetic + one row WITHOUT). Faceless factory is now the single source of truth for `niche_cooldown` writes. Added boot-time `assertRotationCoverage()`.
+
+**Schema:**
+
+```sql
+CREATE TABLE pipeline_rotation_state (
+  brand text PRIMARY KEY,
+  total_ships integer NOT NULL DEFAULT 0,
+  last_advanced_at timestamptz NOT NULL DEFAULT now(),
+  last_niche text,
+  last_angle_id text
+);
+```
+
+One row per brand, both seeded at `total_ships=0`. Brands advance independently — SS and TCF each have their own cursor and never block each other. Math:
+
+- `niche_index = total_ships % 15` (wraps every 15 ships)
+- `pass_index = total_ships ÷ 15` (0, 1, 2, ...)
+- `angle_index = pass_index % niche.angle_count` (each niche wraps its own pool)
+
+**Coverage verified:** All 30 niches (15 SS + 15 TCF) have ≥14 angles each. SS = 224 unique seeds, TCF = 225. With orthogonal A/B/C aesthetic rotation: ~675 unique combinations per brand before any seed repeats.
+
+**Simulation results** (`outputs/simulate_rotation.py`, ran 2026-04-30):
+
+- Zero (niche, angle) duplicates across the first 100 ships per brand.
+- First seed repeat at ship **#221 (SS)** and ship **#226 (TCF)** — at 2 ships/day = ~3.6 months before any wrap, ~11 months when factoring in aesthetic rotation.
+
+**Niche cooldown semantics changed:** `niche_cooldown` table is now a pure ledger (audit + `aesthetic_style` for the 30-video performance test). `assertNichePermitted` is defined but was never called in production — confirmed via grep. Sequential rotation IS the cooldown. Architect can run unlimited batch productions back-to-back without "biting" — rotator just keeps advancing.
+
+**Known minor data-hygiene issue (deferred):** Angle id `the-open-office-panopticon` appears in both `containment` and `compliance-machinery` for TCF. Different niche slots, but the seed text appears copy-pasted. Doesn't break the rotator (treats them as distinct slots). Worth deduping in a follow-up.
+
+---
+
 ## ⚡ Session Start Protocol (from `CLAUDE.md`)
 
 1. Read `NORTH_STAR.md` — revenue gate, 5 input metrics, current highest-leverage action.

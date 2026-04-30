@@ -40,12 +40,24 @@ export function shouldAlertOnce(platform: AlertPlatform, brand: AlertBrand): boo
 export function formatAuthAlert(platform: AlertPlatform, brand: AlertBrand, reason: string): string {
   const platformIcon = platform === "instagram" ? "📷" : platform === "facebook" ? "📘" : "🎵";
   const brandLabel = brand === "sovereign_synthesis" ? "Sovereign Synthesis" : "Containment Field";
-  const fixHint =
-    platform === "tiktok"
-      ? `Re-export Cookie-Editor JSON from your ${brand === "sovereign_synthesis" ? "7ace.rich1" : "empoweredservices2013"} TikTok session, POST to /api/browser/import-cookies with account=${brand === "sovereign_synthesis" ? "acerichie" : "tcf"}.`
-      : platform === "instagram"
-      ? `IG token may have expired. Refresh FACEBOOK_PAGE_ACCESS_TOKEN${brand === "containment_field" ? "_CF" : ""} or set INSTAGRAM_ACCESS_TOKEN${brand === "containment_field" ? "_CF" : ""} explicitly.`
-      : `FB Page Access Token expired or revoked. Refresh FACEBOOK${brand === "containment_field" ? "_CF" : ""}_PAGE_ACCESS_TOKEN on Railway.`;
+  // Pick fix hint based on platform AND inferred failure type (proxy/cookie/token)
+  const isProxyIssue = /YTDLP_PROXY|datacenter IP|residential proxy/i.test(reason);
+  const isBrowserIssue = /Browser launch|chromium|puppeteer/i.test(reason);
+
+  let fixHint: string;
+  if (platform === "tiktok") {
+    if (isProxyIssue) {
+      fixHint = `Set YTDLP_PROXY in Railway env to a residential proxy URL (e.g. socks5://user:pass@host:port). TT polling is HALTED until this is fixed — running without it would flag the account.`;
+    } else if (isBrowserIssue) {
+      fixHint = `Chromium binary missing or broken in container. Check Dockerfile.bot installs chromium via apt + verify PUPPETEER_EXECUTABLE_PATH.`;
+    } else {
+      fixHint = `Re-export Cookie-Editor JSON from your ${brand === "sovereign_synthesis" ? "7ace.rich1" : "empoweredservices2013"} TikTok session, POST to /api/browser/import-cookies with account=${brand === "sovereign_synthesis" ? "acerichie" : "tcf"}.`;
+    }
+  } else if (platform === "instagram") {
+    fixHint = `IG token may have expired. Refresh FACEBOOK_PAGE_ACCESS_TOKEN${brand === "containment_field" ? "_CF" : ""} or set INSTAGRAM_ACCESS_TOKEN${brand === "containment_field" ? "_CF" : ""} explicitly.`;
+  } else {
+    fixHint = `FB Page Access Token expired or revoked. Refresh FACEBOOK${brand === "containment_field" ? "_CF" : ""}_PAGE_ACCESS_TOKEN on Railway.`;
+  }
 
   return (
     `${platformIcon} *Yuki ${platform.toUpperCase()} Auth Failure*\n` +

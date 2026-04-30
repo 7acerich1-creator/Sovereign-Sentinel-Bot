@@ -457,10 +457,25 @@ export async function runTikTokReplyPoll(brand: Brand): Promise<{ scanned: numbe
     return stats;
   }
 
+  // S126e: FAIL-CLOSED if no working residential proxy. Running TT polling
+  // from Railway's datacenter IP with cookies extracted from Ace's home
+  // browser is a textbook session-hijack signal. We refuse to run rather
+  // than risk an account flag. Alert via the same authFailure path the
+  // scheduler already DMs on (with 6h dedup so it doesn't spam).
+  const proxyRaw = process.env.YTDLP_PROXY || "";
+  const parsedProxy = proxyRaw ? parseProxyUrl(proxyRaw) : null;
+  if (!parsedProxy) {
+    const reason = proxyRaw
+      ? `YTDLP_PROXY set but unparseable: "${proxyRaw.slice(0, 40)}..." (expected socks5:// or http://)`
+      : "YTDLP_PROXY env var not set — refusing to run TT polling from datacenter IP";
+    console.warn(`[YukiTTReplier] ${brand}: HALTED — ${reason}`);
+    stats.authFailure = reason;
+    return stats;
+  }
+
   // S126e: Use a DEDICATED browser instance with residential proxy applied.
   // Don't reuse the singleton (which other tools might use without proxy —
   // would leak datacenter IP to anything else launched concurrently).
-  // Fail-soft if launch throws.
   let browser: Browser;
   let page: Page;
   try {
@@ -470,6 +485,7 @@ export async function runTikTokReplyPoll(brand: Brand): Promise<{ scanned: numbe
     await applyProxyAuth(page);
   } catch (err: any) {
     console.log(`[YukiTTReplier] ${brand}: browser launch failed (${err.message?.slice(0, 120) || "unknown"}), skipping`);
+    stats.authFailure = `Browser launch failed: ${err.message?.slice(0, 100) || "unknown"}`;
     return stats;
   }
 

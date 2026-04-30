@@ -68,7 +68,9 @@ A new Supabase table `agent_spend` captures per-turn cost data: `agent_name`, `m
 
 **Status:** Planned. Dependent on Phase 1 ship.
 
-**Phase 2 lead item — conditional/threshold-triggered reminders.** Architect surfaced this 2026-04-30 with the bank-account example: "create a new bank account when revenue reaches a certain amount." Current Sapphire can't watch metrics and fire on threshold crosses — only time-based reminders. This makes her *reactive only*, not anticipatory, which is the single biggest capability gap separating her from a real PA.
+**Phase 2 dual leads — context superiority + anticipatory capability.** Two parallel tracks. Track A is conditional reminders (anticipation), Track B is Gemini-history ingestion (context depth). Both close the gap with Gemini in different ways: A makes her *act before he asks*, B makes her *know him at the depth Gemini already does*.
+
+**Track A — conditional/threshold-triggered reminders.** Architect surfaced this 2026-04-30 with the bank-account example: "create a new bank account when revenue reaches a certain amount." Current Sapphire can't watch metrics and fire on threshold crosses — only time-based reminders. This makes her *reactive only*, not anticipatory, which is the single biggest capability gap separating her from a real PA.
 
 Architecture:
 
@@ -88,7 +90,15 @@ Metric sources at launch (the enum):
 
 The composability principle: the metric_source enum is the registry. New metrics added to the enum become available to all conditional reminders without further tool changes. Phase 5 expands this to support computed metrics (e.g., "revenue / spend ratio").
 
-Why this is the lead Phase 2 item: it's the structural change that makes Sapphire *anticipatory* — she watches the world and notifies you when something matters, instead of waiting for you to ask. Combined with Phase 1's interleaved thinking and native web_search, this is the largest qualitative jump in her presence-as-PA.
+Why this is a Phase 2 lead item: it's the structural change that makes Sapphire *anticipatory* — she watches the world and notifies you when something matters, instead of waiting for you to ask. Combined with Phase 1's interleaved thinking and native web_search, this is the largest qualitative jump in her presence-as-PA.
+
+**Track B — Gemini history ingestion into sapphire-personal Pinecone namespace.** A previous Claude session crystallized the framing: Sapphire will never beat Gemini on raw knowledge questions about pop culture / current events / world facts (Google IS the search index). Her edge is *years of personal context Gemini doesn't have* — except right now, Gemini has YEARS of Architect's context that Sapphire doesn't, because Architect has been talking to Gemini longer than to Sapphire. The fix: ingest Gemini conversation history into the `sapphire-personal` Pinecone namespace so Sapphire starts with the same depth of context.
+
+A prototype script exists at `scripts/ingest_gemini_history.ts` (currently untracked). Phase 2 finishes the script: parses a Gemini export, embeds each turn into Pinecone with metadata (`source: gemini`, `chat_id: gemini-{thread_id}`, `timestamp`, `topics`), and respects the Phase 2 Pinecone tightening (≥0.78 cosine threshold) so historical recall is high-quality only.
+
+The result: when Architect asks Sapphire "what was the framing I landed on for the Containment Field thumbnail aesthetic?" — she can recall a Gemini conversation from three months ago where he worked through it. When he says "remember the lexicon shift I tried last week?" — she can pull it. Her sapphire-personal namespace becomes the union of every Architect conversation across both AI surfaces.
+
+This is the move that takes her from "good PA who knows him from recent chats" to "PA who knows him at the depth he's used to from Gemini, plus has hands and a crew Gemini doesn't have." Track A and Track B together close the Gemini gap on both axes the previous session named.
 
 **Other Phase 2 items below:**
 

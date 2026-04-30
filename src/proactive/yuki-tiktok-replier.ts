@@ -360,8 +360,18 @@ export async function runTikTokReplyPoll(brand: Brand): Promise<{ scanned: numbe
     return stats;
   }
 
-  const browser = await getBrowser();
-  const page = await browser.newPage();
+  // Defensive launch — Chromium may not be installed in the production container
+  // (Dockerfile.bot historically had PUPPETEER_SKIP_DOWNLOAD=true + no apt install
+  // for chromium). Fail soft so this worker doesn't spam errors every 30min.
+  let browser;
+  let page;
+  try {
+    browser = await getBrowser();
+    page = await browser.newPage();
+  } catch (err: any) {
+    console.log(`[YukiTTReplier] ${brand}: browser unavailable (${err.message?.slice(0, 120) || "unknown"}), skipping. Fix Dockerfile or install Chromium to activate.`);
+    return stats;
+  }
 
   try {
     await page.setUserAgent(

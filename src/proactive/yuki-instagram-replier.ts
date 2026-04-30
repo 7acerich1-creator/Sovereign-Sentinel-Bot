@@ -76,17 +76,95 @@ interface IGCredentials {
   businessId: string;
 }
 
-function getCredentials(brand: Brand): IGCredentials | null {
-  if (brand === "containment_field") {
-    const token = process.env.INSTAGRAM_ACCESS_TOKEN_CF;
-    const businessId = process.env.INSTAGRAM_BUSINESS_ID_CF;
-    if (!token || !businessId) return null;
-    return { token, businessId };
+// Cache per-brand auto-discovered credentials so we don't re-call Graph API every poll.
+const credCache: Partial<Record<Brand, IGCredentials | null>> = {};
+const CRED_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const credCacheTimestamps: Partial<Record<Brand, number>> = {};
+
+/**
+ * Resolve IG credentials with progressive fallback so Ace doesn't have to set
+ * every env var manually. Resolution order per brand:
+ *   1. Explicit INSTAGRAM_ACCESS_TOKEN + INSTAGRAM_BUSINESS_ID (per-brand variants)
+ *   2. INSTAGRAM_ACCESS_TOKEN explicit but BUSINESS_ID missing → derive via Graph API
+ *      from the FACEBOOK_PAGE_ID's `instagram_business_account` field.
+ *   3. No explicit IG vars → fall back to FACEBOOK_PAGE_ACCESS_TOKEN
+ *      (Page tokens have IG permissions when the Page is linked to an IG account)
+ *      and derive BUSINESS_ID from FACEBOOK_PAGE_ID.
+ *   4. No FB token → fall back to META_SYSTEM_USER_TOKEN (master Meta token).
+ *   5. Nothing → return null, worker logs + skips.
+ */
+async function getCredentials(brand: Brand): Promise<IGCredentials | null> {
+  const cached = credCache[brand];
+  const cachedAt = credCacheTimestamps[brand] || 0;
+  if (cached !== undefined && Date.now() - cachedAt < CRED_CACHE_TTL_MS) {
+    return cached;
   }
-  const token = process.env.INSTAGRAM_ACCESS_TOKEN;
-  const businessId = process.env.INSTAGRAM_BUSINESS_ID;
-  if (!token || !businessId) return null;
-  return { token, businessId };
+
+  // Path 1: explicit per-brand vars
+  const explicitToken = brand === "containment_field"
+    ? process.env.INSTAGRAM_ACCESS_TOKEN_CF
+    : process.env.INSTAGRAM_ACCESS_TOKEN;
+  const explicitBusinessId = brand === "containment_field"
+    ? process.env.INSTAGRAM_BUSINESS_ID_CF
+    : process.env.INSTAGRAM_BUSINESS_ID;
+  if (explicitToken && explicitBusinessId) {
+    const creds = { token: explicitToken, businessId: explicitBusinessId };
+    credCache[brand] = creds;
+    credCacheTimestamps[brand] = Date.now();
+    return creds;
+  }
+
+  // Determine which token + page ID to use for Graph API auto-discovery.
+  // Priority: explicit IG token > FB Page token > Meta System User token.
+  let token = explicitToken || null;
+  const pageId = brand === "containment_field"
+    ? (process.env.FACEBOOK_CF_PAGE_ID || null)
+    : (process.env.FACEBOOK_PAGE_ID || null);
+  const fbToken = brand === "containment_field"
+    ? (process.env.FACEBOOK_CF_PAGE_ACCESS_TOKEN || null)
+    : (process.env.FACEBOOK_PAGE_ACCESS_TOKEN || null);
+  const metaSystemToken = process.env.META_SYSTEM_USER_TOKEN || null;
+
+  if (!token) token = fbToken;
+  if (!token) token = metaSystemToken;
+
+  if (!token || !pageId) {
+    console.log(`[YukiIGReplier] ${brand}: no token+pageId combination available, skipping`);
+    credCache[brand] = null;
+    credCacheTimestamps[brand] = Date.now();
+    return null;
+  }
+
+  // Discover IG Business ID via Graph API:
+  //   GET /{page-id}?fields=instagram_business_account
+  try {
+    const url = `https://graph.facebook.com/v21.0/${pageId}?fields=instagram_business_account&access_token=${token}`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      console.log(`[YukiIGReplier] ${brand}: IG discovery ${resp.status} — ${(await resp.text()).slice(0, 200)}`);
+      credCache[brand] = null;
+      credCacheTimestamps[brand] = Date.now();
+      return null;
+    }
+    const data = (await resp.json()) as { instagram_business_account?: { id: string } };
+    if (!data.instagram_business_account?.id) {
+      console.log(`[YukiIGReplier] ${brand}: page ${pageId} has no linked IG Business Account`);
+      credCache[brand] = null;
+      credCacheTimestamps[brand] = Date.now();
+      return null;
+    }
+    const businessId = data.instagram_business_account.id;
+    console.log(`[YukiIGReplier] ${brand}: auto-discovered IG Business ID ${businessId} from FB Page ${pageId}`);
+    const creds = { token, businessId };
+    credCache[brand] = creds;
+    credCacheTimestamps[brand] = Date.now();
+    return creds;
+  } catch (err: any) {
+    console.error(`[YukiIGReplier] ${brand}: IG discovery threw ${err.message}`);
+    credCache[brand] = null;
+    credCacheTimestamps[brand] = Date.now();
+    return null;
+  }
 }
 
 interface IGMedia {
@@ -250,10 +328,9 @@ async function decideReply(comment: IGComment, mediaCaption: string): Promise<Re
 export async function runInstagramReplyPoll(brand: Brand): Promise<{ scanned: number; replied: number; skipped: number; errors: number }> {
   const stats = { scanned: 0, replied: 0, skipped: 0, errors: 0 };
 
-  const creds = getCredentials(brand);
+  const creds = await getCredentials(brand);
   if (!creds) {
-    console.log(`[YukiIGReplier] ${brand}: no INSTAGRAM_ACCESS_TOKEN${brand === "containment_field" ? "_CF" : ""} configured, skipping`);
-    return stats;
+    return stats; // getCredentials already logs the reason
   }
 
   const media = await fetchRecentMedia(creds);

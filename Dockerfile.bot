@@ -25,12 +25,23 @@ RUN ./node_modules/.bin/tsc && cp src/data/*.json dist/data/
 # (exit 137). Only chromium remains as an apt install.
 FROM nikolaik/python-nodejs:python3.11-nodejs20-slim
 
-# NOTE: Chromium apt-install was removed — Railway's Singapore builder cannot
-# unpack the 150+ transitive debs without exit 137 OOM. puppeteer-core is loaded
-# lazily in src/tools/browser.ts via `await import()` so the bot starts fine
-# without chromium; only TikTok/Instagram direct browser uploads will fail at
-# runtime (not on the critical dispatch / LIGHT MODE path). Revisit in Session 45
-# by either using a puppeteer base image or downloading chromium via @puppeteer/browsers.
+# S126 (2026-04-30) — Chromium ACTUALLY installed now, not just gestured at.
+# Previously the Dockerfile set PUPPETEER_EXECUTABLE_PATH to a path that
+# didn't exist (/usr/bin/chromium) — browser automation was silently broken
+# for IG/TT/Threads uploads + Yuki TT reply worker. Fix: install chromium
+# in production stage via apt with the minimal-deps flag to avoid the
+# Singapore builder OOM that killed prior attempts. If this still OOMs,
+# fall back to copying chrome from the builder stage via @puppeteer/browsers.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      chromium \
+      fonts-liberation \
+      ca-certificates \
+      libnss3 \
+      libxss1 \
+      libasound2 \
+      libatk-bridge2.0-0 \
+      libgtk-3-0 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Static ffmpeg + ffprobe binaries from the mwader stage (avoids apt OOM)
 COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg

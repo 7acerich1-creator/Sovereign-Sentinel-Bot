@@ -83,11 +83,16 @@ type SingleSection = (typeof SINGLE_SECTIONS)[number];
 type MultiSection = (typeof MULTI_SECTIONS)[number];
 export type SectionName = SingleSection | MultiSection;
 
+// S125 (2026-04-29) — flipped from the parallel-system "executive_pa / cold
+// executor" defaults back to the longtime-handler tone (Ron-from-Jay-Kelly).
+// The cold pieces (executive_pa, strategic_partner, high_agency_execution,
+// results_only) are still in the library for explicit selection but no longer
+// the fallback when the DB is empty.
 const DEFAULTS: Record<string, string> = {
-  active_persona: "executive_pa",
-  active_relationship: "strategic_partner",
-  active_goals: "high_agency_execution",
-  active_format: "results_only",
+  active_persona: "longtime_handler",
+  active_relationship: "trusted_assistant",
+  active_goals: "be_present_useful",
+  active_format: "warm_concise",
   active_scenario: "default",
   active_extras: "discernment,memory_routing,what_you_can_do,family_first,no_loops,no_tool_retry_loops,complex_task_protocol",
   active_emotions: "focused",
@@ -197,18 +202,26 @@ export async function rotateSpice(): Promise<{ current: string; next: string }> 
 
 // ── Time-aware piece auto-selection (only when active is the default) ─────
 
+// S125 (2026-04-29) — Ace works nights. His day starts ~2pm CDT and he sleeps
+// ~6-8am CDT. The original 9-to-5 mapping was inverted: morning_focus was
+// firing while he was going to bed and after_hours was firing while he was
+// working. Mapping below uses his actual rhythm; see user_schedule memory.
+//   14:00–17:00 CDT = his morning  -> morning_focus
+//   17:00–01:00 CDT = main awake   -> longtime_handler (the warm default)
+//   01:00–14:00 CDT = late night + asleep -> after_hours (quiet, unobtrusive)
 function autoPersonaForTime(currentActive: string): string {
   if (currentActive !== DEFAULTS.active_persona) return currentActive;
   const cdtHour = (new Date().getUTCHours() - 5 + 24) % 24;
-  if (cdtHour >= 23 || cdtHour < 5) return "after_hours";
-  if (cdtHour >= 6 && cdtHour < 10) return "morning_focus";
-  return "warm_pa";
+  if (cdtHour >= 14 && cdtHour < 17) return "morning_focus";
+  if (cdtHour >= 17 || cdtHour < 1) return "longtime_handler";
+  return "after_hours";
 }
 
 function autoScenarioForTime(currentActive: string): string {
   if (currentActive !== DEFAULTS.active_scenario) return currentActive;
   const cdtHour = (new Date().getUTCHours() - 5 + 24) % 24;
-  if (cdtHour >= 6 && cdtHour < 11) return "morning_brief";
+  // 2pm-5pm CDT = Ace's actual morning window
+  if (cdtHour >= 14 && cdtHour < 17) return "morning_brief";
   return "default";
 }
 

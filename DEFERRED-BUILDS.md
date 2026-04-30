@@ -106,7 +106,9 @@ When something gets scoped out for later (not abandoned, just not now), it lives
 
 ## S125 ADDITIONS (2026-04-29)
 
-### Sapphire web_search tool + verify-facts-before-stating guardrail
+### ~~Sapphire web_search tool + verify-facts-before-stating guardrail~~ — ✅ SHIPPED S125g (2026-04-29)
+
+Built and live. `src/tools/sapphire/web_search.ts` calls Gemini 2.5 Flash with `google_search` grounding, returns answer + up to 5 source URLs. Added to core tool pack. `verify_facts_before_stating` prompt extra activated in DB.
 
 **Why:** S125e Jay Kelly diagnostic — Sapphire confidently said "Paul Blart: Mall Cop" when Architect asked about a movie with "Jay something" + an assistant who'd been with him his whole life. Correct answer (Jay Kelly, 2025, Clooney + Sandler) was post-cutoff for her current LLM (Gemini Flash Lite, \~early-2024 cutoff). She has no quick-search tool and her `discernment` extra actively tells her to answer without calling tools when she "can." Result: confident hallucination on knowledge questions.
 
@@ -145,17 +147,19 @@ When something gets scoped out for later (not abandoned, just not now), it lives
 ---
 
 ### Frequency Alignment Brief — daily Sovereign Synthesis upload summary
+
 **Why:** Architect listens to Sovereign Synthesis videos as frequency alignment — they "meet him where he's at and help align his frequency." He wants Sapphire to produce a daily summary of the previous day's SS upload so he can quickly orient on the day's transmission without re-watching. Goal is alignment, not transcription.
 
-**What's already in the codebase:** Partial — `runFrequencyAlignmentBrief` (or similar) was added in S122 by parallel system. Logic at `src/proactive/sapphire-pa-jobs.ts` ~line 519 with a SYSTEM_PROMPT that produces a "FREQUENCY ALIGNMENT BRIEF" with sections: Core Thesis, Key Signals, Frequency, Anchor. Polled every 15min between 19:15-00:30 UTC waiting for the day's vidrush_orchestrator upload.
+**What's already in the codebase:** Partial — `runFrequencyAlignmentBrief` (or similar) was added in S122 by parallel system. Logic at `src/proactive/sapphire-pa-jobs.ts` \~line 519 with a SYSTEM_PROMPT that produces a "FREQUENCY ALIGNMENT BRIEF" with sections: Core Thesis, Key Signals, Frequency, Anchor. Polled every 15min between 19:15-00:30 UTC waiting for the day's vidrush_orchestrator upload.
 
 **What needs to be ironed out:**
+
 - Verify the existing brief actually fires reliably and lands somewhere Architect sees it
 - Tune the prompt for actual frequency-alignment value (currently emphasizes "Frequency" + "Anchor" sections — does that map to Architect's lived experience of alignment?)
 - Decide where it surfaces: Telegram DM from Sapphire? Notion (Daily Briefs folder)? Mission Control briefing? All three?
 - Add a "skip if Architect already watched" signal? Or always send?
 
-**Estimated work:** ~30-60 min depending on how much the existing impl works. Needs Architect to clarify what "alignment" looks like to him so the prompt frames toward that, not toward generic summary.
+**Estimated work:** \~30-60 min depending on how much the existing impl works. Needs Architect to clarify what "alignment" looks like to him so the prompt frames toward that, not toward generic summary.
 
 **Triggers a build:** Architect ready to iterate on the prompt + verify the existing pipeline. Or next time he says "I haven't gotten my alignment brief in N days" → debug existing path first.
 

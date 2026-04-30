@@ -20,6 +20,8 @@ import { ReadTeamRosterTool } from "./roster";
 import { YoutubeTranscriptTool } from "./youtube";
 // S125c — Mission Control surface tools so "send to MC" stops routing to Notion
 import { FileBriefingTool, ProposeTaskTool } from "../action-surface";
+// S125g — Web search grounding so she stops hallucinating facts (Jay Kelly fix)
+import { WebSearchTool } from "./web_search";
 import type { Tool } from "../../types";
 
 export {
@@ -96,6 +98,7 @@ export function buildSapphireCoreTools(): Tool[] {
     new RecallFactsTool(),
     new FileBriefingTool("sapphire"),
     new ProposeTaskTool("sapphire"),
+    new WebSearchTool(),
   ];
 }
 

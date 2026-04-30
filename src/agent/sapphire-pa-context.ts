@@ -114,11 +114,19 @@ export async function buildPersonalContextPrefix(userMessage = ""): Promise<stri
   // This is what makes her feel like a real assistant: "what was the gift budget"
   // surfaces "girls_birthday_parties: $25" because of similarity, not exact match.
   // Only fires when the user's message is substantive (>10 chars).
+  //
+  // S125+ Phase 2 (2026-04-30): TIGHTENED. Was (6, 0.55) — the "wider net" was
+  // actively polluting Sapphire's context. Smoke test post-Phase-1 ship surfaced
+  // a turn where "is there a YouTube video showing this [briefcase]?" injected
+  // three unrelated past Ace conversations about *uploading videos and content
+  // strategy* (all sim 0.63), and Sapphire pattern-matched the polluted memory
+  // instead of the actual briefcase context. New threshold 0.78 + cap 3 matches
+  // filters out borderline-relevant cross-domain recalls. If a real-world
+  // recall regresses, raise count to 4 before lowering threshold.
   if (userMessage && userMessage.length > 10) {
     try {
       const { recallSapphireFacts } = await import("../tools/sapphire/_pinecone");
-      // Wider net (6, lower min) — pulls from sapphire-personal + sapphire (legacy) + shared + brand
-      const matches = await recallSapphireFacts(userMessage, 6, 0.55);
+      const matches = await recallSapphireFacts(userMessage, 3, 0.78);
       if (matches.length > 0) {
         const lines = matches.map((m) => {
           const value = m.value.length > 240 ? m.value.slice(0, 240) + "…" : m.value;

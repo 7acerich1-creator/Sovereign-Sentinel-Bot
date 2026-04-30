@@ -2940,7 +2940,9 @@ async function main() {
           const ss = await runHookDrops("sovereign_synthesis");
           const cf = await runHookDrops("containment_field");
           if (defaultChatId && telegram) {
-            await telegram.sendMessage(defaultChatId,
+            // S126c: route Yuki's own activity DMs through Yuki's bot, not Veritas
+            const sender = agentLoops.get("yuki")?.channel ?? telegram;
+            await sender.sendMessage(defaultChatId,
               `🟡 *Yuki Hook Drops — 9 AM CDT*\n\n` +
               `*Sovereign Synthesis:* ${ss.posted} posted (${ss.attempted} attempted, ${ss.errors} errors)\n` +
               `*Containment Field:* ${cf.posted} posted (${cf.attempted} attempted, ${cf.errors} errors)`,
@@ -2971,7 +2973,9 @@ async function main() {
           const ss = await runHookDrops("sovereign_synthesis");
           const cf = await runHookDrops("containment_field");
           if (defaultChatId && telegram) {
-            await telegram.sendMessage(defaultChatId,
+            // S126c: route Yuki's own activity DMs through Yuki's bot, not Veritas
+            const sender = agentLoops.get("yuki")?.channel ?? telegram;
+            await sender.sendMessage(defaultChatId,
               `🟡 *Yuki Hook Drops — 5 PM CDT*\n\n` +
               `*Sovereign Synthesis:* ${ss.posted} posted (${ss.attempted} attempted, ${ss.errors} errors)\n` +
               `*Containment Field:* ${cf.posted} posted (${cf.attempted} attempted, ${cf.errors} errors)`,
@@ -3027,7 +3031,9 @@ async function main() {
           const ss = await runBlueskyHookDrops("sovereign_synthesis");
           const cf = await runBlueskyHookDrops("containment_field");
           if (defaultChatId && telegram) {
-            await telegram.sendMessage(defaultChatId,
+            // S126c: route Yuki's own activity DMs through Yuki's bot, not Veritas
+            const sender = agentLoops.get("yuki")?.channel ?? telegram;
+            await sender.sendMessage(defaultChatId,
               `🦋 *Yuki Bluesky Hook Drops — 9:30 AM CDT*\n\n` +
               `*Sovereign Synthesis:* ${ss.posted} posted (${ss.attempted} attempted, ${ss.skipped} skipped, ${ss.errors} errors)\n` +
               `*Containment Field:* ${cf.posted} posted (${cf.attempted} attempted, ${cf.skipped} skipped, ${cf.errors} errors)`,
@@ -3058,7 +3064,9 @@ async function main() {
           const ss = await runBlueskyHookDrops("sovereign_synthesis");
           const cf = await runBlueskyHookDrops("containment_field");
           if (defaultChatId && telegram) {
-            await telegram.sendMessage(defaultChatId,
+            // S126c: route Yuki's own activity DMs through Yuki's bot, not Veritas
+            const sender = agentLoops.get("yuki")?.channel ?? telegram;
+            await sender.sendMessage(defaultChatId,
               `🦋 *Yuki Bluesky Hook Drops — 5:30 PM CDT*\n\n` +
               `*Sovereign Synthesis:* ${ss.posted} posted (${ss.attempted} attempted, ${ss.skipped} skipped, ${ss.errors} errors)\n` +
               `*Containment Field:* ${cf.posted} posted (${cf.attempted} attempted, ${cf.skipped} skipped, ${cf.errors} errors)`,

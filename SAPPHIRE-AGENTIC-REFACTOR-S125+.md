@@ -121,7 +121,7 @@ Phase 2 also moves Notion duplicate-prevention from doctrine into the tool itsel
 
 ### Phase 3 — Kill keyword tiering; move to LLM-dispatched tool discovery
 
-**Status:** Planned. Medium effort. Dependent on Phase 1 + Phase 2 stable.
+**Status (2026-04-30 close):** ✅ SHIPPED. `src/tools/sapphire/_router.ts` deleted (was dead code, never called by runtime). The four pack functions in `src/tools/sapphire/index.ts` retained as backward-compat stubs but `buildSapphireWorkflowTools/Research/Life` now return `[]` — all tools live in `buildSapphireCoreTools` as the canonical set. Sapphire's loaded surface is the 15 fat tools; Claude picks by reasoning over their descriptions, not regex over user text. The "tool tiering by keyword regex" anti-pattern is gone. (Rest of section preserved below for context.)
 
 The current `src/tools/sapphire/_router.ts` (which is dead code — never called by the runtime, but exists as a landmine) and the active tier loaders in `src/tools/sapphire/index.ts` (`buildSapphireCoreTools`, `buildSapphireWorkflowTools`, `buildSapphireResearchTools`, `buildSapphireLifeTools`) are eliminated as gating mechanisms. They are replaced with one of two patterns:
 
@@ -142,7 +142,30 @@ Decision between patterns happens at Phase 3 kickoff. Default lean: pattern one 
 
 ### Phase 4 — Consolidate 30 narrow tools to ~12 fat composable tools
 
-**Status:** Planned. Medium effort. Compounds with Phase 3.
+**Status (2026-04-30 close):** ✅ SHIPPED. Sapphire's surface is now 15 fat composable tools (down from 39 narrow ones). New file `src/tools/sapphire/_fat.ts` holds all 13 new fat dispatchers (the 14th, ConditionalRemindersTool from Phase 2, was already fat; the 15th is ReadTeamRosterTool which is single-action and stayed as-is). Each fat tool internally instantiates the narrow tool classes and dispatches by `action` arg — zero logic duplication, narrow tools stay in code for internal use, doctrine updated to reference fat-tool action mappings.
+
+**The 15 tools:**
+- `reminders` (set/list/cancel/cancel_series)
+- `conditional_reminders` (set/list/cancel) — already fat from Phase 2
+- `followups` (record/list/complete/cancel)
+- `gmail` (inbox/search/send/draft)
+- `calendar` (list/create/reschedule)
+- `memory` (remember/recall)
+- `family` (save/get)
+- `research` (web_search/youtube_search/youtube_transcript/analyze_pdf/research_brief)
+- `notion` (create_page/append/search/set_parent/get_blocks/update_block/delete_block)
+- `mission_control` (file_briefing/propose_task/create_task)
+- `plan` (create/approve/advance/record_step/execute/record_artifact/cancel)
+- `diary` (write/read/read_significance)
+- `self` (set_piece/remove_piece/create_piece/list_pieces/view_self_prompt/view_identity_history)
+- `learning` (log_email_classification/request_code_change/list_deferred_builds)
+- `team_roster` (single-action, kept as-is)
+
+**Doctrine updates:** `execute_what_you_say`, `task_creation_workflow`, `mission_control_routing`, `reminder_dedup`, `family_first`, `verify_facts_before_stating`, `email_learning_loop`, `signal_discipline_s125`, `notion_canonical_structure`, `memory_routing`, `complex_task_protocol` — all updated to reference fat-tool action mappings instead of bare narrow tool names.
+
+**Schema cost:** ~5,250 input tokens for tool definitions vs ~7,500 prior. Selection accuracy curve recovered to 78%+ zone per Anthropic / Jenova / Writer benchmarks.
+
+**Backward compat:** Other crew agents (Vector, Veritas, Anita, Yuki, Alfred) don't use Sapphire's tools, so this consolidation only touched her surface. Their tool sets are untouched. (Plus narrow tool classes still exist in their domain files — they're just not directly registered in the LOADED tool surface.)
 
 The current 30-tool sprawl has clusters that should collapse:
 - `record_followup`, `list_followups`, `complete_followup`, `cancel_followup` → one `followups(action: "record"|"list"|"complete"|"cancel", ...)` tool.

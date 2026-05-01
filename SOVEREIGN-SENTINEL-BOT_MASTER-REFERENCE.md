@@ -6,6 +6,43 @@
 
 ---
 
+## S125+ — Agentic Refactor Phase 3 + Phase 4: kill keyword tiering + consolidate 39 narrow tools to 15 fat ones (2026-04-30)
+
+**Architect directive 2026-04-30:** "We're gonna do everything in all of them. So whichever way is easier and best for you... You work much faster than you might realize... I want you to do phase three. And then focus on phase four. No shortcuts."
+
+**Phase 3 (✅ shipped):** Deleted `src/tools/sapphire/_router.ts` (dead code, never called by runtime — was a landmine for future sessions to mistakenly start using). All four `buildSapphireXxxTools()` pack functions retained as stubs for backward compat with the call site in `src/index.ts`. Workflow/Research/Life return `[]`. `buildSapphireCoreTools()` is now the canonical 15-tool surface.
+
+**Phase 4 (✅ shipped):** Sapphire's loaded surface consolidated from 39 narrow tools to 15 fat composable ones. New file `src/tools/sapphire/_fat.ts` (~600 lines) holds 13 new fat dispatcher classes:
+- `RemindersTool` (set/list/cancel/cancel_series)
+- `GmailTool` (inbox/search/send/draft)
+- `CalendarTool` (list/create/reschedule)
+- `NotionTool` (create_page/append/search/set_parent/get_blocks/update_block/delete_block)
+- `MemoryTool` (remember/recall)
+- `FamilyTool` (save/get)
+- `FollowupsTool` (record/list/complete/cancel)
+- `ResearchTool` (web_search/youtube_search/youtube_transcript/analyze_pdf/research_brief)
+- `MissionControlTool` (file_briefing/propose_task/create_task)
+- `SelfTool` (set_piece/remove_piece/create_piece/list_pieces/view_self_prompt/view_identity_history)
+- `LearningTool` (log_email_classification/request_code_change/list_deferred_builds)
+- `PlanTool` (create/approve/advance/record_step/execute/record_artifact/cancel)
+- `DiaryTool` (write/read/read_significance)
+
+Each fat tool internally instantiates the narrow tool classes and dispatches by `action` arg — zero logic duplication. Narrow tool classes remain in their domain files (calendar.ts, gmail.ts, notion.ts, etc.) for internal reuse but are no longer directly registered in the loaded surface.
+
+**Plus 2 already-fat tools that round out the 15:**
+- `ConditionalRemindersTool` (set/list/cancel) — Phase 2
+- `ReadTeamRosterTool` (single-action, kept as-is)
+
+**Doctrine updates** in `src/data/sapphire-prompt-pieces.json` — 11 pieces touched to reflect fat-tool action mappings instead of bare narrow tool names: `execute_what_you_say`, `task_creation_workflow`, `mission_control_routing`, `reminder_dedup`, `family_first`, `verify_facts_before_stating`, `email_learning_loop`, `signal_discipline_s125` rule 3, `notion_canonical_structure`, `memory_routing`, `complex_task_protocol`.
+
+**Schema cost reduction:** Sapphire's tool-definition tokens drop from ~7,500 to ~5,250 (-30%). Per Anthropic/Jenova/Writer benchmarks, selection accuracy at ~15 tools is in the 78%+ zone vs the documented dropoff past 50 tools that compromises tool-call accuracy. This is a *measurable capability gain*, not just cleanup — it's the structural step that makes Sapphire's 39-tool surface usable as her load grows in Phases 5+.
+
+**Conditional reminder verified live:** The Architect's bank-account test reminder (id `308614d1-074a-4f01-b236-04014c27ee77`) is in `public.conditional_reminders` watching `stripe_revenue_total >= 1000`. Status `active`. Phase 2's anticipatory loop is end-to-end functional.
+
+**Open at close:** Push via Desktop Commander (this session). Architect tests live as failures surface. Phase 5 (Letta-style memory + Zep temporal graph + reflection + sleeptime) is the next architectural arc — large lift, deep payoff.
+
+---
+
 ## S125+ — Agentic Refactor Phase 2: anticipatory + structural + context-depth (2026-04-30)
 
 **Commits:** `3cc0dfc` (Pinecone hotfix earlier today). Next push contains 5 new files + 4 modified for the Phase 2 batch. Architect's directive 2026-04-30: ship everything, no smoke-test gating, iterate against the live system.

@@ -551,20 +551,24 @@ def _image_to_branded_video(
         )
         # S125+ — DYNAMIC FONT SIZING based on total char count so the
         # entire hook fits inside the frame instead of getting clipped at
-        # word 18. Tiers chosen for 1080×1080 canvas with safe margins:
-        #   ≤ 80  chars  → fontsize 56, 28 chars/line, max 4 lines
-        #   ≤ 200 chars  → fontsize 44, 36 chars/line, max 6 lines
-        #   ≤ 400 chars  → fontsize 36, 44 chars/line, max 8 lines
-        #   > 400 chars  → fontsize 28, 56 chars/line, max 10 lines
+        # word 18. Tiers chosen for 1080×1080 canvas with safe margins.
+        # S125+ pass 2: bumped each tier ~25% — the previous values left a
+        # small text block floating in unused frame space (Ace 2026-05-01).
+        # New tiers fill more of the canvas while still leaving the FLUX
+        # hero image legible around the edges.
+        #   ≤ 80  chars  → fontsize 72, 22 chars/line, max 4 lines
+        #   ≤ 200 chars  → fontsize 56, 30 chars/line, max 6 lines
+        #   ≤ 400 chars  → fontsize 46, 38 chars/line, max 8 lines
+        #   > 400 chars  → fontsize 38, 46 chars/line, max 11 lines
         n_chars = len(safe_text)
         if n_chars <= 80:
-            dyn_fontsize, max_chars_per_line, max_lines = 56, 28, 4
+            dyn_fontsize, max_chars_per_line, max_lines = 72, 22, 4
         elif n_chars <= 200:
-            dyn_fontsize, max_chars_per_line, max_lines = 44, 36, 6
+            dyn_fontsize, max_chars_per_line, max_lines = 56, 30, 6
         elif n_chars <= 400:
-            dyn_fontsize, max_chars_per_line, max_lines = 36, 44, 8
+            dyn_fontsize, max_chars_per_line, max_lines = 46, 38, 8
         else:
-            dyn_fontsize, max_chars_per_line, max_lines = 28, 56, 10
+            dyn_fontsize, max_chars_per_line, max_lines = 38, 46, 11
 
         words = safe_text.split()
         lines: list[str] = []

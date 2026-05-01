@@ -68,35 +68,71 @@ async function summarizeYesterday(diaryEntries: string[]): Promise<string | null
   }
 }
 
-export async function runSleeptimeConsolidation(): Promise<void> {
+// S125+ Phase 8: generalized to per-agent + crew iterator. Strategy session
+// 2026-04-30 locked: ONE unified job, runs at 8 AM CDT (13:00 UTC), iterates
+// over each agent in turn. Each agent's diary entries get consolidated into
+// THEIR own significance + core_memory recent_themes slot.
+
+const CREW_AGENTS = ["sapphire", "anita", "yuki", "vector", "veritas", "alfred"] as const;
+
+export async function runSleeptimeConsolidation(agentName?: string): Promise<void> {
+  // If no agent specified, run for entire crew.
+  if (!agentName) {
+    return runCrewConsolidation();
+  }
+  // Otherwise run for the named agent only.
+  return runConsolidationForAgent(agentName);
+}
+
+export async function runCrewConsolidation(): Promise<void> {
+  console.log(`💤 [Sleeptime/Crew] Starting consolidation for ${CREW_AGENTS.length} agents`);
+  for (const agent of CREW_AGENTS) {
+    try {
+      await runConsolidationForAgent(agent);
+    } catch (e: any) {
+      console.warn(`[Sleeptime/Crew] ${agent} threw: ${e.message}`);
+    }
+  }
+  console.log(`💤 [Sleeptime/Crew] Done.`);
+}
+
+async function runConsolidationForAgent(agentName: string): Promise<void> {
   const startedAt = Date.now();
-  console.log(`💤 [Sleeptime] Starting consolidation for ${new Date().toISOString().slice(0, 10)}`);
+  console.log(`💤 [Sleeptime/${agentName}] Starting consolidation`);
 
   const supabase = await getSupabase();
-
-  // Window: 24h ending now (Architect's "yesterday" because we run during his sleep)
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-  // 1. Fetch yesterday's diary entries
+  // 1. Fetch yesterday's diary entries for THIS agent.
+  // Sapphire still has the legacy table sapphire_diary; other agents will
+  // have their tables added in subsequent phases. For now, only sapphire's
+  // table exists, so other agents skip cleanly.
   let diaryRows: any[] = [];
-  try {
-    const { data, error } = await supabase
-      .from("sapphire_diary")
-      .select("text, tags, created_at")
-      .gte("created_at", since)
-      .order("created_at", { ascending: true });
-    if (error) {
-      console.warn(`[Sleeptime] diary fetch error: ${error.message}`);
+  if (agentName === "sapphire") {
+    try {
+      const { data, error } = await supabase
+        .from("sapphire_diary")
+        .select("text, tags, created_at")
+        .gte("created_at", since)
+        .order("created_at", { ascending: true });
+      if (error) {
+        console.warn(`[Sleeptime/${agentName}] diary fetch error: ${error.message}`);
+        return;
+      }
+      diaryRows = data || [];
+    } catch (e: any) {
+      console.warn(`[Sleeptime/${agentName}] diary fetch threw: ${e.message}`);
       return;
     }
-    diaryRows = data || [];
-  } catch (e: any) {
-    console.warn(`[Sleeptime] diary fetch threw: ${e.message}`);
+  } else {
+    // Other agents: when they get their own diary tables, this branch reads them.
+    // For now, no-op gracefully so the crew iterator doesn't fail.
+    console.log(`[Sleeptime/${agentName}] no diary table yet; skipping. (Will be added in subsequent phases.)`);
     return;
   }
 
   if (diaryRows.length === 0) {
-    console.log(`[Sleeptime] No diary entries in last 24h. Nothing to consolidate.`);
+    console.log(`[Sleeptime/${agentName}] No diary entries in last 24h. Nothing to consolidate.`);
     return;
   }
 
@@ -104,58 +140,59 @@ export async function runSleeptimeConsolidation(): Promise<void> {
   const entries = diaryRows.map((r: any) => String(r.text || "").slice(0, 500));
   const summary = await summarizeYesterday(entries);
   if (!summary) {
-    console.warn(`[Sleeptime] Gemini summary failed or returned empty. Using fallback.`);
-    // Fallback: just count entries
+    console.warn(`[Sleeptime/${agentName}] Gemini summary failed. Using fallback.`);
     const fallback = `Yesterday: ${diaryRows.length} diary entries (no LLM summary available).`;
-    await writeSignificance(supabase, fallback, "fallback");
+    await writeSignificance(supabase, agentName, fallback, "fallback");
     return;
   }
 
-  // 3. Write significance record (table already exists from prior diary work)
-  await writeSignificance(supabase, summary, "consolidated");
+  // 3. Write significance record (per-agent table; sapphire_significance for now).
+  await writeSignificance(supabase, agentName, summary, "consolidated");
 
-  // 4. Update core memory's 'recent_themes' slot with the consolidation
+  // 4. Update core memory's 'recent_themes' slot for THIS agent.
   try {
     const today = new Date().toISOString().slice(0, 10);
     const themeLine = `[${today}] ${summary}`;
-    // Read current 'recent_themes' content
     const { data: existing } = await supabase
-      .from("sapphire_core_memory")
+      .from("agent_core_memory")
       .select("content")
       .eq("slot", "recent_themes")
+      .eq("agent_name", agentName)
       .maybeSingle();
     let next = existing?.content
       ? `${existing.content}\n${themeLine}`
       : themeLine;
-    // Cap at 800 chars; keep most recent
     if (next.length > 800) {
       next = next.slice(next.length - 800);
       const firstNl = next.indexOf("\n");
       if (firstNl > 0 && firstNl < 200) next = next.slice(firstNl + 1);
     }
     await supabase
-      .from("sapphire_core_memory")
+      .from("agent_core_memory")
       .upsert(
-        { slot: "recent_themes", content: next, updated_at: new Date().toISOString(), updated_by: "sleeptime_consolidator" },
-        { onConflict: "slot" },
+        { slot: "recent_themes", agent_name: agentName, content: next, updated_at: new Date().toISOString(), updated_by: "sleeptime_consolidator" },
+        { onConflict: "slot,agent_name" },
       );
   } catch (e: any) {
-    console.warn(`[Sleeptime] core_memory update failed: ${e.message}`);
+    console.warn(`[Sleeptime/${agentName}] core_memory update failed: ${e.message}`);
   }
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
-  console.log(`💤 [Sleeptime] Consolidation complete: ${diaryRows.length} entries → 1 significance record. ${elapsed}s`);
+  console.log(`💤 [Sleeptime/${agentName}] Done: ${diaryRows.length} entries → 1 significance record. ${elapsed}s`);
 }
 
-async function writeSignificance(supabase: any, summary: string, kind: string): Promise<void> {
+async function writeSignificance(supabase: any, agentName: string, summary: string, kind: string): Promise<void> {
   try {
-    await supabase.from("sapphire_significance").insert({
-      content: summary,
-      kind: `sleeptime_${kind}`,
-      created_at: new Date().toISOString(),
-    });
+    // For now, sapphire_significance is the only table. Other agents will get their own.
+    if (agentName === "sapphire") {
+      await supabase.from("sapphire_significance").insert({
+        content: summary,
+        kind: `sleeptime_${kind}`,
+        created_at: new Date().toISOString(),
+      });
+    }
+    // Future: per-agent significance tables OR a unified agent_significance table.
   } catch (e: any) {
-    // Table may not exist on older deployments; log and continue.
-    console.warn(`[Sleeptime] significance write failed (table may not exist): ${e.message}`);
+    console.warn(`[Sleeptime/${agentName}] significance write failed: ${e.message}`);
   }
 }

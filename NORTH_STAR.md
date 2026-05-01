@@ -295,6 +295,42 @@ ORDER BY total_cost DESC;
 
 **Phase 8 (next strategy arc):** Generalize the Phase 5+6 memory infrastructure across the crew — per-agent core memory tables, per-agent archival namespaces, unified sleeptime consolidator iterating across all agents. Plus deepen Anita's marketing capabilities organically as Architect's marketing push begins.
 
+---
+
+## 🛤️ Marketing-Push Readiness Roadmap (locked 2026-04-30, target: May 5)
+
+Architect's three blocking tracks before live marketing work begins. Architect explicitly said all three are achievable within 1-2 days; week-out scheduling is buffer, not effort estimate. Each track has a clear repo + scope + completion criteria.
+
+### Track A — Crew bots fully lined out and working (Phase 8)
+
+**Repo:** `Sovereign-Sentinel-Bot` (current).
+**Scope:** Generalize Phase 5+6 memory infrastructure across the crew. Implementation of the strategy session decisions locked 2026-04-30:
+- Per-agent core memory (table refactor: `sapphire_core_memory` → `agent_core_memory` with `agent_name` column).
+- Per-agent Pinecone archival namespaces (anita-personal, yuki-personal, etc.).
+- Unified sleeptime consolidator iterating across all agents.
+- Per-agent reflection schedules (3-day Yuki+Anita, weekly Vector+Veritas+Alfred).
+- Anita's core memory bootstrapped with marketing-relevant slots.
+- Memory tools wired into global tools array (agent-aware via ToolContext).
+- Each agent has a personal_intelligence_X doctrine piece scoped to their role (lighter than Sapphire's; role + lexicon + boundaries).
+**Completion criteria:** Each non-Sapphire agent can call `memory(action='core_append'/'core_replace'/'archival_insert')` and have it land in their own namespace + tables. Sleeptime fires once per crew agent overnight. Reflection cadences scheduled and firing.
+
+### Track B — Funnel walked through + design upgrades
+
+**Repo:** `Sovereign-Mission-Control` and/or `sovereign-landing`.
+**Scope:** End-to-end review of the live funnel (`sovereign-synthesis.com/` → `/diagnostic` → email capture → nurture sequence). Design upgrades on each surface. Verify the diagnostic question logic, email-capture form behavior, post-result CTA, nurture template branding consistency.
+**Completion criteria:** Architect walks through every page of the funnel as a fresh visitor and confirms (a) nothing breaks, (b) design lands cleanly across all surfaces, (c) the dominant_pattern routing logic flows to the right nurture template, (d) brand identity is consistent.
+**Note:** Different repo mount required. Will need to be a separate Cowork session pointed at `Sovereign-Mission-Control`.
+
+### Track C — Content pipelines ironed out
+
+**Repo:** `Sovereign-Sentinel-Bot` (current — pipeline + pod).
+**Scope:** End-to-end audit of the deterministic content pipeline (VidRush + ContentEngine + faceless-factory + pod). Verify rotation system is working as intended, niches and aesthetic styles are firing in the documented LRU pattern, thumbnails render correctly, voice generation is on, scheduled posting via Buffer is firing, the 30-video A/B/C performance test (NORTH_STAR original goal) is producing usable data.
+**Completion criteria:** A fresh pipeline run from idea → published video → analytics row is verified working. Any silent fallbacks identified and patched. Mission Control aesthetic-performance tile (queued earlier in NORTH_STAR) gets its first usable data once we have ≥10 ships post-S113+ rotation.
+
+### Sequencing
+
+A and C can run in parallel within this session (same repo). B requires a separate mount/session. My read on order: **A first** (unblocks the rest because the bots that handle pipeline + content are part of the crew), **C second** (validates content production is healthy before marketing pushes traffic at it), **B third** (separate-session work). Architect can ship marketing only after all three are green.
+
 The 5 specialist agents (Anita = email, Yuki = social, Vector = metrics, Veritas = content, Alfred = research) currently have shallower memory + fewer tools + no reflection loops. Each one would benefit from the Phase 5 memory architecture in role-tuned ways:
 - Anita: archival memory of email patterns + reflection on email replies that landed/didn't
 - Yuki: archival memory of post performance + reflection on engagement patterns

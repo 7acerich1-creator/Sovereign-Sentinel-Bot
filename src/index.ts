@@ -544,6 +544,14 @@ async function main() {
   const { MarketingTool } = await import("./tools/marketing");
   tools.push(new MarketingTool());
 
+  // ── S125+ Phase 8: Memory fat tool (agent-aware via ToolContext) ──
+  // Each agent calling memory.core_* auto-routes to their own slot rows.
+  // memory.archival_* defaults to {agent}-personal Pinecone namespace.
+  // memory.entity_* / relate / graph_query operate on the SHARED graph.
+  // Memory infrastructure generalized from sapphire_core_memory → agent_core_memory.
+  const { MemoryTool: MemoryFatTool } = await import("./tools/sapphire/_fat");
+  tools.push(new MemoryFatTool());
+
   // ── 4. Initialize Agent Loop ──
   // CRITICAL: Veritas chat must use the Veritas team LLM (Anthropic-first), NOT failoverLLM (Groq-first).
   // failoverLLM has Groq at position #1, which competes with pipeline for rate limits and burns

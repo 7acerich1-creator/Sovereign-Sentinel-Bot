@@ -367,7 +367,7 @@ export class MemoryTool implements Tool {
       text: { type: "string", description: "[core_append] Text to append." },
       content: { type: "string", description: "[core_replace, archival_insert] Content body." },
       // Layer 3 — archival
-      namespace: { type: "string", description: "[archival_insert, archival_search, supersede] Pinecone namespace.", enum: ["sapphire-personal", "shared", "sovereign-synthesis"] },
+      namespace: { type: "string", description: "[archival_insert, archival_search, supersede] Pinecone namespace. Agents typically write to their own *-personal namespace; use 'shared' or 'sovereign-synthesis' for cross-cutting insights.", enum: ["sapphire-personal", "anita-personal", "yuki-personal", "vector-personal", "veritas-personal", "alfred-personal", "shared", "sovereign-synthesis"] },
       query: { type: "string", description: "[archival_search] Semantic query." },
       k: { type: "number", description: "[archival_search] Top-k results, default 5." },
       include_history: { type: "boolean", description: "[archival_search, graph_query] Include superseded entries. Default false." },
@@ -399,14 +399,20 @@ export class MemoryTool implements Tool {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
+    // S125+ Phase 8: agent name from ToolContext routes core/archival to per-agent storage.
+    const agentName = ctx.agentName || "sapphire";
     switch (action) {
+      // S125+ Phase 8: inject agent_name from ToolContext for actions that scope by agent.
+      // Agents calling memory.core_* automatically write to THEIR own slot rows.
+      // archival_* defaults to {agent}-personal namespace if not explicitly overridden.
+      // Graph actions (entity_upsert/relate/etc.) operate on the SHARED graph (Phase 6 decision).
       case "remember": return this.rememberT.execute(args);
       case "recall": return this.recallT.execute(args);
-      case "core_view": return this.coreViewT.execute(args);
-      case "core_append": return this.coreAppendT.execute(args);
-      case "core_replace": return this.coreReplaceT.execute(args);
-      case "archival_insert": return this.archivalInsertT.execute(args);
-      case "archival_search": return this.archivalSearchT.execute(args);
+      case "core_view": return this.coreViewT.execute({ ...args, agent_name: agentName });
+      case "core_append": return this.coreAppendT.execute({ ...args, agent_name: agentName });
+      case "core_replace": return this.coreReplaceT.execute({ ...args, agent_name: agentName });
+      case "archival_insert": return this.archivalInsertT.execute({ ...args, namespace: args.namespace || `${agentName}-personal` });
+      case "archival_search": return this.archivalSearchT.execute({ ...args, namespace: args.namespace || `${agentName}-personal` });
       case "supersede": return this.supersedeT.execute(args);
       case "entity_upsert": return this.entityUpsertT.execute(args);
       case "entity_get": return this.entityGetT.execute(args);

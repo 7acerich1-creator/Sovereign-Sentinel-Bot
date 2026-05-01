@@ -402,6 +402,9 @@ export class AgentLoop {
         chatId: message.chatId,
         userId: message.userId,
         channel: message.channel,
+        // S125+ Phase 8: agentName populated from AgentLoop identity so tools
+        // that scope by agent (memory, archival, etc.) can route correctly.
+        agentName: this.identity.agentName,
         sendMessage: async (text: string) => {
           // This would be wired to the channel's sendMessage
           console.log(`[Tool→User] ${text}`);

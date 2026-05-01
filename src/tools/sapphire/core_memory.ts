@@ -39,14 +39,17 @@ async function getSupabase() {
 const CORE_MEMORY_HARD_CAP_PER_SLOT = 800;     // chars per slot
 const CORE_MEMORY_HARD_CAP_TOTAL = 6000;       // chars across all slots ≈ 1500 tokens
 
-// ── Slot reader (also used by sapphire-pa-context.ts to inject) ─────────────
+// ── Slot reader (also used by context-prefix injectors per agent) ─────────────
+// S125+ Phase 8: agentName param (default 'sapphire' for backward compat with
+// existing sapphire-pa-context.ts caller).
 
-export async function readAllCoreMemory(): Promise<Array<{ slot: string; content: string; updated_at: string }>> {
+export async function readAllCoreMemory(agentName = "sapphire"): Promise<Array<{ slot: string; content: string; updated_at: string }>> {
   try {
     const supabase = await getSupabase();
     const { data, error } = await supabase
-      .from("sapphire_core_memory")
+      .from("agent_core_memory")
       .select("slot, content, updated_at")
+      .eq("agent_name", agentName)
       .order("updated_at", { ascending: false });
     if (error || !data) return [];
     return data as any[];
@@ -70,15 +73,16 @@ export class CoreMemoryViewTool implements Tool {
 
   async execute(args: Record<string, unknown>): Promise<string> {
     const slot = args.slot ? String(args.slot).trim() : null;
-    const all = await readAllCoreMemory();
+    const agentName = args.agent_name ? String(args.agent_name) : "sapphire";
+    const all = await readAllCoreMemory(agentName);
     const filtered = slot ? all.filter((r) => r.slot === slot) : all;
     if (filtered.length === 0) {
-      return slot ? `core_memory_view: no entry for slot '${slot}'.` : "core_memory_view: no slots populated yet.";
+      return slot ? `core_memory_view: no entry for slot '${slot}' in ${agentName}'s memory.` : `core_memory_view: no slots populated yet for ${agentName}.`;
     }
     const lines = filtered.map((r) =>
       `[${r.slot}] (updated ${r.updated_at.slice(0, 16).replace("T", " ")})\n  ${r.content}`,
     );
-    return `Core memory (${filtered.length} slot${filtered.length === 1 ? "" : "s"}):\n${lines.join("\n\n")}`;
+    return `Core memory for ${agentName} (${filtered.length} slot${filtered.length === 1 ? "" : "s"}):\n${lines.join("\n\n")}`;
   }
 }
 
@@ -101,16 +105,18 @@ export class CoreMemoryAppendTool implements Tool {
   async execute(args: Record<string, unknown>): Promise<string> {
     const slot = String(args.slot || "").trim();
     const text = String(args.text || "").trim();
+    const agentName = args.agent_name ? String(args.agent_name) : "sapphire";
     if (!slot) return "core_memory_append: slot required.";
     if (!text) return "core_memory_append: text required.";
 
     const supabase = await getSupabase();
 
-    // Fetch existing slot
+    // Fetch existing slot for THIS agent
     const { data: existing } = await supabase
-      .from("sapphire_core_memory")
+      .from("agent_core_memory")
       .select("content")
       .eq("slot", slot)
+      .eq("agent_name", agentName)
       .maybeSingle();
 
     let next = existing?.content ? `${existing.content}\n${text}` : text;
@@ -124,11 +130,14 @@ export class CoreMemoryAppendTool implements Tool {
     }
 
     const { error } = await supabase
-      .from("sapphire_core_memory")
-      .upsert({ slot, content: next, updated_at: new Date().toISOString(), updated_by: "sapphire" }, { onConflict: "slot" });
+      .from("agent_core_memory")
+      .upsert(
+        { slot, agent_name: agentName, content: next, updated_at: new Date().toISOString(), updated_by: agentName },
+        { onConflict: "slot,agent_name" },
+      );
 
     if (error) return `core_memory_append: Supabase error — ${error.message}`;
-    return `Appended to core memory slot '${slot}'. Slot now ${next.length} chars.`;
+    return `Appended to ${agentName} core memory slot '${slot}'. Slot now ${next.length} chars.`;
   }
 }
 
@@ -151,6 +160,7 @@ export class CoreMemoryReplaceTool implements Tool {
   async execute(args: Record<string, unknown>): Promise<string> {
     const slot = String(args.slot || "").trim();
     let content = String(args.content || "").trim();
+    const agentName = args.agent_name ? String(args.agent_name) : "sapphire";
     if (!slot) return "core_memory_replace: slot required.";
     if (!content) return "core_memory_replace: content required.";
 
@@ -160,11 +170,14 @@ export class CoreMemoryReplaceTool implements Tool {
 
     const supabase = await getSupabase();
     const { error } = await supabase
-      .from("sapphire_core_memory")
-      .upsert({ slot, content, updated_at: new Date().toISOString(), updated_by: "sapphire" }, { onConflict: "slot" });
+      .from("agent_core_memory")
+      .upsert(
+        { slot, agent_name: agentName, content, updated_at: new Date().toISOString(), updated_by: agentName },
+        { onConflict: "slot,agent_name" },
+      );
 
     if (error) return `core_memory_replace: Supabase error — ${error.message}`;
-    return `Replaced core memory slot '${slot}' (${content.length} chars).`;
+    return `Replaced ${agentName} core memory slot '${slot}' (${content.length} chars).`;
   }
 }
 
@@ -175,10 +188,20 @@ export class CoreMemoryReplaceTool implements Tool {
 const PINECONE_HOST = process.env.PINECONE_HOST;
 const PINECONE_API_KEY = process.env.PINECONE_API_KEY;
 
+// S125+ Phase 8: per-agent namespaces locked in strategy session 2026-04-30.
+// Each agent has their own personal namespace; shared + sovereign-synthesis
+// remain cross-cutting.
 const ALLOWED_ARCHIVAL_NAMESPACES = [
-  "sapphire-personal",      // primary personal memory
-  "shared",                 // cross-cutting insights
-  "sovereign-synthesis",    // brand-related context Sapphire wants to preserve
+  // Per-agent personal namespaces
+  "sapphire-personal",
+  "anita-personal",
+  "yuki-personal",
+  "vector-personal",
+  "veritas-personal",
+  "alfred-personal",
+  // Cross-cutting
+  "shared",                 // any-agent insights worth sharing across crew
+  "sovereign-synthesis",    // brand/business namespace
 ] as const;
 
 type ArchivalNamespace = (typeof ALLOWED_ARCHIVAL_NAMESPACES)[number];

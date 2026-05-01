@@ -6,6 +6,40 @@
 
 ---
 
+## S125+ — Agentic Refactor Phase 8: crew memory infrastructure generalized (2026-04-30)
+
+**Architect directive 2026-04-30:** Three blocking tracks before marketing push next week — (A) all bots fully lined out, (B) funnel walked through, (C) content pipelines ironed out. Phase 8 is Track A — generalizing the Phase 5+6 memory infrastructure across the crew per the strategy session decisions.
+
+**What landed (✅ shipped):**
+
+- **ToolContext extended** (`src/types.ts`): added `agentName?: string` field. `AgentLoop.processMessage` populates it from `this.identity.agentName` so any tool that needs to scope by agent (memory, archival, sleeptime) can route correctly.
+- **Table migration** (applied via MCP): `sapphire_core_memory` renamed to `agent_core_memory`. Added `agent_name text NOT NULL DEFAULT 'sapphire'` column. UNIQUE constraint flipped from `(slot)` to `(slot, agent_name)` so each agent has independent slots. Existing Sapphire rows backfilled with `agent_name='sapphire'`.
+- **Narrow memory tools agent-aware** (`src/tools/sapphire/core_memory.ts`): `readAllCoreMemory(agentName)` exported function takes agent param. `CoreMemoryViewTool`, `CoreMemoryAppendTool`, `CoreMemoryReplaceTool` all read `args.agent_name` (default 'sapphire'), apply WHERE/upsert with `agent_name`. `ALLOWED_ARCHIVAL_NAMESPACES` enum expanded with `anita-personal`, `yuki-personal`, `vector-personal`, `veritas-personal`, `alfred-personal` (plus existing `shared` and `sovereign-synthesis` cross-cutting).
+- **Fat MemoryTool dispatcher injects agent_name** (`src/tools/sapphire/_fat.ts`): reads `ctx.agentName` (from ToolContext), defaults `'sapphire'` for backward compat. For `core_*` actions injects `agent_name` into args. For `archival_*` actions defaults `namespace` to `${agent}-personal` if not explicitly overridden. Graph actions (Phase 6) operate on the SHARED graph regardless of agent (per strategy session decision).
+- **MemoryTool added to global tools array** (`src/index.ts`): non-Sapphire agents (Anita, Yuki, Vector, Veritas, Alfred) now have memory at their disposal. Each agent's calls auto-route to their own namespace via ToolContext.
+- **Sleeptime consolidator generalized** (`src/proactive/sleeptime-consolidator.ts`): new `runCrewConsolidation()` iterates over all 6 agents. Per-agent diary tables not yet built for non-Sapphire agents; iterator skips gracefully and logs. When future phases add per-agent diary tables, this iterator picks them up automatically. Existing scheduler entry calls with no args, triggering crew-wide iterator.
+- **Anita's core memory bootstrapped** (5 seed slots): `current_campaigns`, `current_audiences`, `recent_experiments`, `current_concerns`, `recent_themes`. Each populated with marketing-relevant context so Anita has substance to work with from day one.
+
+**Strategy session decisions implemented in Phase 8:**
+1. Graph: SHARED across all agents — already done in Phase 6, no change needed.
+2. Pinecone: PER-AGENT namespaces — implemented via `agent_core_memory.agent_name` + namespace enum expansion.
+3. Reflection cadence (3-day Yuki+Anita, weekly Vector+Veritas+Alfred) — schedulers NOT YET added (deferred to Phase 9 since each agent needs a diary table first; Sapphire's existing per-turn reflection still works).
+4. Sleeptime: ONE unified job — implemented via `runCrewConsolidation()` iterator.
+
+**What's deliberately deferred (Phase 9+):**
+- Per-agent diary tables (anita_diary, yuki_diary, etc.) — when each agent has substantive turns to reflect on, they get a table.
+- Per-agent reflection scheduler entries (3-day Yuki+Anita, weekly others) — depend on per-agent diary tables.
+- Per-agent core memory bootstrap for Yuki/Vector/Veritas/Alfred — Anita seeded first since she's the most immediately active for marketing push.
+- Per-agent `personal_intelligence_X` doctrine pieces — Anita has Phase 7 doctrine; others get role-tuned doctrine in Phase 9+.
+
+**Open at close:**
+1. Push the Phase 8 batch via Desktop Commander (this session). tsc clean.
+2. Architect tests Anita can call `memory(action='core_view')` and see her seeded slots. Same for archival writes routing to `anita-personal`.
+3. Phase 9 (next): per-agent diary tables + reflection schedulers + bootstrap remaining agents' core memory.
+4. Track C (content pipeline iron-out) and Track B (funnel review) remain in NORTH_STAR roadmap.
+
+---
+
 ## S125+ — Agentic Refactor Phase 7: Anita Marketing Lead + Veritas Chief of Staff (2026-04-30)
 
 **Architect directive 2026-04-30 strategy session:** Anita elevates from Email Response Specialist → Marketing Lead. Veritas elevates from "Chief Strategy Officer" → Chief of Staff (cross-crew oversight, no longer pipeline/content production). Alfred takes the pipeline + content production scope Veritas had. NO cross-crew dispatch authority for Anita yet — Architect stays in the coordination loop until pattern is proven.

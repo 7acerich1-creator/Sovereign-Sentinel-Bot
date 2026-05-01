@@ -2116,6 +2116,34 @@ async function main() {
     },
   });
 
+  // ── S125+ Phase 5D: Sleeptime Consolidator (daily, 13:00 UTC = 8 AM CDT) ──
+  // Letta v1 pattern. Runs deep in Architect's sleep window (he wakes ~2pm CDT).
+  // Consolidates yesterday's diary entries into a one-line significance summary
+  // via Gemini Flash Lite, writes the summary to sapphire_significance, and
+  // updates core_memory's 'recent_themes' slot so her always-visible context
+  // stays current as days accumulate. Fires once per UTC date.
+  const sleeptimeFiredDates = { lastFired: "" };
+  scheduler.add({
+    name: "Sapphire PA — Sleeptime Consolidator (8 AM CDT)",
+    intervalMs: 60_000,
+    nextRun: new Date(Date.now() + 5 * 60 * 1000),
+    enabled: true,
+    handler: async () => {
+      const now = new Date();
+      const dateKey = now.toUTCString().slice(0, 16); // 'Day, DD Mon YYYY'
+      if (sleeptimeFiredDates.lastFired === dateKey) return;
+      // Fire at 13:00 UTC ± 2 minutes
+      if (now.getUTCHours() !== 13 || now.getUTCMinutes() > 2) return;
+      sleeptimeFiredDates.lastFired = dateKey;
+      try {
+        const { runSleeptimeConsolidation } = await import("./proactive/sleeptime-consolidator");
+        await runSleeptimeConsolidation();
+      } catch (e: any) {
+        console.error(`[Sleeptime] scheduler error: ${e.message}`);
+      }
+    },
+  });
+
   // ── SAPPHIRE PA — Morning Brief (16:00 UTC = 11 AM CDT) ──
   scheduler.add({
     name: "Sapphire PA — Morning Brief (11 AM CDT)",

@@ -79,6 +79,11 @@ import {
 import {
   WriteDiaryEntryTool, ReadDiaryTool, ReadSignificanceTool,
 } from "./diary";
+// S125+ Phase 5 — core memory (Letta-style) + archival memory + temporal supersession
+import {
+  CoreMemoryViewTool, CoreMemoryAppendTool, CoreMemoryReplaceTool,
+  ArchivalInsertTool, ArchivalSearchTool, SupersedeMemoryTool,
+} from "./core_memory";
 
 // ── Helper: dispatch to a narrow tool by action ─────────────────────────────
 
@@ -292,22 +297,61 @@ export class NotionTool implements Tool {
 export class MemoryTool implements Tool {
   private rememberT = new RememberFactTool();
   private recallT = new RecallFactsTool();
+  private coreViewT = new CoreMemoryViewTool();
+  private coreAppendT = new CoreMemoryAppendTool();
+  private coreReplaceT = new CoreMemoryReplaceTool();
+  private archivalInsertT = new ArchivalInsertTool();
+  private archivalSearchT = new ArchivalSearchTool();
+  private supersedeT = new SupersedeMemoryTool();
 
   definition: ToolDefinition = {
     name: "memory",
     description:
-      "Architect's standing personal facts (NOT family members — use family tool for those; NOT business knowledge — that's a Pinecone brand-namespace operation).\n\n" +
-      "ACTIONS:\n" +
-      "• remember — save a fact. Required: key (slug, e.g. 'preferred_dentist'), value. Optional: category (default 'preferences').\n" +
-      "• recall — retrieve facts. Optional: keyword (filters by key/value substring), category, limit.\n\n" +
-      "Use this for: dentist names, gym preferences, brand decisions, tracked items, one-off notes Architect wants you to keep. Personal context flows here. Family member info (DOB, school, allergies) goes in family.save instead.",
+      "Memory operations across THREE layers (Letta-style memory hierarchy):\n\n" +
+      "LAYER 1 — STANDING FACTS (key/value, structured):\n" +
+      "• remember — save a fact. Required: key (slug like 'preferred_dentist'), value. Optional: category.\n" +
+      "• recall — retrieve facts by keyword/category. Optional: keyword, category, limit.\n\n" +
+      "LAYER 2 — CORE MEMORY (Sapphire-owned in-context state, ALWAYS visible to her):\n" +
+      "• core_view — inspect current core memory slots. Optional: slot filter.\n" +
+      "• core_append — append to a slot (creates if missing). Required: slot, text. Hard-capped at 800 chars/slot.\n" +
+      "• core_replace — full replace of a slot. Required: slot, content. Use when an old understanding is no longer accurate.\n" +
+      "Slot examples: 'current_priorities', 'current_projects', 'current_concerns', 'recent_themes'.\n\n" +
+      "LAYER 3 — ARCHIVAL MEMORY (Sapphire-controlled Pinecone):\n" +
+      "• archival_insert — write to long-term semantic memory. Required: namespace ('sapphire-personal' | 'shared' | 'sovereign-synthesis'), content, topic. Optional: metadata.\n" +
+      "• archival_search — explicit search across archival namespaces. Required: query. Optional: namespace, k, include_history.\n" +
+      "• supersede — mark a prior archival entry as no-longer-current (Zep-lite temporal model). Required: old_id, new_id, namespace. Optional: reason.\n\n" +
+      "ROUTING GUIDE:\n" +
+      "• Family info (DOB/school/allergies) → family.save (different tool, structured fields)\n" +
+      "• One-off facts ('preferred dentist is Dr. X') → memory.remember\n" +
+      "• Current-state things you want to ALWAYS see ('Architect just shifted priorities to Y') → memory.core_append or memory.core_replace\n" +
+      "• Long-term-keep things that don't need to be in every-turn context → memory.archival_insert\n" +
+      "• When a fact CHANGES (Aliza switched schools, project status updated) → archival_insert the new + supersede the old",
     parameters: {
-      action: { type: "string", description: "remember | recall", enum: ["remember", "recall"] },
+      action: {
+        type: "string",
+        description: "remember | recall | core_view | core_append | core_replace | archival_insert | archival_search | supersede",
+        enum: ["remember", "recall", "core_view", "core_append", "core_replace", "archival_insert", "archival_search", "supersede"],
+      },
+      // Layer 1 — facts
       key: { type: "string", description: "[remember] Slug-style key." },
       value: { type: "string", description: "[remember] The fact text." },
       category: { type: "string", description: "[remember, recall] Optional category." },
       keyword: { type: "string", description: "[recall] Substring filter." },
       limit: { type: "number", description: "[recall] Max results, default 10." },
+      // Layer 2 — core memory
+      slot: { type: "string", description: "[core_*] Slot name." },
+      text: { type: "string", description: "[core_append] Text to append." },
+      content: { type: "string", description: "[core_replace, archival_insert] Content body." },
+      // Layer 3 — archival
+      namespace: { type: "string", description: "[archival_insert, archival_search, supersede] Pinecone namespace.", enum: ["sapphire-personal", "shared", "sovereign-synthesis"] },
+      query: { type: "string", description: "[archival_search] Semantic query." },
+      k: { type: "number", description: "[archival_search] Top-k results, default 5." },
+      include_history: { type: "boolean", description: "[archival_search] Include superseded memories. Default false." },
+      topic: { type: "string", description: "[archival_insert] Topic tag." },
+      metadata: { type: "object", description: "[archival_insert] Optional extra metadata." },
+      old_id: { type: "string", description: "[supersede] Pinecone ID of the now-outdated entry." },
+      new_id: { type: "string", description: "[supersede] Pinecone ID of the replacement entry." },
+      reason: { type: "string", description: "[supersede] Why it's being superseded." },
     },
     required: ["action"],
   };
@@ -317,7 +361,13 @@ export class MemoryTool implements Tool {
     switch (action) {
       case "remember": return this.rememberT.execute(args, ctx);
       case "recall": return this.recallT.execute(args, ctx);
-      default: return unknownAction("memory", action, ["remember", "recall"]);
+      case "core_view": return this.coreViewT.execute(args);
+      case "core_append": return this.coreAppendT.execute(args);
+      case "core_replace": return this.coreReplaceT.execute(args);
+      case "archival_insert": return this.archivalInsertT.execute(args);
+      case "archival_search": return this.archivalSearchT.execute(args);
+      case "supersede": return this.supersedeT.execute(args);
+      default: return unknownAction("memory", action, ["remember", "recall", "core_view", "core_append", "core_replace", "archival_insert", "archival_search", "supersede"]);
     }
   }
 }
@@ -655,19 +705,24 @@ export class DiaryTool implements Tool {
   definition: ToolDefinition = {
     name: "diary",
     description:
-      "Sapphire's reflective journal — what she noticed today, anniversary echoes, significance tracking. Used by evening wrap + morning brief schedulers but also callable directly when Architect asks 'what did you notice today' / 'on this date last year' / 'reflect on this week'.\n\n" +
+      "Sapphire's reflective journal — what she noticed today, anniversary echoes, significance tracking, post-turn reflection. Used by evening wrap + morning brief schedulers but also callable directly when Architect asks 'what did you notice today' / 'on this date last year' / 'reflect on this week'.\n\n" +
       "ACTIONS:\n" +
       "• write — log a diary entry. Required: text. Optional: tags (array), date (default today).\n" +
       "• read — retrieve recent entries. Optional: days_back (default 7), tag filter, limit.\n" +
-      "• read_significance — find anniversary/significance hits for a date. Optional: date (default today).",
+      "• read_significance — find anniversary/significance hits for a date. Optional: date (default today).\n" +
+      "• reflect — S125+ Phase 5C: post-turn reflection (Reflexion paper pattern). Sapphire briefly reviews her own substantive turn — what worked, what didn't, takeaway. Auto-tagged 'reflection'. Required: turn_summary (1 sentence on the user's request), what_worked, what_didnt, takeaway (~1-2 lines each). Use ONLY on substantive/exploratory turns, NOT on quick transactional ones (would be noise).",
     parameters: {
-      action: { type: "string", description: "write | read | read_significance", enum: ["write", "read", "read_significance"] },
+      action: { type: "string", description: "write | read | read_significance | reflect", enum: ["write", "read", "read_significance", "reflect"] },
       text: { type: "string", description: "[write] Diary text." },
       tags: { type: "array", description: "[write] Optional tags.", items: { type: "string", description: "tag" } },
       date: { type: "string", description: "[write, read_significance] ISO date." },
       days_back: { type: "number", description: "[read] Lookback window, default 7." },
       tag: { type: "string", description: "[read] Filter by tag." },
       limit: { type: "number", description: "[read] Max entries." },
+      turn_summary: { type: "string", description: "[reflect] One-sentence summary of what Architect asked for this turn." },
+      what_worked: { type: "string", description: "[reflect] What landed well in the response." },
+      what_didnt: { type: "string", description: "[reflect] What missed or could be better." },
+      takeaway: { type: "string", description: "[reflect] Lesson to carry forward." },
     },
     required: ["action"],
   };
@@ -678,7 +733,25 @@ export class DiaryTool implements Tool {
       case "write": return this.writeT.execute(args, ctx);
       case "read": return this.readT.execute(args, ctx);
       case "read_significance": return this.signifT.execute(args, ctx);
-      default: return unknownAction("diary", action, ["write", "read", "read_significance"]);
+      case "reflect": {
+        const turnSummary = String(args.turn_summary || "").trim();
+        const worked = String(args.what_worked || "").trim();
+        const didnt = String(args.what_didnt || "").trim();
+        const takeaway = String(args.takeaway || "").trim();
+        if (!turnSummary || !takeaway) {
+          return "diary reflect: turn_summary and takeaway required (Reflexion-pattern post-turn reflection).";
+        }
+        const reflectionText =
+          `[reflection] ${turnSummary}\n` +
+          `  ✓ ${worked || "(nothing surfaced)"}\n` +
+          `  ✗ ${didnt || "(nothing missed)"}\n` +
+          `  → ${takeaway}`;
+        return this.writeT.execute(
+          { text: reflectionText, tags: ["reflection"] },
+          ctx,
+        );
+      }
+      default: return unknownAction("diary", action, ["write", "read", "read_significance", "reflect"]);
     }
   }
 }

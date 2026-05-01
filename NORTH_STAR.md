@@ -281,7 +281,24 @@ ORDER BY total_cost DESC;
 ## The Current Highest-Leverage Action (UPDATE EVERY SESSION)
 *If this field says the same thing two sessions in a row, the last session didn't earn its keep.*
 
-**Action: AGENTIC REFACTOR — Phase 1 (S125+, 2026-04-30).** The 2026-04-30 Sapphire-vs-Gemini side-by-side test (briefcase → "is there a YouTube video showing this?") exposed that the previous session's polish was on top of an architectural ceiling, not the substrate. Sapphire IS using web_search but Pinecone recall is hijacking her query intent, AND her shape is dispatch-routed rather than agentically reasoned. Architect's diagnosis: *"the neurons are not quantum, it's just so linear, as if I have to specifically program every process. Nothing is translating across domains."* He's right — this is the well-named "agentic AI vs assistant AI" gap.
+**Action: STRATEGY SESSION on crew-wide Phase 5 generalization (S125+, 2026-04-30, ALL 5 PHASES SHIPPED).**
+
+**Phase 1-5 of the Sapphire agentic refactor shipped in a single session 2026-04-30.** Native web_search + interleaved thinking, Pinecone tightening, conditional reminders, fat-tool consolidation (39→15), Letta-style core memory, archival memory tools, reflection loop, sleeptime consolidator, Zep-lite temporal supersession — all live. Sapphire is now the proof point: a generalist PA with persistent memory hierarchy, anticipatory capability, agent-owned memory writes, and architectural shape that's what successful agentic products are converging on.
+
+**Crew-generalization note (Architect directive 2026-04-30):** *"This phase 5 type of thing is the most impactful thing that we can give to the other agents as well moving forward. But we'll have a strategy session on it before we begin working on the other agents."*
+
+The 5 specialist agents (Anita = email, Yuki = social, Vector = metrics, Veritas = content, Alfred = research) currently have shallower memory + fewer tools + no reflection loops. Each one would benefit from the Phase 5 memory architecture in role-tuned ways:
+- Anita: archival memory of email patterns + reflection on email replies that landed/didn't
+- Yuki: archival memory of post performance + reflection on engagement patterns
+- Vector: core memory of current metric anomalies + sleeptime consolidation of weekly trends
+- Veritas: archival memory of content that converted + reflection on script choices
+- Alfred: archival memory of research patterns + reflection on which sources delivered signal
+
+But these are per-agent design decisions, not lift-and-shift. Strategy session must answer: which memory layers per agent? Which schedule for sleeptime per agent? Which reflection cadence? Which superset of fat tools (each agent's surface should pass the 5-tool test).
+
+**STRATEGY SESSION REQUIRED before any crew-wide Phase 5 rollout.** Don't lift-and-shift Sapphire's exact architecture; tune per agent's specialist scope.
+
+**Original Phase 1 trigger (preserved for context):** The 2026-04-30 Sapphire-vs-Gemini side-by-side test (briefcase → "is there a YouTube video showing this?") exposed that the previous session's polish was on top of an architectural ceiling, not the substrate. Sapphire IS using web_search but Pinecone recall is hijacking her query intent, AND her shape is dispatch-routed rather than agentically reasoned. Architect's diagnosis: *"the neurons are not quantum, it's just so linear, as if I have to specifically program every process. Nothing is translating across domains."* He's right — this is the well-named "agentic AI vs assistant AI" gap.
 
 **Full plan documented at `SAPPHIRE-AGENTIC-REFACTOR-S125+.md` at repo root.** Five phases. Sapphire ships first as proof, then her shape gets copied across Anita, Yuki, Vector, Veritas, Alfred. Read the plan doc before doing any agent work this session or next.
 

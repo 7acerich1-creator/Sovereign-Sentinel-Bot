@@ -185,7 +185,25 @@ Each consolidated tool gets a description written like a new-hire onboarding doc
 
 ### Phase 5 — Letta-style memory + Zep-style temporal graph + reflection loop
 
-**Status:** Planned. Largest lift. The deepest payoff.
+**Status (2026-04-30 close):** ✅ SHIPPED (V1). Architect directive: ship all of Phase 5 in one session. Done. Zep full graph DB (Neo4j) deferred to Phase 6; everything else live.
+
+**What landed:**
+
+- **Phase 5A — Letta-style core memory** (`supabase/migrations/20260430_sapphire_core_memory.sql` + `src/tools/sapphire/core_memory.ts` + injection in `src/agent/sapphire-pa-context.ts`). New `sapphire_core_memory` table with slotted entries (current_priorities, current_projects, current_concerns, recent_themes). Always-injected into Sapphire's context prefix as `# CORE MEMORY` block. Hard-capped 6000 chars total ≈ 1500 tokens. Sapphire owns writes via `memory(action='core_view'/'core_append'/'core_replace')`. Migration applied via MCP (success). Seeded with 4 starter slots so the format is obvious from day one.
+
+- **Phase 5B — Archival memory tools** (in same `core_memory.ts`). `memory(action='archival_insert')` writes to her chosen Pinecone namespace with structured metadata (topic, valid_from, superseded_at). `memory(action='archival_search')` queries with optional `include_history` flag. Allowed namespaces: sapphire-personal, shared, sovereign-synthesis. She decides what to remember long-term and where to put it.
+
+- **Phase 5C — Reflection loop** (in `_fat.ts` `DiaryTool`). New `diary(action='reflect')` action. Required args: turn_summary, what_worked, what_didnt, takeaway. Auto-tagged 'reflection'. Writes structured Reflexion-pattern entry. Doctrine encourages reflection ONLY on substantive turns (not transactional — would be noise). Sleeptime consolidator picks up reflections.
+
+- **Phase 5D — Sleeptime consolidator** (`src/proactive/sleeptime-consolidator.ts` + scheduler in `src/index.ts`). Runs daily at 13:00 UTC = 8 AM CDT (deep in Architect's sleep window per his inverted schedule). Reads yesterday's diary entries, summarizes via Gemini Flash Lite into a single significance line, writes to `sapphire_significance`, updates core memory's `recent_themes` slot. The "what would otherwise be forgotten gets re-anchored" loop.
+
+- **Phase 5E — Temporal supersession (Zep-lite)** (`memory(action='supersede')` in `core_memory.ts`). Pinecone metadata extended with `valid_from`, `superseded_at`, `superseded_by_id`. When a fact changes, archival_insert the new + supersede the old. Recall excludes superseded by default unless `include_history=true`. This is the lightest viable Zep-style temporal model; full graph DB (Neo4j or pgvector graph extensions) is Phase 6.
+
+- **Doctrine: `memory_protocol_s125p5`** added to extras + activated in DB. Routes Sapphire across the three memory layers (standing facts / core memory / archival) plus reflection plus sleeptime — explicit decision tree for which layer fits which kind of write.
+
+**Crew-generalization deferred (Architect directive):** Phase 5's architecture is the most impactful pattern to apply across Anita, Yuki, Vector, Veritas, Alfred. But each specialist needs role-tuned design (which layers, which schedule, which reflection cadence). NOT a lift-and-shift. Strategy session required before crew rollout. NORTH_STAR's Highest-Leverage Action now points to this.
+
+**Phase 6 (queued, not in this session):** Full Zep-style temporal knowledge graph via Neo4j or pgvector graph extensions. Cross-agent memory sharing via `shared` namespace conventions. Agent-to-agent memory handoff protocols. The Letta-style memory architecture generalized across the whole 6-agent swarm with the role-tuned tweaks decided in the strategy session above.
 
 Sapphire's three-tier memory (SQLite for facts/family, Pinecone for semantic, Supabase for ops) already has the bones of MemGPT/Letta's context-as-OS-memory-hierarchy. What's missing is **the agent owning memory writes as normal tool calls** instead of memory being plumbed by the framework. Phase 5 introduces:
 

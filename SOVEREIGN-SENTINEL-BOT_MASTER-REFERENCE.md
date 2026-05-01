@@ -6,6 +6,35 @@
 
 ---
 
+## S125+ — Agentic Refactor Phase 5: Letta-style memory + reflection + sleeptime + Zep-lite supersession (2026-04-30)
+
+**Architect directive 2026-04-30:** "Keep going through phase five in one shot... I think this phase five type of thing is the most impactful thing that we can give to the other agents as well moving forward. But we'll have a strategy session on it. Before we begin working on the other agents."
+
+**ALL FIVE phases of the agentic refactor shipped in a single session 2026-04-30.** Sapphire's architecture is now the proof point. Crew generalization (Anita/Yuki/Vector/Veritas/Alfred) is QUEUED pending strategy session — NORTH_STAR's Highest-Leverage Action now points there.
+
+**Phase 5 components shipped (V1):**
+
+- **5A — Letta-style core memory:** `supabase/migrations/20260430_sapphire_core_memory.sql` (applied), `src/tools/sapphire/core_memory.ts` (new ~400 lines), injection into `src/agent/sapphire-pa-context.ts`. Slotted always-visible Sapphire-owned context. Slots: current_priorities, current_projects, current_concerns, recent_themes. Hard-capped 6000 chars total. Updated via `memory(action='core_append'/'core_replace')`.
+
+- **5B — Archival memory tools:** `memory(action='archival_insert' / 'archival_search')` in same `core_memory.ts`. Sapphire-controlled writes to Pinecone with chosen namespace + structured metadata (topic, valid_from, superseded_at). Three allowed namespaces: sapphire-personal, shared, sovereign-synthesis.
+
+- **5C — Reflection loop:** `diary(action='reflect')` in `_fat.ts`. Reflexion paper pattern. Auto-tagged 'reflection'. Used on substantive turns only.
+
+- **5D — Sleeptime consolidator:** `src/proactive/sleeptime-consolidator.ts` (new) + scheduler in `src/index.ts`. Runs daily at 13:00 UTC = 8 AM CDT (Architect's deep sleep window). Reads yesterday's diary, summarizes via Gemini Flash Lite, writes significance + updates `recent_themes` core memory slot. Letta v1 pattern.
+
+- **5E — Temporal supersession (Zep-lite):** `memory(action='supersede')` in `core_memory.ts`. Pinecone metadata extended with valid_from / superseded_at / superseded_by_id. Recall excludes superseded by default. Full graph DB deferred to Phase 6.
+
+- **Doctrine: `memory_protocol_s125p5`** added to extras section in `sapphire-prompt-pieces.json` + activated in `sapphire_known_facts.active_extras` row. Three-layer routing guide (standing facts / core memory / archival) + reflection + sleeptime explanation.
+
+**Crew-generalization plan (deferred to strategy session per Architect directive):** Each specialist agent (Anita, Yuki, Vector, Veritas, Alfred) gets the Phase 5 memory architecture tuned for its scope. Not lift-and-shift — different layers/schedules/cadences per agent. See NORTH_STAR for the strategy-session prompts.
+
+**Open at close:**
+1. Push the Phase 5 batch via Desktop Commander (this session).
+2. Strategy session on crew-wide Phase 5 generalization (next dedicated session).
+3. Architect tests live; sleeptime fires tomorrow at 8 AM CDT first.
+
+---
+
 ## S125+ — Agentic Refactor Phase 3 + Phase 4: kill keyword tiering + consolidate 39 narrow tools to 15 fat ones (2026-04-30)
 
 **Architect directive 2026-04-30:** "We're gonna do everything in all of them. So whichever way is easier and best for you... You work much faster than you might realize... I want you to do phase three. And then focus on phase four. No shortcuts."

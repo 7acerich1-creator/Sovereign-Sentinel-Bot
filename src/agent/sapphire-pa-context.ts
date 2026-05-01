@@ -54,6 +54,24 @@ export async function buildPersonalContextPrefix(userMessage = ""): Promise<stri
     parts.push(`[CONTEXT: DM from Ace. PA mode. Warm, sharp, plain English.]`);
   }
 
+  // ── S125+ Phase 5A: CORE MEMORY (Sapphire-owned, Letta-style) ──
+  // Always-visible state Sapphire maintains via memory(action='core_*') tools.
+  // This is HER understanding of Architect's current world — distinct from the
+  // static personal_intelligence_ace doctrine piece (which is identity/lens).
+  // Hard-capped at ~6000 chars total across all slots (≈1500 tokens).
+  try {
+    const { readAllCoreMemory } = await import("../tools/sapphire/core_memory");
+    const slots = await readAllCoreMemory();
+    if (slots.length > 0) {
+      const lines = slots.map((s) =>
+        `[${s.slot}] (updated ${s.updated_at.slice(0, 10)})\n  ${s.content}`,
+      );
+      parts.push(`# CORE MEMORY (your current understanding — update via memory action='core_append'/'core_replace')\n${lines.join("\n\n")}`);
+    }
+  } catch (e: any) {
+    console.warn(`[SapphirePA] core memory fetch failed: ${e.message}`);
+  }
+
   // ── 2. Live state hints ──
   parts.push(`# LIVE STATE (this message)`);
 

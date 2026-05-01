@@ -401,11 +401,15 @@ async function main() {
   // Every other agent + both pipelines run Gemini -> Groq with NO Anthropic fallback —
   // a single Gemini+Groq outage on Yuki/Veritas/Alfred/Vector/Anita or the pipelines
   // would otherwise drain her budget across the whole crew in minutes.
+  // S125+ Phase 7 (2026-04-30): Anita elevated to Marketing Lead, Veritas to Chief
+  // of Staff. Both promoted to Anthropic primary because their roles require
+  // strategic reasoning across domains. Yuki/Vector/Alfred stay on Gemini Flash —
+  // their work is more deterministic.
   const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
     alfred: buildTeamLLM(["gemini", "groq"], 1, false),    // Gemini -> Groq. NO Anthropic.
-    anita: buildTeamLLM(["gemini", "groq"], 1, true),      // Gemini -> Groq. NO Anthropic.
+    anita: buildTeamLLM(["anthropic", "gemini", "groq"], 1),    // S125+ Phase 7: MARKETING LEAD — Anthropic primary.
     sapphire: buildTeamLLM(["anthropic", "gemini", "groq"], 1),  // Anthropic Primary — S121d ddxfish intelligence level restored.
-    veritas: buildTeamLLM(["gemini", "groq"], 1),          // Gemini -> Groq. NO Anthropic.
+    veritas: buildTeamLLM(["anthropic", "gemini", "groq"], 1),  // S125+ Phase 7: CHIEF OF STAFF — Anthropic primary.
     vector: buildTeamLLM(["gemini", "groq"], 1, false),    // Gemini -> Groq. NO Anthropic.
     yuki: buildTeamLLM(["gemini", "groq"], 1, true),       // Gemini -> Groq. NO Anthropic.
   };
@@ -532,6 +536,13 @@ async function main() {
   if (pineconeMemory.isReady()) {
     tools.push(new KnowledgeWriterTool(pineconeMemory, "veritas", "brand"));
   }
+
+  // ── S125+ Phase 7: Marketing Tool (Anita Marketing Lead's primary surface) ──
+  // Architect directive 2026-04-30: NO cross-crew dispatch — Anita drafts
+  // briefs, defines audiences, logs experiments. Architect coordinates Yuki
+  // for distribution + Vector for metrics until pattern is proven.
+  const { MarketingTool } = await import("./tools/marketing");
+  tools.push(new MarketingTool());
 
   // ── 4. Initialize Agent Loop ──
   // CRITICAL: Veritas chat must use the Veritas team LLM (Anthropic-first), NOT failoverLLM (Groq-first).

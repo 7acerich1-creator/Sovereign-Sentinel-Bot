@@ -6,6 +6,43 @@
 
 ---
 
+## S125+ — Agentic Refactor Phase 7: Anita Marketing Lead + Veritas Chief of Staff (2026-04-30)
+
+**Architect directive 2026-04-30 strategy session:** Anita elevates from Email Response Specialist → Marketing Lead. Veritas elevates from "Chief Strategy Officer" → Chief of Staff (cross-crew oversight, no longer pipeline/content production). Alfred takes the pipeline + content production scope Veritas had. NO cross-crew dispatch authority for Anita yet — Architect stays in the coordination loop until pattern is proven.
+
+**What landed (✅ shipped):**
+
+- **AGENT_LLM_TEAMS update** (`src/index.ts`): anita + veritas elevated to `["anthropic", "gemini", "groq"]` chain. Both now run on Claude Sonnet 4 by default. Yuki, Vector, Alfred stay on Gemini → Groq (their work is more deterministic).
+- **Marketing fat tool** (`src/tools/marketing.ts` — new ~370 lines). Starter actions: `draft_campaign` (returns structured brief, doesn't auto-execute), `define_audience` (upserts to anita_audience_segments), `list_audiences`, `log_experiment` (writes to anita_experiments), `update_experiment` (status/result/winner), `list_experiments`, `analyze_channel` (read of tracked experiments — future versions integrate Buffer/YouTube/Stripe). NO cross-crew dispatch — Anita drafts + proposes; Architect coordinates.
+- **Two new Supabase tables** (migration applied via MCP):
+  - `anita_audience_segments`: name, description, attributes jsonb, size_estimate, channels, pain_points, desired_outcomes
+  - `anita_experiments`: name, hypothesis, variant_a, variant_b, metric, status (planning/running/concluded/abandoned), result, winner, audience_segment_id (FK)
+  Both with RLS service_role write + anon read.
+- **Anita persona overhaul**:
+  - `src/agent/personas.ts`: role flipped from "Email Response and Copy Specialist" → "Marketing Lead — Strategy, Campaigns, Experiments, Copy". Goal expanded to full marketing scope.
+  - `src/data/anita-prompt-pieces.json`: new `marketing_lead` persona piece (default), existing `propagandist` and `warm_responder` retained as scenario-specific voices. New `marketing_protocol_s125p7` extras piece — when to use the marketing tool vs. email tools, no-cross-crew-dispatch rule, Mom Test still applies even in strategic mode.
+- **Veritas persona overhaul** (`src/agent/personas.ts`): role flipped to "Chief of Staff — Crew Oversight + Strategic Course-Correction". Detailed scope still being refined per Architect — placeholder for now, will be detailed in subsequent sessions as patterns surface.
+- **Alfred persona expansion** (`src/agent/personas.ts`): role expanded to "Content Production Lead — Seed + Pipeline Oversight" since Veritas no longer owns pipeline.
+
+**Crew strategy session decisions locked (Architect 2026-04-30):**
+1. Graph: SHARED across all agents (entities + relationships are namespace-less, all agents read/write same tables).
+2. Pinecone: PER-AGENT namespaces (anita-personal, yuki-personal, vector-personal, veritas-personal, alfred-personal) plus existing `shared` cross-cutting namespace. *Implementation pending* — current memory tools still hardcoded to sapphire-personal; next phase generalizes.
+3. Reflection cadence: Yuki + Anita every 3 days (most active agents). Vector + Veritas + Alfred weekly. Sapphire keeps per-turn (substantive turns only).
+4. Sleeptime: ONE unified job that iterates over all agents. *Implementation pending* — current consolidator runs Sapphire-only; next phase generalizes.
+
+**What's deliberately deferred:**
+- Generalizing the memory tool surface (core_memory + archival + supersede) for other agents — Anita has Marketing tool + Gmail; she gets full memory in the next phase.
+- Generalizing the sleeptime consolidator across crew — Sapphire-only currently.
+- Anita's deeper marketing capabilities (channel-perf integration with Buffer/YouTube/Stripe, audience-research deep dives, hypothesis frameworks) — Architect explicitly framed these as work-in-progress, built conversationally as marketing strategy develops.
+- Veritas's full Chief-of-Staff tool surface — needs more strategic thinking before locking detail.
+
+**Open at close:**
+1. Push the Phase 7 batch via Desktop Commander (this session).
+2. Architect tests Anita on Telegram with the new marketing tools as marketing push begins.
+3. Phase 8 strategy session: generalize memory infrastructure across crew (per-agent core memory + archival + reflection schedules).
+
+---
+
 ## S125+ — Agentic Refactor Phase 6: temporal knowledge graph in Postgres (Zep-style, 2026-04-30)
 
 **Architect directive 2026-04-30:** "Phase 6." Single word. Shipped same session.

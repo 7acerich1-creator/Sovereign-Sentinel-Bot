@@ -613,7 +613,7 @@ export const BRAND_FREQUENCY_PROFILES: Record<BrandFrequency, BrandFrequencyProf
     brandLabel: "The Containment Field",
     frequencyLayer: "LOWER",
     identity: "The Containment Field is an anonymous, top-of-funnel channel written for people who are still INSIDE the machine and know something is wrong but do not yet have the vocabulary. The narrator is a whistleblower reading a declassified brief at a quiet table — measured, tactical, specific. The audience is a tired worker who just closed their laptop and is looking for someone who can finally NAME what is happening to them. Never speak in cosmology, quantum metaphors, or spiritual vocabulary.",
-    theme: "Escaping the Matrix as a concrete set of behavioral programs installed by the workplace. Dark psychology as it is used IN PRACTICE — by managers, HR, performance reviews, promotion ladders. Systemic corporate burnout as the product of an extraction loop. Human behavioral programming installed one micro-compliance at a time. The 9-to-5 grind as a conditioning apparatus, not a moral failure.",
+    theme: "The Containment Field exists for people still inside the machine who feel something is being done to them but haven't been given the language to name it. Each transmission names ONE specific manipulation pattern, exposes how it operates in their daily life, and hands them a single concrete countermeasure they can run tomorrow. The shift produced runs from 'I'm exhausted and I don't know why' to 'I see the mechanism and I know what to do about it.' The TOPIC for any given script is whatever the rotator-supplied angle is — workplace conditioning, dark-psychology tactics in practice, narcissistic dynamics, social control patterns, manufactured compliance, gaslighting, triangulation, or anything else in the angle pool. Voice carries the channel; topic comes from the angle.",
     tone: "Clinical, edgy, tactical, grounded in raw survival. Name the extraction loop. Name the operator. Empathize with the exhaustion FIRST, then expose the manipulation. Never uplifting. Never 'expansive'. Never motivational. The emotional peak is RECOGNITION, not transcendence.",
     style: "High-velocity, punchy, listicle-friendly. Frameworks with numbers ('3 Signs', '6 Tricks', '4 Micro-Compliance Traps'). Short sentences. Pattern-interrupt hooks that name a specific body sensation the viewer is having right now ('If your chest tightens when your manager says quick sync...'). Zero abstract language. Every claim is falsifiable and tactical.",
     structure: "NAME THE LOOP (clinical description of the extraction pattern) → EXPOSE THE MECHANISM (how the operant conditioning was installed) → DELIVER ONE COUNTERMEASURE (a single concrete tactic the viewer can run tomorrow morning). Lists are encouraged. Numbered steps are encouraged. The viewer should feel ARMED, not awakened.",
@@ -671,8 +671,8 @@ export const BRAND_FREQUENCY_PROFILES: Record<BrandFrequency, BrandFrequencyProf
   sovereign_synthesis: {
     brandLabel: "Sovereign Synthesis",
     frequencyLayer: "HIGHER",
-    identity: "Sovereign Synthesis speaking as the System Architect. Personal brand. Master-level sovereign transmission for souls who have already outgrown the 'how do I survive my manager' layer. The audience is a mind that already suspects reality is self-authored and is hunting for the vocabulary to confirm it. Never speak in hacks, tips, numbered lists, or workplace analogies.",
-    theme: "Master-Level Sovereign Synthesis. Quantum mechanics of the soul. Timeline jumping as a daily practice. Solipsism as operating system — the viewer is authoring the universe by the frequency signature they are broadcasting. Event horizons of identity. The collapse of the old self as a prerequisite for the monad to re-select its timeline.",
+    identity: "Sovereign Synthesis speaking as the System Architect. Personal brand. Master-level sovereign transmission for souls who have already outgrown the 'how do I survive my manager' layer. The audience is a mind that already suspects reality is self-authored and is hunting for the framework to confirm it and act on it. Never speak in hacks, tips, numbered lists, or workplace analogies.",
+    theme: "Sovereign Synthesis is for minds who already sense reality is self-authored and are hunting for the architectural framework to act on it. Each transmission delivers ONE specific piece of sovereign architecture — a lens, a framework, a law, an identity shift, a decision rule — that the viewer can install into how they think and operate. The shift produced runs from 'something is wrong with the world I'm in' to 'I am the architect of the world I select.' The TOPIC for any given script is whatever the rotator-supplied angle is — sovereignty, authority, identity, decision-making, attention, network design, time, legacy, pattern recognition, exit velocity, or anything else in the angle pool. Voice carries the channel; topic comes from the angle.",
     tone: "Hypnotic, esoteric, deeply philosophical, absolute. Speak in edicts, not suggestions. Do not offer hacks, tips, tricks, numbered steps, or frameworks the viewer can 'try'. Deliver universal laws the way an oracle delivers them — as though the viewer was always meant to hear this, and the only variable is whether they are ready. Warmth is allowed; concession is not.",
     style: "Slow, mesmerizing pacing. Long, breath-driven sentences that loop back on themselves. Pauses. Repetition as incantation. Speaking directly to the soul's architecture and the illusion of separation between the viewer and the universe they believe is happening TO them. Every line should feel like it was spoken into existence, not written into a doc.",
     structure: "EDICT (a universal law stated as fact in the first breath) → MIRROR (show the viewer they are already living inside this law, unconsciously) → DISTORTION (reveal the timeline they are broadcasting and why it is being mirrored back at them) → RE-SELECTION (name the frequency signature they must hold to collapse into the next timeline — NOT an action step, a state). No lists. No bullet points. No 'here is what to do tomorrow'.",
@@ -736,23 +736,44 @@ export const BRAND_FREQUENCY_PROFILES: Record<BrandFrequency, BrandFrequencyProf
 /**
  * Build the FREQUENCY BIFURCATION PROTOCOL block that gets prepended to every
  * LLM prompt (Anita scriptwriter, Yuki copywriter, long-form SEO) for a given
- * brand. This is the non-negotiable voice-lock layer.
+ * brand.
+ *
+ * S127 (2026-05-01) — REDESIGNED. The previous version emitted a hardcoded
+ * REQUIRED LEXICON list ("monad", "timeline", "frequency signature", etc.)
+ * plus a SELF-AUDIT step that demanded ≥3 of those words appear in every
+ * output. That mechanism collapsed every SS script into the same word soup
+ * and the cosine uniqueness guard correctly rejected the resulting
+ * paraphrases. TCF had the same architecture (different vocabulary —
+ * "extraction loop", "operant conditioning", "micro-compliance") and was
+ * heading for the same wall once enough scripts shipped.
+ *
+ * Voice doesn't come from required-word lists. It comes from describing
+ * who's writing, who's reading, and what shift the channel produces. The
+ * LLM is a writer; let it write.
+ *
+ * What's emitted now: identity, theme (purpose-driven, not vocabulary-
+ * driven), tone, style, structure, voice mandate, plus an explicit closing
+ * line that pins the topic to the seed material below.
+ *
+ * What's no longer emitted: REQUIRED LEXICON, BANNED LEXICON, "imitate the
+ * shape" sample titles/hooks (they were acting as molds the LLM copied),
+ * and the SELF-AUDIT block. The data fields stay on the profile object for
+ * any future tooling that wants to inspect them — this fix only changes
+ * what reaches the LLM.
  */
 export function buildBrandFrequencyBlock(brand: BrandFrequency): string {
   const p = BRAND_FREQUENCY_PROFILES[brand];
   const lines: string[] = [];
   lines.push("═══════════════════════════════════════════════");
-  lines.push(`FREQUENCY BIFURCATION PROTOCOL — ${p.frequencyLayer} FREQUENCY LAYER`);
-  lines.push(`CHANNEL: ${p.brandLabel}`);
+  lines.push(`CHANNEL VOICE — ${p.brandLabel}`);
   lines.push("═══════════════════════════════════════════════");
   lines.push("");
-  lines.push("This block overrides any generic voice advice that follows it.");
-  lines.push("Violations are a hard failure, not a stylistic preference.");
+  lines.push("This block describes the channel's identity and voice. The TOPIC for this transmission is bound by the seed material that appears later in the prompt — not by this block. Keep the voice; let the topic come from the seed.");
   lines.push("");
   lines.push("IDENTITY:");
   lines.push(`  ${p.identity}`);
   lines.push("");
-  lines.push("THEME:");
+  lines.push("PURPOSE & AUDIENCE:");
   lines.push(`  ${p.theme}`);
   lines.push("");
   lines.push("TONE:");
@@ -761,28 +782,16 @@ export function buildBrandFrequencyBlock(brand: BrandFrequency): string {
   lines.push("STYLE:");
   lines.push(`  ${p.style}`);
   lines.push("");
-  lines.push("STRUCTURE:");
+  lines.push("COMMON STRUCTURAL SHAPE (reference, not a rigid mold — let the topic drive structure if it pulls a different shape):");
   lines.push(`  ${p.structure}`);
-  lines.push("");
-  lines.push("REQUIRED LEXICON (weave naturally, do not dump):");
-  for (const w of p.lexiconRequired) lines.push(`  • ${w}`);
-  lines.push("");
-  lines.push("BANNED LEXICON (ZERO TOLERANCE — self-audit before emitting):");
-  for (const w of p.lexiconBanned) lines.push(`  • ${w}`);
-  lines.push("");
-  lines.push("SAMPLE TITLE SHAPES (imitate the shape, do NOT copy verbatim):");
-  for (const t of p.sampleTitles) lines.push(`  • "${t}"`);
-  lines.push("");
-  lines.push("SAMPLE HOOK SHAPES (imitate the cadence, do NOT copy verbatim):");
-  for (const h of p.sampleHooks) lines.push(`  • "${h}"`);
   lines.push("");
   lines.push("VOICE MANDATE:");
   lines.push(`  ${p.voiceMandate}`);
   lines.push("");
-  lines.push("SELF-AUDIT (run before emitting ANY final output):");
-  lines.push("  1. Scan every sentence for the BANNED LEXICON list above. If any banned word appears, REWRITE that sentence.");
-  lines.push("  2. Confirm that at least 3 words from the REQUIRED LEXICON appear organically in the output.");
-  lines.push("  3. Read the output aloud in your head in the voice described by VOICE MANDATE. If the cadence does not match, rewrite.");
+  lines.push("WRITING THIS SCRIPT:");
+  lines.push("  • The TOPIC is the seed material below in the prompt. Stay inside that conceptual territory and develop it.");
+  lines.push("  • Vocabulary should emerge naturally from the topic and the voice described above. There is no required word list and no banned word list — write as a writer, not a vocabulary-matcher.");
+  lines.push("  • The two channels are tonally distinct (one carries the lower clinical layer, the other the higher sovereign layer). Keep this script in this channel's voice; that separation is what bifurcation means here. It is NOT a vocabulary firewall.");
   lines.push("═══════════════════════════════════════════════");
   return lines.join("\n");
 }

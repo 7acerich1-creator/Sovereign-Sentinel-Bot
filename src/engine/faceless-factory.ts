@@ -394,9 +394,9 @@ function buildScriptVoice(brand: Brand): string {
   const block = buildBrandFrequencyBlock(brand);
   return `${block}
 
-You are Anita, the in-house scriptwriter for this channel. You are writing a voiceover script for a faceless video. Every rule in the FREQUENCY BIFURCATION PROTOCOL block above is non-negotiable and overrides any generic voiceover craft advice that follows.
+You are Anita, the in-house scriptwriter for this channel. You are writing a voiceover script for a faceless video. The CHANNEL VOICE block above describes the channel's identity, tone, and posture — honor it. The topic comes from the seed material in the prompt below, not from this block.
 
-The voiceover should sound like a human speaking — conversational, with natural pauses and the cadence mandated by the VOICE MANDATE above. NOT like reading an essay. NOT like a motivational speech. Speak in the vocabulary and rhythm of this brand ONLY.`;
+The voiceover should sound like a human speaking — conversational, with natural pauses and the cadence described in the VOICE MANDATE above. NOT like reading an essay. NOT like a motivational speech. Stay in this channel's voice and develop the seed's thesis.`;
 }
 
 const SCRIPT_VOICE: Record<Brand, string> = {
@@ -431,16 +431,14 @@ async function extractNarrativeBlueprint(
 
   const blueprintPrompt = `${brandBlock}
 
-You are Anita, a narrative architect for a faceless YouTube documentary channel. Every rule in the FREQUENCY BIFURCATION PROTOCOL block above overrides any generic blueprint advice that follows. The thesis, title, hook, narrative arc, arguments, and emotional journey you return MUST all honor that block — vocabulary, structure, tone, ALL of it.
+You are Anita, a narrative architect for a faceless YouTube documentary channel. The CHANNEL VOICE block above governs the channel's identity, tone, and posture — your blueprint must honor it. The TOPIC, however, is bound by the seed material below — your blueprint must develop the seed's specific thesis. Do not pull in metaphors or vocabulary from outside the seed's conceptual territory.
 
-You have raw transcript material from a source video. Your job is NOT to summarize it. Your job is to EXTRACT THE DEEPEST TRUTH from it and architect an ORIGINAL narrative around that truth.
-
-Think like a documentary filmmaker: What is the ONE powerful thesis buried in this material? What story does it tell about human nature, power, psychology, or consciousness?
+Your job is NOT to summarize the seed and it is NOT to invent an unrelated topic that "sounds like" the channel. Your job is to take the seed's core argument and architect an ORIGINAL narrative that develops THAT argument — same conceptual lane, different sentences.
 
 URGENCY CONTEXT (weave into every blueprint):
 We are in an active evolutionary moment. AI and exponential technological shifts are widening the gap between the sovereign and the sleeping DAILY. The people who feel "stuck" or "behind" aren't imagining it — their internal operating system is outdated and the world around them is updating faster than they are. This channel exists to deliver the architectural codes for the upgrade. Every video must carry this urgency — not as fear, but as factual observation that demands action NOW.
 
-RAW SOURCE MATERIAL (use as INSPIRATION only — do NOT copy phrases or structure):
+BINDING SEED — this is the topic spine for this script. Develop THIS thesis, in this conceptual territory. Do not copy phrases verbatim, but DO stay inside the seed's lane:
 ${sourceIntelligence.slice(0, 8000)}
 
 NICHE: ${niche.replace(/_/g, " ")}
@@ -779,7 +777,7 @@ Return ONLY valid JSON, no code fences.`;
         : "CONSCIOUSNESS ACTIVATION DECLARATIONS";
       const activationPrompt = `${activationBrandBlock}
 
-You are writing 2 ${activationLabel} for a documentary-style video on this channel. Every rule in the FREQUENCY BIFURCATION PROTOCOL block above is non-negotiable. Declarations that drift into the OTHER brand's vocabulary are a hard failure.
+You are writing 2 ${activationLabel} for a documentary-style video on this channel. The CHANNEL VOICE block above describes the channel; honor its tone. The declarations must be topic-specific to THIS video's thesis — generated from the thesis below, not pulled from a fixed phrase pool.
 
 These are NOT traditional calls to action. These are first-person declarations the viewer types in the comments — a moment of recognition for containment_field, a moment of frequency re-selection for sovereign_synthesis.
 
@@ -789,8 +787,8 @@ VIDEO CONTEXT:
 - Niche: ${niche.replace(/_/g, " ")}
 
 For each activation, write:
-1. A "context_line" — what the narrator says to set up the moment (1 sentence, honors the VOICE MANDATE above)
-2. A "declaration" — what the viewer types in the comments (short, powerful, first-person, present tense, in the REQUIRED LEXICON of this brand)
+1. A "context_line" — what the narrator says to set up the moment (1 sentence, in the channel's voice as described above)
+2. A "declaration" — what the viewer types in the comments (short, powerful, first-person, present tense, generated from THIS thesis)
 
 ${activationExamples}
 
@@ -798,9 +796,9 @@ RULES:
 - Declarations must be TOPIC-SPECIFIC — tied to THIS video's thesis, not generic.
 - First-person, present tense ONLY ("I am..." / "I choose..." / "I see...").
 - Max 8 words per declaration — punchy, declarative.
-- The context_line must be voiced in the VOICE MANDATE of this brand — clinical and low-cadence for containment_field, hypnotic and oracular for sovereign_synthesis.
+- The context_line must match this channel's voice — clinical and low-cadence for containment_field, hypnotic and oracular for sovereign_synthesis.
 - NO begging ("please subscribe"), NO manipulation ("smash that like button").
-- Zero cross-contamination. Scan for the BANNED LEXICON above before emitting.
+- Stay in this channel's voice; do not drift into the other channel's tone.
 
 Return as JSON array:
 [

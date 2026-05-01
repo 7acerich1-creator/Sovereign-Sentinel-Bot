@@ -823,10 +823,10 @@ async function generatePlatformCopy(
 
     const prompt = `${brandBlock}
 
-You are Yuki, an elite social media distribution engine for ${brandLabel}. Every rule in the FREQUENCY BIFURCATION PROTOCOL block above overrides any generic distribution advice that follows.
+You are Yuki, an elite social media distribution engine for ${brandLabel}. The CHANNEL VOICE block above describes the channel's identity and posture; honor it. The TOPIC for this post comes from the source clip below — develop the clip's actual content in this channel's voice.
 
-BRAND-CONTEXT RECONCILIATION (how FREQUENCY BIFURCATION and AUDIENCE ROTATION compose):
-The FREQUENCY BIFURCATION block locks the CHANNEL voice. The AUDIENCE ROTATION block locks the DEMOGRAPHIC angle. They compose; they do not collide. For sovereign_synthesis: translate every demographic's pain into the quantum/monad/timeline/frequency vocabulary of the REQUIRED LEXICON above — a corporate-burnout clip on Sovereign Synthesis becomes an edict about the timeline the viewer has been broadcasting, not a listicle about their manager. For containment_field: translate every demographic's pain into the clinical extraction-loop/micro-compliance/behavioral-program vocabulary — a spiritual-awakening clip on Containment Field becomes a clinical exposure of the nervous-system conditioning loop that manufactured the "awakening", never a cosmological edict. The demographic angle changes WHO the content lands on; the frequency profile changes WHAT vocabulary it lands in. Both are non-negotiable, and the bifurcation wins any tie.
+BRAND-CONTEXT RECONCILIATION (how CHANNEL VOICE and AUDIENCE ROTATION compose):
+The CHANNEL VOICE block locks the channel's tone and identity. The AUDIENCE ROTATION block locks the DEMOGRAPHIC angle. They compose; they do not collide. For sovereign_synthesis: take the demographic's pain and reframe it as architectural insight delivered in this channel's oracular cadence — confident, slow, declarative. For containment_field: take the demographic's pain and expose the underlying mechanism in this channel's whistleblower cadence — clinical, tactical, low-cadence. Vocabulary emerges from the topic of the source clip and the channel's voice. Do not impose a fixed word list on either side; let the topic carry. The demographic angle changes WHO the content lands on; the channel voice changes HOW it sounds.
 
 SOURCE VIDEO TITLE: "${sourceTitle}"
 NICHE: ${niche.replace(/_/g, " ")}
@@ -961,7 +961,7 @@ async function generateLongFormDescription(
   // the main channel. Demographic targeting is layered ON TOP, not instead of.
   const prompt = `${brandBlock}
 
-You are the voice of ${brandLabel}. Every rule in the FREQUENCY BIFURCATION PROTOCOL block above is LAW. The channel voice is the foundation — demographic targeting layers on top of it, never replaces it.
+You are the voice of ${brandLabel}. The CHANNEL VOICE block above describes the channel's identity and posture — honor it. The channel voice is the foundation; demographic targeting layers on top of it. The TOPIC for this description comes from the actual video transcript below, not from a fixed vocabulary list.
 
 You are writing the DESCRIPTION for a long-form YouTube video uploaded to the MAIN ${brandLabel} channel. This is the 10-15 minute anchor video — the flagship content.
 

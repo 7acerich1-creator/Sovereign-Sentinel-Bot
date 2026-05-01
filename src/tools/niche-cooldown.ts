@@ -215,6 +215,12 @@ export async function recordNicheRun(params: {
   source?: string;
   /** Session 113+ — A/B/C aesthetic used on this run (for performance test). */
   aestheticStyle?: "A" | "B" | "C";
+  /** S125+ — YouTube watch URL persisted after long-form upload. */
+  youtubeUrl?: string | null;
+  /** S125+ — Short YouTube URLs (or R2 URLs as fallback) for the standalone shorts produced from this run. */
+  shortUrls?: string[] | null;
+  /** S125+ — R2 long-form URL (always present after pod upload). */
+  r2VideoUrl?: string | null;
 }): Promise<void> {
   const cfg = getSupabaseConfig();
   if (!cfg) {
@@ -239,6 +245,10 @@ export async function recordNicheRun(params: {
         job_id: params.jobId ?? null,
         source: params.source ?? "alfred_daily",
         aesthetic_style: params.aestheticStyle ?? null,
+        // S125+ — URL persistence for Mission Control + audit grepping
+        youtube_url: params.youtubeUrl ?? null,
+        short_urls: params.shortUrls ?? null,
+        r2_video_url: params.r2VideoUrl ?? null,
       }),
     });
     if (!resp.ok) {

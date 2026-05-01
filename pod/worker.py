@@ -484,7 +484,10 @@ def produce_short(
 # ---------------------------------------------------------------------------
 BRAND_MUSIC = {
     "sovereign_synthesis": "/app/brand-assets/music_sovereign.mp3",
-    "containment_field": "/app/brand-assets/ambient_drone.mp3",
+    # S125+ — was ambient_drone.mp3 (mismatched with long-form/shorts which use
+    # music_urgent.mp3); content engine TCF videos sounded "wrong" to viewers
+    # because the brand audio identity didn't match the rest of the channel.
+    "containment_field": "/app/brand-assets/music_urgent.mp3",
 }
 BRAND_FONT = "/app/brand-assets/BebasNeue-Regular.ttf"
 # SESSION 116 (2026-04-25): per-brand handle burned in last ~2s of every kinetic

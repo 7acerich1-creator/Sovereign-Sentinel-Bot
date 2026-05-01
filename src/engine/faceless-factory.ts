@@ -603,9 +603,9 @@ If you catch yourself reaching for any of these, REWRITE the sentence with a con
 
 Generate as JSON:
 {
-  "title": "CTR-optimized title (max 60 chars). FORMULA: [Bold Claim or Revelation] + [Specificity Anchor]. Specificity = numbers, time frames, or named mechanisms (e.g. 'In 48 Hours', 'The 3 Laws', 'Quantum Field Reset'). Good: 'Delete Your Old Self In 48 Hours — The Quantum Reset Protocol', 'Nobody Told You This About Your Subconscious Programming', 'The 3 Frequency Shifts That Collapse Old Timelines'. Bad: 'Wake Up Call', 'Beyond Right', 'Stuck In The Loop' (too vague, no curiosity gap). MUST be different from ALL previously used titles.${recentTitles.length > 0 ? " BANNED (already used): " + recentTitles.slice(0, 5).map(t => `'${t}'`).join(", ") : ""}",
+  "title": "CTR-optimized title (max 60 chars). FORMULA: [Bold Claim or Revelation] + [Specificity Anchor]. Specificity = numbers, time frames, or named mechanisms (e.g. 'In 48 Hours', 'The 3 Laws', 'Quantum Field Reset'). GOOD FORMULA: "[Bold claim] [Specificity anchor]" — e.g., "[X] [PROTOCOL/SHIFT/RESET] In [TIMEFRAME]" or "The [N] [DOMAIN] [MECHANISM]". The bold claim creates a curiosity gap; the specificity anchor (number, timeframe, named mechanism) makes it credible. BAD: vague phrases without specificity ("Wake Up Call", "Stuck In The Loop"). DO NOT REUSE these example structures verbatim — generate ORIGINAL phrasing using the formula. NEVER reuse phrases from prior runs. MUST be different from ALL previously used titles.${recentTitles.length > 0 ? " BANNED (already used): " + recentTitles.slice(0, 5).map(t => `'${t}'`).join(", ") : ""}",
   "hook": "${blueprint.hook}",
-  "thumbnail_headline": "A 4-6 word PAIN-POINT HEADLINE in ALL CAPS — the MAIN punch. Names a feeling, lie, or trap the viewer recognizes instantly. COMPLETE STANDALONE STATEMENT (not a fragment, not a setup, not a cliffhanger). HARD CONSTRAINTS: 3-6 words, max 32 chars, ALL CAPS only. Think Rev. Ike sermon poster — 'GOD WILL NOT CHOOSE FOR YOU', not entertainment-niche power-words. REVELATIONS: 'THEY DESIGNED YOUR CAGE', 'YOUR MEMORIES ARE INSTALLED'. COMMANDS: 'BURN THE MANUAL', 'DELETE YOUR OLD SELF', 'STOP CHASING THE SIGNAL'. CONFRONTATIONS: 'YOU WERE NEVER FREE', 'YOUR COMFORT IS THE TRAP'. HARD BANS: NO ellipsis, NO trailing comma, NO mid-clause cutoff, NO single power-words like 'EXPOSED' alone.",
+  "thumbnail_headline": "A 4-6 word PAIN-POINT HEADLINE in ALL CAPS — the MAIN punch. Names a feeling, lie, or trap the viewer recognizes instantly. COMPLETE STANDALONE STATEMENT (not a fragment, not a setup, not a cliffhanger). HARD CONSTRAINTS: 3-6 words, max 32 chars, ALL CAPS only. Think Rev. Ike sermon poster — 'GOD WILL NOT CHOOSE FOR YOU', not entertainment-niche power-words. CATEGORIES (use as STRUCTURAL hint, do NOT copy verbatim — generate ORIGINAL phrasing): REVELATIONS reveal hidden architecture (e.g. naming a system the viewer didn't know existed). COMMANDS direct an action against the system (3-5 words, imperative voice). CONFRONTATIONS state an uncomfortable truth about the viewer's current state. Pull a fresh phrase rooted in THIS script's specific thesis — never recycle phrasing across videos. HARD BANS: NO ellipsis, NO trailing comma, NO mid-clause cutoff, NO single power-words like 'EXPOSED' alone.",
   "thumbnail_subhead": "A 4-8 word ITALIC AMPLIFIER in mixed case — sits below the headline, completes the headline's promise. Names the WHY or the CONSEQUENCE in Title Case. Complete clause, not a fragment. HARD CONSTRAINTS: 4-8 words, max 56 chars, mixed case. The headline punches; the subhead twists the knife. Examples — 'And Why Your Reality Will Not Hold', 'The Architecture They Hide From You', 'The Code They Do Not Want You Reading', 'How To Walk Through The Wall', 'The Identity Reset They Will Not Teach', 'And This Is Why Your Life Is Not Changing'. HARD BANS: NO ellipsis, NO trailing comma, NO leading 'And...' pattern repeated across multiple videos.",
   "thumbnail_visual": "A MOVIE POSTER frame, not a movie still. HIGH CONTRAST, 50% of the frame dark/empty for text. Pick ONE: (A) EXTREME face close-up — eyes filling the frame, single hard light source, rest pitch black, visible skin texture, intensity in the gaze. (B) SINGLE powerful object against darkness — a shattered mirror, a burning letter, a key in a lock, a door cracked open with blinding white light behind it — rim-lit or glowing, everything else black. (C) Abstract energy — golden particles swirling in void, electric arcs, volumetric god-rays cutting through pure darkness. Frame it like a Fincher title card or a Saul Bass poster.",
   "segments": [
@@ -1631,6 +1631,10 @@ export async function produceFacelessVideo(
     // data that drives future LRU rotation AND the 30-video A/B/C performance
     // measurement (joined against YouTube analytics by Mission Control).
     try {
+      // S125+ — persist URLs so Mission Control can surface today's videos
+      // without grepping R2. R2 URL is deterministic given client_job_id;
+      // YouTube URL is whatever the publisher returned (null on upload fail).
+      const r2VideoUrl = `https://${(process.env.R2_PUBLIC_URL_BASE || "").replace(/^https?:\/\//, "")}/videos/${brand}/${jobId}.mp4`;
       await recordNicheRun({
         brand,
         niche,
@@ -1638,6 +1642,8 @@ export async function produceFacelessVideo(
         jobId,
         source: "faceless_factory",
         aestheticStyle,
+        youtubeUrl: videoUrl,
+        r2VideoUrl,
       });
     } catch (cooldownErr: any) {
       console.warn(`[FacelessFactory] recordNicheRun non-fatal: ${cooldownErr?.message}`);

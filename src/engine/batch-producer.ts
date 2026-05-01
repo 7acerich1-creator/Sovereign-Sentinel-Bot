@@ -42,6 +42,11 @@ import {
 } from "../tools/niche-cooldown";
 import { AESTHETIC_MODIFIERS } from "./content-engine";
 import { pickUnusedAngle } from "../data/thesis-angles";
+// S125+ — Sequential rotator. Replaces the batch's old selectNichesForBrand
+// LRU + pickUnusedAngle path with the deterministic march used by the
+// auto-pipeline. One cursor per brand, advances per ship, ~225 unique seeds
+// before any wrap. See src/tools/rotation-state.ts.
+import { advanceAndPickSeed } from "../tools/rotation-state";
 import { withPodSession } from "../pod/session";
 import { produceVideo, splitOversizedScenes } from "../pod/runpod-client";
 import type { JobSpec, Scene as PodScene } from "../pod/types";
@@ -132,21 +137,28 @@ async function preGenerateScripts(
   const errors: string[] = [];
 
   for (const brand of brands) {
-    const niches = await selectNichesForBrand(brand, perBrand);
     const brandLabel = brand === "sovereign_synthesis" ? "Sovereign Synthesis" : "TCF";
 
-    // Fetch previously used angle IDs for this brand (cross-batch dedup)
-    const usedAngleIds = await getUsedAngleIds(brand);
+    await onProgress?.(`📝 ${brandLabel}: generating ${perBrand} scripts via sequential rotator`);
 
-    await onProgress?.(`📝 ${brandLabel}: generating ${niches.length} scripts [${niches.join(", ")}] (${usedAngleIds.size} angles previously consumed)`);
-
-    for (let i = 0; i < niches.length; i++) {
-      // S122c — `niche` is now `let` so the uniqueness retry loop can rotate
-      // it via pickNextNiche. The post-rotation niche is what gets pushed
-      // into `valid` so downstream pod jobs and cooldown records track the
-      // shipped niche, not the originally-attempted one.
-      let niche = niches[i];
-      const { text: sourceIntelligence, angleId } = buildSourceIntelligence(brand, niche, usedAngleIds);
+    for (let i = 0; i < perBrand; i++) {
+      // S125+ — SEQUENTIAL ROTATOR. Each iteration advances the brand cursor
+      // and returns the next (niche, angle) pair. Replaces the old LRU niche
+      // pick + random angle pick which was producing same-niche duplicates
+      // within a single batch (e.g. two SS legacy-engineering videos in one
+      // run). The rotator guarantees ~225 unique seeds before any repeat.
+      const seed = await advanceAndPickSeed(brand);
+      let niche = seed.niche;
+      const angleId: string | null = seed.angle.id;
+      const sourceIntelligence =
+        `BRAND: ${brand === "sovereign_synthesis" ? "Sovereign Synthesis" : "The Containment Field"}\n` +
+        `NICHE: ${niche}\n\n` +
+        `THESIS ANGLE:\n${seed.angle.seed}\n\n` +
+        `Build the entire video around this specific angle. Do NOT generalize or ` +
+        `broaden the topic — the thesis seed above IS the video's core argument. ` +
+        `Expand it with evidence, mechanisms, lived examples, and a concrete ` +
+        `sovereign takeaway the viewer can act on immediately.`;
+      console.log(`🔄 [BatchProducer] ${brandLabel} slot ${i + 1}/${perBrand} → ${niche}/${angleId} (rotator slot=${seed.slotIndex}, pass=${seed.passIndex + 1})`);
 
       try {
         let script: FacelessScript | null = null;
@@ -382,6 +394,11 @@ async function produceBatchOnPod(
           script: script.segments.map(s => s.voiceover).join("\n\n"),
           scenes,
           hook_text: hookText,
+          // S125+ — pass our own jobId as client_job_id so the pod uploads to
+          // a predictable R2 key (videos/{brand}/{client_job_id}.mp4).
+          // Without this, the pod generates a random UUID and we lose
+          // the ability to construct/lookup video URLs later.
+          client_job_id: videoJobId,
         };
 
         await onProgress?.(`[${i + 1}/${scripts.length}] ${label} aesthetic: ${aestheticStyle}`);

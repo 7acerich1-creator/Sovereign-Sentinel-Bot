@@ -2777,6 +2777,43 @@ async function main() {
     },
   });
 
+  // ── S125+ FLUX BATCH AUTO-FIRE — runs daily 18:50 UTC ──
+  // Bridges the gap that left content_engine_queue.media_url NULL for 6+ days
+  // (2026-04-24 -> 2026-04-30): daily production at 18:30 UTC drafts queue rows
+  // with image_prompt set and media_url=null, but fluxBatchImageGen() was only
+  // wired to manual /flux-batch + a webhook. With no auto-fire, every Buffer
+  // post since 2026-04-24 went out text-only. This scheduler closes the loop
+  // 20 min after daily production so the 19:00 UTC distribution sweep finds
+  // populated media_url. ~$0.07/day on FLUX (one image per brand, deduped).
+  const fluxBatchFiredDate = { key: "" };
+  scheduler.add({
+    name: "Content Engine - FLUX Batch (daily 18:50 UTC)",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      const now = new Date();
+      const hour = now.getUTCHours();
+      const minute = now.getUTCMinutes();
+      const dateKey = now.toDateString();
+      if (hour === 18 && minute >= 50 && minute <= 54 && fluxBatchFiredDate.key !== dateKey) {
+        fluxBatchFiredDate.key = dateKey;
+        try {
+          const patched = await fluxBatchImageGen();
+          console.log(`[ContentEngine] FLUX auto-batch backfilled ${patched} queue row(s)`);
+          if (patched > 0 && defaultChatId && telegram) {
+            try {
+              await telegram.sendMessage(defaultChatId, `FLUX batch: ${patched} images generated for today's content drops.`);
+            } catch { /* non-critical */ }
+          }
+        } catch (err: any) {
+          console.error(`[ContentEngine] FLUX auto-batch failed: ${err.message}`);
+        }
+      }
+    },
+  });
+
   // SESSION 105: Distribution sweep — fixed 2x daily at 12:00 UTC + 19:00 UTC.
   // Was boot-relative (fired every deploy). Now clock-based: morning sweep (12:00 UTC / 7AM CDT)
   // catches overnight drafts, evening sweep (19:00 UTC / 2PM CDT) catches daily production output.

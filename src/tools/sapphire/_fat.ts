@@ -130,10 +130,10 @@ export class RemindersTool implements Tool {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
     switch (action) {
-      case "set": return this.setT.execute(args, ctx);
-      case "list": return this.listT.execute(args, ctx);
-      case "cancel": return this.cancelT.execute(args, ctx);
-      case "cancel_series": return this.cancelSeriesT.execute(args, ctx);
+      case "set": return this.setT.execute(args);
+      case "list": return this.listT.execute(args);
+      case "cancel": return this.cancelT.execute(args);
+      case "cancel_series": return this.cancelSeriesT.execute(args);
       default: return unknownAction("reminders", action, ["set", "list", "cancel", "cancel_series"]);
     }
   }
@@ -176,10 +176,10 @@ export class GmailTool implements Tool {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
     switch (action) {
-      case "inbox": return this.inboxT.execute(args, ctx);
-      case "search": return this.searchT.execute(args, ctx);
-      case "send": return this.sendT.execute(args, ctx);
-      case "draft": return this.draftT.execute(args, ctx);
+      case "inbox": return this.inboxT.execute(args);
+      case "search": return this.searchT.execute(args);
+      case "send": return this.sendT.execute(args);
+      case "draft": return this.draftT.execute(args);
       default: return unknownAction("gmail", action, ["inbox", "search", "send", "draft"]);
     }
   }
@@ -224,9 +224,9 @@ export class CalendarTool implements Tool {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
     switch (action) {
-      case "list": return this.listT.execute(args, ctx);
-      case "create": return this.createT.execute(args, ctx);
-      case "reschedule": return this.rescheduleT.execute(args, ctx);
+      case "list": return this.listT.execute(args);
+      case "create": return this.createT.execute(args);
+      case "reschedule": return this.rescheduleT.execute(args);
       default: return unknownAction("calendar", action, ["list", "create", "reschedule"]);
     }
   }
@@ -282,13 +282,13 @@ export class NotionTool implements Tool {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
     switch (action) {
-      case "create_page": return this.createT.execute(args, ctx);
-      case "append": return this.appendT.execute(args, ctx);
-      case "search": return this.searchT.execute(args, ctx);
-      case "set_parent": return this.setParentT.execute(args, ctx);
-      case "get_blocks": return this.getBlocksT.execute(args, ctx);
-      case "update_block": return this.updateBlockT.execute(args, ctx);
-      case "delete_block": return this.deleteBlockT.execute(args, ctx);
+      case "create_page": return this.createT.execute(args);
+      case "append": return this.appendT.execute(args);
+      case "search": return this.searchT.execute(args);
+      case "set_parent": return this.setParentT.execute(args);
+      case "get_blocks": return this.getBlocksT.execute(args);
+      case "update_block": return this.updateBlockT.execute(args);
+      case "delete_block": return this.deleteBlockT.execute(args);
       default: return unknownAction("notion", action, ["create_page", "append", "search", "set_parent", "get_blocks", "update_block", "delete_block"]);
     }
   }
@@ -400,8 +400,8 @@ export class MemoryTool implements Tool {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
     switch (action) {
-      case "remember": return this.rememberT.execute(args, ctx);
-      case "recall": return this.recallT.execute(args, ctx);
+      case "remember": return this.rememberT.execute(args);
+      case "recall": return this.recallT.execute(args);
       case "core_view": return this.coreViewT.execute(args);
       case "core_append": return this.coreAppendT.execute(args);
       case "core_replace": return this.coreReplaceT.execute(args);
@@ -454,8 +454,8 @@ export class FamilyTool implements Tool {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
     switch (action) {
-      case "save": return this.saveT.execute(args, ctx);
-      case "get": return this.getT.execute(args, ctx);
+      case "save": return this.saveT.execute(args);
+      case "get": return this.getT.execute(args);
       default: return unknownAction("family", action, ["save", "get"]);
     }
   }
@@ -496,10 +496,10 @@ export class FollowupsTool implements Tool {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
     switch (action) {
-      case "record": return this.recordT.execute(args, ctx);
-      case "list": return this.listT.execute(args, ctx);
-      case "complete": return this.completeT.execute(args, ctx);
-      case "cancel": return this.cancelT.execute(args, ctx);
+      case "record": return this.recordT.execute(args);
+      case "list": return this.listT.execute(args);
+      case "complete": return this.completeT.execute(args);
+      case "cancel": return this.cancelT.execute(args);
       default: return unknownAction("followups", action, ["record", "list", "complete", "cancel"]);
     }
   }
@@ -545,11 +545,11 @@ export class ResearchTool implements Tool {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
     switch (action) {
-      case "web_search": return this.webT.execute(args, ctx);
-      case "youtube_search": return this.ytSearchT.execute(args, ctx);
-      case "youtube_transcript": return this.ytTranscriptT.execute(args, ctx);
-      case "analyze_pdf": return this.pdfT.execute(args, ctx);
-      case "research_brief": return this.briefT.execute(args, ctx);
+      case "web_search": return this.webT.execute(args);
+      case "youtube_search": return this.ytSearchT.execute(args);
+      case "youtube_transcript": return this.ytTranscriptT.execute(args);
+      case "analyze_pdf": return this.pdfT.execute(args);
+      case "research_brief": return this.briefT.execute(args);
       default: return unknownAction("research", action, ["web_search", "youtube_search", "youtube_transcript", "analyze_pdf", "research_brief"]);
     }
   }
@@ -587,9 +587,9 @@ export class MissionControlTool implements Tool {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
     switch (action) {
-      case "file_briefing": return this.briefingT.execute(args, ctx);
-      case "propose_task": return this.proposeT.execute(args, ctx);
-      case "create_task": return this.createTaskT.execute(args, ctx);
+      case "file_briefing": return this.briefingT.execute(args);
+      case "propose_task": return this.proposeT.execute(args);
+      case "create_task": return this.createTaskT.execute(args);
       default: return unknownAction("mission_control", action, ["file_briefing", "propose_task", "create_task"]);
     }
   }
@@ -632,12 +632,12 @@ export class SelfTool implements Tool {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
     switch (action) {
-      case "set_piece": return this.setPieceT.execute(args, ctx);
-      case "remove_piece": return this.removePieceT.execute(args, ctx);
-      case "create_piece": return this.createPieceT.execute(args, ctx);
-      case "list_pieces": return this.listPiecesT.execute(args, ctx);
-      case "view_self_prompt": return this.viewPromptT.execute(args, ctx);
-      case "view_identity_history": return this.viewHistoryT.execute(args, ctx);
+      case "set_piece": return this.setPieceT.execute(args);
+      case "remove_piece": return this.removePieceT.execute(args);
+      case "create_piece": return this.createPieceT.execute(args);
+      case "list_pieces": return this.listPiecesT.execute(args);
+      case "view_self_prompt": return (this.viewPromptT.execute as any)();
+      case "view_identity_history": return this.viewHistoryT.execute(args);
       default: return unknownAction("self", action, ["set_piece", "remove_piece", "create_piece", "list_pieces", "view_self_prompt", "view_identity_history"]);
     }
   }
@@ -679,9 +679,9 @@ export class LearningTool implements Tool {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
     switch (action) {
-      case "log_email_classification": return this.logEmailT.execute(args, ctx);
-      case "request_code_change": return this.requestCodeT.execute(args, ctx);
-      case "list_deferred_builds": return this.listDeferredT.execute(args, ctx);
+      case "log_email_classification": return this.logEmailT.execute(args);
+      case "request_code_change": return this.requestCodeT.execute(args);
+      case "list_deferred_builds": return this.listDeferredT.execute(args);
       default: return unknownAction("learning", action, ["log_email_classification", "request_code_change", "list_deferred_builds"]);
     }
   }
@@ -732,13 +732,13 @@ export class PlanTool implements Tool {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
     switch (action) {
-      case "create": return this.createT.execute(args, ctx);
-      case "approve": return this.approveT.execute(args, ctx);
-      case "advance": return this.advanceT.execute(args, ctx);
-      case "record_step": return this.recordStepT.execute(args, ctx);
-      case "execute": return this.executeT.execute(args, ctx);
-      case "record_artifact": return this.recordArtifactT.execute(args, ctx);
-      case "cancel": return this.cancelT.execute(args, ctx);
+      case "create": return this.createT.execute(args);
+      case "approve": return this.approveT.execute(args);
+      case "advance": return this.advanceT.execute(args);
+      case "record_step": return this.recordStepT.execute(args);
+      case "execute": return this.executeT.execute(args);
+      case "record_artifact": return this.recordArtifactT.execute(args);
+      case "cancel": return this.cancelT.execute(args);
       default: return unknownAction("plan", action, ["create", "approve", "advance", "record_step", "execute", "record_artifact", "cancel"]);
     }
   }
@@ -781,9 +781,9 @@ export class DiaryTool implements Tool {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
     switch (action) {
-      case "write": return this.writeT.execute(args, ctx);
-      case "read": return this.readT.execute(args, ctx);
-      case "read_significance": return this.signifT.execute(args, ctx);
+      case "write": return this.writeT.execute(args);
+      case "read": return this.readT.execute(args);
+      case "read_significance": return (this.signifT.execute as any)();
       case "reflect": {
         const turnSummary = String(args.turn_summary || "").trim();
         const worked = String(args.what_worked || "").trim();
@@ -799,7 +799,6 @@ export class DiaryTool implements Tool {
           `  → ${takeaway}`;
         return this.writeT.execute(
           { text: reflectionText, tags: ["reflection"] },
-          ctx,
         );
       }
       default: return unknownAction("diary", action, ["write", "read", "read_significance", "reflect"]);

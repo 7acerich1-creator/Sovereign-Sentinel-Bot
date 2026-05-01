@@ -57,7 +57,12 @@ export const config: GravityClawConfig = {
       },
       anthropic: {
         apiKey: process.env.ANTHROPIC_API_KEY || "",
-        model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
+        // S127 (2026-05-01): Default bumped from `claude-sonnet-4-20250514` (old May-2025
+        // Sonnet 4) to `claude-sonnet-4-6` (current Sonnet 4.6 alias). Per
+        // `feedback_audit_veritas_pre_opus.md` memory: Sonnet 4.6 across the board until
+        // Veritas scope audit completes. ANTHROPIC_MODEL env var on Railway will override
+        // — make sure it's either unset or set to a real, current model id.
+        model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
       },
       openai: {
         apiKey: process.env.OPENAI_API_KEY || "",

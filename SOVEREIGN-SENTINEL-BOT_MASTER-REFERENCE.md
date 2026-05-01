@@ -1067,6 +1067,82 @@ Immutable roster. Do not add, remove, or rename. Each agent runs on its own Tele
 ### Group chat roles (legacy; honored until refactored)
 - **Lead** (Veritas): always responds. **Copilot** (Sapphire): plain-English summary on pipeline completion. **Crew** (Alfred/Yuki/Anita/Vector): respond only on `@mention` or broadcast.
 
+### Per-agent LLM teams (S125+ Phase 7, code at `src/index.ts:444`)
+
+Each agent has its own failover chain so a quota hit on one provider doesn't stampede the whole crew.
+
+| Agent | Primary → Fallback chain | Reasoning |
+|---|---|---|
+| **Veritas** | anthropic → gemini → groq | Chief of Staff. Strategic reasoning. |
+| **Anita** | anthropic → gemini → groq | Marketing Lead. Cross-domain copy strategy. |
+| **Sapphire** | anthropic → gemini → groq | PA / COO. ddxfish intelligence level. |
+| **Alfred** | gemini → groq (NO Anthropic) | Deterministic seed work. Bulk cycles. |
+| **Vector** | gemini → groq (NO Anthropic) | Numerical analytics. Bulk metrics. |
+| **Yuki** | gemini → groq Key B (NO Anthropic) | High-volume engagement. Dual Groq routing. |
+| **SS Pipeline** | gemini → groq Key A (NO Anthropic) | High-volume video production. |
+| **TCF Pipeline** | gemini → groq Key B (NO Anthropic) | Avoids Groq stampede with SS. |
+
+**Anthropic is locked to Veritas / Anita / Sapphire only.** S121d rule: pipelines and Yuki/Vector/Alfred never touch Anthropic credits — a single Gemini+Groq outage on those would otherwise drain the budget across the whole crew in minutes.
+
+`AGENT_LLM_TEAMS` env var on Railway can override the chain shape; `ANTHROPIC_MODEL` env var sets the model id (must be a current, real model — e.g. `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`). Default in `config.ts` is `claude-sonnet-4-6` as of S127.
+
+---
+
+## 5.5 OPERATOR'S MANUAL — Commands & Pipeline Triggers
+
+**Read this BEFORE answering "how do I trigger X."** Source of truth for every Telegram command and every pipeline entry point. If something here disagrees with the code in `src/index.ts`, the code wins — patch this section.
+
+### A. Telegram command surface (`src/index.ts` switch block starting line ~1012)
+
+| Command | Args | What it does |
+|---|---|---|
+| `/start` | — | Welcome ping + bot online check. |
+| `/status` | — | Full env / LLM team / git SHA / health snapshot. |
+| `/model` / `/models` | — | Print active LLM model and per-agent chains. |
+| `/memory` | — | Memory layer status (SQLite / Pinecone / Supabase counts). |
+| `/compact` | — | Compact recent conversation context. |
+| `/skills` | — | List available skills + activation status. |
+| `/schedule` | — | Show upcoming scheduled jobs (briefings, sweeps, scans). |
+| `/test_tts` | `<text>` | Render TTS sample, sends voice note back. |
+| `/test_yt` | `<url>` | YouTube ingestion + transcript probe. No production. |
+| `/dryrun` | `<youtube_url>` | Script + audit only. No TTS, no images, no upload. |
+| **`/pipeline`** | `<youtube_url> [ss only\|tcf only]` | Full Vidrush pipeline from a URL. Dual-brand by default. |
+| **`/alfred`** | `[ss only\|tcf only]` | **Force-trigger Alfred's `daily_trend_scan` autonomous pipeline.** No URL — Alfred generates the seed from the framework, fans into both brands. **This is the autonomous Vidrush trigger.** |
+| `/batch` | `[ss\|tcf] [N] [dry]` | Batch producer: N videos per brand. Default 3 per brand. `dry` = scripts only. |
+| `/produce` | `[force]` | Content Engine cycle: drafts → FLUX images → distribution. `force` regenerates today's drafts. |
+| `/flux-batch` | — | Run FLUX image gen on pending content_engine_queue rows. Deterministic, no LLM. |
+| `/drain` | — | Single-pass Buffer backlog drain + R2 clip drain. Zero retry. Pre-flight quota check. |
+| `/rechop` | `<youtube_url>` | Re-clip an already-produced long-form into shorts. |
+| `/rescue` | `<task>` | Pull a stalled crew_dispatch row and force-execute. |
+| `/comment` | `<youtube_url>` | Generate + auto-post Yuki engagement comment on a video. |
+| `/buffer_audit` | — | Scan Buffer channels, detect duplicates, purge failed/queued posts. |
+| `/mesh` | `<goal>` | Multi-agent mesh execution (passes through to agent loop). |
+| `/swarm` | `<goal> [agents]` | Swarm execution with optional agent list (passes through to agent loop). |
+
+### B. Pipeline trigger matrix — three paths to a video
+
+| Path | Trigger | When to use | What runs |
+|---|---|---|---|
+| **Manual (URL-driven)** | `/pipeline <yt_url>` in Telegram | You found a specific video you want chopped + reframed for both brands. | `executeFullPipeline` → 8-step Vidrush per brand. Uses `pipelineLLM` (Gemini→Groq, no Anthropic). |
+| **Autonomous (seed-driven)** | `/alfred` in Telegram **OR** 15:05 UTC daily cron | You want today's video without finding a URL — Alfred projects the thesis from the Sovereign Synthesis framework. | `dispatchTask({to_agent:'alfred', task_type:'daily_trend_scan'})` → Alfred emits `PIPELINE_IDEA_ACE` + `PIPELINE_IDEA_TCF` → bridge calls `executeFullPipeline` for each brand. |
+| **Batch** | `/batch [ss\|tcf] [N] [dry]` | You want multiple videos in one sweep (e.g., catch-up after a quiet day). | `produceBatch` → loops N times per brand through full production. `dry` skips TTS/images/upload. |
+
+### C. Common-failure decode
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `Usage: /pipeline <youtube_url>` | You ran `/pipeline` without a URL. **For autonomous mode use `/alfred`.** | Use `/alfred` (no URL) or supply a URL. |
+| `All LLM providers failed: anthropic 404 model: claude-sonnet-X-YYYYY` | `ANTHROPIC_MODEL` Railway env var is set to a non-existent model id. | Unset it (default kicks in) or set to `claude-sonnet-4-6` / `claude-haiku-4-5-20251001`. |
+| `gemini 403 Your project has been denied access` | Gemini API key revoked or billing-flagged in Google Cloud. | Check Google Cloud Console → Billing on the project tied to the key. Rotate or restore. |
+| `groq 413 Request too large for model` | Conversation history bloat — prompt exceeded TPM tier. | Restart the conversation (resets context) or run `/compact`. |
+| `Pipeline queued (position N)` | Another pipeline is running. Yours will start when it finishes. | Wait. Pipeline queue serializes on purpose. |
+| `Alfred dispatched but no video appears` | Alfred emitted `PIPELINE_IDEA: NONE` (abstained — none of his candidates scored above threshold) OR all 3 LLM providers in his chain failed. | Check `crew_dispatch` table for the `alfred/daily_trend_scan` row, look at `result` field. |
+
+### D. Where the autonomous cron lives
+- **15:05 UTC daily** — `src/index.ts:2558` checks `hasAlreadyFiredToday("alfred", "daily_trend_scan")`, dispatches if not. Once-per-day idempotency via `crew_dispatch` table.
+- **15:00 UTC** — Morning briefing (Veritas). **17:00 UTC** — Vector metrics sweep. **18:30 UTC** — ContentEngine production. **20:30 UTC** — Stasis detection. **01:00 UTC** — Evening recap. **Mon 17:10 UTC** — Veritas weekly directive.
+- All scheduled jobs in `src/index.ts` boot block, table in §6 below.
+
 ---
 
 ## 6. CODEBASE ARCHITECTURE
@@ -1076,7 +1152,7 @@ Immutable roster. Do not add, remove, or rename. Each agent runs on its own Tele
 - **Runtime:** Node 20
 - **Deploy:** Railway via `Dockerfile.bot` (multi-stage)
 - **Memory:** three-tier — SQLite (episodic) + Pinecone (semantic) + Supabase (structured)
-- **LLM providers:** Anthropic (primary, all agent dispatches) → Groq (pipelines only) → OpenAI (Whisper + failover). Gemini is NUKED for text-gen (billing crisis, Session 35); `GEMINI_IMAGEN_KEY` isolated for Imagen 4 image gen only.
+- **LLM providers:** See §5 "Per-agent LLM teams" table. Summary: Anthropic locked to Veritas / Anita / Sapphire (S121d). Gemini → Groq for everyone else and both pipelines. OpenAI for Whisper. `GEMINI_IMAGEN_KEY` isolated for Imagen 4 image gen only. Gemini is NOT nuked for text-gen (was re-admitted post-S29c after the prompt-overwrite root cause was fixed).
 
 ### Key `src/` Paths
 

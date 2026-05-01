@@ -206,9 +206,93 @@ export async function handleSapphirePACommand(
     case "/help_sapphire":
       return await handleHelp(message, channel);
 
+    case "/diagnose":
+      // Self-Healing Layer 5 — pulls the most recent failed deploy event
+      // from Supabase, injects it into message.content prefixed with
+      // [DIAGNOSE_DEPLOY], and returns false so the AGENT LOOP runs with
+      // the new context. The diagnose_deploy_failure doctrine piece in
+      // Sapphire's prompt drives the actual investigation.
+      return await handleDiagnose(message, channel);
+
     default:
       return false;
   }
+}
+
+// ── /diagnose — Layer 5 entry point ─────────────────────────────────────────
+async function handleDiagnose(message: Message, channel: Channel): Promise<boolean> {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !serviceKey) {
+    await channel.sendMessage(
+      message.chatId,
+      "Can't pull deploy events — SUPABASE_URL/SERVICE_KEY not set on this container.",
+    );
+    return true;
+  }
+
+  // Pull the most recent FAILED/CRASHED deploy event
+  const url =
+    `${supabaseUrl}/rest/v1/deploy_events` +
+    `?select=deployment_id,project_id,service_id,status,classification,action_taken,retry_count,error_excerpt,created_at` +
+    `&status=in.(FAILED,CRASHED)` +
+    `&order=created_at.desc` +
+    `&limit=1`;
+
+  let row: any = null;
+  try {
+    const res = await fetch(url, {
+      headers: {
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+      },
+    });
+    if (res.ok) {
+      const arr = await res.json().catch(() => []);
+      row = Array.isArray(arr) && arr.length > 0 ? arr[0] : null;
+    }
+  } catch (e) {
+    console.error("[/diagnose] supabase fetch failed:", e);
+  }
+
+  if (!row) {
+    await channel.sendMessage(
+      message.chatId,
+      "No FAILED/CRASHED deploy events on record. The pipeline is green or the table is empty.",
+    );
+    return true;
+  }
+
+  // Mutate message.content with the diagnose context. The agent loop will
+  // pick up the [DIAGNOSE_DEPLOY] prefix; the diagnose_deploy_failure doctrine
+  // piece in Sapphire's prompt drives the rest of the investigation.
+  const errExcerpt = (row.error_excerpt || "").slice(0, 1500);
+  message.content =
+    `[DIAGNOSE_DEPLOY]\n` +
+    `Architect ran /diagnose. Walk the most recent failure per the diagnose_deploy_failure doctrine.\n\n` +
+    `Most recent failure:\n` +
+    `  deployment_id: ${row.deployment_id}\n` +
+    `  status: ${row.status}\n` +
+    `  classification: ${row.classification ?? "unknown"}\n` +
+    `  action_taken: ${row.action_taken ?? "alert_only"}\n` +
+    `  retry_count: ${row.retry_count ?? 0}\n` +
+    `  occurred_at: ${row.created_at}\n` +
+    `  project_id: ${row.project_id ?? "(unset)"}\n` +
+    `  service_id: ${row.service_id ?? "(unset)"}\n\n` +
+    `Error log excerpt:\n` +
+    "```\n" +
+    (errExcerpt || "(no log captured — Layer 1 may have failed to fetch from Railway GraphQL)") +
+    "\n```\n\n" +
+    `Step 2: archival_search sapphire-personal for similar incidents using the key error terms above. ` +
+    `Step 3: classify confidently and decide whether to file a request_code_change. ` +
+    `Step 4: respond with the 4-6 sentence diagnosis Architect is expecting. ` +
+    `Step 5: archival_insert your diagnosis with topic='deploy_failure_diagnosis' before signing off.`;
+
+  // Return false so the agent loop runs with the mutated content
+  return false;
 }
 
 // ── /auth_google ────────────────────────────────────────────────────────────

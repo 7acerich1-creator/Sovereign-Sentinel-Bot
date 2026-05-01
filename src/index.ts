@@ -129,6 +129,13 @@ import {
 // startup, not at runtime when the rotator hits the gap.
 import { assertRotationCoverage } from "./tools/rotation-state";
 
+// ── S126 — Self-healing Layer 3: boot-time smoke test ──
+// Validates Supabase tables, env vars per agent's chain, Pinecone namespaces,
+// and tool name uniqueness BEFORE any tools or agents are wired. CRITICAL
+// failures alert the Architect via Sapphire's bot and let callers refuse to
+// register affected surfaces (visible-broken > silent-broken).
+import { runBootSmokeTest, surfaceShouldRefuse, type SmokeReport } from "./proactive/boot-smoke-test";
+
 // ── Plugins ──
 import { PluginManager, MemoryTool, RecallTool } from "./plugins/system";
 
@@ -211,6 +218,35 @@ async function main() {
   } catch (covErr: any) {
     console.error(`❌ Rotation coverage check failed: ${covErr?.message}`);
     throw covErr;
+  }
+
+  // ── S126 Self-Healing Layer 3: Boot Smoke Test ──
+  // Runs BEFORE we instantiate memory providers / tools / agents so the
+  // critical-failure list can guide registration decisions below.
+  // This is intentionally non-throwing — surfaces that should refuse to
+  // register check `surfaceShouldRefuse(smokeReport, prefix)` on their own.
+  let smokeReport: SmokeReport | null = null;
+  try {
+    smokeReport = await runBootSmokeTest({
+      // Agent chains derived from the AGENT_LLM_TEAMS map below. We hardcode
+      // the same chain shape here because the report runs before AGENT_LLM_TEAMS
+      // is constructed; if those chains change, update this list too.
+      agentChains: {
+        sapphire: ["anthropic", "gemini", "groq"],
+        veritas:  ["anthropic", "gemini", "groq"],
+        anita:    ["anthropic", "gemini", "groq"],
+        yuki:     ["gemini", "groq"],
+        vector:   ["gemini", "groq"],
+        alfred:   ["gemini", "groq"],
+      },
+      // Tool names get checked later in registration when the array is built;
+      // pass [] here so the uniqueness check is skipped at this stage.
+      toolNames: [],
+    });
+  } catch (smokeErr: any) {
+    // The smoke test should never throw, but never let it kill boot.
+    console.error(`⚠️  [BootSmokeTest] crashed (non-fatal): ${smokeErr?.message}`);
+    smokeReport = null;
   }
 
   // ── 1. Initialize Memory Providers ──
@@ -558,6 +594,46 @@ async function main() {
   // to agent_diary. Sleeptime consolidator + reflection schedulers read from
   // these per-agent diaries.
   tools.push(new DiaryFatTool());
+
+  // ── S126 Self-Healing Layer 3: Tool Uniqueness Re-Check ──
+  // The boot-time smoke test ran before tools were registered. Now that the
+  // global tool array is finalized, verify no two tools share a definition
+  // name — a name collision means one of them silently shadows the other,
+  // which is exactly the class of bug Layer 3 exists to surface.
+  try {
+    const { checkToolNameUniqueness } = await import("./proactive/boot-smoke-test");
+    const toolNames = tools
+      .map((t) => (t as any)?.definition?.name)
+      .filter((n): n is string => typeof n === "string" && n.length > 0);
+    const uniqResult = checkToolNameUniqueness(toolNames);
+    if (!uniqResult.passed) {
+      console.error(`🚨 [BootSmokeTest] ${uniqResult.details}`);
+      // Best-effort alert — don't crash boot, but make sure Architect sees it.
+      const alertToken = process.env.SAPPHIRE_TOKEN || process.env.VERITAS_TOKEN;
+      const alertChat =
+        process.env.ARCHITECT_CHAT_ID ||
+        process.env.TELEGRAM_AUTHORIZED_USER_ID ||
+        process.env.AUTHORIZED_USER_ID ||
+        "8593700720";
+      if (alertToken) {
+        try {
+          await fetch(`https://api.telegram.org/bot${alertToken}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: alertChat,
+              text: `🚨 *Boot smoke test*\nDuplicate tool names detected:\n${uniqResult.details}`,
+              parse_mode: "Markdown",
+            }),
+          });
+        } catch { /* swallow */ }
+      }
+    } else {
+      console.log(`🩺 [BootSmokeTest] tool registry uniqueness: ${toolNames.length} tools, no collisions ✅`);
+    }
+  } catch (toolCheckErr: any) {
+    console.warn(`[BootSmokeTest] tool uniqueness check failed: ${toolCheckErr?.message}`);
+  }
 
   // ── 4. Initialize Agent Loop ──
   // CRITICAL: Veritas chat must use the Veritas team LLM (Anthropic-first), NOT failoverLLM (Groq-first).

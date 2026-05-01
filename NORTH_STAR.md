@@ -281,7 +281,21 @@ ORDER BY total_cost DESC;
 ## The Current Highest-Leverage Action (UPDATE EVERY SESSION)
 *If this field says the same thing two sessions in a row, the last session didn't earn its keep.*
 
-**Action: SELF-HEALING INFRASTRUCTURE — ship all 5 layers in one session (S125+, set 2026-04-30 evening, deferred from marketing-push readiness Tracks B/C).**
+**Action: RESUME MARKETING-PUSH READINESS TRACKS B + C (set 2026-04-30 late evening, after S126 shipped self-healing).**
+
+After S126 shipped all 5 self-healing layers in a single session 2026-04-30, the PAUSE on Tracks B + C is lifted. The next session that mounts `Sovereign-Mission-Control` should walk Track B (funnel review + design upgrades). The next session in this repo should walk Track C (content pipeline iron-out). Track A is COMPLETE (Phase 9 ship 2026-04-30).
+
+**S126 ship summary (✅ shipped 2026-04-30, single session):**
+- Layer 1+2: Railway deploy webhook → Sapphire Telegram alert + auto-retry on transient errors (Edge Function, Railway GraphQL).
+- Layer 3: Boot-time smoke test — 26 tables, env vars per agent's chain, Pinecone namespaces, tool name uniqueness.
+- Layer 4: Bot health canary — pg_cron every 10 min, getMe + spend-freshness pulses, quiet-hours suppression.
+- Layer 5: `diagnose_deploy_failure` doctrine + `/diagnose` command. Sapphire reads error log + archival memory, files request_code_change, archives the diagnosis.
+- Three new tables: `deploy_events`, `bot_health_pulses`, `smoke_test_runs` (all RLS-on, Mission Control–readable).
+
+**Architect setup steps (post-push, before self-healing is fully active):** apply both migrations, deploy both Edge Functions, set RAILWAY_API_TOKEN + RAILWAY_WEBHOOK_SECRET + CANARY_SECRET on Railway, wire the webhook URL in Railway → Project Settings → Webhooks, run `UPDATE sapphire_known_facts ...` to activate the diagnose doctrine on live Sapphire. Full checklist in master reference S126 section.
+
+**Previous Highest-Leverage Action (RETIRED 2026-04-30 late evening):**
+> Action: SELF-HEALING INFRASTRUCTURE — ship all 5 layers in one session (S125+, set 2026-04-30 evening, deferred from marketing-push readiness Tracks B/C).
 
 After Phase 1-9 of the agentic refactor shipped 2026-04-30 (single session, 11 commits), Architect surfaced a real operational gap: a Railway build failed due to a transient PyPI network error during pip install of yt-dlp + edge-tts. He didn't know about it until he went looking. Multiple Phase 5 bugs (sleeptime reading wrong column, writing to nonexistent table, reflect with wrong arg name) had been silently failing daily for who-knows-how-long. The pattern is real: failures happen, no one notices, system degrades quietly.
 

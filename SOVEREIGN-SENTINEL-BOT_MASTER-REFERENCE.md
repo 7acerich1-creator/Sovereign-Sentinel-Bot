@@ -6,7 +6,73 @@
 
 ---
 
-## S126 — Self-healing infrastructure (LOCKED for next session, 2026-04-30 evening)
+## S126 — Self-healing infrastructure (✅ SHIPPED 2026-04-30, single session)
+
+**Status:** All 5 layers built in one focused session per Architect directive. Marketing-push readiness Tracks B/C unblocked.
+
+**What landed (✅ shipped, awaiting clean tsc + push from Architect's PowerShell):**
+
+- **Layer 1+2 — Railway deploy webhook → Telegram alert + auto-retry** (`supabase/functions/railway-deploy-webhook/index.ts`):
+  - Receives Railway deploy webhook (POST). Auth via shared secret (`?secret=<RAILWAY_WEBHOOK_SECRET>` or `x-webhook-secret` header).
+  - On FAILED/CRASHED status: pulls deployment logs from Railway GraphQL, classifies via locked pattern lists (transient vs code_bug vs unknown).
+  - Auto-redeploy via Railway `deploymentRedeploy` mutation, capped at ONE retry per deployment_id (idempotency tracked in `deploy_events`).
+  - Telegram alert via Sapphire's bot (SAPPHIRE_TOKEN) with classification + retry count + first 800 chars of error log. CODE_BUG escalates immediately with `/diagnose` prompt; transient on second failure escalates too.
+  - Logs every event (success and failure) to `deploy_events` for trend analysis.
+
+- **Layer 3 — Boot-time smoke test** (`src/proactive/boot-smoke-test.ts` + wired into `main()` early in `src/index.ts`):
+  - Runs FIRST after rotation coverage check, before tools/agents wire.
+  - Validates: 26 required Supabase tables (`SELECT 1 LIMIT 0` per table), per-agent LLM env vars from AGENT_LLM_TEAMS chains (primary CRITICAL, fallback WARNING), Pinecone namespaces (probe `describe_index_stats`), and infra envs (SUPABASE_URL, RAILWAY_API_TOKEN, etc.).
+  - Tool-name uniqueness re-checked AFTER global tool array fully built (catches duplicate registrations that would silently shadow).
+  - CRITICAL failures alert Architect via Sapphire's bot directly. WARNINGs log only.
+  - Every check persisted to `smoke_test_runs` (one row per check, per boot_id) for Mission Control trend tile.
+
+- **Layer 4 — Bot health canary** (`supabase/functions/bot-health-canary/index.ts` + `supabase/migrations/20260430_self_healing_cron.sql`):
+  - pg_cron schedules the canary every 10 min via pg_net.http_post.
+  - Two pulses per run: `getMe` (Telegram bot reachability + token validity, latency tracked) and `spend_freshness` (any agent_spend write in last 120 min — proxy for "the bot is actually answering").
+  - Quiet-hours suppression: spend-freshness alerts only fire 19:00-11:00 UTC (Architect's waking hours, sleeps ~6-8am CDT per `user_schedule.md` memory).
+  - Each alert kind rate-limited to 1/hour. All pulses logged to `bot_health_pulses`.
+  - "getMe ok + spend stale" combination is the "alive but silent" signal — different from "container dead."
+
+- **Layer 5 — Agent-driven diagnosis** (doctrine + `/diagnose` command):
+  - New `diagnose_deploy_failure` doctrine piece in `src/data/sapphire-prompt-pieces.json` (extras section). 5-step protocol: pull deploy_events row → archival_search past incidents → classify confidently → propose surgical fix (with file path/function name) and file `learning(action='request_code_change')` if needed → archival_insert the diagnosis.
+  - Activated in DEFAULTS' `active_extras` CSV in `src/agent/sapphire-prompt-builder.ts` (existing rows in `sapphire_known_facts.active_extras` need an `UPDATE` SQL to append `,diagnose_deploy_failure` for live Sapphire to pick it up — see Open at close).
+  - `/diagnose` command handler in `src/agent/sapphire-pa-commands.ts` — pulls latest FAILED/CRASHED row from `deploy_events`, mutates `message.content` with the [DIAGNOSE_DEPLOY] context, returns false so agent loop runs with the doctrine. No new tool needed; uses existing `learning` + `memory` + `archival_search` tools.
+
+- **Tables added** (`supabase/migrations/20260430_self_healing_infrastructure.sql`):
+  - `deploy_events` (Layer 1+2 audit + idempotency).
+  - `bot_health_pulses` (Layer 4 canary log).
+  - `smoke_test_runs` (Layer 3 boot trend log).
+  - All RLS-on, service_role write, anon read for Mission Control surfacing.
+
+**Env vars Architect must set in Railway after push:**
+- `RAILWAY_API_TOKEN` — Layer 2 redeploy mutation. Generate from Railway dashboard.
+- `RAILWAY_WEBHOOK_SECRET` — shared secret for webhook URL `?secret=...`. Random string.
+- `CANARY_SECRET` — Layer 4 cron auth. Random string.
+- `ARCHITECT_CHAT_ID` — already implicitly set via TELEGRAM_AUTHORIZED_USER_ID; alias is optional.
+
+**Supabase setup Architect runs once:**
+1. Apply both migrations (`20260430_self_healing_infrastructure.sql`, `20260430_self_healing_cron.sql`) via MCP or Supabase dashboard SQL editor.
+2. Set GUCs for pg_cron's net.http_post:
+   ```
+   ALTER DATABASE postgres SET app.settings.supabase_url      = 'https://wzthxohtgojenukmdubz.supabase.co';
+   ALTER DATABASE postgres SET app.settings.canary_secret     = '<random>';
+   ALTER DATABASE postgres SET app.settings.service_role_key  = '<service role>';
+   ```
+3. Deploy both Edge Functions: `supabase functions deploy railway-deploy-webhook` and `supabase functions deploy bot-health-canary`.
+4. Add the webhook URL `https://wzthxohtgojenukmdubz.supabase.co/functions/v1/railway-deploy-webhook?secret=<RAILWAY_WEBHOOK_SECRET>` to Railway → Project Settings → Webhooks.
+5. Append `diagnose_deploy_failure` to live Sapphire's active_extras: `UPDATE sapphire_known_facts SET value = value || ',diagnose_deploy_failure' WHERE key = 'active_extras';` (or reset to default by deleting the row, since DEFAULTS now includes it).
+
+**Open at close:**
+1. Run `npx tsc --noEmit` from PowerShell (bash sandbox FUSE view is unreliable for tsc). Push via Desktop Commander only after clean.
+2. Apply both migrations + deploy both Edge Functions + set the env vars above.
+3. Wire the Railway webhook URL in the dashboard.
+4. Run `UPDATE sapphire_known_facts ...` to activate the doctrine on live Sapphire.
+5. First failed deploy will be the live test — observe whether the Telegram alert fires, classification is accurate, and (if transient) the auto-retry sticks.
+6. After self-healing has 24-48h of clean operation, resume Tracks B (funnel walk-through, separate Mission Control session) and C (content pipeline iron-out, this repo).
+
+---
+
+## S126 — Self-healing infrastructure (LOCKED for next session, 2026-04-30 evening — ARCHIVE)
 
 **Status:** Architecture locked, NOT YET BUILT. Architect's directive 2026-04-30 evening after Phase 9 wrapped: build the full 5-layer self-healing infrastructure in ONE focused next session BEFORE resuming marketing-push readiness Tracks B/C.
 

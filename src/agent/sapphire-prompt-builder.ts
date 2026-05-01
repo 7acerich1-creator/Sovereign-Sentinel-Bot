@@ -94,7 +94,7 @@ const DEFAULTS: Record<string, string> = {
   active_goals: "be_present_useful",
   active_format: "warm_concise",
   active_scenario: "default",
-  active_extras: "discernment,memory_routing,what_you_can_do,family_first,no_loops,no_tool_retry_loops,complex_task_protocol",
+  active_extras: "discernment,memory_routing,what_you_can_do,family_first,no_loops,no_tool_retry_loops,complex_task_protocol,diagnose_deploy_failure",
   active_emotions: "focused",
 };
 

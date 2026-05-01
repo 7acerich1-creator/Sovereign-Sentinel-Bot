@@ -1510,7 +1510,11 @@ async function main() {
 
           // Step 2: FLUX batch images for any drafts with image_prompt but no media_url
           await telegram.sendMessage(message.chatId, "🎨 Step 2/3: FLUX batch image generation...");
-          const imaged = await fluxBatchImageGen();
+          const fluxResult = await fluxBatchImageGen();
+          const imaged = fluxResult.patched;
+          if (fluxResult.error) {
+            console.error(`[/produce-content] FLUX failed: ${fluxResult.error}`);
+          }
           await telegram.sendMessage(message.chatId, `✅ Images: ${imaged} media_urls patched`);
 
           // Step 3: Distribute ready posts to Buffer + Facebook
@@ -1534,12 +1538,17 @@ async function main() {
         try {
           await telegram.sendMessage(message.chatId, "🎨 Running FLUX pod batch...");
           const { fluxBatchImageGen } = await import("./engine/content-engine");
-          const patched = await fluxBatchImageGen();
-          await telegram.sendMessage(message.chatId,
-            patched > 0
-              ? `✅ FLUX batch complete — ${patched} videos generated with hook text.`
-              : `⏸️ No pending images found (all queue entries already have media_url).`
-          );
+          const fluxResult = await fluxBatchImageGen();
+          let msg: string;
+          if (fluxResult.error) {
+            // Pod failed mid-batch — distinguish from "no pending"
+            msg = `❌ FLUX batch — pod failure (${fluxResult.patched}/${fluxResult.pending} processed)\nError: ${fluxResult.error.slice(0, 250)}\nThe ${fluxResult.pending - fluxResult.patched} unprocessed rows are still pending — fire /flux-batch again once the pod recovers.`;
+          } else if (fluxResult.patched > 0) {
+            msg = `✅ FLUX batch complete — ${fluxResult.patched} videos generated with hook text.`;
+          } else {
+            msg = `⏸️ No pending images found (all queue entries already have media_url).`;
+          }
+          await telegram.sendMessage(message.chatId, msg);
         } catch (err: any) {
           console.error(`❌ [/flux-batch] ${err.message}\n${err.stack}`);
           await telegram.sendMessage(message.chatId, `❌ /flux-batch failed: ${err.message?.slice(0, 400)}`);
@@ -2800,7 +2809,8 @@ async function main() {
       if (hour === 18 && minute >= 50 && minute <= 54 && fluxBatchFiredDate.key !== dateKey) {
         fluxBatchFiredDate.key = dateKey;
         try {
-          const patched = await fluxBatchImageGen();
+          const _flux = await fluxBatchImageGen();
+        const patched = _flux.patched;
           console.log(`[ContentEngine] FLUX auto-batch backfilled ${patched} queue row(s)`);
           if (patched > 0 && defaultChatId && telegram) {
             try {
@@ -2912,7 +2922,8 @@ async function main() {
     handler: async () => {
       if (isAutonomousPaused()) return;
       try {
-        const patched = await fluxBatchImageGen();
+        const _flux = await fluxBatchImageGen();
+        const patched = _flux.patched;
         if (patched > 0) {
           console.log(`🎨 [FluxBatch] Patched ${patched} queue entries with FLUX images`);
         }

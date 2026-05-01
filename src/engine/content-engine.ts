@@ -1352,7 +1352,13 @@ async function queueWeekendReposts(): Promise<number> {
  * but no media_url, spin up the pod, batch-generate via FLUX, patch media_url back.
  * Runs every 3 days. One pod session = one batch = ~$0.07 (vs $3/day with Imagen 4).
  */
-export async function fluxBatchImageGen(): Promise<number> {
+export interface FluxBatchResult {
+  patched: number;
+  pending: number;
+  error: string | null;
+}
+
+export async function fluxBatchImageGen(): Promise<FluxBatchResult> {
   // Fetch queue entries with image_prompt but no media_url
   const needsImages = await supabaseQuery(
     "content_engine_queue",
@@ -1361,7 +1367,7 @@ export async function fluxBatchImageGen(): Promise<number> {
 
   if (needsImages.length === 0) {
     console.log("[FluxBatch] No pending images — skipping pod spin-up");
-    return 0;
+    return { patched: 0, pending: 0, error: null };
   }
 
   console.log(`🎨 [FluxBatch] ${needsImages.length} images pending — starting pod session`);
@@ -1424,12 +1430,15 @@ export async function fluxBatchImageGen(): Promise<number> {
       }
     });
   } catch (err: any) {
-    console.error(`[FluxBatch] Pod session failed: ${err.message?.slice(0, 300)}`);
+    const errMsg = err?.message?.slice(0, 300) || String(err);
+    console.error(`[FluxBatch] Pod session failed: ${errMsg}`);
     // Don't throw — partial success is still progress
+    console.log(`🎨 [FluxBatch] Patched ${patched}/${needsImages.length} queue entries (pod ERROR — ${needsImages.length - patched} unprocessed)`);
+    return { patched, pending: needsImages.length, error: errMsg };
   }
 
   console.log(`🎨 [FluxBatch] Patched ${patched}/${needsImages.length} queue entries with FLUX images`);
-  return patched;
+  return { patched, pending: needsImages.length, error: null };
 }
 
 // ── Draft Auto-Publisher — Promote agent drafts to distribution queue ──

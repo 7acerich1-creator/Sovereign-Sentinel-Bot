@@ -233,7 +233,11 @@ class HealthReport(BaseModel):
 class ImageBatchItem(BaseModel):
     id: str = Field(min_length=1, max_length=200)
     prompt: str = Field(min_length=1, max_length=2000)
-    hook_text: Optional[str] = Field(default=None, max_length=300)
+    # S125+ — bumped from 300 → 600 to support full first paragraph hook
+    # text. Content engine now passes the entire first line (capped at 500
+    # chars) so the dynamic font sizing in _image_to_branded_video can
+    # render the complete idea instead of cutting at "of unmet" mid-thought.
+    hook_text: Optional[str] = Field(default=None, max_length=600)
     width: int = Field(default=1024, ge=256, le=2048)
     height: int = Field(default=1024, ge=256, le=2048)
 

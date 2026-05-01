@@ -59,7 +59,6 @@ const REQUIRED_TABLES = [
   "sapphire_reminders",
   "sapphire_followups",
   "sapphire_plans",
-  "sapphire_messages_log",
   "messages_log",
   "niche_cooldown",
   "pipeline_rotation_state",

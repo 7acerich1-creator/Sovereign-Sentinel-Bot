@@ -36,16 +36,18 @@ export class WriteDiaryEntryTool implements Tool {
   async execute(args: Record<string, unknown>): Promise<string> {
     const entry = String(args.entry || "").trim().slice(0, 2000);
     if (entry.length < 10) return "write_diary_entry: entry too short (minimum 10 chars).";
+    const agentName = args.agent_name ? String(args.agent_name) : "sapphire";
     const supabase = await sb();
     const tagsArr = Array.isArray(args.tags) ? (args.tags as any[]).map((t) => String(t).slice(0, 40)) : null;
-    const { error } = await supabase.from("sapphire_diary").insert({
+    const { error } = await supabase.from("agent_diary").insert({
+      agent_name: agentName,
       entry,
       mood: args.mood ? String(args.mood).slice(0, 40) : null,
       scenario: args.scenario ? String(args.scenario).slice(0, 60) : null,
       tags: tagsArr,
     });
     if (error) return `write_diary_entry: ${error.message}`;
-    return `Diary entry recorded.`;
+    return `${agentName} diary entry recorded.`;
   }
 }
 
@@ -64,8 +66,13 @@ export class ReadDiaryTool implements Tool {
 
   async execute(args: Record<string, unknown>): Promise<string> {
     const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 50);
+    const agentName = args.agent_name ? String(args.agent_name) : "sapphire";
     const supabase = await sb();
-    let q = supabase.from("sapphire_diary").select("entry, mood, scenario, tags, created_at").order("created_at", { ascending: false }).limit(limit);
+    let q = supabase.from("agent_diary")
+      .select("entry, mood, scenario, tags, created_at")
+      .eq("agent_name", agentName)
+      .order("created_at", { ascending: false })
+      .limit(limit);
     if (args.days) {
       const since = new Date(Date.now() - Number(args.days) * 86400e3).toISOString();
       q = q.gte("created_at", since);
@@ -87,7 +94,8 @@ export class ReadDiaryTool implements Tool {
 
 // Used by morning brief / scheduler — finds diary entries + relationship_context
 // rows from the same MM-DD as today in past years. "A year ago today..."
-export async function fetchSignificanceForToday(): Promise<{
+// S125+ Phase 9: agentName param added (default 'sapphire' for backward compat).
+export async function fetchSignificanceForToday(agentName = "sapphire"): Promise<{
   diary: Array<{ entry: string; created_at: string; mood?: string | null }>;
   relctx: Array<{ observation: string; category: string; created_at: string }>;
 }> {
@@ -106,8 +114,9 @@ export async function fetchSignificanceForToday(): Promise<{
   const cutoffYear = new Date(today.getUTCFullYear(), 0, 1).toISOString();
 
   const [d, r] = await Promise.all([
-    supabase.from("sapphire_diary")
+    supabase.from("agent_diary")
       .select("entry, mood, created_at")
+      .eq("agent_name", agentName)
       .gte("created_at", cutoffOldest)
       .lt("created_at", cutoffYear)
       .order("created_at", { ascending: false })
@@ -139,12 +148,15 @@ export class ReadSignificanceTool implements Tool {
       "Pull diary entries + relationship observations from this same calendar day in past years. " +
       "Use when greeting Ace in the morning, when he asks 'what was happening a year ago', or when surfacing a meaningful anniversary. " +
       "Returns up to 5 entries each.",
-    parameters: {},
+    parameters: {
+      agent_name: { type: "string", description: "Optional agent scope (default 'sapphire'). S125+ Phase 9 — auto-injected by fat MemoryTool from ToolContext." },
+    },
     required: [],
   };
 
-  async execute(): Promise<string> {
-    const sig = await fetchSignificanceForToday();
+  async execute(args: Record<string, unknown> = {}): Promise<string> {
+    const agentName = args.agent_name ? String(args.agent_name) : "sapphire";
+    const sig = await fetchSignificanceForToday(agentName);
     if (sig.diary.length === 0 && sig.relctx.length === 0) return "Nothing from this same calendar day in prior years.";
     const lines: string[] = [`📅 On this date in past years:`];
     for (const e of sig.diary) {

@@ -72,8 +72,40 @@ async function summarizeYesterday(diaryEntries: string[]): Promise<string | null
 // 2026-04-30 locked: ONE unified job, runs at 8 AM CDT (13:00 UTC), iterates
 // over each agent in turn. Each agent's diary entries get consolidated into
 // THEIR own significance + core_memory recent_themes slot.
+//
+// S125+ Phase 9: per-agent cadence gating. The job runs daily, but each agent
+// only consolidates if their cadence window has elapsed since their last
+// consolidation. This implements the strategy session decision: Yuki + Anita
+// every 3 days (most active), Vector + Veritas + Alfred weekly, Sapphire daily.
 
 const CREW_AGENTS = ["sapphire", "anita", "yuki", "vector", "veritas", "alfred"] as const;
+
+// Per-agent consolidation cadence in days. If the agent's last consolidation
+// was N+ days ago (or never), run; else skip.
+const AGENT_CADENCE_DAYS: Record<string, number> = {
+  sapphire: 1,   // daily (her substantive turns generate new reflection material every day)
+  anita: 3,      // every 3 days (most active specialist — marketing pushes yield daily diary entries)
+  yuki: 3,       // every 3 days (six-channel distribution = high volume)
+  vector: 7,     // weekly (metrics observation patterns develop over a week)
+  veritas: 7,    // weekly (cross-crew patterns develop over a week)
+  alfred: 7,     // weekly (research/pipeline insights develop over a week)
+};
+
+async function lastConsolidationAt(supabase: any, agentName: string): Promise<Date | null> {
+  try {
+    const { data } = await supabase
+      .from("agent_significance")
+      .select("created_at")
+      .eq("agent_name", agentName)
+      .like("kind", "sleeptime_%")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return data?.created_at ? new Date(data.created_at) : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function runSleeptimeConsolidation(agentName?: string): Promise<void> {
   // If no agent specified, run for entire crew.
@@ -85,15 +117,31 @@ export async function runSleeptimeConsolidation(agentName?: string): Promise<voi
 }
 
 export async function runCrewConsolidation(): Promise<void> {
-  console.log(`💤 [Sleeptime/Crew] Starting consolidation for ${CREW_AGENTS.length} agents`);
+  console.log(`💤 [Sleeptime/Crew] Starting cadence-gated consolidation for ${CREW_AGENTS.length} agents`);
+  const supabase = await getSupabase();
+  const now = Date.now();
+  let ranCount = 0;
+  let skippedCount = 0;
+
   for (const agent of CREW_AGENTS) {
     try {
+      const cadenceDays = AGENT_CADENCE_DAYS[agent] ?? 7;
+      const last = await lastConsolidationAt(supabase, agent);
+      if (last) {
+        const daysSince = (now - last.getTime()) / 86_400_000;
+        if (daysSince < cadenceDays) {
+          console.log(`[Sleeptime/${agent}] Skip: last consolidated ${daysSince.toFixed(1)}d ago, cadence is ${cadenceDays}d.`);
+          skippedCount++;
+          continue;
+        }
+      }
       await runConsolidationForAgent(agent);
+      ranCount++;
     } catch (e: any) {
       console.warn(`[Sleeptime/Crew] ${agent} threw: ${e.message}`);
     }
   }
-  console.log(`💤 [Sleeptime/Crew] Done.`);
+  console.log(`💤 [Sleeptime/Crew] Done. Ran ${ranCount}, skipped ${skippedCount}.`);
 }
 
 async function runConsolidationForAgent(agentName: string): Promise<void> {
@@ -103,31 +151,23 @@ async function runConsolidationForAgent(agentName: string): Promise<void> {
   const supabase = await getSupabase();
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-  // 1. Fetch yesterday's diary entries for THIS agent.
-  // Sapphire still has the legacy table sapphire_diary; other agents will
-  // have their tables added in subsequent phases. For now, only sapphire's
-  // table exists, so other agents skip cleanly.
+  // 1. Fetch yesterday's diary entries for THIS agent (S125+ Phase 9: unified
+  // agent_diary table with agent_name filter — was sapphire_diary in Phase 5).
   let diaryRows: any[] = [];
-  if (agentName === "sapphire") {
-    try {
-      const { data, error } = await supabase
-        .from("sapphire_diary")
-        .select("text, tags, created_at")
-        .gte("created_at", since)
-        .order("created_at", { ascending: true });
-      if (error) {
-        console.warn(`[Sleeptime/${agentName}] diary fetch error: ${error.message}`);
-        return;
-      }
-      diaryRows = data || [];
-    } catch (e: any) {
-      console.warn(`[Sleeptime/${agentName}] diary fetch threw: ${e.message}`);
+  try {
+    const { data, error } = await supabase
+      .from("agent_diary")
+      .select("entry, tags, created_at")
+      .eq("agent_name", agentName)
+      .gte("created_at", since)
+      .order("created_at", { ascending: true });
+    if (error) {
+      console.warn(`[Sleeptime/${agentName}] diary fetch error: ${error.message}`);
       return;
     }
-  } else {
-    // Other agents: when they get their own diary tables, this branch reads them.
-    // For now, no-op gracefully so the crew iterator doesn't fail.
-    console.log(`[Sleeptime/${agentName}] no diary table yet; skipping. (Will be added in subsequent phases.)`);
+    diaryRows = data || [];
+  } catch (e: any) {
+    console.warn(`[Sleeptime/${agentName}] diary fetch threw: ${e.message}`);
     return;
   }
 
@@ -136,8 +176,8 @@ async function runConsolidationForAgent(agentName: string): Promise<void> {
     return;
   }
 
-  // 2. Summarize via Gemini Flash Lite
-  const entries = diaryRows.map((r: any) => String(r.text || "").slice(0, 500));
+  // 2. Summarize via Gemini Flash Lite — column is `entry` not `text` (Phase 9 bug fix)
+  const entries = diaryRows.map((r: any) => String(r.entry || "").slice(0, 500));
   const summary = await summarizeYesterday(entries);
   if (!summary) {
     console.warn(`[Sleeptime/${agentName}] Gemini summary failed. Using fallback.`);
@@ -182,16 +222,14 @@ async function runConsolidationForAgent(agentName: string): Promise<void> {
 }
 
 async function writeSignificance(supabase: any, agentName: string, summary: string, kind: string): Promise<void> {
+  // S125+ Phase 9: unified agent_significance table with agent_name column.
   try {
-    // For now, sapphire_significance is the only table. Other agents will get their own.
-    if (agentName === "sapphire") {
-      await supabase.from("sapphire_significance").insert({
-        content: summary,
-        kind: `sleeptime_${kind}`,
-        created_at: new Date().toISOString(),
-      });
-    }
-    // Future: per-agent significance tables OR a unified agent_significance table.
+    await supabase.from("agent_significance").insert({
+      agent_name: agentName,
+      content: summary,
+      kind: `sleeptime_${kind}`,
+      created_at: new Date().toISOString(),
+    });
   } catch (e: any) {
     console.warn(`[Sleeptime/${agentName}] significance write failed: ${e.message}`);
   }

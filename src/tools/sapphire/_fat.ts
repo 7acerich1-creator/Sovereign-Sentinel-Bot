@@ -786,10 +786,13 @@ export class DiaryTool implements Tool {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
+    // S125+ Phase 9: per-agent diary via ctx.agentName
+    const agentName = ctx.agentName || "sapphire";
+    const argsWithAgent = { ...args, agent_name: agentName };
     switch (action) {
-      case "write": return this.writeT.execute(args);
-      case "read": return this.readT.execute(args);
-      case "read_significance": return (this.signifT.execute as any)();
+      case "write": return this.writeT.execute(argsWithAgent);
+      case "read": return this.readT.execute(argsWithAgent);
+      case "read_significance": return this.signifT.execute(argsWithAgent);
       case "reflect": {
         const turnSummary = String(args.turn_summary || "").trim();
         const worked = String(args.what_worked || "").trim();
@@ -803,9 +806,12 @@ export class DiaryTool implements Tool {
           `  ✓ ${worked || "(nothing surfaced)"}\n` +
           `  ✗ ${didnt || "(nothing missed)"}\n` +
           `  → ${takeaway}`;
-        return this.writeT.execute(
-          { text: reflectionText, tags: ["reflection"] },
-        );
+        // S125+ Phase 9: column is `entry`, not `text`. Bug from Phase 5.
+        return this.writeT.execute({
+          entry: reflectionText,
+          tags: ["reflection"],
+          agent_name: agentName,
+        });
       }
       default: return unknownAction("diary", action, ["write", "read", "read_significance", "reflect"]);
     }

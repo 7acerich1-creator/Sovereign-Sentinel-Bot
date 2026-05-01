@@ -6,6 +6,48 @@
 
 ---
 
+## S125+ — Agentic Refactor Phase 9: per-agent diary + sleeptime cadence + crew bootstrap (2026-04-30)
+
+**Architect directive 2026-04-30:** "Let's get it." — Phase 9 ships in same session as Phases 1-8. Track A of marketing-push readiness now COMPLETE.
+
+**What landed (✅ shipped):**
+
+- **Tables migrated** (applied via MCP):
+  - `sapphire_diary` renamed to `agent_diary`, added `agent_name` column with default 'sapphire' (existing rows backfilled). Index on `(agent_name, created_at DESC)`.
+  - `agent_significance` created fresh (sapphire_significance never existed). Same `(agent_name, created_at DESC)` index.
+  - RLS: service_role write + anon read on both.
+- **Diary tool agent-aware** (`src/tools/sapphire/diary.ts`): `WriteDiaryEntryTool`, `ReadDiaryTool`, `fetchSignificanceForToday()`, `ReadSignificanceTool` all read `args.agent_name` (default 'sapphire'). All references to `sapphire_diary` updated to `agent_diary` with agent_name filter.
+- **Fat DiaryTool dispatcher** (`_fat.ts`): injects `ctx.agentName` into every dispatch. Reflect action's `text:` arg corrected to `entry:` (Phase 5 column-name bug fix). Read significance now properly gets args.
+- **DiaryTool added to global tools** (`src/index.ts`): non-Sapphire agents now have `diary(action='write'/'read'/'reflect'/'read_significance')` access, auto-routed to their own diary rows.
+- **Sleeptime consolidator generalized + cadence-gated** (`src/proactive/sleeptime-consolidator.ts`):
+  - Reads from `agent_diary` with agent_name filter (was sapphire_diary with broken `text` column reference — Phase 5 bug fixed).
+  - Writes to `agent_significance` (was sapphire_significance which didn't exist — silent failure fixed).
+  - **Per-agent cadence gating**: `AGENT_CADENCE_DAYS` map = sapphire 1 / anita 3 / yuki 3 / vector 7 / veritas 7 / alfred 7. The unified daily job runs `lastConsolidationAt(agent)` — if < cadence_days, skip. This implements the strategy session decision (3-day Yuki+Anita, weekly others) without separate scheduler entries.
+- **All 6 agents bootstrapped** with core memory slots. Anita: 5 slots (current_campaigns / current_audiences / recent_experiments / current_concerns / recent_themes). Sapphire: 4 (from Phase 5). Yuki / Vector / Veritas / Alfred: 4 slots each (current_priorities / role-specific second slot / current_concerns / recent_themes). Total: 25 seeded slots.
+
+**Bug fixes incidentally made:**
+- Phase 5 sleeptime consolidator was reading `text` column from `sapphire_diary` — actual column is `entry`. The job was silently failing every day. Now corrected.
+- Phase 5 sleeptime was writing to `sapphire_significance` which never existed. Now writes to `agent_significance` with agent_name.
+- Phase 5 reflect action in DiaryTool was passing `text:` to WriteDiaryEntryTool which expects `entry:`. Bug fixed.
+
+**Track A status:** ✅ COMPLETE. Per the strategy session decisions:
+1. Shared graph ✅ (Phase 6)
+2. Per-agent Pinecone namespaces ✅ (Phase 8 enum + namespace routing in fat tool)
+3. Reflection cadence (3-day Yuki+Anita, weekly others, daily Sapphire) ✅ (Phase 9 cadence gating in sleeptime)
+4. Unified sleeptime job iterating crew ✅ (Phase 8 + 9 cadence-gated)
+
+**What's deferred (non-blocking for marketing push):**
+- Per-agent `personal_intelligence_X` doctrine pieces — Anita has Phase 7 marketing_lead. Yuki/Vector/Veritas/Alfred get role-tuned pieces in Phase 9.5 (will develop better organically as agents start using their memory).
+- Bot_active_state activation of any new pieces added — manual via set_piece tool when needed.
+
+**Open at close:**
+1. Push the Phase 9 batch via Desktop Commander (this session). tsc clean.
+2. Track A complete. Track C (content pipeline iron-out) is the next session in this repo.
+3. Track B (funnel walked through) requires `Sovereign-Mission-Control` mount — separate session.
+4. Architect tests live: try having Anita call `diary(action='write', entry='...')` — should land in `agent_diary` with `agent_name='anita'`.
+
+---
+
 ## S125+ — Agentic Refactor Phase 8: crew memory infrastructure generalized (2026-04-30)
 
 **Architect directive 2026-04-30:** Three blocking tracks before marketing push next week — (A) all bots fully lined out, (B) funnel walked through, (C) content pipelines ironed out. Phase 8 is Track A — generalizing the Phase 5+6 memory infrastructure across the crew per the strategy session decisions.

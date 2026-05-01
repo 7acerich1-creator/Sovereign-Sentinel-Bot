@@ -549,8 +549,15 @@ async function main() {
   // memory.archival_* defaults to {agent}-personal Pinecone namespace.
   // memory.entity_* / relate / graph_query operate on the SHARED graph.
   // Memory infrastructure generalized from sapphire_core_memory → agent_core_memory.
-  const { MemoryTool: MemoryFatTool } = await import("./tools/sapphire/_fat");
+  const { MemoryTool: MemoryFatTool, DiaryTool: DiaryFatTool } = await import("./tools/sapphire/_fat");
   tools.push(new MemoryFatTool());
+
+  // ── S125+ Phase 9: Diary fat tool (agent-aware via ToolContext) ──
+  // diary.write / read / read_significance / reflect — all auto-routed to the
+  // calling agent's diary slot via ctx.agentName. Generalized from sapphire_diary
+  // to agent_diary. Sleeptime consolidator + reflection schedulers read from
+  // these per-agent diaries.
+  tools.push(new DiaryFatTool());
 
   // ── 4. Initialize Agent Loop ──
   // CRITICAL: Veritas chat must use the Veritas team LLM (Anthropic-first), NOT failoverLLM (Groq-first).

@@ -281,7 +281,23 @@ ORDER BY total_cost DESC;
 ## The Current Highest-Leverage Action (UPDATE EVERY SESSION)
 *If this field says the same thing two sessions in a row, the last session didn't earn its keep.*
 
-**Action: STRATEGY SESSION on crew-wide Phase 5 generalization (S125+, 2026-04-30, ALL 5 PHASES SHIPPED).**
+**Action: SELF-HEALING INFRASTRUCTURE — ship all 5 layers in one session (S125+, set 2026-04-30 evening, deferred from marketing-push readiness Tracks B/C).**
+
+After Phase 1-9 of the agentic refactor shipped 2026-04-30 (single session, 11 commits), Architect surfaced a real operational gap: a Railway build failed due to a transient PyPI network error during pip install of yt-dlp + edge-tts. He didn't know about it until he went looking. Multiple Phase 5 bugs (sleeptime reading wrong column, writing to nonexistent table, reflect with wrong arg name) had been silently failing daily for who-knows-how-long. The pattern is real: failures happen, no one notices, system degrades quietly.
+
+**Architect's directive 2026-04-30 evening:** Build the self-healing infrastructure in one focused session BEFORE resuming the marketing-push readiness work (Tracks B/C). Tracks B and C are EXPLICITLY PAUSED until self-healing ships.
+
+**The five layers (full architecture in `memory/project_self_healing_architecture.md`):**
+
+1. **Deploy failure alerts** — Railway webhook → Supabase Edge Function → Telegram alert via Sapphire's bot. Within 30-60s of any failed build, Architect gets pinged with the actual error.
+2. **Auto-retry for transient errors** — Same Edge Function classifies the error. Network/timeout/rate-limit → auto-redeploy via Railway API once. Code-bug errors → escalate immediately. Resolves 70%+ of build failures without Architect involvement.
+3. **Boot-time smoke test** — At container start, ping every Supabase table the bot writes to + verify env vars per agent's chain + ping Pinecone namespaces + integration auth. Critical failures DM Architect via Sapphire and refuse to register the affected tool. Catches Phase-5-class bugs the day they ship.
+4. **Bot health canary** — Cron every 5-10min sends a test message at Sapphire, checks response within timeout. Alert if dead. Catches "container alive but bot dead."
+5. **Agent-driven diagnosis** — When failure escalates, Sapphire (or Veritas as Chief of Staff) reads the error log, cross-references archival memory for similar past incidents, proposes a fix, files a Claude task via `learning(action='request_code_change')`. Architect approves; Claude executes. This is where the Phase 5+6 memory infrastructure pays off — the crew becomes self-monitoring.
+
+**Why this goes here in NORTH_STAR:** Without self-healing, every silent failure costs days of degraded operation before anyone notices. Marketing pushes traffic at the funnel — if any agent's silently broken when traffic arrives, conversions get lost without being caught. Self-healing is the prerequisite for trusting the system enough to push real traffic at it.
+
+**Resume Track B/C after self-healing ships.**
 
 **Phase 1-6 of the Sapphire agentic refactor shipped in a single session 2026-04-30.** Native web_search + interleaved thinking, Pinecone tightening, conditional reminders, fat-tool consolidation (39→15), Letta-style core memory, archival memory tools, reflection loop, sleeptime consolidator, Zep-lite temporal supersession, AND full Zep-style temporal knowledge graph in Postgres (Phase 6) — all live. Sapphire is now the proof point: a generalist PA with FOUR memory layers (standing facts / core memory / archival semantic / temporal graph), anticipatory capability, agent-owned memory writes, and architectural shape that's what successful agentic products are converging on. Seeded graph entities for Architect + family + brands + infra so the graph isn't empty on day one.
 

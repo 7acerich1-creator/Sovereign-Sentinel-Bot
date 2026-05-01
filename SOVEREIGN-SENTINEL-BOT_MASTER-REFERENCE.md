@@ -6,6 +6,36 @@
 
 ---
 
+## S126 — Self-healing infrastructure (LOCKED for next session, 2026-04-30 evening)
+
+**Status:** Architecture locked, NOT YET BUILT. Architect's directive 2026-04-30 evening after Phase 9 wrapped: build the full 5-layer self-healing infrastructure in ONE focused next session BEFORE resuming marketing-push readiness Tracks B/C.
+
+**Trigger:** Railway build failed on Phase 9 push (commit 64ba4db) due to transient PyPI network error during `pip3 install yt-dlp edge-tts` (`BrokenPipeError`). Architect didn't know about it until he went looking. Combined with Phase 5 silent bugs caught only at Phase 9 (sleeptime reading wrong column, writing to nonexistent table, reflect with wrong arg name) — the silent-failure surface area is real and needs systematic mitigation.
+
+**Five layers (full design in `memory/project_self_healing_architecture.md`):**
+1. Deploy failure alerts (Railway webhook → Supabase Edge Function → Telegram)
+2. Auto-retry for transient errors (same Edge Function classifies + redeploys)
+3. Boot-time smoke test (table/env/namespace integrity at every boot)
+4. Bot health canary (cron checks Sapphire is alive every 10min)
+5. Agent-driven diagnosis (Sapphire/Veritas reads error logs, files Claude tasks)
+
+**Architectural decisions LOCKED (don't relitigate in next session):**
+- Webhook receiver: Supabase Edge Function (same project `wzthxohtgojenukmdubz`).
+- Telegram alert path: Sapphire's bot (SAPPHIRE_TOKEN env var, Architect's chat id).
+- Railway redeploy: Railway GraphQL API (RAILWAY_API_TOKEN env var — Architect generates from Railway dashboard).
+- Boot smoke test: first thing in `boot()` after dotenv. Critical failures DM Architect + don't register affected tool. Warnings log only.
+- Bot health canary: Supabase scheduled function, every 10min.
+- Agent-driven diagnosis: doctrine + existing `learning(action='request_code_change')` tool. No new tools needed.
+
+**Marketing-push readiness Tracks B + C are PAUSED** until self-healing ships. NORTH_STAR's Highest-Leverage Action points here.
+
+**Open at next-session start:**
+1. Architect REDEPLOYS the current build first (the Phase 9 build failed transiently; redeploy will succeed). This is independent of self-healing — just a one-click recovery to get the bot live.
+2. Then start the new session with the prepared prompt (in this session's wrap-up).
+3. Build all 5 layers in one shot.
+
+---
+
 ## S125+ — Agentic Refactor Phase 9: per-agent diary + sleeptime cadence + crew bootstrap (2026-04-30)
 
 **Architect directive 2026-04-30:** "Let's get it." — Phase 9 ships in same session as Phases 1-8. Track A of marketing-push readiness now COMPLETE.

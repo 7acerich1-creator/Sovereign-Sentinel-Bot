@@ -32,11 +32,17 @@ export interface SpendLogEntry {
 // during the next pricing review and add it. Until then it logs $0.
 const PRICING_PER_MILLION_TOKENS: Record<string, { input: number; output: number }> = {
   // ── Anthropic ──
+  // Note: Opus 4.6+ dropped to $5/$25 (was $15/$75 on Opus 4/4.5). Keep
+  // historic rows accurate so old llm_calls log at the price they ACTUALLY
+  // cost when used. Updated 2026-05-01 (Sonnet 4 retiring June 15, 2026).
+  "claude-sonnet-4-6": { input: 3.00, output: 15.00 },
   "claude-sonnet-4-5": { input: 3.00, output: 15.00 },
   "claude-sonnet-4": { input: 3.00, output: 15.00 },
+  "claude-opus-4-7": { input: 5.00, output: 25.00 },
+  "claude-opus-4-6": { input: 5.00, output: 25.00 },
   "claude-opus-4-5": { input: 15.00, output: 75.00 },
   "claude-opus-4": { input: 15.00, output: 75.00 },
-  "claude-haiku-4-5": { input: 0.80, output: 4.00 },
+  "claude-haiku-4-5": { input: 1.00, output: 5.00 },
   "claude-3-7-sonnet": { input: 3.00, output: 15.00 },
   "claude-3-5-sonnet": { input: 3.00, output: 15.00 },
   "claude-3-5-haiku": { input: 0.80, output: 4.00 },

@@ -84,6 +84,10 @@ import {
   CoreMemoryViewTool, CoreMemoryAppendTool, CoreMemoryReplaceTool,
   ArchivalInsertTool, ArchivalSearchTool, SupersedeMemoryTool,
 } from "./core_memory";
+// S125+ Phase 6 — Zep-style temporal knowledge graph (Postgres-as-graph)
+import {
+  EntityUpsertTool, EntityGetTool, RelateTool, UnrelateTool, GraphQueryTool,
+} from "./temporal_graph";
 
 // ── Helper: dispatch to a narrow tool by action ─────────────────────────────
 
@@ -303,6 +307,12 @@ export class MemoryTool implements Tool {
   private archivalInsertT = new ArchivalInsertTool();
   private archivalSearchT = new ArchivalSearchTool();
   private supersedeT = new SupersedeMemoryTool();
+  // Phase 6 — temporal graph
+  private entityUpsertT = new EntityUpsertTool();
+  private entityGetT = new EntityGetTool();
+  private relateT = new RelateTool();
+  private unrelateT = new UnrelateTool();
+  private graphQueryT = new GraphQueryTool();
 
   definition: ToolDefinition = {
     name: "memory",
@@ -320,17 +330,31 @@ export class MemoryTool implements Tool {
       "• archival_insert — write to long-term semantic memory. Required: namespace ('sapphire-personal' | 'shared' | 'sovereign-synthesis'), content, topic. Optional: metadata.\n" +
       "• archival_search — explicit search across archival namespaces. Required: query. Optional: namespace, k, include_history.\n" +
       "• supersede — mark a prior archival entry as no-longer-current (Zep-lite temporal model). Required: old_id, new_id, namespace. Optional: reason.\n\n" +
-      "ROUTING GUIDE:\n" +
-      "• Family info (DOB/school/allergies) → family.save (different tool, structured fields)\n" +
+      "LAYER 4 — TEMPORAL KNOWLEDGE GRAPH (S125+ Phase 6, Zep-style in Postgres):\n" +
+      "• entity_upsert — create/update a graph node. Required: name, entity_type ('person'|'project'|'task'|'place'|'organization'|'event'|'concept'|'document'). Optional: attributes.\n" +
+      "• entity_get — look up an entity by name+type or by id.\n" +
+      "• relate — create a relationship between two entities. AUTO-SUPERSEDES any prior currently-valid (source, type, target) edge. Use when a fact changes (Aliza switches schools, project status updates).\n" +
+      "  Required: source_name, source_type, relationship_type (PARENT_OF | CHILD_OF | SIBLING_OF | PARTNER_OF | AT_SCHOOL | HAS_DOCTOR | HAS_THERAPIST | WORKS_AT | WORKS_ON | HAS_STATUS | BELONGS_TO | DEPENDS_ON | BLOCKS | OWNS | ATTENDED | SCHEDULED_FOR | OCCURRED_AT | REFERENCES | CONTRADICTS | EXTENDS | INSTANCE_OF | RELATED_TO), target_name, target_type. Optional: attributes, valid_from, supersede_reason.\n" +
+      "• unrelate — close a relationship without replacing it. Required: relationship_id. Optional: reason.\n" +
+      "• graph_query — traverse from a starting entity along a relationship type. 1 or 2 hops. Required: start_name, start_type, traverse. Optional: depth (1|2), include_history.\n\n" +
+      "ROUTING GUIDE (4 layers):\n" +
+      "• Family info structured (DOB/school/allergies/doctor) → family.save (different tool — structured fields, NOT graph)\n" +
       "• One-off facts ('preferred dentist is Dr. X') → memory.remember\n" +
-      "• Current-state things you want to ALWAYS see ('Architect just shifted priorities to Y') → memory.core_append or memory.core_replace\n" +
-      "• Long-term-keep things that don't need to be in every-turn context → memory.archival_insert\n" +
-      "• When a fact CHANGES (Aliza switched schools, project status updated) → archival_insert the new + supersede the old",
+      "• Current-state things ALWAYS visible ('Architect just shifted priorities') → memory.core_append/replace\n" +
+      "• Long-term semantic searchable but not always-visible → memory.archival_insert\n" +
+      "• When a fact CHANGES (Aliza switched schools) → memory.relate creates new edge, auto-supersedes old; OR archival_insert + supersede for unstructured\n" +
+      "• Structured RELATIONSHIPS between entities ('Architect WORKS_ON Sovereign Synthesis', 'Aliza AT_SCHOOL Pacific Elementary') → memory.relate (graph)\n" +
+      "• Walking relationships ('what projects does Architect work on?', 'where do the kids go to school?') → memory.graph_query, NOT a vector search",
     parameters: {
       action: {
         type: "string",
-        description: "remember | recall | core_view | core_append | core_replace | archival_insert | archival_search | supersede",
-        enum: ["remember", "recall", "core_view", "core_append", "core_replace", "archival_insert", "archival_search", "supersede"],
+        description: "remember | recall | core_view | core_append | core_replace | archival_insert | archival_search | supersede | entity_upsert | entity_get | relate | unrelate | graph_query",
+        enum: [
+          "remember", "recall",
+          "core_view", "core_append", "core_replace",
+          "archival_insert", "archival_search", "supersede",
+          "entity_upsert", "entity_get", "relate", "unrelate", "graph_query",
+        ],
       },
       // Layer 1 — facts
       key: { type: "string", description: "[remember] Slug-style key." },
@@ -346,12 +370,29 @@ export class MemoryTool implements Tool {
       namespace: { type: "string", description: "[archival_insert, archival_search, supersede] Pinecone namespace.", enum: ["sapphire-personal", "shared", "sovereign-synthesis"] },
       query: { type: "string", description: "[archival_search] Semantic query." },
       k: { type: "number", description: "[archival_search] Top-k results, default 5." },
-      include_history: { type: "boolean", description: "[archival_search] Include superseded memories. Default false." },
+      include_history: { type: "boolean", description: "[archival_search, graph_query] Include superseded entries. Default false." },
       topic: { type: "string", description: "[archival_insert] Topic tag." },
       metadata: { type: "object", description: "[archival_insert] Optional extra metadata." },
       old_id: { type: "string", description: "[supersede] Pinecone ID of the now-outdated entry." },
       new_id: { type: "string", description: "[supersede] Pinecone ID of the replacement entry." },
-      reason: { type: "string", description: "[supersede] Why it's being superseded." },
+      reason: { type: "string", description: "[supersede, unrelate] Reason / audit note." },
+      // Layer 4 — temporal knowledge graph
+      name: { type: "string", description: "[entity_upsert, entity_get] Entity name." },
+      entity_type: { type: "string", description: "[entity_upsert, entity_get] Entity type from controlled vocabulary.", enum: ["person", "project", "task", "place", "organization", "event", "concept", "document"] },
+      attributes: { type: "object", description: "[entity_upsert, relate] Optional structured attributes (jsonb)." },
+      id: { type: "string", description: "[entity_get] Look up by UUID instead of name+type." },
+      source_name: { type: "string", description: "[relate] Source entity name." },
+      source_type: { type: "string", description: "[relate] Source entity type.", enum: ["person", "project", "task", "place", "organization", "event", "concept", "document"] },
+      relationship_type: { type: "string", description: "[relate] Edge type from controlled vocabulary.", enum: ["PARENT_OF", "CHILD_OF", "SIBLING_OF", "PARTNER_OF", "AT_SCHOOL", "HAS_DOCTOR", "HAS_THERAPIST", "WORKS_AT", "WORKS_ON", "HAS_STATUS", "BELONGS_TO", "DEPENDS_ON", "BLOCKS", "OWNS", "ATTENDED", "SCHEDULED_FOR", "OCCURRED_AT", "REFERENCES", "CONTRADICTS", "EXTENDS", "INSTANCE_OF", "RELATED_TO"] },
+      target_name: { type: "string", description: "[relate] Target entity name." },
+      target_type: { type: "string", description: "[relate] Target entity type.", enum: ["person", "project", "task", "place", "organization", "event", "concept", "document"] },
+      valid_from: { type: "string", description: "[relate] Optional ISO8601. Default now()." },
+      supersede_reason: { type: "string", description: "[relate] Audit reason if this auto-supersedes a prior edge." },
+      relationship_id: { type: "string", description: "[unrelate] UUID of the relationship to close." },
+      start_name: { type: "string", description: "[graph_query] Starting entity name." },
+      start_type: { type: "string", description: "[graph_query] Starting entity type.", enum: ["person", "project", "task", "place", "organization", "event", "concept", "document"] },
+      traverse: { type: "string", description: "[graph_query] Relationship type to follow.", enum: ["PARENT_OF", "CHILD_OF", "SIBLING_OF", "PARTNER_OF", "AT_SCHOOL", "HAS_DOCTOR", "HAS_THERAPIST", "WORKS_AT", "WORKS_ON", "HAS_STATUS", "BELONGS_TO", "DEPENDS_ON", "BLOCKS", "OWNS", "ATTENDED", "SCHEDULED_FOR", "OCCURRED_AT", "REFERENCES", "CONTRADICTS", "EXTENDS", "INSTANCE_OF", "RELATED_TO"] },
+      depth: { type: "number", description: "[graph_query] 1 (direct) or 2 (friends-of-friends). Default 1." },
     },
     required: ["action"],
   };
@@ -367,7 +408,17 @@ export class MemoryTool implements Tool {
       case "archival_insert": return this.archivalInsertT.execute(args);
       case "archival_search": return this.archivalSearchT.execute(args);
       case "supersede": return this.supersedeT.execute(args);
-      default: return unknownAction("memory", action, ["remember", "recall", "core_view", "core_append", "core_replace", "archival_insert", "archival_search", "supersede"]);
+      case "entity_upsert": return this.entityUpsertT.execute(args);
+      case "entity_get": return this.entityGetT.execute(args);
+      case "relate": return this.relateT.execute(args);
+      case "unrelate": return this.unrelateT.execute(args);
+      case "graph_query": return this.graphQueryT.execute(args);
+      default: return unknownAction("memory", action, [
+        "remember", "recall",
+        "core_view", "core_append", "core_replace",
+        "archival_insert", "archival_search", "supersede",
+        "entity_upsert", "entity_get", "relate", "unrelate", "graph_query",
+      ]);
     }
   }
 }

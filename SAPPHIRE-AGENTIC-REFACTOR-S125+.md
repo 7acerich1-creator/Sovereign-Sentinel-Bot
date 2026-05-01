@@ -203,7 +203,17 @@ Each consolidated tool gets a description written like a new-hire onboarding doc
 
 **Crew-generalization deferred (Architect directive):** Phase 5's architecture is the most impactful pattern to apply across Anita, Yuki, Vector, Veritas, Alfred. But each specialist needs role-tuned design (which layers, which schedule, which reflection cadence). NOT a lift-and-shift. Strategy session required before crew rollout. NORTH_STAR's Highest-Leverage Action now points to this.
 
-**Phase 6 (queued, not in this session):** Full Zep-style temporal knowledge graph via Neo4j or pgvector graph extensions. Cross-agent memory sharing via `shared` namespace conventions. Agent-to-agent memory handoff protocols. The Letta-style memory architecture generalized across the whole 6-agent swarm with the role-tuned tweaks decided in the strategy session above.
+**Phase 6 (✅ shipped 2026-04-30, same session):** Zep-style temporal knowledge graph in Postgres (Supabase). Two new tables: `sapphire_entities` + `sapphire_relationships` with `valid_from`/`valid_until` columns + `superseded_by_id` audit trail. Architecture chosen: Postgres-as-graph instead of Neo4j (Sapphire's scale is hundreds-to-thousands of edges, not millions; recursive CTEs handle 1-3 hop traversal fine; no new infrastructure; additive to Supabase she already pays for). 90% of Zep's value at 10% of the operational complexity.
+
+Five new tool actions on the `memory` fat tool: `entity_upsert`, `entity_get`, `relate` (auto-supersedes prior same-shape edges), `unrelate`, `graph_query` (1 or 2-hop traversal). Controlled vocabulary: 8 entity types (person/project/task/place/organization/event/concept/document), 22 relationship types (PARENT_OF, CHILD_OF, SIBLING_OF, AT_SCHOOL, HAS_DOCTOR, WORKS_ON, HAS_STATUS, OWNS, etc.). DB-level CHECK constraints prevent fragmentation.
+
+Seeded entities at migration time (so Sapphire has something to walk on day one): `Ace Richie` (person, role=Architect), `Aliza` and `Maddy` (person, role=daughter, with DOBs), four projects (`Sovereign Synthesis`, `The Containment Field`, `Mission Control`, `Sovereign-Sentinel-Bot`). Seeded family edges (PARENT_OF / CHILD_OF / SIBLING_OF) + ownership edges (Architect WORKS_ON SS+TCF, OWNS Mission Control + Sovereign-Sentinel-Bot).
+
+The `memory_protocol_s125p5` doctrine piece extended to Phase 6 — now routes Sapphire across FOUR memory layers (standing facts / core memory / archival / graph) with explicit "when does which layer apply" decision tree. Critical rule: structured relationships go to graph, unstructured semantic to archival, always-visible state to core memory, simple key/value to facts.
+
+**True Zep parity (Neo4j with full graph algorithms — PageRank, community detection, betweenness centrality, etc.) is deferred indefinitely** — Sapphire's actual scale doesn't need it, and the operational complexity isn't worth the marginal gain. If we ever hit a wall where recursive CTEs are too slow or graph algorithms become useful, that's the trigger to revisit. Until then, Postgres-as-graph is the right answer.
+
+**Crew-generalization across Anita / Yuki / Vector / Veritas / Alfred remains queued** per Architect's directive. Strategy session before lift-and-shift. NORTH_STAR's Highest-Leverage Action points there.
 
 Sapphire's three-tier memory (SQLite for facts/family, Pinecone for semantic, Supabase for ops) already has the bones of MemGPT/Letta's context-as-OS-memory-hierarchy. What's missing is **the agent owning memory writes as normal tool calls** instead of memory being plumbed by the framework. Phase 5 introduces:
 

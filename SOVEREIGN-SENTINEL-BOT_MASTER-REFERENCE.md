@@ -6,6 +6,35 @@
 
 ---
 
+## S125+ — Agentic Refactor Phase 6: temporal knowledge graph in Postgres (Zep-style, 2026-04-30)
+
+**Architect directive 2026-04-30:** "Phase 6." Single word. Shipped same session.
+
+**Architecture decision:** Postgres-as-graph (Supabase) instead of Neo4j. Sapphire's scale = hundreds-to-thousands of edges, not millions. Recursive CTEs handle 1-3 hop traversal. No new infrastructure cost. Additive to existing stack. 90% of Zep's value at 10% of operational complexity. True Neo4j parity (graph algorithms — PageRank, community detection, etc.) deferred indefinitely; revisit only if recursive CTEs ever become the bottleneck.
+
+**What landed (✅ shipped):**
+
+- **Schema** (applied via MCP, 2026-04-30): `public.sapphire_entities` (id, name, entity_type, attributes jsonb, UNIQUE(name, entity_type)) + `public.sapphire_relationships` (source_entity_id, target_entity_id, relationship_type, attributes, valid_from, valid_until, superseded_by_id, superseded_reason). 4 indexes (current-valid lookups, target reverse lookups, audit trail). RLS service_role write + anon read. Convenience view `sapphire_relationships_current` for currently-valid edges only.
+- **Controlled vocabulary** at DB level (CHECK constraints):
+  - 8 entity_types: person / project / task / place / organization / event / concept / document
+  - 22 relationship_types: PARENT_OF / CHILD_OF / SIBLING_OF / PARTNER_OF / AT_SCHOOL / HAS_DOCTOR / HAS_THERAPIST / WORKS_AT / WORKS_ON / HAS_STATUS / BELONGS_TO / DEPENDS_ON / BLOCKS / OWNS / ATTENDED / SCHEDULED_FOR / OCCURRED_AT / REFERENCES / CONTRADICTS / EXTENDS / INSTANCE_OF / RELATED_TO
+  - Adding a new type requires a schema migration — intentional friction to prevent fragmentation.
+- **Seeds at migration time** (so Sapphire has something to walk on day one):
+  - 3 person entities: Ace Richie (role=Architect), Aliza (DOB 2015-05-19), Maddy (DOB 2017-08-05)
+  - 4 project entities: Sovereign Synthesis, The Containment Field, Mission Control, Sovereign-Sentinel-Bot
+  - 6 family edges: PARENT_OF (×2), CHILD_OF (×2), SIBLING_OF (×2)
+  - 4 ownership edges: Architect WORKS_ON SS + TCF, OWNS MC + Sentinel Bot
+- **New file** `src/tools/sapphire/temporal_graph.ts` (~400 lines) — 5 narrow tool classes: EntityUpsertTool, EntityGetTool, RelateTool (auto-supersedes prior same-shape edges), UnrelateTool, GraphQueryTool (1 or 2-hop traversal with optional include_history).
+- **MemoryTool fat dispatcher** (in `_fat.ts`) extended with the 5 new actions. Total memory tool actions: 13 across 4 layers.
+- **Doctrine** `memory_protocol_s125p5` extended in `sapphire-prompt-pieces.json` with Layer 4 routing rules + decision tree for "when fact changes, which layer to update." Already activated in `active_extras` row from Phase 5.
+
+**Open at close:**
+1. Push the Phase 6 batch via Desktop Commander (this session).
+2. Architect tests live: try `memory(action='graph_query', start_name='Ace Richie', start_type='person', traverse='PARENT_OF', depth=1)` — should return Aliza + Maddy.
+3. Crew-generalization strategy session (queued, NORTH_STAR pointer).
+
+---
+
 ## S125+ — Agentic Refactor Phase 5: Letta-style memory + reflection + sleeptime + Zep-lite supersession (2026-04-30)
 
 **Architect directive 2026-04-30:** "Keep going through phase five in one shot... I think this phase five type of thing is the most impactful thing that we can give to the other agents as well moving forward. But we'll have a strategy session on it. Before we begin working on the other agents."

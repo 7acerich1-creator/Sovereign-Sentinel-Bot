@@ -283,7 +283,7 @@ ORDER BY total_cost DESC;
 
 **Action: STRATEGY SESSION on crew-wide Phase 5 generalization (S125+, 2026-04-30, ALL 5 PHASES SHIPPED).**
 
-**Phase 1-5 of the Sapphire agentic refactor shipped in a single session 2026-04-30.** Native web_search + interleaved thinking, Pinecone tightening, conditional reminders, fat-tool consolidation (39→15), Letta-style core memory, archival memory tools, reflection loop, sleeptime consolidator, Zep-lite temporal supersession — all live. Sapphire is now the proof point: a generalist PA with persistent memory hierarchy, anticipatory capability, agent-owned memory writes, and architectural shape that's what successful agentic products are converging on.
+**Phase 1-6 of the Sapphire agentic refactor shipped in a single session 2026-04-30.** Native web_search + interleaved thinking, Pinecone tightening, conditional reminders, fat-tool consolidation (39→15), Letta-style core memory, archival memory tools, reflection loop, sleeptime consolidator, Zep-lite temporal supersession, AND full Zep-style temporal knowledge graph in Postgres (Phase 6) — all live. Sapphire is now the proof point: a generalist PA with FOUR memory layers (standing facts / core memory / archival semantic / temporal graph), anticipatory capability, agent-owned memory writes, and architectural shape that's what successful agentic products are converging on. Seeded graph entities for Architect + family + brands + infra so the graph isn't empty on day one.
 
 **Crew-generalization note (Architect directive 2026-04-30):** *"This phase 5 type of thing is the most impactful thing that we can give to the other agents as well moving forward. But we'll have a strategy session on it before we begin working on the other agents."*
 

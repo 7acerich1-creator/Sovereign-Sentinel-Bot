@@ -1383,7 +1383,11 @@ export async function fluxBatchImageGen(): Promise<number> {
     return brandItems.map((r: any) => ({
       id: r.id,
       prompt: sharedPrompt, // Same prompt → pod deduplicates to 1 FLUX generation
-      hook_text: (r.universal_text || "").split("\n")[0].slice(0, 200) || undefined,
+      // S125+ — pass the full first paragraph as hook text. The pod now
+      // auto-sizes the font based on character count so the entire text fits
+      // inside the frame regardless of length. Cap at 500 chars (anything
+      // longer than that won't be readable in 7s anyway).
+      hook_text: ((r.universal_text || "").split("\n")[0].trim().slice(0, 500)) || undefined,
     }));
   };
 

@@ -1019,18 +1019,20 @@ def _mix_audio(
     log.info("audio_mix_done", layers=n_layers, elapsed_s=round(elapsed, 1))
     return output_path
 
-def _extract_hook_text(hook_text: Optional[str], script: str, max_words: int = 18) -> str:
+def _extract_hook_text(hook_text: Optional[str], script: str, max_words: int = 80) -> str:
     """
     Get the opening typewriter text. Prefer explicit hook_text from the job spec;
-    fall back to the first ~18 words of the full script.
+    fall back to the first ~80 words of the full script.
+    S125+ — raised cap from 18 to 80 because content-engine videos now use
+    dynamic font sizing in _image_to_branded_video; full paragraph fits the
+    frame regardless of length. The 18-word cap was cutting sentences
+    mid-thought ("...of unmet" with no period).
     """
     raw = (hook_text or "").strip()
     if not raw:
         raw = script.strip()
-    # Take first max_words words
     words = raw.split()[:max_words]
     text = " ".join(words)
-    # Strip trailing partial punctuation, ensure clean ending
     text = text.rstrip(",;:—-")
     if not text.endswith((".", "?", "!", "…")):
         text += "."

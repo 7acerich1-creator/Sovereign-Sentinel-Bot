@@ -545,14 +545,28 @@ def _image_to_branded_video(
             .replace("\n", " ")
             .replace("'", "\u2019")
         )
-        # SESSION 116: tighter wrap (28 chars vs old 35) — at fontsize=42 on a
-        # 1080px canvas the old width spilled past the safe zone and clipped at
-        # the bezel. 28 chars stays comfortably inside.
+        # S125+ — DYNAMIC FONT SIZING based on total char count so the
+        # entire hook fits inside the frame instead of getting clipped at
+        # word 18. Tiers chosen for 1080×1080 canvas with safe margins:
+        #   ≤ 80  chars  → fontsize 56, 28 chars/line, max 4 lines
+        #   ≤ 200 chars  → fontsize 44, 36 chars/line, max 6 lines
+        #   ≤ 400 chars  → fontsize 36, 44 chars/line, max 8 lines
+        #   > 400 chars  → fontsize 28, 56 chars/line, max 10 lines
+        n_chars = len(safe_text)
+        if n_chars <= 80:
+            dyn_fontsize, max_chars_per_line, max_lines = 56, 28, 4
+        elif n_chars <= 200:
+            dyn_fontsize, max_chars_per_line, max_lines = 44, 36, 6
+        elif n_chars <= 400:
+            dyn_fontsize, max_chars_per_line, max_lines = 36, 44, 8
+        else:
+            dyn_fontsize, max_chars_per_line, max_lines = 28, 56, 10
+
         words = safe_text.split()
         lines: list[str] = []
         current = ""
         for w in words:
-            if len(current) + len(w) + 1 > 28:
+            if len(current) + len(w) + 1 > max_chars_per_line:
                 if current:
                     lines.append(current.strip())
                 current = w
@@ -560,7 +574,7 @@ def _image_to_branded_video(
                 current = f"{current} {w}" if current else w
         if current:
             lines.append(current.strip())
-        lines = lines[:4]  # max 4 lines
+        lines = lines[:max_lines]
 
         # Write to a sidecar .txt with REAL newlines.  drawtext `textfile=`
         # respects them.  The `text=` parameter does NOT.
@@ -582,7 +596,7 @@ def _image_to_branded_video(
         text_filter = (
             f"drawtext=fontfile={BRAND_FONT}"
             f":textfile={hook_textfile}"
-            f":fontsize=56:fontcolor=white"
+            f":fontsize={dyn_fontsize}:fontcolor=white"
             f":borderw=4:bordercolor=black"
             f":shadowcolor=black@0.85:shadowx=3:shadowy=3"
             f":line_spacing=14"

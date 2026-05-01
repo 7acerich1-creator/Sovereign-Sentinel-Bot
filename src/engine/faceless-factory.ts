@@ -737,6 +737,17 @@ Return ONLY valid JSON, no code fences.`;
         hook: parsed1.hook || blueprint.hook,
         segments: [...parsed1.segments, ...parsed2.segments],
         cta: parsed1.cta || "The full protocol is at sovereign-synthesis.com",
+        // S127 BUG FIX (2026-05-01): Pass 2 only emits `segments`. The previous merge
+        // dictionary dropped Pass 1's thumbnail_headline / thumbnail_subhead /
+        // thumbnail_visual on the floor — which made sanitizeThumbnailFields below
+        // see undefined for both fields and silently fall back to the same
+        // hardcoded palette pair on EVERY successful long-form merge. That's why
+        // multiple TCF videos shipped with the identical "YOU ARE NOT THE PROGRAM"
+        // thumbnail. Carrying these forward restores Pass 1's per-script copy.
+        thumbnail_headline: parsed1.thumbnail_headline,
+        thumbnail_subhead: parsed1.thumbnail_subhead,
+        thumbnail_text: parsed1.thumbnail_text,
+        thumbnail_visual: parsed1.thumbnail_visual,
       };
     }
     console.log(`📝 [FacelessFactory] Merged script: ${parsed.segments.length} total segments`);

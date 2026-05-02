@@ -90,6 +90,7 @@ import { runBlueskyHookDrops } from "./proactive/yuki-bluesky-hook-dropper";
 import { runInstagramReplyPoll } from "./proactive/yuki-instagram-replier";
 import { runFacebookReplyPoll } from "./proactive/yuki-facebook-replier";
 import { runTikTokReplyPoll } from "./proactive/yuki-tiktok-replier";
+import { runInstagramBrowserReplyPoll } from "./proactive/yuki-instagram-browser-replier";
 import { shouldAlertOnce, formatAuthAlert, type AlertPlatform, type AlertBrand } from "./proactive/yuki-auth-alert";
 import { handleInboundEmail, sendApprovedReply, getPendingReplies, getMostRecentPendingReplyId } from "./proactive/email-reply-handler";
 import { runWeeklyNewsletterCycle } from "./proactive/anita-newsletter";
@@ -3390,6 +3391,45 @@ async function main() {
     },
   });
   console.log("🎵 [YukiTTReplier] Scheduled: every 3h, 25% skip jitter, residential proxy if YTDLP_PROXY set");
+
+  // ── Yuki Instagram Browser Reply Poll (S128, 2026-05-02) ──
+  // Browser-based IG comment replier. Sister to runTikTokReplyPoll. Runs
+  // alongside the Graph-API replier (which silently no-ops because the
+  // Meta App lacks Instagram product / scopes — see master ref §15). This
+  // worker bypasses Meta entirely using the same cookie+browser pattern
+  // as TikTok. 3h cadence, 25% skip jitter, fail-closed without
+  // YTDLP_PROXY (IG flags datacenter IPs same as TT).
+  scheduler.add({
+    name: "Yuki Instagram Browser Reply Poll (3h, organic-volume)",
+    intervalMs: 3 * 60 * 60_000,
+    // Stagger 90 minutes after TT replier so the two browser sessions don't
+    // launch in the same 5-second window and double the memory hit.
+    nextRun: new Date(Date.now() + 95 * 60_000), // first run ~95 min after boot
+    enabled: true,
+    handler: async () => {
+      // 25% random skip to break perfectly-periodic firing patterns
+      if (Math.random() < 0.25) {
+        console.log("[YukiIGBrowserReplier] random skip — organic-volume jitter");
+        return;
+      }
+      try {
+        const brands: AlertBrand[] = ["sovereign_synthesis", "containment_field"];
+        for (const brand of brands) {
+          const result = await runInstagramBrowserReplyPoll(brand);
+          if (result.authFailure && shouldAlertOnce("instagram", brand) && defaultChatId && telegram) {
+            const yukiChannel = agentLoops.get("yuki")?.channel;
+            const sender = yukiChannel || telegram;
+            await sender.sendMessage(defaultChatId, formatAuthAlert("instagram", brand, result.authFailure), { parseMode: "Markdown" });
+          }
+          // Inter-brand delay 30-90s
+          await new Promise((r) => setTimeout(r, 30_000 + Math.floor(Math.random() * 60_000)));
+        }
+      } catch (err: any) {
+        console.error(`[YukiIGBrowserReplier] poll failed: ${err.message}`);
+      }
+    },
+  });
+  console.log("📷 [YukiIGBrowserReplier] Scheduled: every 3h, 25% skip jitter, residential proxy required");
 
   // ── YouTube Analytics Stats — Fix B for the 30-Video A/B/C Test ──
   // S114 (2026-04-24). Existing fetch-youtube-stats edge function populates

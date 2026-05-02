@@ -2,7 +2,7 @@
 
 > **This file holds INVARIANTS ONLY.** Things that don't change session-to-session: identity, infrastructure IDs, env var map, schemas, protocols, the canonical account map, the product ladder, architectural rules. **For session-by-session history** see `HISTORY.md` (append-only journal, search-only — do not auto-load). **Runtime state is read on-demand from the code, not cached.** Grep `src/voice/tts.ts`, `src/index.ts`, `package.json`, or check Railway env directly for current chain shape. If this file contradicts the code, the code wins — patch this file and move on. **For revenue-first sanity check** see `NORTH_STAR.md`. Read before authorizing any build task.
 
-**Last trimmed:** 2026-05-02 (S127 — added §3.5 DEPLOYMENT MATRIX so any session can reach prod without asking the Architect; updated Alfred LLM team row + doctrine note for the Anthropic last-resort fallback shipped 2026-05-01).
+**Last trimmed:** 2026-05-02 (S128b — shipped browser-based IG comment replier (`yuki-instagram-browser-replier.ts`, commit 756d2f7) that bypasses the dead Meta API path entirely; mirrors the TikTok pattern, uses S128 cookie persistence, scheduled 95 min after boot then every 3h. New env vars `INSTAGRAM_HANDLE_SS=sovereign_synthesis` + `INSTAGRAM_HANDLE_CF=the_containment_field` set on Railway. New table `instagram_browser_replies_seen`. Also: Railway Raw Editor has a quote-parsing bug that silently re-keys variables with values containing quotes — DO NOT use Raw Editor for bulk edits; use New Variable form per-variable instead. See §3.6 + §15.).
 
 ---
 
@@ -249,6 +249,35 @@ When something you committed isn't visible in production, walk this in order:
 4. **Is the live runtime serving the new artifact?** `/status` in any bot DM shows live git SHA for Railway. Pod `/health` for the pod (when implemented). For Vercel, the dashboard shows the deployed commit.
 
 **Default assumption:** if you didn't explicitly push to the right surface, your change isn't live. The four planes do not propagate to each other.
+
+---
+
+## 3.6 COOKIE PERSISTENCE (added S128, 2026-05-02)
+
+The Railway service has **NO Volume attached to `/app/data`** — confirmed by inspecting the project canvas (only the Gravity Claw service node, no Volume node). This means every redeploy wipes:
+- `/app/data/browser-cookies/<domain>_<account>.json` (TT, IG, YouTube, Threads cookies)
+- `/app/data/gravity-claw.db` (the SQLite memory)
+
+For 6 days before S128, this caused Yuki's TT/IG repliers to silently no-op every poll because cookies imported via `/api/browser/import-cookies` were getting nuked. The `cookie-status` endpoint reading 0 across the board was the leading indicator.
+
+**Fix shipped (commit `da3cf2f`):** `src/utils/cookie-persistence.ts`
+- New Supabase table `browser_cookies_persistent (domain, account, cookies jsonb, cookie_count, updated_at)` — primary key (domain, account)
+- `/api/browser/import-cookies` endpoint now mirrors to Supabase via `persistCookiesToSupabase()` AFTER the disk save
+- `restoreAllCookiesFromSupabase()` runs in `main()` right after the boot smoke test, BEFORE any worker starts polling. Reads all rows and writes them back to `/app/data/browser-cookies/`. Skip-on-disk-exists semantics preserve in-session cookie rotation if `/app/data` ever becomes a Volume.
+
+**Architect-side workflow stays the same:** export cookies via Cookie-Editor extension, POST to `/api/browser/import-cookies`. They now survive every redeploy automatically, no env vars to manage.
+
+**Long-term cleanup (future session):** SQLite is also wiped on each deploy because `/app/data` is ephemeral. If we keep using SQLite for memory (vs Supabase-only), attaching a Railway Volume to `/app/data` would fix both cookies and SQLite at once and let us delete the Supabase mirror logic. For now the Supabase mirror is correct — most state already lives in Supabase, and the bot tolerates SQLite re-init at boot.
+
+### 3.6.1 Railway Raw Editor quote bug — DO NOT USE for bulk edits
+
+**Discovered S128b, 2026-05-02.** Railway's Raw Editor (`Variables tab → Raw Editor`) has a parser quirk: when the buffer contains keys whose values are double-quoted (e.g. `LLM_FAILOVER_ORDER="gemini,groq,anthropic"`), editing the buffer and clicking Update Variables can produce a diff where 5+ existing variables are marked for **deletion** and recreated with names prefixed by a stray `"` character (e.g. `"GEMINI_API_KEY` instead of `GEMINI_API_KEY`). Confirmed near-miss: would have deleted GEMINI_API_KEY, LLM_FAILOVER_ORDER, R2_BUCKET_THUMBS, both XTTS_SPEAKER_WAV_*, and SPEAKERS_DIR if Deploy had been clicked.
+
+**Always click Details on the pending-changes banner before clicking Deploy.** If the diff shows ANY deletions you didn't intend, click Discard.
+
+**Use the New Variable button (per-variable form) for individual additions.** That form does not exhibit the bug. Acceptable for bulk additions if you do them one at a time.
+
+`Copy ENV` from the Raw Editor for read is safe — the bug is only in the write path.
 
 ---
 
@@ -654,7 +683,60 @@ Per-bot calibrated directives, decision trees, autonomy loops, reflection schema
 
 ---
 
-## 15. REFERENCE LINKS
+## 15. META APP REALITY CHECK (added S128, 2026-05-02)
+
+**Why Yuki IG and FB have been silent for ~6 days, definitively.**
+
+Spent S128 walking through every plausible misconfiguration. The actual root cause is at the deepest layer (Meta App configuration), not at any layer we'd been investigating. Documenting here so the next session doesn't repeat the wrong-fork search.
+
+### The Meta object map (ground truth as of 2026-05-02)
+
+| Object | Type | ID | Notes |
+|---|---|---|---|
+| Sovereign Synthesis FB "Page" | **Pro Mode personal profile** (NOT a classic Page) | `1064072003457963` (page-id), redirects to `profile.php?id=61573475925594` | category: "Entrepreneur"; 3 followers; FB Graph treats it as Page-shaped but it's a personal profile in Pro Mode |
+| The Containment Field FB "Page" | **Pro Mode personal profile** | `987809164425935`, redirects to `profile.php?id=61572015403001` | category: "Digital creator"; 0 followers |
+| `@sovereign_synthesis` Instagram | Business | **`17841406463677551`** | linked in Meta Accounts Center to Ace's personal FB account, NOT to the SS Pro Mode profile |
+| `@the_containment_field` Instagram | Business | **`17841435127932672`** | same story for CF |
+| Meta App | "Sovereign synthesis publisher" | (debug_token confirms) | **Has NO Instagram product configured.** Token scopes prove: only `pages_*`, `ads_*`, `business_management`, `read_insights`, `public_profile`. Zero `instagram_*`. |
+| `META_SYSTEM_USER_TOKEN` | SYSTEM_USER | name="Conversions API System User" id=`122094455907295318` | scopes: `read_insights`, `ads_management`, `ads_read`, `business_management`, `public_profile`. No IG. No Pages. |
+| `FACEBOOK_PAGE_ACCESS_TOKEN` | PAGE | bound to `1064072003457963` | scopes: `pages_show_list`, `pages_read_engagement`, `pages_manage_metadata`, `pages_read_user_content`, `pages_manage_posts`, `public_profile`. No IG. |
+
+System Users available in Business Manager: "content bot", "Conversions API System User" (×2 entries).
+
+### Why every path we tried failed
+
+1. **`getCredentials()` auto-discovery via FB Page Token returns null** — the Page Token DOES return 200 from Graph API and resolves to the right Page, but `instagram_business_account` is null because the FB Pro Mode profiles have no IG link in Business Suite (the IGs are linked at the Accounts Center level to Ace's personal FB account, not to the Pro Mode profile that Railway uses as `FACEBOOK_PAGE_ID`).
+2. **Direct IG Graph API access via System User token returns 400 / error code 100 / subcode 33** — "Object does not exist or missing permissions." The IG IDs are valid but the token can't see them.
+3. **Assigning IG accounts to System Users in Business Suite does NOT retroactively grant scopes.** Token scopes are baked at generation time; asset assignment alone is necessary but not sufficient.
+
+### What actually unblocks IG (whenever the Architect is ready, in dev console)
+
+1. `developers.facebook.com/apps` → open "Sovereign synthesis publisher"
+2. Add Product → **Instagram** → set up Instagram Business Login, link both IG accounts
+3. Business Suite → System Users → pick "content bot" (or whichever) → Add Assets → Instagram → both accounts → Full Control
+4. Same System User → **Generate New Token** → check `instagram_basic` + `instagram_manage_comments` (additive to existing scopes) → Generate
+5. Replace `META_SYSTEM_USER_TOKEN` on Railway with new value
+6. Add explicit env vars (auto-discovery still won't work, IGs aren't linked to a real Page):
+   - `INSTAGRAM_ACCESS_TOKEN` = new META_SYSTEM_USER_TOKEN value
+   - `INSTAGRAM_ACCESS_TOKEN_CF` = same value
+   - `INSTAGRAM_BUSINESS_ID` = `17841406463677551`
+   - `INSTAGRAM_BUSINESS_ID_CF` = `17841435127932672`
+
+The IG replier in `src/proactive/yuki-instagram-replier.ts` already supports the explicit-creds path as the first branch of `getCredentials()`. No code change needed once the token has IG scopes.
+
+### Alternative path (SHIPPED S128b, 2026-05-02 — `yuki-instagram-browser-replier.ts`)
+
+The browser-based replier is now live. Mirrors the TikTok pattern, uses S128 cookie persistence, scheduled to fire 95 min after boot then every 3h with 25% random skip. New table `instagram_browser_replies_seen`. Env vars on Railway:
+- `INSTAGRAM_HANDLE_SS=sovereign_synthesis`
+- `INSTAGRAM_HANDLE_CF=the_containment_field`
+
+Cookies for both brands seeded directly into `browser_cookies_persistent` (acerichie ds 6460415455 = sovereign_synthesis, tcf ds 35061378931 = the_containment_field).
+
+The Graph API replier (`yuki-instagram-replier.ts`) is left in place — it silently no-ops because of the missing IG scopes documented above. If/when Architect adds the Instagram product to the Meta App and regenerates the System User token with IG scopes, the Graph API path will start working in parallel and we can decide which to keep.
+
+---
+
+## 16. REFERENCE LINKS
 
 | Resource | URL / Path |
 |---|---|

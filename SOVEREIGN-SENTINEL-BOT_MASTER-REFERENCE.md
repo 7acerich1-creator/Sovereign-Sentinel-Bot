@@ -1,6 +1,6 @@
 # Sovereign Sentinel Bot — Master Reference (LEAN)
 
-> **This file holds INVARIANTS ONLY.** Things that don't change session-to-session: identity, infrastructure IDs, env var map, schemas, protocols, the canonical account map, the product ladder, architectural rules. \*\***For session-by-session history** (Sessions 1–47, every fix, every DVP tag, every resolved blocker) see `HISTORY.md`. That file is the append-only journal. This file is the trimmed reference. \*\***For live runtime truth** (TTS routing, LLM chain, git SHA, env var presence at boot) see `LIVE_STATE.md`. Auto-generated from `src/voice/tts.ts` + `src/index.ts`. If `LIVE_STATE.md` contradicts anything in this file, `LIVE_STATE.md` **wins** — patch this file and move on. \*\***For revenue-first sanity check** (the 5 input metrics, current highest-leverage action) see `NORTH_STAR.md`. Read before authorizing any build task.
+> **This file holds INVARIANTS ONLY.** Things that don't change session-to-session: identity, infrastructure IDs, env var map, schemas, protocols, the canonical account map, the product ladder, architectural rules. \*\***For session-by-session history** (Sessions 1–47, every fix, every DVP tag, every resolved blocker) see `HISTORY.md`. That file is the append-only journal. This file is the trimmed reference. \*\***Runtime state is read on-demand from the code, not cached.** (Old `LIVE_STATE.md` was retired 2026-04-24 — stale cached state was actively misleading diagnoses. Don't recreate it.) Grep `src/voice/tts.ts`, `src/index.ts`, `package.json`, or check Railway env directly for current chain shape. If this file contradicts the code, the code wins — patch this file and move on. \*\***For revenue-first sanity check** (the 5 input metrics, current highest-leverage action) see `NORTH_STAR.md`. Read before authorizing any build task.
 
 **Last trimmed:** 2026-04-11 (Lean rewrite — everything archived to [HISTORY.md](http://HISTORY.md))
 
@@ -472,9 +472,9 @@ One row per brand, both seeded at `total_ships=0`. Brands advance independently 
 ## ⚡ Session Start Protocol (from `CLAUDE.md`)
 
 1. Read `NORTH_STAR.md` — revenue gate, 5 input metrics, current highest-leverage action.
-2. Read `LIVE_STATE.md` — regenerate via `npm run verify-state` if missing or &gt;24h old.
-3. Read this file — invariants, schemas, architectural rules.
-4. Read memory index `MEMORY.md` — feedback, prior session learnings.
+2. Read this file — invariants, schemas, architectural rules.
+3. Read memory index `MEMORY.md` — feedback, prior session learnings.
+4. For runtime state (LLM chain, TTS routing, git SHA, env presence), grep the code directly — `src/voice/tts.ts`, `src/index.ts` `AGENT_LLM_TEAMS`, `package.json`, or Railway dashboard. **Do not cache runtime state to a file.** (Old `LIVE_STATE.md` retired 2026-04-24 — stale cache was misleading diagnoses.)
 5. Only read `HISTORY.md` when you need a specific past session's context (searchable by session number or DVP tag).
 
 **Never push to** `main` **while the pipeline is running.** Railway auto-deploys and kills the container. See `feedback_no_push_during_pipeline.md` in memory.
@@ -1152,7 +1152,7 @@ Each agent has its own failover chain so a quota hit on one provider doesn't sta
 - **Runtime:** Node 20
 - **Deploy:** Railway via `Dockerfile.bot` (multi-stage)
 - **Memory:** three-tier — SQLite (episodic) + Pinecone (semantic) + Supabase (structured)
-- **LLM providers:** See §5 "Per-agent LLM teams" table. Summary: Anthropic locked to Veritas / Anita / Sapphire (S121d). Gemini → Groq for everyone else and both pipelines. OpenAI for Whisper. `GEMINI_IMAGEN_KEY` isolated for Imagen 4 image gen only. Gemini is NOT nuked for text-gen (was re-admitted post-S29c after the prompt-overwrite root cause was fixed).
+- **LLM providers:** See §5 "Per-agent LLM teams" table. Summary: Anthropic locked to Veritas / Anita / Sapphire (S121d). Gemini → Groq for everyone else and both pipelines. OpenAI for Whisper. **Image generation:** RunPod (FLUX) for everything — pipeline images via faceless-factory, content-engine queue via fluxBatchImageGen. Imagen path was purged in S127 (2026-05-01) along with the standalone `ImageGeneratorTool`. Gemini is NOT nuked for text-gen (was re-admitted post-S29c after the prompt-overwrite root cause was fixed).
 
 ### Key `src/` Paths
 
@@ -1172,7 +1172,7 @@ src/
 │   ├── backlog-drainer.ts            — R2 clip backlog → Buffer + FB direct, runs at boot (S90)
 │   └── migration.sql                 — content_engine_queue DDL
 ├── voice/
-│   └── tts.ts                        — TTS routing (edge→elevenlabs, FORCE_ELEVENLABS=true to flip)
+│   └── tts.ts                        — XTTS-only TTS via RunPod (S106: ElevenLabs/Edge/OpenAI TTS purged)
 ├── prompts/
 │   ├── personalities.json            — Layer 1 agent identity
 │   ├── shared-context.ts             — Layer 2 shared mission + crew roster
@@ -1180,12 +1180,12 @@ src/
 └── tools/
     ├── social-scheduler.ts           — Buffer GraphQL posting (9 channels)
     ├── video-publisher.ts            — YouTube long-form + shorts publish + thumbnail set (S47 D3)
-    ├── browser.ts                    — Puppeteer lazy-load (chromium deferred, see LIVE_STATE)
+    ├── browser.ts                    — Puppeteer lazy-load (chromium deferred until first browser tool call)
     └── ... (stripe_metrics, buffer_analytics, etc.)
 
 scripts/
-├── verify-state.ts                   — Generates LIVE_STATE.md from runtime code
 └── seed-youtube-protocols.ts         — Seeds 6 rows into protocols table
+   (verify-state.ts retired 2026-04-24 — LIVE_STATE generator no longer used)
 ```
 
 ### Pollers
@@ -1255,12 +1255,10 @@ scripts/
 | Instagram | Containment Field | `the_containment_field` | empoweredservices2013 | Yes |
 | **TikTok** | Sovereign Synthesis | `sovereign_synthesis` | **7ace.rich1** (CROSSED) | Yes |
 | **TikTok** | Containment Field | `the_containment_field` | **empoweredservices2013** (CROSSED) | Yes |
-| X (Twitter) | Sovereign Synthesis | `AceRichie77` | 7ace.rich1 | Yes |
-| X (Twitter) | Containment Field | `ContainmentFld` | empoweredservices2013 | Yes |
 | Threads | Sovereign Synthesis | `ace_richie_77` | via IG login | Yes |
 | Reddit | Sovereign Synthesis | `sovereign_synthesis` | 7ace.rich1 | No (manual) |
 
-**Channel math (verified):** Sovereign Synthesis = 5 channels, Containment Field = 4 channels, **total = 9 Buffer channels**. LinkedIn/Pinterest/Reddit NOT in Buffer.
+**Channel math (verified):** Sovereign Synthesis = 4 channels (YT, IG, TikTok, Threads), Containment Field = 3 channels (YT, IG, TikTok), **total = 7 Buffer channels**. LinkedIn/Pinterest/Reddit NOT in Buffer.
 
 **CRITICAL — TikTok accounts are CROSSED** vs other platforms. Every other platform: `empoweredservices2013` = Sovereign Synthesis, `7ace.rich1` = Containment Field. TikTok ONLY: `7ace.rich1` = Sovereign Synthesis, `empoweredservices2013` = Containment Field.
 
@@ -1314,16 +1312,14 @@ Archived (do not reuse): `prod_UAWwRgKTgeF6wj`, `prod_UAX3zxKjJiCYtO`, `prod_UAX
 | `YOUTUBE_REFRESH_TOKEN` / `YOUTUBE_REFRESH_TOKEN_TCF` | Per-brand YT uploads |
 | `YOUTUBE_COOKIES_BASE64` | yt-dlp auth (YouTube blocks Railway IPs) |
 | `GROQ_API_KEY` / `GROQ_API_KEY_TCF` | Pipeline LLM (dual keys for brand separation) |
-| `GEMINI_IMAGEN_KEY` | Imagen 4 image gen ONLY — isolated from text-gen |
 | `MAKE_SCENARIO_E_WEBHOOK` / `MAKE_SCENARIO_F_WEBHOOK` | Make.com content factory triggers |
 | `WEBHOOKS_ENABLED` | Must be "true" for `/api/*` endpoints |
 | `MCP_JSON_B64` | MCP server config (base64) |
-| `ELEVENLABS_API_KEY` | ElevenLabs TTS (Adam Brooding). **Reloaded by Ace 2026-04-10.** See `project_edge_tts_primary.md`. |
 | `FACEBOOK_PAGE_ACCESS_TOKEN` / `FACEBOOK_PAGE_ID` | Sovereign Synthesis FB page (ID `1064072003457963`). Graph API v25.0 direct publish. System user token, never-expire. |
 | `FACEBOOK_CF_PAGE_ACCESS_TOKEN` / `FACEBOOK_CF_PAGE_ID` | The Containment Field FB page (ID `987809164425935`). Graph API v25.0 direct publish. System user token, never-expire. S97. |
 
 ### OPTIONAL — defaulted
-`NODE_ENV=production` · `SQLITE_PATH=./gravity-claw.db` · `TZ` · `PORT` (Railway sets) · `LLM_DEFAULT_PROVIDER=anthropic` · `LLM_FAILOVER_ORDER=groq,gemini,anthropic,openai` · `FORCE_ELEVENLABS=false` (flip to `true` to force ElevenLabs) · `MCP_ENABLED=false` (OOM prevention) · `BROWSER_ENABLED=false`
+`NODE_ENV=production` · `SQLITE_PATH=./gravity-claw.db` · `TZ` · `PORT` (Railway sets) · `LLM_DEFAULT_PROVIDER=anthropic` · `LLM_FAILOVER_ORDER=groq,gemini,anthropic,openai` · `MCP_ENABLED=false` (OOM prevention) · `BROWSER_ENABLED=false`
 
 ### Timezone
 `MORNING_BRIEFING_HOUR=15` (10 AM CDT) · `EVENING_RECAP_HOUR=1` (8 PM CDT). Code uses `getUTCHours()`. Ace is CDT (UTC-5).
@@ -1457,7 +1453,7 @@ Per-bot calibrated directives, decision trees, autonomy loops, reflection schema
 | YouTube Growth Protocol v2.0 | `SOVEREIGN-YOUTUBE-GROWTH-PROTOCOL.md` (repo root) |
 | Canonical IDs | `SovereignSynthesisProjects/gravity-claw-skills-vault/SYSTEM_IDS_CANONICAL.md` |
 | Session history | [`HISTORY.md`](./HISTORY.md) |
-| Live runtime state | [`LIVE_STATE.md`](./LIVE_STATE.md) |
+| Runtime state | Read live from `src/voice/tts.ts`, `src/index.ts`, Railway. (LIVE_STATE.md retired 2026-04-24 — do not recreate.) |
 | Revenue-first gate | [`NORTH_STAR.md`](./NORTH_STAR.md) |
 
 ---
@@ -1519,8 +1515,7 @@ At the END of every session, the session pilot MUST:
 
 1. **Append the session summary to `HISTORY.md`** (not here). Use the format: `### Session NN Summary (YYYY-MM-DD)` + status, commits, files touched, DVP tags, next-session priorities.
 2. **Update this file ONLY if an invariant changed** — new env var, new agent role, new data schema, new infrastructure ID. Do not append session narratives.
-3. **Update `LIVE_STATE.md`** if runtime routing changed (run `npm run verify-state`).
-4. **Update memory files** in `spaces/.../memory/` for feedback, project state, user facts.
+3. **Update memory files** in `spaces/.../memory/` for feedback, project state, user facts.
 5. **Declare push status:**
    - **Push executed** (Claude Code): Desktop Commander cmd → `git push origin main`
    - **Push deferred** (Cowork): tell Ace to run `git push origin main` from terminal
@@ -1532,8 +1527,8 @@ When changing the status of ANY system component, update every section that refe
 
 | If you change... | Also update... |
 |---|---|
-| An env var status (Sec 10) | Any session entry in HISTORY.md referencing that var; LIVE_STATE.md |
-| Infra IDs (Sec 3) | LIVE_STATE.md; Section 15 reference links |
+| An env var status (Sec 10) | Any session entry in HISTORY.md referencing that var |
+| Infra IDs (Sec 3) | Section 15 reference links |
 | Agent role (Sec 5 or 14) | Supabase personality blueprints; memory `project_agent_role_reality.md` |
 | Git/push protocol (Sec 4) | MC Master Ref Sec 3 + Sec 14 |
 | Posting math / channel count (Sec 8) | MC Master Ref Sec 15 + Posting Guide header |
@@ -1542,10 +1537,10 @@ When changing the status of ANY system component, update every section that refe
 
 ### Quick Context Recovery (new sessions)
 1. `NORTH_STAR.md`
-2. `LIVE_STATE.md`
-3. This file
-4. `MEMORY.md` index (`spaces/.../memory/`)
-5. `HISTORY.md` — only when you need a specific past session
+2. This file
+3. `MEMORY.md` index (`spaces/.../memory/`)
+4. `HISTORY.md` — only when you need a specific past session
+5. Runtime state — read live from `src/voice/tts.ts`, `src/index.ts`, Railway. Do not cache to a file.
 
 ---
 

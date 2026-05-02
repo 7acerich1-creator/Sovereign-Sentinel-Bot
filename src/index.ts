@@ -57,7 +57,6 @@ import { SapphireSentinel } from "./proactive/sapphire-sentinel";
 import { handleSapphirePACommand } from "./agent/sapphire-pa-commands";
 import { PineconeMemory } from "./memory/pinecone";
 import { KnowledgeWriterTool } from "./tools/knowledge-writer";
-import { ImageGeneratorTool } from "./tools/image-generator";
 import { produceFacelessBatch } from "./engine/faceless-factory";
 import { extractWhisperIntel } from "./engine/whisper-extract";
 import { executeFullPipeline, formatPipelineReport, type PipelineOptions } from "./engine/vidrush-orchestrator";
@@ -262,16 +261,12 @@ async function main() {
   const memoryProviders: MemoryProvider[] = [sqliteMemory, markdownMemory, supabaseMemory];
   console.log("# ✅ Environment validated");
 
-  // SESSION 35: Gemini key audit
+  // S127: Key audit. GEMINI_IMAGEN_KEY removed — Imagen path is dead (RunPod handles images).
   const hasGeminiApi = !!process.env.GEMINI_API_KEY;
-  const hasGeminiImagen = !!process.env.GEMINI_IMAGEN_KEY;
   const hasOpenAi = !!process.env.OPENAI_API_KEY;
-  console.log(`🔑 [KEY AUDIT] GEMINI_API_KEY: ${hasGeminiApi ? "SET" : "NOT SET"} | GEMINI_IMAGEN_KEY: ${hasGeminiImagen ? "SET" : "NOT SET"} | OPENAI_API_KEY: ${hasOpenAi ? "SET" : "NOT SET"}`);
+  console.log(`🔑 [KEY AUDIT] GEMINI_API_KEY: ${hasGeminiApi ? "SET" : "NOT SET"} | OPENAI_API_KEY: ${hasOpenAi ? "SET" : "NOT SET"}`);
   if (!hasGeminiApi && !hasOpenAi) {
     console.warn(`⚠️ [KEY AUDIT] No embedding provider — Pinecone writes DISABLED (reads still work). Add GEMINI_API_KEY or OPENAI_API_KEY to enable.`);
-  }
-  if (!hasGeminiImagen) {
-    console.warn(`⚠️ [KEY AUDIT] GEMINI_IMAGEN_KEY not set — Imagen 4 disabled, using Pollinations (free) for images.`);
   }
 
   // Knowledge Graph
@@ -363,8 +358,7 @@ async function main() {
 
   // Second pass: catch any providers with keys that were NOT in failoverOrder.
   // SESSION 93: Gemini exclusion REMOVED. All providers with keys are eligible for text-gen.
-  // GEMINI_IMAGEN_KEY is still a separate key read directly by faceless-factory/content-engine
-  // for image gen — that's independent of the text-gen Gemini provider.
+  // S127: GEMINI_IMAGEN_KEY references removed — Imagen path purged, RunPod handles images.
   for (const providerName of Object.keys(config.llm.providers)) {
     if (llmProviders.some(p => p.name === providerName)) continue; // Already initialized
     const providerConfig = (config.llm.providers as Record<string, any>)[providerName];
@@ -553,8 +547,9 @@ async function main() {
   tools.push(new CalendarListTool());
   tools.push(new CalendarCreateEventTool());
 
-  // Sovereign Image Generator (Gemini Imagen 3 + DALL-E 3 fallback)
-  tools.push(new ImageGeneratorTool());
+  // S127 (2026-05-01): ImageGeneratorTool REMOVED. All image gen runs through
+  // RunPod (FLUX). Tool was vestigial since S68 — kept for /imagine that nobody
+  // uses. Removing it strips the tool's schema bloat from every agent's prompt.
 
   // Scheduler
   const scheduler = new Scheduler();
@@ -3586,75 +3581,16 @@ async function main() {
     diag.xtts_server_url_set = !!process.env.XTTS_SERVER_URL;
 
     // ── API key status ──
-    const geminiKey = process.env.GEMINI_IMAGEN_KEY;
+    // S127: GEMINI_IMAGEN_KEY removed (Imagen path purged, RunPod handles images).
     const geminiTextKey = process.env.GEMINI_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
-    diag.gemini_imagen_key_set = !!geminiKey;
-    diag.gemini_imagen_key_length = geminiKey?.length || 0;
     diag.gemini_text_key_set = !!geminiTextKey;
-    diag.gemini_keys_same = geminiKey === geminiTextKey;
     diag.openai_key_set = !!openaiKey;
     diag.openai_key_length = openaiKey?.length || 0;
 
-    // Test Pollinations.ai (FREE primary)
-    try {
-      const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent("A simple blue sphere on white background")}?width=512&height=512&nologo=true&seed=${Date.now()}`;
-      const pollRes = await fetch(pollUrl, { redirect: "follow" });
-      diag.pollinations_status = pollRes.status;
-      if (pollRes.ok) {
-        const buf = Buffer.from(await pollRes.arrayBuffer());
-        diag.pollinations_bytes = buf.length;
-        diag.pollinations_ok = buf.length > 5000;
-      }
-    } catch (err: any) {
-      diag.pollinations_error = err.message;
-    }
-
-    // Test Gemini Imagen
-    if (geminiKey) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${geminiKey}`;
-        const res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            instances: [{ prompt: "A simple blue sphere on a white background" }],
-            parameters: { sampleCount: 1, aspectRatio: "1:1", safetyFilterLevel: "block_only_high" },
-          }),
-        });
-        diag.gemini_imagen_status = res.status;
-        if (!res.ok) {
-          diag.gemini_imagen_error = (await res.text()).slice(0, 500);
-        } else {
-          const data = (await res.json()) as any;
-          const b64 = data.predictions?.[0]?.bytesBase64Encoded || data.predictions?.[0]?.image?.bytesBase64Encoded;
-          diag.gemini_imagen_has_image = !!b64;
-          diag.gemini_imagen_bytes = b64 ? b64.length : 0;
-        }
-      } catch (err: any) {
-        diag.gemini_imagen_error = err.message;
-      }
-    }
-
-    // Test DALL-E 3
-    if (openaiKey) {
-      try {
-        const res = await fetch("https://api.openai.com/v1/images/generations", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
-          body: JSON.stringify({ model: "dall-e-3", prompt: "A simple blue sphere on a white background", size: "1024x1024", quality: "standard", n: 1, response_format: "b64_json" }),
-        });
-        diag.dalle_status = res.status;
-        if (!res.ok) {
-          diag.dalle_error = (await res.text()).slice(0, 500);
-        } else {
-          const data = (await res.json()) as any;
-          diag.dalle_has_image = !!data.data?.[0]?.b64_json;
-        }
-      } catch (err: any) {
-        diag.dalle_error = err.message;
-      }
-    }
+    // S127: Image-gen probe block removed (Pollinations/Imagen/DALL-E tests). All
+    // image generation goes through RunPod FLUX — see /api/content-engine/flux-batch
+    // and the runpod-client module for the actual live path.
 
     return JSON.stringify(diag);
   });
@@ -5194,7 +5130,11 @@ async function main() {
                   .trim();
                 sapphireRawText = rawText;
 
-                agentBotLoop.setContextOverrides({ maxRecentMessages: 50, skipSemanticSearch: false });
+                // S127: dropped 50 → 15 to cut Sapphire's per-turn input tokens.
+                // Conversation summary already compresses older history; 50 raw msgs
+                // was double-paying. 15 holds enough working continuity for a DM
+                // thread without hauling 20-30k tokens of prior turns into context.
+                agentBotLoop.setContextOverrides({ maxRecentMessages: 15, skipSemanticSearch: false });
 
                 // ── S125+ Agentic Refactor Phase 1 ──
                 // Anthropic-native web_search server tool ($0.01/call) — Claude decides

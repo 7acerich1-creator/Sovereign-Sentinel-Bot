@@ -15,10 +15,9 @@
 //   - `gemini-2.5-flash-lite` → 200, no thinking tokens, clean JSON output
 //     at ~800ms latency. Correct default.
 //
-// Key resolution order:
-//   1. GEMINI_API_KEY — explicit primary text-gen key
-//   2. GEMINI_IMAGEN_KEY — fallback (historically isolated for Imagen 4;
-//      acceptable fallback when primary missing, confirmed by Architect S115)
+// Key resolution: GEMINI_API_KEY only.
+// (S127 2026-05-01: GEMINI_IMAGEN_KEY fallback removed — Imagen path is dead,
+// all image gen runs through RunPod. The env var is being purged from Railway.)
 //
 // Uses the native Gemini REST endpoint, NOT the OpenAI compat layer.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -26,7 +25,7 @@
 const GEMINI_MODEL = process.env.GEMINI_FLASH_MODEL || "gemini-2.5-flash-lite";
 
 function getGeminiKey(): string | null {
-  return process.env.GEMINI_API_KEY || process.env.GEMINI_IMAGEN_KEY || null;
+  return process.env.GEMINI_API_KEY || null;
 }
 
 export interface GeminiFlashResult {
@@ -45,7 +44,7 @@ export async function generateShortText(
 ): Promise<GeminiFlashResult> {
   const apiKey = getGeminiKey();
   if (!apiKey) {
-    return { text: "", error: "No Gemini key set (GEMINI_API_KEY / GEMINI_IMAGEN_KEY)" };
+    return { text: "", error: "No Gemini key set (GEMINI_API_KEY)" };
   }
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;

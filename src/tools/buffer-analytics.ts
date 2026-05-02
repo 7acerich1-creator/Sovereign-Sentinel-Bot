@@ -21,7 +21,7 @@
 //   - Recent sent posts with text + dueAt (real)
 //   - Engagement metrics: explicitly marked as "not exposed by Buffer GraphQL —
 //     pull from native APIs" so Vector knows where to look (YouTube Analytics,
-//     Meta Graph API, X API, etc.)
+//     Meta Graph API, etc.)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { Tool, ToolDefinition } from "../types";
@@ -36,7 +36,7 @@ export class BufferAnalyticsTool implements Tool {
       "NOTE: Buffer's GraphQL API does NOT expose per-post engagement metrics " +
       "(likes, clicks, impressions, reach) — those are on Buffer's roadmap. " +
       "For engagement data, query native platform APIs: YouTube Analytics for YT, " +
-      "Meta Graph API for Facebook/Instagram, X API for Twitter, etc. " +
+      "Meta Graph API for Facebook/Instagram, etc. " +
       "Use this tool for: how much content was published, which channels are most active, " +
       "what was the most recent post on a given channel.",
     parameters: {
@@ -139,7 +139,6 @@ export class BufferAnalyticsTool implements Tool {
         "For native engagement metrics:\n" +
         "  • YouTube → query the youtube_analytics Supabase table (already populated)\n" +
         "  • Facebook / Instagram → Meta Graph API insights endpoint\n" +
-        "  • X (Twitter) → X API v2 tweet metrics\n" +
         "  • LinkedIn → LinkedIn Marketing API";
 
       switch (report) {

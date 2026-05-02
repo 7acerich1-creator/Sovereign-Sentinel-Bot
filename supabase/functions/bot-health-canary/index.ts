@@ -81,7 +81,9 @@ async function logPulse(
 }
 
 async function sendTelegramAlert(text: string): Promise<boolean> {
-  const token = Deno.env.get("SAPPHIRE_TOKEN");
+  const token =
+    Deno.env.get("SAPPHIRE_TOKEN") ||
+    Deno.env.get("TELEGRAM_BOT_TOKEN");
   const chatId =
     Deno.env.get("ARCHITECT_CHAT_ID") ||
     Deno.env.get("TELEGRAM_AUTHORIZED_USER_ID") ||
@@ -105,9 +107,11 @@ async function sendTelegramAlert(text: string): Promise<boolean> {
 
 // ── Pulse 1: getMe ──
 async function getMePulse(): Promise<PulseResult> {
-  const token = Deno.env.get("SAPPHIRE_TOKEN");
+  const token =
+    Deno.env.get("SAPPHIRE_TOKEN") ||
+    Deno.env.get("TELEGRAM_BOT_TOKEN");
   if (!token) {
-    return { pulse_kind: "getMe", status: "dead", details: { reason: "no_SAPPHIRE_TOKEN" } };
+    return { pulse_kind: "getMe", status: "dead", details: { reason: "no_telegram_bot_token" } };
   }
   const startedAt = Date.now();
   try {

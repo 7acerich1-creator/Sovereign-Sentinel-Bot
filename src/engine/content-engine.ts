@@ -67,7 +67,7 @@ type Brand = typeof BRANDS[number];
 // Platforms where an image is strongly preferred for engagement
 const IMAGE_REQUIRED_PLATFORMS = new Set(["instagram", "tiktok"]);
 // Platforms that accept text-only posts
-// Buffer supports ALL connected channels — YouTube (community), IG, TikTok, X, Threads, LinkedIn, FB
+// Buffer supports the connected channels — YouTube (community), IG, TikTok, Threads, LinkedIn, FB
 const TEXT_OK_PLATFORMS = new Set(["threads", "youtube", "linkedin", "facebook", "bluesky"]);
 // Threads hard limit from Meta API (500 chars max)
 const THREADS_CHAR_LIMIT = 500;
@@ -266,206 +266,18 @@ export const AESTHETIC_MODIFIERS: Record<Brand, Record<AestheticStyleLabel, stri
   },
 };
 
-/** Compose the aesthetic modifier for a given brand+style (helper). */
-export function aestheticModifier(brand: Brand, style: AestheticStyleLabel): string {
-  return AESTHETIC_MODIFIERS[brand]?.[style] ?? "";
-}
+// S127 (2026-05-01): Removed dead Imagen path —
+//   - aestheticModifier() helper (orphaned export, no callers)
+//   - DALLE_SIZE_MAP (only used by deleted generateContentImage)
+//   - uploadImageToStorage() (only used by deleted generateContentImage)
+//   - generateContentImage() (never called — image gen migrated to FLUX/RunPod
+//     in S68; this function survived as dead code preferring Imagen 4 primary,
+//     Pollinations fallback, DALL-E last resort)
+// AESTHETIC_MODIFIERS / IMAGE_NICHE_PREFIXES / IMAGE_NICHE_FALLBACK /
+// BRAND_IMAGE_STYLE / STORAGE_BUCKET are all KEPT — referenced by the live
+// FLUX path (dailyContentProduction builds image_prompt from them, FLUX pod
+// batch consumes the prompt) and by faceless-factory + batch-producer.
 
-/** DALL-E 3 aspect ratio mapping */
-const DALLE_SIZE_MAP: Record<string, string> = {
-  "16:9": "1792x1024",
-  "9:16": "1024x1792",
-  "1:1": "1024x1024",
-};
-
-/**
- * Upload a buffer to Supabase Storage and return the public URL.
- * Uses the same public-assets bucket as clip-generator.ts.
- */
-async function uploadImageToStorage(
-  imageBuffer: Buffer,
-  storagePath: string
-): Promise<string | null> {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseKey) {
-    console.error("[ContentEngine] Cannot upload image — SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing");
-    return null;
-  }
-  try {
-    const resp = await fetch(
-      `${supabaseUrl}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
-      {
-        method: "POST",
-        headers: {
-          apikey: supabaseKey,
-          Authorization: `Bearer ${supabaseKey}`,
-          "Content-Type": "image/png",
-          "x-upsert": "true",
-        },
-        body: imageBuffer,
-      }
-    );
-
-    if (!resp.ok) {
-      const errText = await resp.text();
-      console.error(`[ContentEngine] Storage upload failed ${resp.status}: ${errText.slice(0, 200)}`);
-      return null;
-    }
-
-    const publicUrl = `${supabaseUrl}/storage/v1/object/public/${STORAGE_BUCKET}/${storagePath}`;
-    console.log(`🖼️ [ContentEngine] Image uploaded → ${publicUrl}`);
-    return publicUrl;
-  } catch (err: any) {
-    console.error(`[ContentEngine] Storage upload error: ${err.message}`);
-    return null;
-  }
-}
-/**
- * Generate a branded image for a content post using Gemini Imagen 3 (primary) or DALL-E 3 (fallback).
- * Returns the Supabase Storage public URL, or null if generation fails.
- */
-async function generateContentImage(
-  postText: string,
-  niche: string,
-  brand: Brand,
-  dateStr: string,
-  slotLabel: string
-): Promise<string | null> {
-  // Build a cinematic image prompt from brand × niche visual spec + post concept
-  const nichePrefixes = IMAGE_NICHE_PREFIXES[niche];
-  const nichePrefix = nichePrefixes?.[brand] || IMAGE_NICHE_FALLBACK[brand];
-  const brandSuffix = BRAND_IMAGE_STYLE[brand];
-
-  // Extract the core CONCEPT (not raw text) to seed the image with thematic relevance
-  const conceptSeed = postText
-    .replace(/[#@\n"]/g, " ")
-    .replace(/—.*$/, "") // Remove sign-off
-    .slice(0, 100)
-    .trim();
-  const imagePrompt = `${nichePrefix}Thematic concept: ${conceptSeed}. ${brandSuffix}`;
-
-  let imageBuffer: Buffer | null = null;
-  let source = "none";
-
-  // ── STEP 1: Gemini Imagen 4 (PRIMARY — cinematic quality, brand-aligned prompts) ──
-  // Session 36: Flipped order. Imagen 4 is PRIMARY because our prompts are crafted
-  // for cinematic brand-aligned imagery. Pollinations is free but generic quality.
-  // GEMINI_IMAGEN_KEY only — no fallback to GEMINI_API_KEY (Session 35 ghost fix).
-  if (!imageBuffer) {
-    const geminiKey = process.env.GEMINI_IMAGEN_KEY;
-    if (geminiKey) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${geminiKey}`;
-        const res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            instances: [{ prompt: imagePrompt }],
-            parameters: {
-              sampleCount: 1,
-              aspectRatio: "1:1",
-              safetyFilterLevel: "block_only_high",
-            },
-          }),
-        });
-
-        if (res.ok) {
-          const data = (await res.json()) as any;
-          const b64 =
-            data.predictions?.[0]?.bytesBase64Encoded ||
-            data.predictions?.[0]?.image?.bytesBase64Encoded;
-          if (b64) {
-            imageBuffer = Buffer.from(b64, "base64");
-            source = "gemini_imagen_4";
-          }
-        } else {
-          const errText = await res.text();
-          console.warn(`[ContentEngine] Gemini Imagen ${res.status}: ${errText.slice(0, 200)}`);
-        }
-      } catch (err: any) {
-        console.warn(`[ContentEngine] Gemini Imagen error: ${err.message}`);
-      }
-    }
-  }
-
-  // ── STEP 2: Pollinations.ai (FREE fallback — no auth, unlimited) ──
-  if (!imageBuffer) {
-    try {
-      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePrompt.slice(0, 2000))}?width=1024&height=1024&nologo=true&seed=${Date.now()}`;
-      const res = await fetch(pollinationsUrl, { redirect: "follow" });
-      if (res.ok) {
-        const buf = Buffer.from(await res.arrayBuffer());
-        if (buf.length > 5000) {
-          imageBuffer = buf;
-          source = "pollinations";
-          console.log(`🎨 [ContentEngine] Image generated via Pollinations fallback (${(buf.length / 1024).toFixed(0)}KB)`);
-        } else {
-          console.warn(`[ContentEngine] Pollinations returned tiny response: ${buf.length}B`);
-        }
-      } else {
-        console.warn(`[ContentEngine] Pollinations ${res.status}`);
-      }
-    } catch (err: any) {
-      console.warn(`[ContentEngine] Pollinations error: ${err.message}`);
-    }
-  }
-
-  // ── STEP 3: DALL-E 3 (last resort) ──
-  if (!imageBuffer) {
-    const openaiKey = process.env.OPENAI_API_KEY;
-    if (openaiKey) {
-      try {
-        const res = await fetch("https://api.openai.com/v1/images/generations", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${openaiKey}`,
-          },
-          body: JSON.stringify({
-            model: "dall-e-3",
-            prompt: imagePrompt,
-            size: "1024x1024",
-            quality: "standard",
-            n: 1,
-            response_format: "b64_json",
-          }),
-        });
-
-        if (res.ok) {
-          const data = (await res.json()) as any;
-          const b64 = data.data?.[0]?.b64_json;
-          if (b64) {
-            imageBuffer = Buffer.from(b64, "base64");
-            source = "dalle_3";
-          }
-        } else {
-          const errText = await res.text();
-          console.warn(`[ContentEngine] DALL-E 3 ${res.status}: ${errText.slice(0, 200)}`);
-        }
-      } catch (err: any) {
-        console.warn(`[ContentEngine] DALL-E 3 error: ${err.message}`);
-      }
-    }
-  }
-
-  if (!imageBuffer) {
-    console.warn(`[ContentEngine] Image generation failed for ${brand}/${slotLabel} — all 3 providers returned nothing`);
-    return null;
-  }
-
-  // ── STEP 3: Upload to Supabase Storage ──
-  const filename = `${brand}_${niche}_${slotLabel}_${Date.now()}.png`;
-  const storagePath = `content-images/${dateStr}/${filename}`;
-
-  const publicUrl = await uploadImageToStorage(imageBuffer, storagePath);
-
-  if (publicUrl) {
-    console.log(`🎨 [ContentEngine] Image ready: ${source} → ${publicUrl}`);
-  }
-
-  return publicUrl;
-}
 // SESSION 85: bufferGraphQL + BUFFER_ORG_ID imported from shared ./buffer-graphql.ts
 // Single rate limiter across all Buffer consumers.
 

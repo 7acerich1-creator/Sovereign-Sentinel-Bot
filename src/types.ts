@@ -254,7 +254,7 @@ export interface GravityClawConfig {
     defaultProvider: string;
     failoverOrder: string[];
     maxIterations: number;
-    providers: Record<string, { apiKey: string; model: string; baseUrl?: string; imagenKey?: string }>;
+    providers: Record<string, { apiKey: string; model: string; baseUrl?: string }>;
   };
   memory: {
     sqlitePath: string;

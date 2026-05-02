@@ -18,8 +18,8 @@ export class ReadTeamRosterTool implements Tool {
     name: "read_team_roster",
     description:
       "Read the LIVE current team roster — every Maven Crew agent's name, role, goal, and style — pulled fresh from the source-of-truth code. " +
-      "Use this BEFORE describing the team to Ace, or whenever someone asks who's on the team / what does X do / tell me the crew. " +
-      "Your baked-in picture of the team WILL be stale (Buffer is dead, X is dead, TikTok/IG are deferred, agents have shifted roles). " +
+      "Use this BEFORE describing the team to Ace, or whenever someone asks who's on the team / what does each agent do / tell me the crew. " +
+      "Your baked-in picture of the team WILL be stale (Buffer is system-only and not any agent's lane, TikTok+Instagram are LIVE under Yuki, agent roles have shifted). " +
       "Always call this tool first when team composition or role specifics matter.",
     parameters: {
       agent: {

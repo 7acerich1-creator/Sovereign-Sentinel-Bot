@@ -80,11 +80,13 @@ async function sendTelegramAlert(
   text: string,
   opts: { parseMode?: "Markdown" | "MarkdownV2" | "HTML" } = {}
 ): Promise<{ ok: boolean; error?: string }> {
-  const token = Deno.env.get("SAPPHIRE_TOKEN");
+  const token =
+    Deno.env.get("SAPPHIRE_TOKEN") ||
+    Deno.env.get("TELEGRAM_BOT_TOKEN");
   const chatId = Deno.env.get("ARCHITECT_CHAT_ID") ||
     Deno.env.get("TELEGRAM_AUTHORIZED_USER_ID") ||
     "8593700720";
-  if (!token) return { ok: false, error: "SAPPHIRE_TOKEN not set" };
+  if (!token) return { ok: false, error: "no telegram bot token set (SAPPHIRE_TOKEN or TELEGRAM_BOT_TOKEN)" };
 
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
   const body: Record<string, unknown> = {

@@ -961,7 +961,7 @@ export const THESIS_ANGLES: Record<Brand, Record<string, ThesisAngle[]>> = {
       },
       {
         id: "the-platform-dependency-trap",
-        seed: "If your network exists only on a platform you do not control — LinkedIn, Twitter, Instagram — you do not own your network. You rent it. One algorithm change, one account suspension, one platform decline, and your entire social infrastructure evaporates. The platform dependency trap has already destroyed thousands of businesses and careers built on borrowed ground. Sovereign network architecture means having direct, platform-independent access to your most important connections: email, phone, in-person.",
+        seed: "If your network exists only on a platform you do not control — LinkedIn, Instagram, TikTok — you do not own your network. You rent it. One algorithm change, one account suspension, one platform decline, and your entire social infrastructure evaporates. The platform dependency trap has already destroyed thousands of businesses and careers built on borrowed ground. Sovereign network architecture means having direct, platform-independent access to your most important connections: email, phone, in-person.",
         keywords: ["platform dependency", "rented network", "algorithm risk", "owned contacts", "direct access"],
       },
       {

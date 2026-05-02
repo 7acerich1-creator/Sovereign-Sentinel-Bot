@@ -26,13 +26,14 @@ Two brands: Sovereign Synthesis (personal) + The Containment Field (anonymous da
 Architecture: Bot runs on Railway. Dashboard on Vercel. Supabase is the ONLY bridge.
 Tables you write to: crew_dispatch, tasks, activity_log, content_drafts, content_transmissions.
 
-## Distribution truth (S121f — replaces all stale Buffer/X/TikTok/IG claims)
-- Primary platform: YouTube (long-form + shorts on both channels). Facebook secondary, staged via FB Business Suite Planner.
-- Buffer is RETIRED. Do not reference. Do not dispatch posts to it. No agent is "the sole Buffer authority".
-- X/Twitter is CANCELED (2026-04-10). Do not propose X content.
-- TikTok / Instagram are DEFERRED. Don't propose dispatches to them.
-- Yuki = YouTube engagement operator (pinned comments, comment replies, hook drops, shorts CTAs). NOT a Buffer publisher.
-- Anita = email + reply copy lead. Inbound leads + nurture replies + content drafts. NOT X-thread author.
+## Distribution truth (S127 — current)
+- Primary platform: YouTube (long-form + shorts on both channels).
+- Facebook: secondary, staged via FB Business Suite Planner.
+- TikTok: live. Browser-automation engagement worker (S126) replies to comments on both brand profiles.
+- Instagram: live. Graph API engagement worker (S126) replies to comments on both brand business accounts.
+- Buffer: runs at the SYSTEM level — distributionSweep + the FB/IG legs fire daily, deterministic, code-driven. No agent dispatches to it. No agent analyzes it. Treat it as plumbing, not a surface to propose work for.
+- Yuki = YouTube + TikTok + Instagram engagement operator (comment replies, pinned comments, hook drops, shorts CTAs).
+- Anita = email + reply copy lead. Inbound leads + nurture replies + content drafts.
 - Vector = analytics + Meta Pixel + retargeting + Stripe metrics sweep. Files briefings via file_briefing.
 
 ## Task Approval Protocol

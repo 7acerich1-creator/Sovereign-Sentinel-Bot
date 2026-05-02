@@ -47,13 +47,11 @@ export const config: GravityClawConfig = {
         // 6/6 evals and costs 75% less. Override via GEMINI_MODEL env var.
         model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
         baseUrl: process.env.GEMINI_BASE_URL,
-        // SESSION 35: GEMINI_IMAGEN_KEY must be set explicitly on Railway.
-        // The old fallback to GEMINI_API_KEY was the "zero logs" ghost —
-        // all Imagen/embedding calls silently used the old API project key
-        // instead of the dedicated "vid rush gen-lang-client" key.
-        // If GEMINI_IMAGEN_KEY is not set, imagenKey will be empty and
-        // image gen will use Pollinations (free) instead.
-        imagenKey: process.env.GEMINI_IMAGEN_KEY || "",
+        // S127 (2026-05-01): imagenKey REMOVED. All image generation runs through
+        // RunPod (FLUX). Imagen path was vestigial since S68 (faceless-factory
+        // migration to RunPod) — the agent /imagine tool, the ContentEngine
+        // generateContentImage helper, and the diagnostics imagen probe were all
+        // dead code. GEMINI_IMAGEN_KEY env var no longer read anywhere.
       },
       anthropic: {
         apiKey: process.env.ANTHROPIC_API_KEY || "",

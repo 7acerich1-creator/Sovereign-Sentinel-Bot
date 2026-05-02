@@ -1,6 +1,6 @@
 # NORTH_STAR.md — The Only File That Matters
 
-> **⚡ Read this BEFORE `LIVE_STATE.md`, BEFORE the master reference, BEFORE anything.**
+> **⚡ Read this BEFORE the master reference, BEFORE anything.**
 > Every session reads this first. If nothing here changed in the last session, the last session didn't move the mission.
 
 ---

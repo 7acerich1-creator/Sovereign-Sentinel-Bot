@@ -27,7 +27,7 @@ async function getSupabase() {
 
 const CHANNELS = [
   "youtube", "youtube_shorts", "instagram", "instagram_reels",
-  "tiktok", "bluesky", "facebook", "x_twitter",
+  "tiktok", "bluesky", "facebook",
   "email", "newsletter", "landing_page", "stripe_checkout",
   "podcast", "blog", "telegram", "other",
 ] as const;

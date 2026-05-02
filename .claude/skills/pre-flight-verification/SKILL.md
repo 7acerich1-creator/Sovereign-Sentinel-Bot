@@ -72,7 +72,7 @@ This is the "THEORY to PRACTICAL FLOWS" pattern from the master reference. It ha
 
 **The Check:**
 1. `/test_tts` — verifies the TTS chain fires (which provider, success/failure).
-2. `/api/content-engine/diag` — verifies image gen chain AND LLM chain AND TTS chain with actual runtime data.
+2. `/api/content-engine/diag` — verifies LLM chain AND TTS chain with actual runtime data. (Image gen chain probe was removed S127 — image gen runs through RunPod FLUX, verified via `/flux-batch` instead.)
 3. `/dryrun <url>` — verifies the full pipeline logic without burning real resources.
 4. Only after all three return clean do you declare the system operational.
 
@@ -90,18 +90,18 @@ When a pipeline run fails, before attempting any fix:
 7. THE GUARD: [what diagnostic/check prevents this class of failure from recurring?]
 ```
 
-## REQUIRED DIAG ENDPOINT FIELDS
+## REQUIRED DIAG ENDPOINT FIELDS (post-S127)
 
 The `/api/content-engine/diag` endpoint MUST report:
-- `llm_chain`: Array of provider names in actual failover order (e.g. ["groq", "gemini", "anthropic", "openai"])
+- `llm_chain`: Array of provider names in actual failover order
 - `llm_chain_count`: Number of active providers
-- `pipeline_llm_chain`: The pipeline-specific LLM chain (should always have groq first)
-- `pollinations_ok`: Boolean
-- `elevenlabs_status`: Status code or "not_configured"
-- `edge_tts_available`: Boolean (package importable)
-- `tts_chain`: Array of TTS providers in fallback order
+- `pipeline_llm_chain`: The pipeline-specific LLM chain
+- `tts_chain`: Always ["xtts"] (S106: ElevenLabs/Edge/OpenAI TTS purged)
+- `xtts_server_url_set`: Boolean
+- `gemini_text_key_set`: Boolean
+- `openai_key_set`: Boolean
 
-If `pipeline_llm_chain` doesn't include "groq" as the first entry, the system is NOT ready.
+Image generation is NOT probed by this endpoint anymore (S127). Image gen runs through RunPod FLUX exclusively; verify via `/flux-batch` and pod logs.
 
 ## THE GOLDEN RULE
 

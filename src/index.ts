@@ -37,6 +37,7 @@ import { ShellTool } from "./tools/shell";
 import { FileReadTool, FileWriteTool, FileListTool, FileDeleteTool, FileSearchTool } from "./tools/files";
 import { WebSearchTool, WebFetchTool } from "./tools/search";
 import { BrowserTool, saveCookies, loadCookies, COOKIE_DIR } from "./tools/browser";
+import { persistCookiesToSupabase, restoreAllCookiesFromSupabase } from "./utils/cookie-persistence";
 import { Scheduler, SchedulerTool } from "./tools/scheduler";
 import { WebhookServer } from "./tools/webhooks";
 import { MCPBridge } from "./tools/mcp-bridge";
@@ -246,6 +247,22 @@ async function main() {
     // The smoke test should never throw, but never let it kill boot.
     console.error(`⚠️  [BootSmokeTest] crashed (non-fatal): ${smokeErr?.message}`);
     smokeReport = null;
+  }
+
+  // ── S128 (2026-05-02): Restore browser cookies from Supabase ──
+  // Railway service has no Volume on /app/data, so any cookies imported via
+  // /api/browser/import-cookies in a prior boot have been wiped. The
+  // browser_cookies_persistent table mirrors them on import — read it back
+  // here BEFORE Yuki's TT/IG repliers start polling at 90s/5min.
+  // Non-fatal: if Supabase is unreachable, the workers will fail-closed on
+  // cookie load (existing behavior) and log it. No silent breakage either way.
+  try {
+    const restoreSummary = await restoreAllCookiesFromSupabase();
+    if (restoreSummary.restored > 0) {
+      console.log(`🍪 Cookie restore: ${restoreSummary.restored} files restored, ${restoreSummary.skipped} skipped, ${restoreSummary.errors} errors`);
+    }
+  } catch (cookieErr: any) {
+    console.error(`⚠️  [cookie-restore] crashed (non-fatal): ${cookieErr?.message}`);
   }
 
   // ── 1. Initialize Memory Providers ──
@@ -4104,6 +4121,16 @@ async function main() {
       const savedCount = verification ? verification.length : 0;
 
       console.log(`🍪 [Cookie Import] Saved ${savedCount} cookies for ${normalizedDomain}/${account}`);
+
+      // ── S128 (2026-05-02): mirror to Supabase so cookies survive Railway redeploys.
+      // Disk-only persistence has been silently wiping every redeploy because
+      // /app/data is not a Railway Volume on this service. Best-effort: failure
+      // here doesn't fail the import — the immediate worker poll will still work
+      // off the just-written disk file. The mirror is what makes the NEXT boot work.
+      const mirrored = await persistCookiesToSupabase(normalizedDomain, account, normalized);
+      if (!mirrored) {
+        console.warn(`[Cookie Import] WARN: Supabase mirror failed for ${normalizedDomain}/${account} — will be lost on next redeploy`);
+      }
 
       // Notify Architect via Telegram
       const ARCHITECT_CHAT_ID = config.telegram.authorizedUserIds[0];

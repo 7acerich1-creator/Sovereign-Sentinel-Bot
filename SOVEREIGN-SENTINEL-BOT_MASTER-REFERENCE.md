@@ -151,8 +151,9 @@ Three live systems. **Never cross-contaminate.**
 | 3 | **Supabase** | (cloud) | — | The ONLY meeting point between systems 1 and 2. Bot writes, dashboard reads. |
 
 **Domain separation rules:**
-- Make.com Scenarios A/B/C (funnel automation) are OFF-LIMITS to bot work. Only Scenario D (Sovereign Content Factory, webhook `2072042`) is in-bounds for content pipeline.
 - `SovereignSynthesisProjects` folder is the legacy parts warehouse. **Reference, don't deploy** — see Section 13.
+
+**Make.com:** Not part of this system. Was fully purged S113 (2026-04-24) — every scenario (A, B, C, D, E, F) replaced by native bot pipelines. Subscription pending Architect cancellation. **Do not propose Make work, do not reintroduce, do not write code that calls Make webhooks.** If you find a Make reference anywhere in this codebase, it is stale — surface it and it gets ripped.
 
 **Mission Control live URL:** https://sovereign-mission-control.vercel.app/
 
@@ -391,7 +392,7 @@ src/
 │   └── protocol-injection.ts         — YouTube Growth Protocol hard-inject (S43 T2)
 ├── engine/
 │   ├── content-engine.ts             — Deterministic Content Engine (text+image distribution)
-│   ├── faceless-factory.ts           — Faceless video pipeline (script→Imagen→TTS→ffmpeg Ken Burns)
+│   ├── faceless-factory.ts           — Faceless video pipeline (script → RunPod FLUX images → XTTS audio → ffmpeg Ken Burns compose)
 │   ├── vidrush-orchestrator.ts       — VidRush: 1 URL → long-form → chop → distribute → Buffer week
 │   ├── facebook-publisher.ts         — Direct FB Graph API v25.0 publisher, dual-page (ace + CF) (S97)
 │   ├── backlog-drainer.ts            — R2 clip backlog → Buffer + FB direct, runs at boot (S90)
@@ -537,7 +538,6 @@ Archived (do not reuse): `prod_UAWwRgKTgeF6wj`, `prod_UAX3zxKjJiCYtO`, `prod_UAX
 | `YOUTUBE_REFRESH_TOKEN` / `YOUTUBE_REFRESH_TOKEN_TCF` | Per-brand YT uploads |
 | `YOUTUBE_COOKIES_BASE64` | yt-dlp auth (YouTube blocks Railway IPs) |
 | `GROQ_API_KEY` / `GROQ_API_KEY_TCF` | Pipeline LLM (dual keys for brand separation) |
-| `MAKE_SCENARIO_E_WEBHOOK` / `MAKE_SCENARIO_F_WEBHOOK` | Make.com content factory triggers |
 | `WEBHOOKS_ENABLED` | Must be "true" for `/api/*` endpoints |
 | `MCP_JSON_B64` | MCP server config (base64) |
 | `FACEBOOK_PAGE_ACCESS_TOKEN` / `FACEBOOK_PAGE_ID` | Sovereign Synthesis FB page (ID `1064072003457963`). Graph API v25.0 direct publish. System user token, never-expire. |
@@ -550,7 +550,9 @@ Archived (do not reuse): `prod_UAWwRgKTgeF6wj`, `prod_UAX3zxKjJiCYtO`, `prod_UAX
 `MORNING_BRIEFING_HOUR=15` (10 AM CDT) · `EVENING_RECAP_HOUR=1` (8 PM CDT). Code uses `getUTCHours()`. Ace is CDT (UTC-5).
 
 ### KILLED — do not set
-`INSTAGRAM_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ID` (Meta API abandoned) · `TIKTOK_ACCESS_TOKEN` (deferred until app approval) · `BUFFER_ACCESS_TOKEN` (v1 REST dead, use `BUFFER_API_KEY`)
+`BUFFER_ACCESS_TOKEN` (v1 REST dead, use `BUFFER_API_KEY`) · `TIKTOK_ACCESS_TOKEN` (TikTok API path abandoned — current path is cookie-based browser automation via `cookie-ext` tool, see Yuki S126 worker) · `MAKE_*` (all Make.com webhook env vars retired S113) · `GEMINI_IMAGEN_KEY` (Imagen path purged S127, RunPod FLUX is the only image path) · `ELEVENLABS_*` / `FORCE_ELEVENLABS` (TTS purged S106, XTTS via RunPod is the only path) · `MAKE_STRIPE_ROUTER_URL` (S113 receipt-email path rewired off Make).
+
+**Live Instagram tokens (DO set):** `INSTAGRAM_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ID` (SS) and `INSTAGRAM_ACCESS_TOKEN_CF` + `INSTAGRAM_BUSINESS_ID_CF` (TCF) — Graph API powers Yuki's S126 IG comment-reply worker. Old "Meta API abandoned" note from earlier sessions was wrong; that was a different deprecation context.
 
 > **Note (S117):** `GEMINI_API_KEY` was listed as KILLED here for sessions citing the S35 billing crisis. That note is stale and was wrong. The S35 problem was a runaway Anita/dispatch loop, not the key itself. `GEMINI_API_KEY` has been required ever since — Sapphire PDF/news/research, the insight-extractor, gemini-flash text-gen, and Pinecone embeddings all depend on it. Confirmed live S117 via `/debug/memory` (HTTP 200, embedding endpoint working, 4339 Pinecone vectors).
 
@@ -599,9 +601,9 @@ Supabase hosts a second set of webhook handlers at `https://wzthxohtgojenukmdubz
 
 | Slug | Version | Role |
 |---|---|---|
-| `stripe-webhook` | v8 | Primary Stripe receiver. Handles `checkout.session.completed` only. Provisions in 6 steps (see below). |
-| `send-purchase-email` | v1 | Resend-backed receipt email + `initiates` table patch. Accepts raw Stripe payload OR flat `{customer_email, amount_total}` from Make.com relay. |
-| `send-nurture-email` | v3 | Anita's nurture template delivery. |
+| `stripe-webhook` | v8 | Primary Stripe receiver. Handles `checkout.session.completed` only. Provisions tier access + fans out a revenue signal. |
+| `send-purchase-email` | v1 | Resend-backed receipt email + `initiates` table patch. Called directly post-purge (used to be Make-relayed before S113). |
+| `send-nurture-email` | v3 | Anita's nurture template delivery. Called by native bot polling job (was Scenario C before S113). |
 | `fireflies-webhook` | v4 | Meeting transcript ingestion. |
 
 **`stripe-webhook` step order (critical for failure mode reasoning):**
@@ -610,16 +612,15 @@ Supabase hosts a second set of webhook handlers at `https://wzthxohtgojenukmdubz
 2. Find-or-create user via `supabase.auth.admin`
 3. Grant `member_access` row with `tier_slug`, `granted_by='stripe-webhook'`
 4. Insert `audit_trail` row with `action='stripe_purchase'`
-5. Fire-and-forget fetch → `MAKE_STRIPE_ROUTER_URL` (Make.com fan-out)
-6. Fire-and-forget fetch → `BOT_WEBHOOK_URL` (Telegram bot fan-out)
+5. Receipt email path → `send-purchase-email` Edge Function (post-purge, direct call — no Make relay)
+6. Fire-and-forget fetch → `BOT_WEBHOOK_URL` (Telegram bot fan-out for revenue signal)
 
-**Fan-out is `.catch((e) => console.warn(...))`.** If steps 5 or 6 hit a dead URL, the buyer is still provisioned (steps 1–4) and the webhook returns 200. But the Make.com scenario at `MAKE_STRIPE_ROUTER_URL` is the relay that normally invokes `send-purchase-email` with a flat payload — so a dead Make.com URL means **no receipt email** even though tier access is granted. The two env vars are SEPARATE: `MAKE_STRIPE_ROUTER_URL` is NOT `BOT_WEBHOOK_URL`. Any doc that says "forwards to Make.com + Telegram via BOT_WEBHOOK_URL" is wrong — that was an earlier conflation bug.
+**Verify before running a paid test:** The Make-purge work in S113 rewired the receipt-email path off Make.com's `MAKE_STRIPE_ROUTER_URL`. Confirm by reading `supabase/functions/stripe-webhook/index.ts` source — the live code is the source of truth for step 5's exact call shape.
 
 **Relevant Edge Function env vars (live in Supabase, not Railway):**
 
 | Var | Powers |
 |---|---|
-| `MAKE_STRIPE_ROUTER_URL` | Make.com fan-out from `stripe-webhook` step 5. Likely target: receipt email relay to `send-purchase-email`, HubSpot/Notion syncs, Slack ping. If this is one of the four dead hooks deleted during funnel cleanup, receipt email is silently broken. |
 | `BOT_WEBHOOK_URL` | Telegram bot fan-out from `stripe-webhook` step 6. Should point to the Railway bot's `/api/stripe-webhook` or equivalent `revenue_signal` receiver. |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Used by stripe-webhook for revenue_log + member_access writes. |
 | `RESEND_API_KEY` | **Currently hardcoded in `send-purchase-email` source** — should be moved to env var. Security issue tracked in `SECURITY-ISSUES.md`. |
@@ -774,9 +775,8 @@ When changing the status of ANY system component, update every section that refe
 - **Never push during pipeline runs** — Railway auto-deploy kills the container mid-run.
 - **Dispatch mode strips memory** — agents in `crew_dispatch` do NOT load episodic memory/summaries (Session 35). Don't assume dispatch-mode agents can recall recent chats.
 - **LIGHT_TASKS stripping** — `stasis_self_check` agents get zero tools and `iterCap=1` (Session 44). Don't add tool-requiring tasks to `LIGHT_TASKS`.
-- **Pinecone embeddings disabled** — no embedding-capable key. Reads work, new writes fail gracefully with empty vectors.
+- **Pinecone embeddings ARE live** — `GEMINI_API_KEY` powers Gemini embedding-001 (1024-dim). 4,339+ vectors across 12 namespaces verified live. Earlier "embeddings disabled" claims that floated around old session notes are wrong; ignore them. (See §3 Pinecone block for full namespace list.)
 - **Buffer YouTube drops the `tags` field** on publish — use the `Related topics:` smuggling line in description body instead (Session 47 D4).
-- **Imagen 4 does NOT support negative prompts.** Never use "NO blue" phrasing; use positive constraints only ("EXCLUSIVELY warm amber").
 - **TikTok accounts are CROSSED** relative to other platforms (see Section 8).
 - **Faceless IS the thesis, not a defect.** Never propose Ace films/voices himself. Max compromise: static photo on thumbnail. See `feedback_never_ace_on_camera.md`.
 - **Zero MRR against $1.2M target** — every build must answer "does this move one of NORTH_STAR's 5 input metrics in <7 days?" Revenue-first pushback is authorized.

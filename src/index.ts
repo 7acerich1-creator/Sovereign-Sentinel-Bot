@@ -237,7 +237,7 @@ async function main() {
         anita:    ["anthropic", "gemini", "groq"],
         yuki:     ["gemini", "groq"],
         vector:   ["gemini", "groq"],
-        alfred:   ["gemini", "groq"],
+        alfred:   ["gemini", "groq", "anthropic"],
       },
       // Tool names get checked later in registration when the array is built;
       // pass [] here so the uniqueness check is skipped at this stage.
@@ -432,17 +432,22 @@ async function main() {
     return new FailoverLLM(chain, llmTimeoutMs, primaryRetries);
   }
 
-  // S121d: Anthropic locked to Sapphire ONLY.
-  // Architect's $5 Anthropic balance is reserved for Sapphire's introspective threads.
-  // Every other agent + both pipelines run Gemini -> Groq with NO Anthropic fallback —
-  // a single Gemini+Groq outage on Yuki/Veritas/Alfred/Vector/Anita or the pipelines
-  // would otherwise drain her budget across the whole crew in minutes.
+  // S121d: Anthropic was originally locked to Sapphire ONLY.
+  // Architect's Anthropic balance was reserved for Sapphire's introspective threads.
+  // Pipelines + deterministic crew ran Gemini -> Groq with NO Anthropic fallback —
+  // a single Gemini+Groq outage on the high-volume agents/pipelines could drain
+  // the budget across the whole crew in minutes.
   // S125+ Phase 7 (2026-04-30): Anita elevated to Marketing Lead, Veritas to Chief
   // of Staff. Both promoted to Anthropic primary because their roles require
-  // strategic reasoning across domains. Yuki/Vector/Alfred stay on Gemini Flash —
-  // their work is more deterministic.
+  // strategic reasoning across domains.
+  // S127 (2026-05-01): Alfred kept on Gemini -> Groq, but Anthropic added as
+  // last-resort fallback after the 2026-05-01 Gemini-403 + Groq-413 double-outage
+  // killed the daily seed silently. Alfred fires once daily (~$0.07–0.16/run on
+  // Sonnet) — Anthropic exposure here is rounding-error and prevents the silent
+  // single-day-loss pattern. Yuki/Vector stay Gemini -> Groq (deterministic +
+  // higher fire-rate; Anthropic blast radius is real for them).
   const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
-    alfred: buildTeamLLM(["gemini", "groq"], 1, false),    // Gemini -> Groq. NO Anthropic.
+    alfred: buildTeamLLM(["gemini", "groq", "anthropic"], 1, false),    // S127: Gemini -> Groq -> Anthropic last-resort.
     anita: buildTeamLLM(["anthropic", "gemini", "groq"], 1),    // S125+ Phase 7: MARKETING LEAD — Anthropic primary.
     sapphire: buildTeamLLM(["anthropic", "gemini", "groq"], 1),  // Anthropic Primary — S121d ddxfish intelligence level restored.
     veritas: buildTeamLLM(["anthropic", "gemini", "groq"], 1),  // S125+ Phase 7: CHIEF OF STAFF — Anthropic primary.

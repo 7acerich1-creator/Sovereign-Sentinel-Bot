@@ -294,6 +294,67 @@ export async function completeDispatch(
     console.error(`[CrewDispatch] Complete error: ${err.message}`);
   }
 
+  // ── S127 (2026-05-01): Telegram failure-notify ──
+  // Closes the silent-death gap that caused 2026-05-01 Alfred outage to sit
+  // for 28 minutes with the Architect staring at a stale "ALFRED OVERRIDE
+  // ACTIVATED" message. Whatever crew agent dies, the Architect gets pinged
+  // immediately with the agent name, task type, dispatch ID, and a result
+  // preview. Best-effort, non-blocking — never delays the PATCH above.
+  if (status === "failed") {
+    (async () => {
+      try {
+        // Resolve agent + task_type if completeDispatch didn't already fetch them
+        // (it only fetches on success path right now).
+        let failAgent = agent;
+        let failTaskType = taskType;
+        if (!failAgent || !failTaskType) {
+          try {
+            const lookup = await fetch(
+              `${SUPABASE_URL}/rest/v1/crew_dispatch?id=eq.${taskId}&select=to_agent,task_type`,
+              { headers: { apikey: SUPABASE_KEY!, Authorization: `Bearer ${SUPABASE_KEY!}` } }
+            );
+            if (lookup.ok) {
+              const rows = (await lookup.json()) as any[];
+              if (rows?.[0]) {
+                failAgent = String(rows[0].to_agent || "unknown");
+                failTaskType = String(rows[0].task_type || "unknown");
+              }
+            }
+          } catch { /* fall through with empty fields */ }
+        }
+
+        const alertToken = process.env.SAPPHIRE_TOKEN || process.env.VERITAS_TOKEN;
+        const alertChat =
+          process.env.ARCHITECT_CHAT_ID ||
+          process.env.TELEGRAM_AUTHORIZED_USER_ID ||
+          process.env.AUTHORIZED_USER_ID ||
+          "8593700720";
+
+        if (!alertToken) return;
+
+        const preview = (result || "(no result body)").slice(0, 600);
+        const text =
+          `🛑 *Crew dispatch failed*\n` +
+          `*Agent:* ${failAgent || "unknown"}\n` +
+          `*Task:* ${failTaskType || "unknown"}\n` +
+          `*Dispatch ID:* \`${taskId}\`\n\n` +
+          `\`\`\`\n${preview}\n\`\`\``;
+
+        await fetch(`https://api.telegram.org/bot${alertToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: alertChat,
+            text,
+            parse_mode: "Markdown",
+          }),
+        });
+      } catch (notifyErr: any) {
+        console.warn(`[CrewDispatch] Failure-notify error: ${notifyErr?.message}`);
+      }
+    })();
+  }
+
   // ── Fire learning loop (don't await — never block dispatch result) ──
   if (status === "completed" && agent && result && result.length >= 50) {
     import("./insight-extractor")

@@ -1,0 +1,177 @@
+[
+  {
+    "id": "biz-purpose-001",
+    "category": "identity",
+    "title": "Sovereign Synthesis purpose statement (canonical)",
+    "content": "Ace Richie's purpose: 'I was never rewarded for being good, because I never manipulated. I was noticed and the people who noticed chose to take advantage of me. It took me most of my life to stop thinking this was a personal problem and start seeing it as the architecture: a society that rewards masks and punishes the real. I am not building an audience. I am assembling a group that has never existed in history — the first organized formation of people willing to lose what they are to become what they actually are. There have always been the one-offs. There has never been the group. I don't know what happens when there is. I am going to find out.' Locked 2026-04-14, S56.",
+    "tags": ["purpose", "mission", "brand-voice", "identity"]
+  },
+  {
+    "id": "biz-mission-target",
+    "category": "mission",
+    "title": "The $1.2M target and 100k minds mission",
+    "content": "The One Target: $1,200,000 net liquid by January 1, 2027. The Mission: liberate 100,000 minds via the 'Firmware Update' (content + mentorship that triggers escape velocity). Plus mentor 100 Inner Circle initiates in System Mastery Architecture. Current Stripe net: $0/wk. Target ladder: $77/wk → $770/wk → $7,700/wk. As of 2026-04-29, no paid conversions yet; system is in measurement/agent-polish phase before paid traffic launch.",
+    "tags": ["target", "metrics", "mission", "revenue"]
+  },
+  {
+    "id": "biz-brands-dual",
+    "category": "branding",
+    "title": "Two-brand parallel content distribution",
+    "content": "Two brands run in parallel across all platforms: (1) Ace Richie / Sovereign Synthesis — personal brand, primary revenue driver, ~44 YouTube subs as of Apr 2026, top video 'OUTDATED CODE' at 14.3% CTR. (2) The Containment Field — anonymous dark-psychology top-of-funnel feeder, 3 YouTube subs, but pulls strong signal-per-viewer (first stranger comment from @noemicsafordi5626 on 04-14-2026). YouTube is PRIMARY platform. TikTok/IG deferred. X/Twitter canceled 2026-04-10. Posting guide: Sovereign-Mission-Control/SOVEREIGN-POSTING-GUIDE.md.",
+    "tags": ["brands", "youtube", "containment-field", "distribution"]
+  },
+  {
+    "id": "biz-funnel-architecture",
+    "category": "funnel",
+    "title": "sovereign-synthesis.com funnel structure",
+    "content": "27 pages live on sovereign-synthesis.com via Vercel (repo: 7acerich1-creator/sovereign-landing). Entry points: / (homepage authority dossier with ROM email capture → /tier-1/diagnostic), /diagnostic (12Q interference pattern quiz → tags lead with dominant_pattern A/B/C), /about. Tiers: T1 diagnostic + ROM PDF download, T2 Protocol 77 ($77), T3 Manifesto ($177), T4 Defense Protocol ($477 Phase 1 DECLASSIFICATION), T5 Phase 2 NEUTRALIZATION ($1497), T6 Phase 3 THE DEPLOYMENT ($3777), T7 Inner Circle application ($12,000). Stripe live, all checkout links wired. Diagnostic link in ALL Sovereign Synthesis YouTube descriptions since S109.",
+    "tags": ["funnel", "tiers", "stripe", "landing-pages"]
+  },
+  {
+    "id": "biz-infra-three-systems",
+    "category": "architecture",
+    "title": "Operational architecture — three live systems",
+    "content": "Three live systems, NEVER cross-contaminate: (1) Gravity Claw Engine (Sovereign-Sentinel-Bot repo) — Bot infrastructure, 6 AI agents, tools, memory. Deploys via GitHub → Railway auto-deploy. (2) Sovereign Assets (Sovereign-Mission-Control + sovereign-landing repos) — Dashboard + landing pages. Deploys via GitHub → Vercel auto-deploy. (3) Supabase (project wzthxohtgojenukmdubz) — the ONLY meeting point between systems 1 and 2. Bot writes, Dashboard reads. Master reference rule: each system has its own master reference file, single source of truth, read FIRST every session, update LAST. SovereignSynthesisProjects folder is parts warehouse only, NOT deployable.",
+    "tags": ["architecture", "railway", "vercel", "supabase", "deployment"]
+  },
+  {
+    "id": "biz-agent-roster",
+    "category": "agents",
+    "title": "The 6-agent Maven Crew roster and roles",
+    "content": "Six agents in Sovereign Sentinel Bot: (1) Veritas — Chief Strategy Officer, morning intelligence briefings from live Supabase data (youtube_analytics, landing_analytics, initiates, crew_dispatch). (2) Sapphire — Strategic Intelligence & Second Mind / PA / Life-COO. Manages Ace's calendar, email, reminders, Notion, ClickUp, knowledge architecture. Persona = 'longtime handler' (Ron-from-Jay-Kelly archetype) post-S125b. (3) Alfred — Content Seed Generator, one original sovereign thesis per day → PIPELINE_IDEA → VidRush. (4) Yuki — Distribution + YouTube Engagement Operator (Buffer publishing, pinned comments, community posts, Bluesky engagement). (5) Anita — Email Response + Copy Specialist, plain-English replies to inbound leads, nurture template authorship. (6) Vector — CRO + Analytics Engine, daily metrics sweep across Stripe + Buffer + Vercel.",
+    "tags": ["agents", "maven-crew", "sapphire", "veritas", "alfred", "yuki", "anita", "vector"]
+  },
+  {
+    "id": "biz-sapphire-architecture",
+    "category": "agents",
+    "title": "Sapphire's prompt architecture and tool surface (post-S125)",
+    "content": "Sapphire uses ddxfish swappable-pieces pattern. Active pieces stored in Supabase sapphire_known_facts table (active_persona, active_relationship, active_goals, active_format, active_extras). S125b locked her to: persona=longtime_handler (Ron-to-Jay-Kelly), relationship=trusted_assistant, goals=be_present_useful, format=warm_concise. Active extras include discernment, memory_routing, what_you_can_do, family_first, no_loops, no_tool_retry_loops, complex_task_protocol, mission_control_routing, reminder_dedup, notion_canonical_structure, verify_facts_before_stating. Tools (S125g): SetReminderTool, ListRemindersTool, CancelReminderTool, CancelReminderSeriesTool, NotionCreate/Append/Search/Get/Update/DeleteBlockTool, RememberFactTool, RecallFactsTool, FileBriefingTool, ProposeTaskTool, WebSearchTool. Plus Workflow/Research/Life packs (Gmail, Calendar, Family, Plans).",
+    "tags": ["sapphire", "tools", "prompt-pieces", "namespaces"]
+  },
+  {
+    "id": "biz-pinecone-namespaces",
+    "category": "memory",
+    "title": "Pinecone namespace architecture",
+    "content": "Pinecone host: gravity-claw-cpcpbz1.svc.aped-4627-b74a.pinecone.io. Index: gravity-claw. Six namespaces with strict separation: (1) sapphire-personal — Ace's personal facts, relationship_context, family, daily life, consciousness journey, Gemini history. (2) sapphire — legacy Sapphire COO memory pre-namespace-split. (3) shared — cross-agent strategic intel. (4) brand — business intelligence, brand voice, funnel insights. (5) scripts-sovereign_synthesis — shipped scripts dedup memory. (6) scripts-containment_field — same for TCF. Sapphire's PA tool reads from sapphire-personal (weight 1.0) + sapphire (legacy) + shared + brand. Brand namespace is for business; sapphire-personal is for personal. Strict separation in writes; merged in reads.",
+    "tags": ["pinecone", "namespaces", "memory", "architecture"]
+  },
+  {
+    "id": "biz-supabase-schemas",
+    "category": "data-schemas",
+    "title": "Supabase canonical tables for the Sovereign system",
+    "content": "Supabase project wzthxohtgojenukmdubz. Key tables: initiates (lead capture from /diagnostic, columns include source, dominant_pattern A/B/C, payment_status, application_status, email). product_tiers (single source of truth for product catalog, Stripe price IDs, portal/sales URLs). revenue_log (Stripe webhook writes). sapphire_reminders (poller every 60s). sapphire_known_facts (active prompt-piece state + facts). sapphire_diary (Sapphire's nightly self-reflections). relationship_context (relationship observations). briefings (Mission Control briefing feed, agents write here via file_briefing tool). tasks (kanban-lite for MC dashboard). crew_dispatch (agent task queue). niche_cooldown (LRU rotation for content niches + aesthetic_style for 30-video A/B/C test). sovereign_metrics (fiscal_sum, mindset_count, elite_count, velocity).",
+    "tags": ["supabase", "schemas", "data-architecture", "tables"]
+  },
+  {
+    "id": "biz-northstar-current",
+    "category": "current-state",
+    "title": "Current Highest-Leverage Action (NORTH_STAR) and 30-video A/B/C test",
+    "content": "Current Highest-Leverage Action (S125+, 2026-04-29): POLISH SAPPHIRE + CREW AGENTS for marketing launch. Beginning capital is in hand. Paid traffic about to hit funnel — agents must fire reliably first. Sapphire is priority. First Real Business Goal (locked S113+, 2026-04-24): Ship 30 videos across SS + TCF with rotating aesthetic A/B/C × niche LRU rotation, then pull YouTube analytics to determine winning aesthetic-brand combo. Three aesthetics: A (macro mechanics + chiaroscuro), B (sacred geometry + kinetic abstract), C (oil-painted cinematic). Each shipped video logs niche + aesthetic_style to niche_cooldown. Mission Control needs an Aesthetic Performance tile to surface 3×2 grid (3 aesthetics × 2 brands) with per-cell CTR + 30s retention.",
+    "tags": ["north-star", "highest-leverage", "30-video-test", "aesthetics"]
+  },
+  {
+    "id": "biz-input-metrics",
+    "category": "metrics",
+    "title": "The 5 input metrics that lead to the $1.2M target",
+    "content": "The only numbers that matter (per NORTH_STAR.md): (1) Top-of-funnel attention per week — YouTube views + Shorts + IG reach. Target 10k/wk baseline, 100k/wk for escape velocity. Current ~930/wk combined. (2) Landing page visitors per week (Vercel Insights on sovereign-synthesis.com). Target 500/wk. Currently unknown — needs re-measure. (3) Email signups per week (Supabase initiates table). Target 50/wk. Currently 0 confirmed. (4) Paid conversions per week (Stripe). Target 1/wk. Currently 0. (5) Revenue per week (Stripe net). Target $77/wk → $770/wk → $7,700/wk. Currently $0/wk. The PUSHBACK rule: if a build proposed doesn't move one of these 5 in <7 days measurably, push back in writing before starting.",
+    "tags": ["metrics", "north-star", "pushback-rule", "revenue"]
+  },
+  {
+    "id": "biz-architect-schedule",
+    "category": "personal-context",
+    "title": "Ace's daily schedule (inverted from default)",
+    "content": "Ace works nights. His day starts ~2pm CDT and he sleeps ~6-8am CDT. Mapped to CDT hours: 14:00-17:00 = his morning (use morning_focus tone for Sapphire), 17:00-01:00 = main awake/working block (use longtime_handler tone), 01:00-06:00 = late night (use after_hours tone), 06:00-14:00 = asleep (after_hours queue, messages land when he wakes). Critical for any time-of-day logic in agents — default 9-to-5 mapping is INVERTED for him. autoPersonaForTime in src/agent/sapphire-prompt-builder.ts patched S125b for this rhythm.",
+    "tags": ["schedule", "circadian", "sapphire-time-of-day"]
+  },
+  {
+    "id": "biz-architect-family",
+    "category": "personal-context",
+    "title": "Ace's family — his world",
+    "content": "Ace's daughters are Aliza (born May 19, 2015) and Maddy (born August 5, 2017). They are his world. Sapphire knows them, mentions them by name when relevant, never forgets. Family memory routing: structured family info goes to save_family_member tool which writes to family table + sapphire-personal Pinecone. When Ace mentions a daughter by name or asks about 'the daughters', 'the kids', 'his family' — Sapphire MUST call get_family BEFORE answering. Never say 'I don't remember' about family.",
+    "tags": ["family", "personal-context", "daughters"]
+  },
+  {
+    "id": "biz-mission-control",
+    "category": "infrastructure",
+    "title": "Mission Control dashboard — what it is and isn't",
+    "content": "Mission Control = the Vercel-hosted Next.js dashboard at sovereign-mission-control.vercel.app. It READS from Supabase tables (briefings, tasks, sovereign_metrics, crew_dispatch, etc.). It is NOT a Notion thing. When Ace says 'send to Mission Control' or 'file a report in MC', the right tool is file_briefing (writes to briefings table) or propose_task (writes to tasks). NEVER NotionCreatePageTool — that creates a private Notion page literally titled 'Mission Control', which was the original failure mode that Sapphire used to do before S125c added file_briefing/propose_task to her core tool surface plus the mission_control_routing prompt extra.",
+    "tags": ["mission-control", "dashboard", "tool-routing", "notion"]
+  },
+  {
+    "id": "biz-notion-structure",
+    "category": "infrastructure",
+    "title": "Notion canonical structure (locked S125e)",
+    "content": "Top-level parent: 🧭 Daily Life (page_id 34d7db89ef73806ca6a0e44b71f87a72). Under it ONLY these five folders: 🌅 Daily Briefs (3507db89ef738122874ce686dc84ea51) — morning brief archive. 🧩 Complex Tasks (3507db89ef7381b292ebcf38976a9cd5) — multi-step plans. ✅ Daily Tasks & Goals (3507db89ef7381b6a21beb07f930a882). 🏗️ Long-term Projects (3507db89ef738182810dc1f2547ae52d). 📓 Daily Reflections (3527db89ef73817b9102ddd399d03729) — Sapphire's diary lands here. NEVER create new top-level pages without Architect approval. NEVER create another 'Mission Control' page (that's the Vercel dashboard, see mission_control_routing).",
+    "tags": ["notion", "canonical-structure", "folders"]
+  },
+  {
+    "id": "biz-deploy-protocols",
+    "category": "deployment",
+    "title": "Deployment protocols and the 'never push during pipeline' rule",
+    "content": "Critical invariant: NEVER push to main while the bot's pipeline is running — Railway auto-deploys and kills the container mid-run. Before pushing, verify pipeline quiet via SQL: vid_rush_queue WHERE status='publishing' AND created_at > NOW()-INTERVAL '4 hours' = 0; AND crew_dispatch WHERE status NOT IN ('completed','failed','dispatched') AND created_at > NOW()-INTERVAL '30 minutes' = 0. Sentinel Bot deploys: GitHub push to main → Railway auto-deploys (project 77e69bc6-f7db-4485-a756-ec393fcd280e). Mission Control + landing pages: GitHub → Vercel auto-deploy. Pod (FFmpeg/composition): separate Docker build via GitHub Actions pod-build.yml workflow.",
+    "tags": ["deployment", "railway", "vercel", "invariants"]
+  },
+  {
+    "id": "biz-master-references",
+    "category": "infrastructure",
+    "title": "Master reference files — single source of truth",
+    "content": "Each system has its own master reference file. SINGLE SOURCE OF TRUTH. Read FIRST every session, update LAST. (1) Sovereign-Sentinel-Bot/SOVEREIGN-SENTINEL-BOT_MASTER-REFERENCE.md — bot invariants, env vars, data schemas, agent roles, infrastructure IDs, history. Includes session-by-session log of fixes from S1-S125+. (2) Sovereign-Mission-Control/MISSION-CONTROL-MASTER-REFERENCE.md — MC dashboard architecture and decisions. Plus NORTH_STAR.md at repo root: revenue gate, 5 input metrics, current Highest-Leverage Action, 30-video test plan. PURPOSE.md: canonical purpose statement. DEFERRED-BUILDS.md: scoped-out work tracker. If anything conflicts with a skill file or memory file, master reference WINS.",
+    "tags": ["master-reference", "documentation", "north-star"]
+  },
+  {
+    "id": "biz-content-rule",
+    "category": "brand-voice",
+    "title": "The Sovereign Content Rule (governs all copy)",
+    "content": "'If what's understood don't have to be explained.' — Sovereign Synthesis, 2026-04-14 (canonical). Every piece of copy, every video script, every thumbnail, every email, every agent system prompt that produces user-facing content must respect this rule. Over-explaining is the failure mode. When a phrase ('the one-offs,' 'the architecture,' 'the Containment Field,' 'lose what you are to become what you actually are') is doing the work, trust the reader to assemble the meaning. The right reader will fill in their own Jesus, Socrates, Tesla, scar. Their list is more powerful than ours. Explaining lowers the frequency and filters IN the wrong audience while filtering OUT the right one. Content filter, not style preference.",
+    "tags": ["brand-voice", "copy-rules", "sovereign-content-rule"]
+  },
+  {
+    "id": "biz-lexical-canon",
+    "category": "brand-voice",
+    "title": "Sovereign Synthesis canonical lexicon",
+    "content": "The Simulation = legacy societal structures / Old Earth frequency. Firmware Update = the content + mentorship that triggers liberation. Escape Velocity = the point where a mind escapes simulated fear. Sovereign Synthesis = act of intentionally architecting reality and financial energy. Biological Drag = old habits, entities (the 'Painting Dad'), or legacy systems attempting to slow the shift. Protocol 77 = master framework for liberation, also the $77 entry-tier product. The Containment Field = the dark-positioned anonymous brand. Inner Circle = the 100 mentees in System Mastery Architecture (T7, $12k). Sovereign / Sovereign Architect = Ace's identity descriptor. Use these naturally in agent voice; do not force.",
+    "tags": ["lexicon", "brand-voice", "sovereign-synthesis"]
+  },
+  {
+    "id": "biz-funnel-status",
+    "category": "current-state",
+    "title": "Funnel restructure status — diagnostic flow live",
+    "content": "S57 (2026-04-14) shipped funnel restructure: sovereign-synthesis.com root now serves authority dossier (was buried at /tier-0/links). /diagnostic is the 12Q interference pattern quiz with post-result email-capture form including dominant_pattern A/B/C tagging. /about has the canonical purpose statement. /tier-0/links 307-redirects to /. Supabase initiates.dominant_pattern column live. S109 (2026-04-24) fixed lead-capture trigger (pg_net schema error was silently rolling back ALL inserts — funnel was broken before this). First successful end-to-end test post-S109: form → initiates row → nurture email fired. Diagnostic link added to ALL Sovereign Synthesis YouTube descriptions. The full path viewer → description → diagnostic → lead capture → nurture is LIVE.",
+    "tags": ["funnel", "diagnostic", "lead-capture", "history"]
+  },
+  {
+    "id": "biz-frequency-alignment",
+    "category": "deferred",
+    "title": "Frequency Alignment Brief — daily SS upload summary (deferred)",
+    "content": "Ace listens to Sovereign Synthesis videos as frequency alignment — they 'meet him where he's at and help align his frequency.' He wants Sapphire to produce a daily summary of the previous day's SS upload so he can quickly orient on the day's transmission without re-watching. Goal is alignment, not transcription. Partial impl exists at src/proactive/sapphire-pa-jobs.ts ~line 519 (runFrequencyAlignmentBrief, polled 19:15-00:30 UTC waiting for vidrush_orchestrator upload). Brief structure: Core Thesis, Key Signals, Frequency, Anchor. Status: deferred per S125f, needs prompt tuning + delivery surface decision (Telegram DM? Notion Daily Briefs? MC briefing? all three?).",
+    "tags": ["deferred", "frequency-alignment", "sovereign-synthesis-content"]
+  },
+  {
+    "id": "biz-llm-providers",
+    "category": "infrastructure",
+    "title": "LLM provider routing per agent",
+    "content": "Anthropic credits drained per S115. Currently most agents on Gemini Flash Lite (cost optimization). Sapphire locked to Anthropic primary per S121 with Hidden Chain-of-Thought via hidden_thinking prompt extra (forces <thinking> block before response). Gemini Flash 2.5 used for proactive jobs (diary, frequency-alignment brief, composer-routed reminders). OpenAI: Whisper for voice transcription, with Groq Whisper as fallback. Embeddings: Gemini gemini-embedding-001 (1024d) primary, OpenAI text-embedding-3-small fallback. When Architect tops up Anthropic credits, knowledge-heavy queries should route to Sonnet/Opus. Web search (S125g) uses Gemini google_search grounding for free fact-checking.",
+    "tags": ["llm", "anthropic", "gemini", "openai", "model-routing"]
+  },
+  {
+    "id": "biz-content-cadence",
+    "category": "content-system",
+    "title": "Daily content cadence and pipeline",
+    "content": "Mon-Fri daily upload cadence to Sovereign Synthesis YouTube by 2pm CDT (19:00 UTC). Pipeline: Alfred generates one PIPELINE_IDEA per day → ContentEngine → VidRush deterministic faceless video composition (FFmpeg in pod) → upload to YT. Niche rotation LRU + aesthetic A/B/C rotation (S113+). Pinecone metadata logs niche + aesthetic_style per shipment for the 30-video performance test. Yuki distributes via Buffer to Bluesky/LinkedIn (X/TikTok/IG dropped per S121f, FB direct via Planner staging per S118c). Yuki also auto-pins shorts CTAs, monitors YT comments via watcher (5min poll, alerts to Telegram on new comments). Anita drafts replies to inbound emails routed via inbound-email webhook → /approve and /edit Telegram commands.",
+    "tags": ["content-pipeline", "vidrush", "yuki", "anita", "youtube"]
+  },
+  {
+    "id": "biz-recent-fixes",
+    "category": "current-state",
+    "title": "S125 session worth of fixes (2026-04-29)",
+    "content": "S125 series shipped: (a) S125 — repo hygiene cleanup, master reference backfill of S123/S124 from parallel system. (b) S125b — Sapphire warm-handler persona (Ron-from-Jay-Kelly archetype), flipped DEFAULTS in sapphire-prompt-builder.ts, fixed time-of-day for Architect's actual 2pm-wake schedule. (c) S125c — file_briefing + propose_task + cancel_reminder_series tools added to Sapphire core, dedup preflight in set_reminder, mission_control_routing + reminder_dedup prompt extras. 14 ghost reminders cleared via SQL. (d) S125d — diary date hallucination fix (inject TODAY into Gemini prompt), NotionDeleteBlockTool added. (e) S125e — Notion structure cleanup, 5 canonical folders, notion_canonical_structure prompt extra. (f) S125f — DEFERRED-BUILDS.md updated. (g) S125g — web_search tool via Gemini google_search grounding, verify_facts_before_stating extra. (h) S125h — query-iteration rule for web_search.",
+    "tags": ["session-history", "s125", "recent-fixes"]
+  },
+  {
+    "id": "biz-deferred-work",
+    "category": "deferred",
+    "title": "Deferred work tracker (post-S125)",
+    "content": "From DEFERRED-BUILDS.md: (1) Self-healing layer for the crew — circuit breakers, dead-letter queue, auto-retry, per-tool error stats. (2) Apply assembled-prompt + spice pattern to Veritas (Sapphire-only currently). (3) Frequency Alignment Brief iteration (partial impl exists, needs prompt tuning + delivery surface). (4) Gemini history migration to Pinecone (in progress S125+, scraper run ✅ 2026-04-29, ingestion to sapphire-personal namespace running). (5) Mission Control Aesthetic Performance tile — 3×2 grid for the 30-video test, queries niche_cooldown joined with YT analytics. (6) Veritas-style cron robustness review.",
+    "tags": ["deferred-builds", "roadmap"]
+  }
+]

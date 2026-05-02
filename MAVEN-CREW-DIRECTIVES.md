@@ -495,50 +495,6 @@ Pieces file: `src/data/vector-prompt-pieces.json`. Default-active:
 
 ---
 
-## 10. IMPLEMENTATION OPEN ITEMS
-
-### 10.1 New Supabase table: `channel_milestones`
-The visible-milestone scaffold. Schema:
-```
-id uuid PK
-channel text  -- "sovereign_synthesis" | "containment_field"
-tier int  -- 0 = pre-AdSense, 1 = D-tier monetized, 2 = C-tier, 3 = B-tier, 4 = A-tier, 5 = S-tier
-name text  -- e.g. "AdSense Gate"
-target_metric text  -- e.g. "subs"
-target_value numeric  -- e.g. 1000
-current_value numeric  -- updated by Vector
-status text  -- "active" | "achieved" | "future"
-hidden_until_active boolean  -- true = invisible on dashboard until status='active'
-created_at timestamptz
-achieved_at timestamptz null
-```
-
-Mission Control home widget queries WHERE `status='active'` only. Future tiers exist but stay invisible per Ace's S117 requirement: "I don't want to be seeing those on my command center home page."
-
-### 10.2 New Supabase table: `bot_active_state`
-ddxfish active-state for the 5 non-Sapphire bots:
-```
-agent text  -- "veritas" | "yuki" | "alfred" | "anita" | "vector"
-key text  -- "active_persona" | "active_relationship" | etc
-value text
-updated_at timestamptz
-PK (agent, key)
-```
-
-### 10.3 Routing fix: YouTube comment watcher → Yuki
-`src/proactive/youtube-comment-watcher.ts:216` currently uses the primary `telegram` (Veritas's bot token). Change the function signature to accept Yuki's bot channel, route alerts there. Veritas keeps the system-health view via `youtube_comments_seen` table reads.
-
-### 10.4 Pinecone embedding fallback verification
-Master ref Section 3 says "embeddings disabled — no embedding-capable key set." The code in `src/memory/pinecone.ts:67-84` HAS an OpenAI `text-embedding-3-small` fallback that should fire when Gemini fails. `OPENAI_API_KEY` is set per master ref Section 10. Verify in Railway logs whether the fallback is actually firing. If yes — patch master ref. If no — fix the fallback. **Without working embeddings, the entire ant-hive-mind architecture is half-broken** (writes silently no-op, semantic reads return empty).
-
-### 10.5 Persona-registry vs personalities.json conflict
-For Alfred / Anita / Yuki, `src/agent/personas.ts` and `src/data/personalities.json` say slightly different things. Today, JSON wins for crew loops; persona registry only matters for Veritas (primary loop). **Resolution:** the calibrated prompts in this document become the canonical source. `personalities.json` gets rewritten to load from the pieces files. `personas.ts` gets retired.
-
-### 10.6 Master Reference rewrite scope
-Sections 5 (agent roles), 6 (codebase architecture summary), 14 (executive role map) get rewritten to point here. Sections 0.1 (1000-token rule) gets retired with a note that the rule was a band-aid for the 27k context bloat — the ddxfish active-state pattern handles that problem more elegantly.
-
----
-
 ## 11. APPENDIX — Format Templates
 
 ### Format A — Continuity Reflection (Pinecone-only, no DM)
@@ -601,21 +557,3 @@ Reply 'flip' to advance, 'hold' to keep current tier visible.
 ```
 
 ---
-
-## 12. NEXT STEPS (PROPOSED)
-
-1. **Ace reviews this document.** Section-by-section approval / pushback.
-2. **On approval:** move `MAVEN-CREW-DIRECTIVES.md` to Sentinel repo root. Reference from master reference Sections 5/14 (rewrite those sections to point here).
-3. **Build tickets** (separate session):
-   - Create `channel_milestones` and `bot_active_state` tables
-   - Write 5 new pieces JSON files (`veritas/yuki/alfred/anita/vector-prompt-pieces.json`)
-   - Refactor `personalities.json` to load from pieces files
-   - Build `MemeticTriggerJudgeTool` (shared by Yuki + Alfred)
-   - Build new tools per §4.7, §5.7, §6.7, §7.7
-   - Fix YouTube comment-watcher routing (§10.3)
-   - Verify Pinecone embedding fallback (§10.4)
-4. **Test cold:** semantic memory query *"what should I focus on this week to move my YouTube channel forward"* should retrieve the active milestone vector. If it doesn't, the hive is still broken.
-
----
-
-*End of MAVEN-CREW-DIRECTIVES.md v1.0. Awaiting Ace approval.*

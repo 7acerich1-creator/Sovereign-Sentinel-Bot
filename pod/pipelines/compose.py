@@ -263,6 +263,7 @@ def _render_text_block(
     upper: bool = False,
     italic_skew: float = 0.0,
     quote_wrap: bool = False,
+    add_shadow: bool = False,
 ):
     """Render a single text block within a defined zone with binary-search
     fontsize fitting and word-boundary wrap.
@@ -369,6 +370,35 @@ def _render_text_block(
             y = start_y + i * line_spacing - (4 - bbox[1])
             img.paste(sheared, (x, y), sheared)
     else:
+        # S127 (2026-05-02): Optional Gaussian-blur drop shadow for the non-skew
+        # path. Subhead's stroke_width=2 wasn't carrying enough contrast on
+        # vignetted FLUX backdrops (compare to headline's stroke_width=6). The
+        # italic-skew path at lines 326-370 already does this technique for
+        # subheads when italic was on; S117c dropped italic but didn't carry
+        # the shadow over to the solid-render path. This restores the shadow
+        # under the subhead's solid-fill rendering — same legibility tech as
+        # before, just decoupled from the italic-skew transform.
+        if add_shadow:
+            from PIL import ImageFilter
+            shadow_offset = max(3, fontsize // 25)
+            shadow_blur = max(3, fontsize // 18)
+            shadow_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            sd = ImageDraw.Draw(shadow_layer)
+            for i, line in enumerate(lines):
+                bbox = font.getbbox(line)
+                line_w = bbox[2] - bbox[0]
+                x = zone_x + (zone_w - line_w) // 2
+                y = start_y + i * line_spacing
+                sd.text(
+                    (x + shadow_offset, y + shadow_offset),
+                    line, fill=(0, 0, 0, 235), font=font,
+                )
+            shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(radius=shadow_blur))
+            # Composite blurred shadow onto img using shadow's alpha as the mask.
+            # Only the dark text area touches img; the rest of the layer is
+            # fully transparent and contributes nothing.
+            img.paste(shadow_layer, (0, 0), shadow_layer)
+
         draw = ImageDraw.Draw(img)
         for i, line in enumerate(lines):
             bbox = font.getbbox(line)
@@ -502,6 +532,9 @@ def render_thumbnail_with_text(
                 upper=True,        # Bebas Neue has no lowercase glyphs anyway
                 italic_skew=0.0,   # solid render for readability
                 quote_wrap=True,   # curly-quote-wrap the subhead
+                add_shadow=True,   # S127 — Gaussian-blur drop shadow for
+                                   # readability on busy/vignetted backdrops.
+                                   # Compensates for the thinner stroke.
             )
         except ValueError as exc:
             log.warning(

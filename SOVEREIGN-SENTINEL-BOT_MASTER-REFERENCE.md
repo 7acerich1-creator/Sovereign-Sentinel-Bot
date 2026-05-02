@@ -1,6 +1,6 @@
 # Sovereign Sentinel Bot — Master Reference (LEAN)
 
-> **This file holds INVARIANTS ONLY.** Things that don't change session-to-session: identity, infrastructure IDs, env var map, schemas, protocols, the canonical account map, the product ladder, architectural rules. \*\***For session-by-session history** (Sessions 1–47, every fix, every DVP tag, every resolved blocker) see `HISTORY.md`. That file is the append-only journal. This file is the trimmed reference. \*\***Runtime state is read on-demand from the code, not cached.** (Old `LIVE_STATE.md` was retired 2026-04-24 — stale cached state was actively misleading diagnoses. Don't recreate it.) Grep `src/voice/tts.ts`, `src/index.ts`, `package.json`, or check Railway env directly for current chain shape. If this file contradicts the code, the code wins — patch this file and move on. \*\***For revenue-first sanity check** (the 5 input metrics, current highest-leverage action) see `NORTH_STAR.md`. Read before authorizing any build task.
+> **This file holds INVARIANTS ONLY.** Things that don't change session-to-session: identity, infrastructure IDs, env var map, schemas, protocols, the canonical account map, the product ladder, architectural rules. **For session-by-session history** see `HISTORY.md` (append-only journal, search-only — do not auto-load). **Runtime state is read on-demand from the code, not cached.** Grep `src/voice/tts.ts`, `src/index.ts`, `package.json`, or check Railway env directly for current chain shape. If this file contradicts the code, the code wins — patch this file and move on. **For revenue-first sanity check** see `NORTH_STAR.md`. Read before authorizing any build task.
 
 **Last trimmed:** 2026-05-02 (S127 — added §3.5 DEPLOYMENT MATRIX so any session can reach prod without asking the Architect; updated Alfred LLM team row + doctrine note for the Anthropic last-resort fallback shipped 2026-05-01).
 
@@ -88,7 +88,7 @@ All three call `executeFullPipeline` (Vidrush). Pipeline = ingest → script →
 1. Read `NORTH_STAR.md` — revenue gate, 5 input metrics, current highest-leverage action.
 2. Read this file — invariants, schemas, architectural rules.
 3. Read memory index `MEMORY.md` — feedback, prior session learnings.
-4. For runtime state (LLM chain, TTS routing, git SHA, env presence), grep the code directly — `src/voice/tts.ts`, `src/index.ts` `AGENT_LLM_TEAMS`, `package.json`, or Railway dashboard. **Do not cache runtime state to a file.** (Old `LIVE_STATE.md` retired 2026-04-24 — stale cache was misleading diagnoses.)
+4. For runtime state (LLM chain, TTS routing, git SHA, env presence), grep the code directly — `src/voice/tts.ts`, `src/index.ts` `AGENT_LLM_TEAMS`, `package.json`, or Railway dashboard. **Do not cache runtime state to a file.**
 5. Only read `HISTORY.md` when you need a specific past session's context (searchable by session number or DVP tag).
 
 **Never push to** `main` **while the pipeline is running.** Railway auto-deploys and kills the container. See `feedback_no_push_during_pipeline.md` in memory.
@@ -99,8 +99,8 @@ All three call `executeFullPipeline` (Vidrush). Pipeline = ingest → script →
 
 These are hard rules that govern every session's work. Violations create the bugs history keeps archiving.
 
-### 0.1 Prompt Economy — RETIRED S117
-The "1000-token cap" was a band-aid for a different problem (27k context bloat from bulk-loading everything into every prompt). It got cargo-culted forward and started constraining good directive design. Replaced by the **ddxfish active-state pattern** (see [`MAVEN-CREW-DIRECTIVES.md`](./MAVEN-CREW-DIRECTIVES.md) §1.3): prompts assemble per turn from a pieces library + active state + spice rotation, so the prompt is exactly as long as it needs to be for the current scenario, no more. New rule: prompts should be tight, not arbitrarily short. Sapphire's prompt-builder (`src/agent/sapphire-prompt-builder.ts`) is the reference implementation.
+### 0.1 Prompt Economy — ddxfish active-state pattern
+Prompts assemble per turn from a pieces library + active state + spice rotation (see [`MAVEN-CREW-DIRECTIVES.md`](./MAVEN-CREW-DIRECTIVES.md) §1.3). Each prompt is exactly as long as it needs to be for the current scenario — tight, not arbitrarily short. Sapphire's prompt-builder (`src/agent/sapphire-prompt-builder.ts`) is the reference implementation.
 
 ### 0.2 Root Cause Discipline
 Stop patching symptoms. Trace the full payload, verify against live data, think architecturally. If two sessions in a row flipped the same fix, the root cause wasn't the last fix. See `feedback_root_cause_discipline.md`.
@@ -152,8 +152,6 @@ Three live systems. **Never cross-contaminate.**
 
 **Domain separation rules:**
 - `SovereignSynthesisProjects` folder is the legacy parts warehouse. **Reference, don't deploy** — see Section 13.
-
-**Make.com:** Not part of this system. Was fully purged S113 (2026-04-24) — every scenario (A, B, C, D, E, F) replaced by native bot pipelines. Subscription pending Architect cancellation. **Do not propose Make work, do not reintroduce, do not write code that calls Make webhooks.** If you find a Make reference anywhere in this codebase, it is stale — surface it and it gets ripped.
 
 **Mission Control live URL:** https://sovereign-mission-control.vercel.app/
 
@@ -308,9 +306,9 @@ Each agent has its own failover chain so a quota hit on one provider doesn't sta
 | **SS Pipeline** | gemini → groq Key A (NO Anthropic) | High-volume video production. |
 | **TCF Pipeline** | gemini → groq Key B (NO Anthropic) | Avoids Groq stampede with SS. |
 
-**Anthropic primary on Veritas / Anita / Sapphire. Last-resort fallback on Alfred (S127).** S121d original rule was Anthropic-locked-to-Sapphire-only; Phase 7 (S125+) elevated Veritas + Anita to primary; S127 (2026-05-01) added Alfred as last-resort fallback after the 2026-05-01 Gemini-403 + Groq-413 double-outage killed Alfred's daily seed silently. Yuki/Vector + both pipelines remain NO-Anthropic — they fire too often for safe Anthropic exposure.
+**Anthropic primary on Veritas, Anita, Sapphire.** Last-resort fallback on Alfred. Yuki, Vector, and both pipelines have NO Anthropic — they fire too often for safe Anthropic exposure.
 
-`AGENT_LLM_TEAMS` env var on Railway can override the chain shape; `ANTHROPIC_MODEL` env var sets the model id (must be a current, real model — e.g. `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`). Default in `config.ts` is `claude-sonnet-4-6` as of S127.
+`AGENT_LLM_TEAMS` env var on Railway can override the chain shape; `ANTHROPIC_MODEL` env var sets the model id (must be a current, real model — e.g. `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`). Default in `config.ts` is `claude-sonnet-4-6`.
 
 ---
 
@@ -378,7 +376,8 @@ Each agent has its own failover chain so a quota hit on one provider doesn't sta
 - **Runtime:** Node 20
 - **Deploy:** Railway via `Dockerfile.bot` (multi-stage)
 - **Memory:** three-tier — SQLite (episodic) + Pinecone (semantic) + Supabase (structured)
-- **LLM providers:** See §5 "Per-agent LLM teams" table. Summary: Anthropic locked to Veritas / Anita / Sapphire (S121d). Gemini → Groq for everyone else and both pipelines. OpenAI for Whisper. **Image generation:** RunPod (FLUX) for everything — pipeline images via faceless-factory, content-engine queue via fluxBatchImageGen. Imagen path was purged in S127 (2026-05-01) along with the standalone `ImageGeneratorTool`. Gemini is NOT nuked for text-gen (was re-admitted post-S29c after the prompt-overwrite root cause was fixed).
+- **LLM providers:** See §5 "Per-agent LLM teams" table. Summary: Anthropic on Veritas / Anita / Sapphire (last-resort fallback on Alfred). Gemini → Groq for everyone else and both pipelines. OpenAI for Whisper.
+- **Image generation:** RunPod (FLUX) for everything — pipeline images via faceless-factory, content-engine queue via fluxBatchImageGen.
 
 ### Key `src/` Paths
 
@@ -398,7 +397,7 @@ src/
 │   ├── backlog-drainer.ts            — R2 clip backlog → Buffer + FB direct, runs at boot (S90)
 │   └── migration.sql                 — content_engine_queue DDL
 ├── voice/
-│   └── tts.ts                        — XTTS-only TTS via RunPod (S106: ElevenLabs/Edge/OpenAI TTS purged)
+│   └── tts.ts                        — XTTS TTS via RunPod (brand-routed voice clones: SS uses `XTTS_SPEAKER_WAV_ACE`, TCF uses `XTTS_SPEAKER_WAV_TCF`)
 ├── prompts/
 │   ├── personalities.json            — Layer 1 agent identity
 │   ├── shared-context.ts             — Layer 2 shared mission + crew roster
@@ -411,7 +410,6 @@ src/
 
 scripts/
 └── seed-youtube-protocols.ts         — Seeds 6 rows into protocols table
-   (verify-state.ts retired 2026-04-24 — LIVE_STATE generator no longer used)
 ```
 
 ### Pollers
@@ -488,10 +486,10 @@ scripts/
 
 **CRITICAL — TikTok accounts are CROSSED** vs other platforms. Every other platform: `empoweredservices2013` = Sovereign Synthesis, `7ace.rich1` = Containment Field. TikTok ONLY: `7ace.rich1` = Sovereign Synthesis, `empoweredservices2013` = Containment Field.
 
-**S126 (2026-04-30) brand-handle update:** SS migrated from `ace_richie_77` (IG) / `acerichie77` (TT) to `sovereign_synthesis` on BOTH platforms. Old handles deprecated, do not reference. CF handles unchanged. Live profile verification (2026-04-30):
-- `instagram.com/sovereign_synthesis` — 148 posts, 164 followers, "Systems Architect / Your mind runs firmware / sovereign-synthesis.com/tier-0/links"
-- `tiktok.com/@sovereign_synthesis` — 26 following, 12 followers, "Your mind runs firmware. I teach the update. sovereign-synthesis.com"
-- Railway env: `TIKTOK_HANDLE_SS=sovereign_synthesis`, `TIKTOK_HANDLE_CF=the_containment_field` (added S126).
+**Live profile verification:**
+- `instagram.com/sovereign_synthesis` — "Systems Architect / Your mind runs firmware / sovereign-synthesis.com/tier-0/links"
+- `tiktok.com/@sovereign_synthesis` — "Your mind runs firmware. I teach the update. sovereign-synthesis.com"
+- Railway env: `TIKTOK_HANDLE_SS=sovereign_synthesis`, `TIKTOK_HANDLE_CF=the_containment_field`.
 
 **YouTube OAuth tokens (Railway):** `YOUTUBE_REFRESH_TOKEN` (Sovereign Synthesis) + `YOUTUBE_REFRESH_TOKEN_TCF` (Containment Field). Both PERMANENT (app published).
 
@@ -549,14 +547,10 @@ Archived (do not reuse): `prod_UAWwRgKTgeF6wj`, `prod_UAX3zxKjJiCYtO`, `prod_UAX
 ### Timezone
 `MORNING_BRIEFING_HOUR=15` (10 AM CDT) · `EVENING_RECAP_HOUR=1` (8 PM CDT). Code uses `getUTCHours()`. Ace is CDT (UTC-5).
 
-### KILLED — do not set
-`BUFFER_ACCESS_TOKEN` (v1 REST dead, use `BUFFER_API_KEY`) · `TIKTOK_ACCESS_TOKEN` (TikTok API path abandoned — current path is cookie-based browser automation via `cookie-ext` tool, see Yuki S126 worker) · `MAKE_*` (all Make.com webhook env vars retired S113) · `GEMINI_IMAGEN_KEY` (Imagen path purged S127, RunPod FLUX is the only image path) · `ELEVENLABS_*` / `FORCE_ELEVENLABS` (TTS purged S106, XTTS via RunPod is the only path) · `MAKE_STRIPE_ROUTER_URL` (S113 receipt-email path rewired off Make).
+### Instagram tokens (DO set)
+`INSTAGRAM_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ID` (SS) and `INSTAGRAM_ACCESS_TOKEN_CF` + `INSTAGRAM_BUSINESS_ID_CF` (TCF) — Graph API powers Yuki's IG comment-reply worker.
 
-**Live Instagram tokens (DO set):** `INSTAGRAM_ACCESS_TOKEN` + `INSTAGRAM_BUSINESS_ID` (SS) and `INSTAGRAM_ACCESS_TOKEN_CF` + `INSTAGRAM_BUSINESS_ID_CF` (TCF) — Graph API powers Yuki's S126 IG comment-reply worker. Old "Meta API abandoned" note from earlier sessions was wrong; that was a different deprecation context.
-
-> **Note (S117):** `GEMINI_API_KEY` was listed as KILLED here for sessions citing the S35 billing crisis. That note is stale and was wrong. The S35 problem was a runaway Anita/dispatch loop, not the key itself. `GEMINI_API_KEY` has been required ever since — Sapphire PDF/news/research, the insight-extractor, gemini-flash text-gen, and Pinecone embeddings all depend on it. Confirmed live S117 via `/debug/memory` (HTTP 200, embedding endpoint working, 4339 Pinecone vectors).
-
-### DEPRECATED aliases
+### Aliases (use the right-hand name)
 `SOCIAL_SCHEDULER_API_KEY` → `BUFFER_API_KEY` · `NEXT_PUBLIC_SUPABASE_URL` → `SUPABASE_URL` · `NEXT_PUBLIC_SUPABASE_ANON_KEY` → `SUPABASE_ANON_KEY` · `AUTHORIZED_USER_ID` → `TELEGRAM_AUTHORIZED_USER_ID`
 
 ---
@@ -593,8 +587,6 @@ Mission Control chat uses the real agent loop via a webhook on the Railway bot.
 - **Fallback:** MC retains template responses for when Railway is unreachable
 - **Gated by:** `WEBHOOKS_ENABLED=true` env var
 
-The standalone Sapphire API service is DEPRECATED — the webhook bridge replaced it.
-
 ### 12.2 Supabase Edge Functions (separate plane from Railway)
 
 Supabase hosts a second set of webhook handlers at `https://wzthxohtgojenukmdubz.supabase.co/functions/v1/<slug>`. Their env vars live in **Supabase Dashboard → Project Settings → Edge Functions → Secrets**, NOT in Railway. `execute_sql` cannot read them.
@@ -602,8 +594,8 @@ Supabase hosts a second set of webhook handlers at `https://wzthxohtgojenukmdubz
 | Slug | Version | Role |
 |---|---|---|
 | `stripe-webhook` | v8 | Primary Stripe receiver. Handles `checkout.session.completed` only. Provisions tier access + fans out a revenue signal. |
-| `send-purchase-email` | v1 | Resend-backed receipt email + `initiates` table patch. Called directly post-purge (used to be Make-relayed before S113). |
-| `send-nurture-email` | v3 | Anita's nurture template delivery. Called by native bot polling job (was Scenario C before S113). |
+| `send-purchase-email` | v1 | Resend-backed receipt email + `initiates` table patch. Called directly by `stripe-webhook`. |
+| `send-nurture-email` | v3 | Anita's nurture template delivery. Called by the native bot nurture poller. |
 | `fireflies-webhook` | v4 | Meeting transcript ingestion. |
 
 **`stripe-webhook` step order (critical for failure mode reasoning):**
@@ -612,10 +604,10 @@ Supabase hosts a second set of webhook handlers at `https://wzthxohtgojenukmdubz
 2. Find-or-create user via `supabase.auth.admin`
 3. Grant `member_access` row with `tier_slug`, `granted_by='stripe-webhook'`
 4. Insert `audit_trail` row with `action='stripe_purchase'`
-5. Receipt email path → `send-purchase-email` Edge Function (post-purge, direct call — no Make relay)
+5. Receipt email path → `send-purchase-email` Edge Function (direct call)
 6. Fire-and-forget fetch → `BOT_WEBHOOK_URL` (Telegram bot fan-out for revenue signal)
 
-**Verify before running a paid test:** The Make-purge work in S113 rewired the receipt-email path off Make.com's `MAKE_STRIPE_ROUTER_URL`. Confirm by reading `supabase/functions/stripe-webhook/index.ts` source — the live code is the source of truth for step 5's exact call shape.
+The live code at `supabase/functions/stripe-webhook/index.ts` is the source of truth for step 5's exact call shape — read it before running a paid test.
 
 **Relevant Edge Function env vars (live in Supabase, not Railway):**
 
@@ -679,7 +671,7 @@ Per-bot calibrated directives, decision trees, autonomy loops, reflection schema
 | YouTube Growth Protocol v2.0 | `SOVEREIGN-YOUTUBE-GROWTH-PROTOCOL.md` (repo root) |
 | Canonical IDs | `SovereignSynthesisProjects/gravity-claw-skills-vault/SYSTEM_IDS_CANONICAL.md` |
 | Session history | [`HISTORY.md`](./HISTORY.md) |
-| Runtime state | Read live from `src/voice/tts.ts`, `src/index.ts`, Railway. (LIVE_STATE.md retired 2026-04-24 — do not recreate.) |
+| Runtime state | Read live from `src/voice/tts.ts`, `src/index.ts`, Railway env. Do not cache to a file. |
 | Revenue-first gate | [`NORTH_STAR.md`](./NORTH_STAR.md) |
 
 ---

@@ -1028,6 +1028,68 @@ Three live systems. **Never cross-contaminate.**
 
 ---
 
+## 3.5 DEPLOYMENT MATRIX (added S127 — single source of truth for "how does X reach prod")
+
+**Why this section exists:** the system has FOUR distinct deploy planes (Railway / GHCR+RunPod / Vercel / Supabase) and each has a different trigger and lag profile. Without this map, every new session has to re-derive the deploy story from scratch and gets it wrong. If a code change isn't taking effect, this is the table that tells you why.
+
+| Surface | What lives there | Trigger | Lag | Verify |
+|---|---|---|---|---|
+| **Railway (bot)** | `src/**`, `Dockerfile.bot`, `package.json` | Push to `main` → Railway auto-deploys | ~2-3 min | `https://railway.com/project/77e69bc6-f7db-4485-a756-ec393fcd280e` deploys tab; `/status` in any bot DM shows live git SHA |
+| **GHCR (pod image)** | `pod/**`, `brand-assets/**`, `pod/Dockerfile`, `.github/workflows/pod-build.yml` | Push to `main` touching above paths → GitHub Actions builds + pushes to `ghcr.io/7acerich1-creator/sovereign-sentinel-pod` | ~5-10 min | `https://github.com/7acerich1-creator/Sovereign-Sentinel-Bot/actions` workflow run status |
+| **RunPod (pod template)** | Image tag the pod pulls on cold start | **NEEDS VERIFICATION.** Either auto-pulls `:latest` on every wake, or template pinned to a specific SHA. **Architect: please confirm and update this row.** | Pod cold-start = next image pull | RunPod console template settings |
+| **Vercel (Mission Control)** | `Sovereign-Mission-Control/repo/**` (separate repo) | Push to `main` of THAT repo → Vercel auto-deploys | ~1-2 min | Vercel dashboard for `sovereign-mission-control` project |
+| **Vercel (Landing)** | `Sovereign-Mission-Control/sovereign-landing/**` (separate repo) | Push to `main` of THAT repo → Vercel auto-deploys | ~1-2 min | Vercel dashboard for `sovereign-landing` project |
+| **Supabase (schema)** | `supabase/migrations/*.sql` | **MANUAL** — apply via `mcp__supabase__apply_migration` tool, or `supabase db push` from CLI | Immediate | `list_migrations` tool |
+| **Supabase (edge functions)** | `supabase/functions/<name>/index.ts` | **MANUAL** — apply via `mcp__supabase__deploy_edge_function` tool, or `supabase functions deploy <name>` from CLI | Immediate | `list_edge_functions` tool |
+| **Supabase (cron / pg_cron)** | SQL `cron.schedule(...)` calls | **MANUAL via SQL** — invoke from Supabase SQL editor or `execute_sql` tool. NOT in migrations (avoids re-firing on every redeploy). | Per cron schedule | `SELECT * FROM cron.job` |
+
+### 3.5.1 Pod deploy — full path
+
+A push to `main` that changes any file under `pod/**` triggers TWO things in sequence:
+
+1. **GitHub Actions** (`.github/workflows/pod-build.yml`) — runs on GitHub's runners (no local Docker needed), builds the image from `pod/Dockerfile` with repo root as context, pushes to GHCR with three tags: `:latest`, `:<full-sha>`, `:sha-<short-sha>`. ~5-10 min build time. Watch at the Actions tab; image appears in the repo's Packages.
+2. **RunPod template** — the live pod (or next pod wake) needs to PULL the new image. **THIS STEP IS CURRENTLY UNDOCUMENTED — Architect must verify whether the template is set to auto-pull `:latest` or pinned to a specific SHA.** Once verified, document the answer here and remove this caveat.
+
+If RunPod is on `:latest` → next pipeline run after the GHCR build finishes uses the new image. Fully automated.
+If RunPod is on a pinned SHA → after each pod-build run, you must update the RunPod template's image tag to the new SHA, then any active pod must be killed/rewoken.
+
+**Operational tells that the pod hasn't refreshed:**
+- Pipeline runs but renders look identical to before a known pod-side change (e.g., new compose.py logic doesn't show in thumbnails).
+- Pod `/health` endpoint returns the old git SHA.
+
+### 3.5.2 Railway deploy — non-pipeline-blocking rule
+
+Per `feedback_no_push_during_pipeline.md`: never push to `main` while a pipeline is running. Railway auto-deploys, kills the running container, and pipeline state vaporizes. Pre-push verification:
+```sql
+SELECT * FROM crew_dispatch
+WHERE status IN ('claimed','in_progress','pending')
+ORDER BY created_at DESC LIMIT 5;
+```
+Empty result = safe. Otherwise wait or `/cancel`.
+
+### 3.5.3 Mission Control & Landing — separate repos, separate clones
+
+The Mission Control dashboard and Landing pages are NOT in this repo. They live at `C:\Users\richi\Sovereign-Mission-Control\repo\` and `C:\Users\richi\Sovereign-Mission-Control\sovereign-landing\` respectively, each their own git checkout, each their own Vercel project. Any frontend change to those is a push from their own folder, not from this one. See §3 → File System.
+
+### 3.5.4 Supabase — schema vs functions vs cron
+
+Three different things deploy to Supabase, three different mechanisms:
+- **Schema migrations** are SQL files in `supabase/migrations/` and apply via the Supabase MCP tool or `supabase db push`. They're idempotent (safe to re-run) only if written that way; default is one-shot.
+- **Edge functions** live in `supabase/functions/<name>/index.ts` and deploy via `mcp__supabase__deploy_edge_function` or the CLI. Each function is independently versioned at the Supabase side.
+- **Cron jobs** (pg_cron) are NOT in migrations — they're invoked once via SQL editor when a new job is added (S126 bot health canary, for example). Putting them in migrations causes them to re-register / duplicate on each apply.
+
+### 3.5.5 First action when "my change isn't live"
+
+When something you committed isn't visible in production, walk this in order:
+1. **Did the right surface get pushed?** Check `git log -1` — confirm the commit hash matches what you expected. Confirm the file path matches the surface (e.g., `pod/**` change won't deploy via Railway).
+2. **Did the trigger fire?** Railway auto-deploy: check Railway dashboard. GHA: check the Actions tab. Manual surfaces: did you actually run the deploy command?
+3. **Did the trigger succeed?** Railway logs / GHA workflow log / Vercel build log. Build failures here are the most common silent gap.
+4. **Is the live runtime serving the new artifact?** `/status` in any bot DM shows live git SHA for Railway. Pod `/health` for the pod (when implemented). For Vercel, the dashboard shows the deployed commit.
+
+**Default assumption:** if you didn't explicitly push to the right surface, your change isn't live. The four planes do not propagate to each other.
+
+---
+
 ## 4. GIT WORKFLOW
 
 ### Environments
@@ -1076,13 +1138,13 @@ Each agent has its own failover chain so a quota hit on one provider doesn't sta
 | **Veritas** | anthropic → gemini → groq | Chief of Staff. Strategic reasoning. |
 | **Anita** | anthropic → gemini → groq | Marketing Lead. Cross-domain copy strategy. |
 | **Sapphire** | anthropic → gemini → groq | PA / COO. ddxfish intelligence level. |
-| **Alfred** | gemini → groq (NO Anthropic) | Deterministic seed work. Bulk cycles. |
+| **Alfred** | gemini → groq → anthropic (last-resort, S127) | Daily seed (~1 run/day). Anthropic catches dual-provider outages. ~$3-5/mo cost ceiling. |
 | **Vector** | gemini → groq (NO Anthropic) | Numerical analytics. Bulk metrics. |
 | **Yuki** | gemini → groq Key B (NO Anthropic) | High-volume engagement. Dual Groq routing. |
 | **SS Pipeline** | gemini → groq Key A (NO Anthropic) | High-volume video production. |
 | **TCF Pipeline** | gemini → groq Key B (NO Anthropic) | Avoids Groq stampede with SS. |
 
-**Anthropic is locked to Veritas / Anita / Sapphire only.** S121d rule: pipelines and Yuki/Vector/Alfred never touch Anthropic credits — a single Gemini+Groq outage on those would otherwise drain the budget across the whole crew in minutes.
+**Anthropic primary on Veritas / Anita / Sapphire. Last-resort fallback on Alfred (S127).** S121d original rule was Anthropic-locked-to-Sapphire-only; Phase 7 (S125+) elevated Veritas + Anita to primary; S127 (2026-05-01) added Alfred as last-resort fallback after the 2026-05-01 Gemini-403 + Groq-413 double-outage killed Alfred's daily seed silently. Yuki/Vector + both pipelines remain NO-Anthropic — they fire too often for safe Anthropic exposure.
 
 `AGENT_LLM_TEAMS` env var on Railway can override the chain shape; `ANTHROPIC_MODEL` env var sets the model id (must be a current, real model — e.g. `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`). Default in `config.ts` is `claude-sonnet-4-6` as of S127.
 

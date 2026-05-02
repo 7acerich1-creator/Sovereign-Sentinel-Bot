@@ -5073,6 +5073,36 @@ async function main() {
               }
             }
 
+            // ── S127: CREW AGENT CONTEXT PREFIX (Anita / Yuki / Vector / Veritas / Alfred) ──
+            // Closes the Phase 8 read-side gap: storage was generalized but only
+            // Sapphire's prefix builder existed. Now every crew agent gets their
+            // own core memory + personal namespace recall auto-injected before
+            // their turn — instead of requiring them to remember to call
+            // core_memory_view first (which Gemini Flash agents under iter cap=3
+            // basically never did unprompted).
+            //
+            // Skip for: Sapphire (already handled above), dispatch tasks (carry
+            // own payload, context wasted), and YouTube-URL acknowledgements.
+            const CREW_AGENTS_FOR_PREFIX = new Set(["anita", "yuki", "vector", "veritas", "alfred"]);
+            if (
+              CREW_AGENTS_FOR_PREFIX.has(agentCfg.name) &&
+              !message.metadata?.isDispatch
+            ) {
+              try {
+                const { buildAgentContextPrefix } = await import("./agent/agent-context-prefix");
+                const userMsg = message.content; // capture before mutation
+                const ctxPrefix = await buildAgentContextPrefix({
+                  agentName: agentCfg.name,
+                  userMessage: userMsg,
+                  pinecone: pineconeMemory.isReady() ? pineconeMemory : null,
+                });
+                message.content = `${ctxPrefix}\n\n${userMsg}`;
+              } catch (ctxErr: any) {
+                console.warn(`[CrewContext/${agentCfg.name}] prefix build failed: ${ctxErr.message}`);
+                // Soft failure — let the message proceed without prefix rather than block.
+              }
+            }
+
             // Log task to Supabase command_queue
             const agentTaskId = await logTask({
               command: message.content.slice(0, 500),

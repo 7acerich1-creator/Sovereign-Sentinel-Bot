@@ -600,14 +600,20 @@ async function main() {
   const { MemoryTool: MemoryFatTool, DiaryTool: DiaryFatTool } = await import("./tools/sapphire/_fat");
   tools.push(new MemoryFatTool());
 
-  // ── S125+ Phase 9: Diary fat tool (agent-aware via ToolContext) ──
+  // ── Diary fat tool (agent-aware via ToolContext) ──
   // diary.write / read / read_significance / reflect — all auto-routed to the
-  // calling agent's diary slot via ctx.agentName. Generalized from sapphire_diary
-  // to agent_diary. Sleeptime consolidator + reflection schedulers read from
-  // these per-agent diaries.
+  // calling agent's diary slot via ctx.agentName. Sleeptime consolidator +
+  // reflection schedulers read from these per-agent diaries.
   tools.push(new DiaryFatTool());
 
-  // ── S126 Self-Healing Layer 3: Tool Uniqueness Re-Check ──
+  // ── Goals + Progress Journal (Sapphire-scoped) ──
+  // goals.set / update / log_progress / list / status. Hierarchical goals
+  // (parent/child) with timestamped progress entries against
+  // sapphire_goals + sapphire_goal_progress.
+  const { GoalsTool } = await import("./tools/sapphire/goals");
+  tools.push(new GoalsTool());
+
+  // ── Self-Healing Layer 3: Tool Uniqueness Re-Check ──
   // The boot-time smoke test ran before tools were registered. Now that the
   // global tool array is finalized, verify no two tools share a definition
   // name — a name collision means one of them silently shadows the other,

@@ -2,6 +2,8 @@
 
 > **This file holds INVARIANTS ONLY.** Things that don't change session-to-session: identity, infrastructure IDs, env var map, schemas, protocols, the canonical account map, the product ladder, architectural rules. **For session-by-session history** see `HISTORY.md` (append-only journal, search-only — do not auto-load). **Runtime state is read on-demand from the code, not cached.** Grep `src/voice/tts.ts`, `src/index.ts`, `package.json`, or check Railway env directly for current chain shape. If this file contradicts the code, the code wins — patch this file and move on. **For revenue-first sanity check** see `NORTH_STAR.md`. Read before authorizing any build task.
 
+**Last trimmed:** 2026-05-03 (S129 — Sapphire's `reminders` fat-tool was broken since Phase 4 refactor: schema declared `text`/`id`/`keyword` but underlying narrow tools (`SetReminderTool` etc.) read `message`/`reminder_id`/`query`/`message_contains`. Every set/cancel/cancel_series call returned "message is required" or equivalent, which Sapphire surfaced as "backend mismatch" in chat. Fix: `_fat.ts` `RemindersTool.execute` now remaps params per action; added `force_create`/`dry_run`/`window_hours`/`include_all_statuses` to schema; added VAGUE TIMES guidance so "later tonight" defaults to 8pm CDT instead of triggering a clarification ping-pong. Commit c568192. See §6 + Known Invariants.)
+
 **Last trimmed:** 2026-05-02 (S128b — shipped browser-based IG comment replier (`yuki-instagram-browser-replier.ts`, commit 756d2f7) that bypasses the dead Meta API path entirely; mirrors the TikTok pattern, uses S128 cookie persistence, scheduled 95 min after boot then every 3h. New env vars `INSTAGRAM_HANDLE_SS=sovereign_synthesis` + `INSTAGRAM_HANDLE_CF=the_containment_field` set on Railway. New table `instagram_browser_replies_seen`. Also: Railway Raw Editor has a quote-parsing bug that silently re-keys variables with values containing quotes — DO NOT use Raw Editor for bulk edits; use New Variable form per-variable instead. See §3.6 + §15.).
 
 ---
@@ -853,6 +855,7 @@ When changing the status of ANY system component, update every section that refe
 - **TikTok accounts are CROSSED** relative to other platforms (see Section 8).
 - **Faceless IS the thesis, not a defect.** Never propose Ace films/voices himself. Max compromise: static photo on thumbnail. See `feedback_never_ace_on_camera.md`.
 - **Zero MRR against $1.2M target** — every build must answer "does this move one of NORTH_STAR's 5 input metrics in <7 days?" Revenue-first pushback is authorized.
+- **Fat-tool dispatch must remap params** — `_fat.ts` tools wrap narrow `*Tool` classes that have their own arg names. When adding/editing a fat tool, verify the schema field names match what the narrow tool reads, OR remap inside `execute()` before calling `narrowT.execute(args)`. The reminders tool was silently broken this way for ~2 weeks (S129). Pattern check: `grep "args\\." src/tools/sapphire/<narrow>.ts` and compare to the fat schema's `parameters` keys.
 
 ---
 

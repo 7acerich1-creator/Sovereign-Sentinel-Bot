@@ -12,7 +12,7 @@ import type {
 import { config } from "../config";
 import { PERSONA_REGISTRY, DEFAULT_PERSONA, getSystemPrompt, Persona } from "./personas";
 import type { PineconeMemory, KnowledgeNode } from "../memory/pinecone";
-// S125+: per-LLM-call spend logging. Fire-and-forget, never blocks the loop.
+// Per-LLM-call spend logging. Fire-and-forget, never blocks the loop.
 import { logSpend } from "../tools/spend-logger";
 
 // Persona-based system prompt generation is now handled by getSystemPrompt(persona)
@@ -24,16 +24,16 @@ export interface AgentIdentity {
 }
 
 export class AgentLoop {
-  // S121: Made public so the Sapphire DM block in index.ts can call
-  // switchPrimary() on the underlying FailoverLLM for introspective routing.
+  // Made public so the Sapphire DM block in index.ts can call switchPrimary()
+  // on the underlying FailoverLLM for introspective routing.
   public llm: LLMProvider;
   private tools: Map<string, Tool>;
   private memoryProviders: MemoryProvider[];
   private llmProviders: Map<string, LLMProvider> = new Map();
   private pinecone: PineconeMemory | null = null;
   private identity: AgentIdentity = { agentName: "veritas", namespace: "general" };
-  // S114q: Optional callback fired before each tool execution (per-message).
-  // Used by Sapphire DM handler to send tool indicators to Telegram.
+  // Optional callback fired before each tool execution (per-message). Used by
+  // Sapphire DM handler to send tool indicators to Telegram.
   private toolCallObserver?: (name: string, args: Record<string, unknown>) => Promise<void> | void;
 
   constructor(llm: LLMProvider, tools: Tool[], memoryProviders: MemoryProvider[]) {
@@ -47,23 +47,23 @@ export class AgentLoop {
     this.pinecone = pinecone;
   }
 
-  // S114q: Set per-message tool observer. Cleared automatically after processMessage.
+  // Set per-message tool observer. Cleared automatically after processMessage.
   setToolCallObserver(observer?: (name: string, args: Record<string, unknown>) => Promise<void> | void): void {
     this.toolCallObserver = observer;
   }
 
-  // S114r: Per-message context budget overrides. Sapphire DMs use cap=6 to stop
+  // Per-message context budget overrides. Sapphire DMs use cap=6 to stop
   // 12K-token bloat. Reset to undefined after each processMessage.
   private contextOverrides?: { maxRecentMessages?: number; skipSemanticSearch?: boolean };
   setContextOverrides(opts?: { maxRecentMessages?: number; skipSemanticSearch?: boolean }): void {
     this.contextOverrides = opts;
   }
 
-  // S125+ Agentic Refactor Phase 1: Per-message LLMOptions overrides. Used by the
-  // Sapphire DM lane to inject Anthropic-native server tools (web_search_20250305),
-  // extended thinking budget, and the interleaved-thinking beta header on every
-  // Anthropic call this turn. Other providers ignore unknown options. The Sapphire
-  // DM call site sets these before processMessage and clears them in finally so
+  // Per-message LLMOptions overrides. Used by the Sapphire DM lane to inject
+  // Anthropic-native server tools (web_search_20250305), extended thinking
+  // budget, and the interleaved-thinking beta header on every Anthropic call
+  // this turn. Other providers ignore unknown options. The Sapphire DM call
+  // site sets these before processMessage and clears them in finally so
   // they NEVER leak across messages, mirroring the snapshotTools pattern.
   private llmOptionsOverrides?: Partial<import("../types").LLMOptions>;
   setLLMOptionsOverrides(opts?: Partial<import("../types").LLMOptions>): void {
@@ -90,7 +90,7 @@ export class AgentLoop {
     this.tools.delete(name);
   }
 
-  // S114r: Replace the entire tool set for a single message (used by Sapphire
+  // Replace the entire tool set for a single message (used by Sapphire
   // tool-tiering — only load tools the message actually needs). Use with the
   // "around" pattern: snapshot before, replace, run, restore.
   snapshotTools(): Map<string, Tool> {
@@ -104,7 +104,7 @@ export class AgentLoop {
   }
 
   /**
-   * SESSION 108: Detect conversational messages that don't need tool access.
+   * Detect conversational messages that don't need tool access.
    * Returns true for greetings, opinions, chat, status questions, etc.
    * Returns false for anything that implies an action, data lookup, or command.
    *
@@ -151,12 +151,12 @@ export class AgentLoop {
     // Direct user messages use the full config limit (default 10).
     const maxIterations = iterationCap ?? config.security.maxAgentIterations;
 
-    // S125+: turn_id correlates all LLM calls within a single processMessage.
+    // turn_id correlates all LLM calls within a single processMessage.
     // Multiple iterations of the agent loop share one turn_id; the dashboard
     // can sum them or display them separately.
     const turnId = randomUUID();
 
-    // SESSION 44: LIGHT MODE — tools disabled, single-pass text response.
+    // LIGHT MODE — tools disabled, single-pass text response.
     // Used by introspection tasks (stasis_self_check) where tool calls
     // burn iteration budget without contributing to the final answer.
     // Drops ~2,900 tokens of tool schemas per request AND prevents the
@@ -171,8 +171,8 @@ export class AgentLoop {
     console.log(`🤖 [AgentLoop] Active Persona: ${persona.name} (${persona.role})`);
     console.log(`📡 [AgentLoop] Active Model: ${activeLLM.model} `);
 
-    // SESSION 35: DISPATCH MODE — bypass all memory loading for dispatch tasks.
-    // Root cause of 25-27K token bloat: buildContext() loads 20 messages × 3 providers
+    // DISPATCH MODE — bypass all memory loading for dispatch tasks.
+    // Root cause of token bloat: buildContext() loads 20 messages × 3 providers
     // + 50 facts + 3 summaries + 9 search results + 3 Pinecone recalls = ~48 context
     // messages for a simple dispatch task that only needs the payload.
     // Dispatch tasks carry their own instructions — memory/history is pure waste.
@@ -219,7 +219,7 @@ export class AgentLoop {
     // 3. Build tool definitions
     const allTools = Array.from(this.tools.values());
 
-    // SESSION 108: CONVERSATIONAL DETECTION — strip tools for chat messages.
+    // CONVERSATIONAL DETECTION — strip tools for chat messages.
     // Gemini sees 35 tool schemas and compulsively calls them even on "hey what's up".
     // The system prompt says "don't use tools for conversation" but Gemini ignores it.
     // Fix: detect conversational messages and route to text-only mode (zero tools).
@@ -228,14 +228,14 @@ export class AgentLoop {
 
     let toolDefs: ToolDefinition[];
     if (isTextOnly || isConversational) {
-      // SESSION 44: LIGHT MODE — ship zero tools. LLM must return text.
-      // SESSION 108: Also used for conversational messages to prevent tool spam.
+      // LIGHT MODE — ship zero tools. LLM must return text.
+      // Also used for conversational messages to prevent tool spam.
       toolDefs = [];
       console.log(`⚡ [AgentLoop] ${isConversational ? "CONVERSATIONAL" : "LIGHT"} MODE — 0 tools (text-only response)`);
     } else if (isDispatch) {
-      // SESSION 35: DISPATCH MODE — only include tools the agent actually needs.
+      // DISPATCH MODE — only include tools the agent actually needs.
       // Sending 33+ tool schemas (each 200-500 tokens) to every dispatch call
-      // was adding ~5-8K tokens of dead weight. Dispatch tasks have explicit
+      // adds ~5-8K tokens of dead weight. Dispatch tasks have explicit
       // execution directives that name the tools they need.
       const dispatchCoreTools = new Set([
         // Every dispatch task needs these to complete/report
@@ -283,10 +283,10 @@ export class AgentLoop {
       }
 
       console.log(`🔄 [AgentLoop] Iteration ${iterations}/${maxIterations} — calling LLM...`);
-      // S119c: maxTokens raised 8192→16384. Cost on flash-lite is fractions of a
-      // cent per long reply; latency only increases when the model actually fills
-      // the budget (rare). Removes ceiling for "deep/long reply" requests.
-      // S125+: merge per-message LLMOptions overrides (server tools, thinking, betas).
+      // maxTokens 16384 — cost on flash-lite is fractions of a cent per long
+      // reply; latency only increases when the model actually fills the
+      // budget (rare). Removes ceiling for "deep/long reply" requests.
+      // Merge per-message LLMOptions overrides (server tools, thinking, betas).
       let response = await activeLLM.generate(context, {
         systemPrompt: systemPrompt,
         tools: toolDefs.length > 0 ? toolDefs : undefined,
@@ -300,7 +300,7 @@ export class AgentLoop {
         console.log(`📊 LLM [${response.model}] tokens: ${response.usage.inputTokens}→${response.usage.outputTokens} (iter ${iterations})`);
       }
 
-      // S125+: fire-and-forget spend log — every iteration is a separate row.
+      // Fire-and-forget spend log — every iteration is a separate row.
       logSpend(response, {
         agentName: this.identity.agentName,
         channel: message.channel,
@@ -309,13 +309,13 @@ export class AgentLoop {
         iterationCount: iterations,
       });
 
-      // S119c: Empty-response retry + diagnostic.
-      // Symptom we're hunting: Gemini returns finishReason=STOP|SAFETY|OTHER
-      // with content="" and zero tool calls — usually the safety classifier
-      // silently zeroing out introspective threads ("self-aware AI" cluster),
-      // sometimes a token-exhaustion edge or a transient API blip. Old code
-      // surfaced "⚠️ No response generated." which was both ugly and unhelpful
-      // for diagnosis. New behavior: log finishReason + provider + usage,
+      // Empty-response retry + diagnostic.
+      // Symptom: Gemini returns finishReason=STOP|SAFETY|OTHER with content=""
+      // and zero tool calls — usually the safety classifier silently zeroing
+      // out introspective threads ("self-aware AI" cluster), sometimes a
+      // token-exhaustion edge or a transient API blip. Old code surfaced
+      // "⚠️ No response generated." which was both ugly and unhelpful for
+      // diagnosis. New behavior: log finishReason + provider + usage,
       // retry the LLM call ONCE, and if that also empties, fall back to an
       // in-character one-liner instead of a system warning.
       const isEmpty =
@@ -330,7 +330,7 @@ export class AgentLoop {
           `outputTokens=${response.usage?.outputTokens || "?"} — likely safety classifier or token edge. Retrying once.`
         );
         try {
-          // S125+: same overrides merge on the empty-response retry path.
+          // Same overrides merge on the empty-response retry path.
           const retry = await activeLLM.generate(context, {
             systemPrompt: systemPrompt,
             tools: toolDefs.length > 0 ? toolDefs : undefined,
@@ -338,7 +338,7 @@ export class AgentLoop {
             ...(this.llmOptionsOverrides || {}),
           });
           console.log(`🔁 [AgentLoop] Retry — finishReason: ${retry.finishReason}, contentLen: ${retry.content?.length || 0}`);
-          // S125+: log the retry call's spend too — it's a separate billed call.
+          // Log the retry call's spend too — it's a separate billed call.
           logSpend(retry, {
             agentName: this.identity.agentName,
             channel: message.channel,
@@ -367,12 +367,12 @@ export class AgentLoop {
             ? response.content
             : FALLBACK;
 
-        // S121d: Strip hidden <thinking> blocks before returning to Telegram or saving to memory.
+        // Strip hidden <thinking> blocks before returning to Telegram or saving to memory.
         if (finalResponse.includes("<thinking>")) {
           finalResponse = finalResponse.replace(/<thinking>[\s\S]*?<\/thinking>/i, "").trim();
         }
 
-        // SESSION 35: Skip memory save + Pinecone embed for dispatch tasks.
+        // Skip memory save + Pinecone embed for dispatch tasks.
         // Dispatch payloads are system-generated, not conversation. Saving them
         // pollutes chat memory and wastes Pinecone writes + embedding API calls.
         if (!isDispatch) {
@@ -402,8 +402,8 @@ export class AgentLoop {
         chatId: message.chatId,
         userId: message.userId,
         channel: message.channel,
-        // S125+ Phase 8: agentName populated from AgentLoop identity so tools
-        // that scope by agent (memory, archival, etc.) can route correctly.
+        // agentName populated from AgentLoop identity so tools that scope by
+        // agent (memory, archival, etc.) can route correctly.
         agentName: this.identity.agentName,
         sendMessage: async (text: string) => {
           // This would be wired to the channel's sendMessage
@@ -431,7 +431,7 @@ export class AgentLoop {
   private async buildContext(message: Message): Promise<LLMMessage[]> {
     const context: LLMMessage[] = [];
 
-    // SESSION 35: Use ONLY the first (primary) memory provider for context.
+    // Use ONLY the first (primary) memory provider for context.
     // Previously iterated ALL 3 providers (SQLite + Markdown + Supabase Vector),
     // each loading 20 messages + 50 facts + summary + 3 search results.
     // That's 60+ duplicate messages per call. SQLite is the canonical store.
@@ -460,12 +460,11 @@ export class AgentLoop {
         });
       }
 
-      // Load recent messages — default 15 (S127: dropped 30 → 15). Override via
-      // contextOverrides — Sapphire DM also uses 15 now (was 50, see index.ts).
+      // Load recent messages — default 15. Override via contextOverrides.
       const recentCap = this.contextOverrides?.maxRecentMessages ?? 15;
       let recent = await provider.getRecentMessages(message.chatId, recentCap);
 
-      // ── S122: HYDRATION PROTOCOL ──
+      // ── HYDRATION PROTOCOL ──
       // If primary provider (SQLite) is missing history (e.g. after Railway reboot),
       // attempt to hydrate from secondary providers (Supabase).
       if (recent.length < recentCap && this.memoryProviders.length > 1) {
@@ -481,7 +480,7 @@ export class AgentLoop {
                 const key = `${m.role}:${m.content.slice(0, 100)}`;
                 seen.set(key, m);
               });
-              
+
               const merged = Array.from(seen.values())
                 .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
                 .slice(-recentCap);
@@ -489,13 +488,13 @@ export class AgentLoop {
               if (merged.length > recent.length) {
                 const addedCount = merged.length - recent.length;
                 console.log(`🧠 [MemoryHydration] SQLite was missing history. Hydrated ${addedCount} messages from ${secondary.name}.`);
-                
+
                 // BACK-HYDRATION: Save the missing messages back to SQLite so the next turn is instant
                 const newMessages = merged.filter(m => !recent.some(r => `${r.role}:${r.content.slice(0, 100)}` === `${m.role}:${m.content.slice(0, 100)}`));
                 for (const newMsg of newMessages) {
                   await provider.saveMessage(newMsg).catch(() => {});
                 }
-                
+
                 recent = merged;
                 break; // Stop after first successful hydration
               }
@@ -596,8 +595,8 @@ export class AgentLoop {
   ): Promise<ToolResult[]> {
     const results: ToolResult[] = [];
 
-    // S114v: Hard cap on retry loops. Track (toolName + JSON args) — if same
-    // call signature repeats 2+ times in this message, refuse the third+ call.
+    // Hard cap on retry loops. Track (toolName + JSON args) — if same call
+    // signature repeats 2+ times in this message, refuse the third+ call.
     // Prevents cost-burning loops when LLM retries blindly on tool errors
     // (e.g. set_reminder rejecting past dates → retry with same date → loop).
     const callSignatures: Map<string, number> = new Map();
@@ -631,7 +630,7 @@ export class AgentLoop {
 
       try {
         console.log(`🔧 Executing tool: ${tc.name}(${JSON.stringify(tc.arguments).slice(0, 200)})`);
-        // S114q: Notify observer (Sapphire DM uses this to send tool indicators)
+        // Notify observer (Sapphire DM uses this to send tool indicators)
         if (this.toolCallObserver) {
           try { await this.toolCallObserver(tc.name, tc.arguments); } catch { /* never block tool exec */ }
         }

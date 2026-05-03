@@ -1,15 +1,13 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// GRAVITY CLAW v3.0 — Proactive Briefings
-// Morning check-in, evening recap, smart recommendations
-// SESSION 108: Rewired to pull REAL data from Supabase
-// (youtube_analytics, landing_analytics, activity_log, crew_dispatch)
-// instead of empty memory stores.
+// GRAVITY CLAW — Proactive Briefings
+// Veritas weekly brand reflection (Monday 17:10 UTC) + smart recommendations.
+// Pulls live data from Supabase (youtube_analytics, landing_analytics,
+// activity_log, crew_dispatch).
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { LLMProvider, MemoryProvider, Channel } from "../types";
-import { config } from "../config";
 import { PERSONA_REGISTRY, getSystemPrompt } from "../agent/personas";
-// S121: prefer the full ddxfish-assembled blueprint over the static persona stub.
+// Prefer the full ddxfish-assembled blueprint over the static persona stub.
 // Falls back to getSystemPrompt(persona) if assembly returns empty.
 import { assembleCrewPrompt } from "../agent/crew-prompt-builder";
 import { appendThoughtTag } from "../channels/agent-voice";
@@ -57,10 +55,10 @@ export class ProactiveBriefings {
     this.chatId = chatId;
   }
 
-  async morningBriefing(): Promise<void> {
+  async weeklyBriefing(): Promise<void> {
     const context = await this.gatherContext();
 
-    const prompt = `Generate a morning sovereign activation briefing for the Architect.
+    const prompt = `Generate the weekly sovereign brand reflection for the Architect.
 
 LIVE DATA (pulled from production systems just now):
 ${context}
@@ -69,84 +67,38 @@ Rules:
 - Reference the ACTUAL numbers above — views, visitors, dispatch counts, top videos
 - Do NOT fabricate anything not present in the data
 - If a section says "unavailable", skip it — don't mention the gap
+- Cite Supabase row IDs or Pinecone vector IDs that triggered each observation
 
 Include:
-1. Activity Summary: crew dispatch activity, content pipeline output
-2. YouTube pulse: total views across channels, any standout videos
-3. Landing page pulse: visitors, top pages
-4. One tactical sovereign directive for today based on what the data reveals
-5. A frequency-lock affirmation
+1. Macro pattern observed across the week (cross-crew synthesis, not single-table summary)
+2. YouTube pulse: total views across channels, standout videos, drift signals
+3. Landing page pulse: visitor trends, conversion signals
+4. One strategic direction shift to propose — with a 'stay course' alternative
+5. The single weakest link in the funnel and one concrete fix
 
-Keep it under 200 words. Be direct, sovereign, data-driven. Format for Telegram (Markdown).`;
+Keep it under 250 words. Be direct, sovereign, data-driven. Format for Telegram (Markdown).`;
 
     try {
       const veritasPrompt = await veritasSystemPrompt();
       const response = await this.llm.generate(
         [{ role: "user", content: prompt }],
-        { systemPrompt: veritasPrompt, maxTokens: 600 }
+        { systemPrompt: veritasPrompt, maxTokens: 700 }
       );
 
-      // S121: append thought-tag tying the morning read to the macro pattern
       const withTag = await appendThoughtTag(
         "veritas",
         response.content,
-        { action: "Morning intelligence briefing emitted from live Supabase data", metric: "MRR" },
+        { action: "Weekly brand reflection emitted from live Supabase data", metric: "MRR" },
       );
 
       await this.channel.sendMessage(
         this.chatId,
-        `☀️ *MORNING PULSE — SOVEREIGN ACTIVATION*\n\n${withTag}`,
+        `📡 *WEEKLY BRAND REFLECTION*\n\n${withTag}`,
         { parseMode: "Markdown" }
       );
-      console.log("☀️ Morning briefing sent");
+      console.log("📡 Weekly briefing sent");
     } catch (err: any) {
-      console.error("Morning briefing failed:", err.message);
-    }
-  }
-
-  async eveningRecap(): Promise<void> {
-    const context = await this.gatherContext();
-
-    const prompt = `Generate an evening debrief for the Architect.
-
-LIVE DATA (pulled from production systems just now):
-${context}
-
-Rules:
-- Reference the ACTUAL numbers above
-- Do NOT fabricate anything not present in the data
-- If a section says "unavailable", skip it
-
-Include:
-1. Activity Summary: what the crew accomplished today (dispatches completed)
-2. YouTube pulse: views, any anomalies or standout performers
-3. Landing page pulse: visitor trends
-4. One sovereign intent for tomorrow morning based on what the data reveals
-
-Keep it under 200 words. Format for Telegram (Markdown).`;
-
-    try {
-      const veritasPrompt = await veritasSystemPrompt();
-      const response = await this.llm.generate(
-        [{ role: "user", content: prompt }],
-        { systemPrompt: veritasPrompt, maxTokens: 600 }
-      );
-
-      // S121: append thought-tag tying the evening read to tomorrow's leverage
-      const withTag = await appendThoughtTag(
-        "veritas",
-        response.content,
-        { action: "Evening debrief emitted; tomorrow's macro intent surfaced", metric: "MRR" },
-      );
-
-      await this.channel.sendMessage(
-        this.chatId,
-        `🌙 *EVENING PULSE — SOVEREIGN DEBRIEF*\n\n${withTag}`,
-        { parseMode: "Markdown" }
-      );
-      console.log("🌙 Evening recap sent");
-    } catch (err: any) {
-      console.error("Evening recap failed:", err.message);
+      console.error("Weekly briefing failed:", err.message);
     }
   }
 

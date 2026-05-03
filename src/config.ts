@@ -124,8 +124,6 @@ export const config: GravityClawConfig = {
   },
 
   scheduler: {
-    morningBriefingHour: envInt("MORNING_BRIEFING_HOUR", 15),  // 15 UTC = 10 AM CDT
-    eveningRecapHour: envInt("EVENING_RECAP_HOUR", 1),        // 01 UTC = 8 PM CDT
     heartbeatIntervalMs: envInt("HEARTBEAT_INTERVAL_MS", 300_000),
   },
 

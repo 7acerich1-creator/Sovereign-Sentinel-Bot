@@ -7,7 +7,7 @@
 import type { Tool, ToolContext, ToolDefinition } from "../types";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
-// SESSION 31: Use service role key for crew_dispatch writes — bypasses RLS.
+// Use service role key for crew_dispatch writes — bypasses RLS.
 // Root cause: anon key was blocked by RLS policies on crew_dispatch, briefings, tasks tables.
 // Every failed write triggered an agent retry loop, which burned more LLM tokens reporting the failure.
 // Falls back to anon key if service role isn't set (old behavior).
@@ -35,13 +35,7 @@ export interface DispatchRecord extends DispatchTask {
 }
 
 // ── Predefined Pipeline Routes ──
-// Alfred → Yuki (timestamped hooks) + Anita (cleaned transcript) + Sapphire (summary)
-// Yuki → Anita ONLY (viral package for caption weaponization)
-// Anita → Yuki (platform-ready posts for distribution) + Vector (metrics/analytics only)
-// Yuki is the SOLE distribution endpoint — she posts to Buffer and publishes video.
-// Vector NEVER posts. He analyzes performance and recommends strategy changes.
-
-// SESSION 36: Pipeline routes DISABLED. These auto-handoffs never fire because
+// Pipeline routes DISABLED. These auto-handoffs never fire because
 // agents produce freeform briefs, not structured payloads with the required keys.
 // ContentEngine + VidRush handle all production deterministically.
 // Alfred's value is PIPELINE_URL → VidRush trigger (handled in index.ts auto-pipeline block).
@@ -242,7 +236,7 @@ export async function claimAllPending(agentNames: string[], limitPerAgent = 1): 
 /**
  * Complete a dispatch task with result.
  *
- * S114p: ALSO triggers business learning loop — successful completions get
+ * Also triggers business learning loop — successful completions get
  * a 1-line insight extracted via Gemini Flash and written to that agent's
  * Pinecone namespace. Best-effort, fire-and-forget. The business learns from
  * itself; without this, agents execute and forget. Skipped for failures.
@@ -260,7 +254,7 @@ export async function completeDispatch(
   let dispatchPayload: any = null;
   if (status === "completed" && result && result.length >= 50) {
     try {
-      // S119c: also fetch payload — needed to recover reply_id for email_reply_draft tasks
+      // Also fetch payload — needed to recover reply_id for email_reply_draft tasks
       const lookupResp = await fetch(`${SUPABASE_URL}/rest/v1/crew_dispatch?id=eq.${taskId}&select=to_agent,task_type,payload`, {
         headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
       });
@@ -294,11 +288,9 @@ export async function completeDispatch(
     console.error(`[CrewDispatch] Complete error: ${err.message}`);
   }
 
-  // ── S127 (2026-05-01): Telegram failure-notify ──
-  // Closes the silent-death gap that caused 2026-05-01 Alfred outage to sit
-  // for 28 minutes with the Architect staring at a stale "ALFRED OVERRIDE
-  // ACTIVATED" message. Whatever crew agent dies, the Architect gets pinged
-  // immediately with the agent name, task type, dispatch ID, and a result
+  // ── Telegram failure-notify ──
+  // Closes the silent-death gap. Whatever crew agent dies, the Architect gets
+  // pinged immediately with the agent name, task type, dispatch ID, and a result
   // preview. Best-effort, non-blocking — never delays the PATCH above.
   if (status === "failed") {
     (async () => {
@@ -362,14 +354,12 @@ export async function completeDispatch(
       .catch((e) => console.warn(`[InsightExtractor] ${e.message}`));
   }
 
-  // ── S119c/d/h: Email reply draft → Telegram approval prompt ──
+  // ── Email reply draft → Telegram approval prompt ──
   // When Anita finishes drafting an inbound-email reply, fire the
   // ✉️ Anita's Draft Reply approval card to the Architect's Telegram.
   //
-  // S119h FIX: ALWAYS pull from content_drafts (the single source of truth).
-  // Removed the regex extractor — it kept matching garbage text in Anita's
-  // meta-summary results ("I'm ready for the next command.") instead of
-  // her actual draft. content_drafts is canonical; Anita writes there FIRST.
+  // ALWAYS pull from content_drafts (the single source of truth).
+  // content_drafts is canonical; Anita writes there FIRST.
   // Never blocks the dispatch loop; failures are logged.
   if (status === "completed" && taskType === "email_reply_draft" && dispatchPayload) {
     const replyId = String(dispatchPayload.reply_id || "");
@@ -440,7 +430,7 @@ export async function triggerPipelineHandoffs(
 
   for (const route of routes) {
     // ONLY dispatch if the agent produced the SPECIFIC structured payload key.
-    // Session 33 FIX: Removed the "full response fallback" that was causing infinite ping-pong loops.
+    // Removed the "full response fallback" that was causing infinite ping-pong loops.
     // Old behavior: if payloadKey wasn't found, forwarded the entire freeform response.
     // This meant EVERY agent completion dispatched downstream, even error messages and briefings.
     // New behavior: no structured key = no dispatch. Agents must produce the expected output format.

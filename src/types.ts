@@ -288,8 +288,6 @@ export interface GravityClawConfig {
     servers: Record<string, MCPServerConfig>;
   };
   scheduler: {
-    morningBriefingHour: number;
-    eveningRecapHour: number;
     heartbeatIntervalMs: number;
   };
   webhooks: {

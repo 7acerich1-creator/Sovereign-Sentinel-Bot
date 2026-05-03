@@ -444,37 +444,32 @@ async function main() {
     return new FailoverLLM(chain, llmTimeoutMs, primaryRetries);
   }
 
-  // S121d: Anthropic was originally locked to Sapphire ONLY.
-  // Architect's Anthropic balance was reserved for Sapphire's introspective threads.
-  // Pipelines + deterministic crew ran Gemini -> Groq with NO Anthropic fallback —
-  // a single Gemini+Groq outage on the high-volume agents/pipelines could drain
-  // the budget across the whole crew in minutes.
-  // S125+ Phase 7 (2026-04-30): Anita elevated to Marketing Lead, Veritas to Chief
-  // of Staff. Both promoted to Anthropic primary because their roles require
-  // strategic reasoning across domains.
-  // S127 (2026-05-01): Alfred kept on Gemini -> Groq, but Anthropic added as
-  // last-resort fallback after the 2026-05-01 Gemini-403 + Groq-413 double-outage
-  // killed the daily seed silently. Alfred fires once daily (~$0.07–0.16/run on
-  // Sonnet) — Anthropic exposure here is rounding-error and prevents the silent
-  // single-day-loss pattern. Yuki/Vector stay Gemini -> Groq (deterministic +
-  // higher fire-rate; Anthropic blast radius is real for them).
+  // LLM team routing rules:
+  //   - Anthropic primary: agents whose role requires strategic reasoning across
+  //     domains (Sapphire PA, Veritas Chief Brand Officer, Anita Marketing Lead).
+  //   - Gemini -> Groq: high-volume deterministic agents (Yuki, Vector) — keeps
+  //     Anthropic blast radius small. A single Gemini+Groq outage can't drain the
+  //     Anthropic budget through these agents.
+  //   - Alfred: Gemini -> Groq -> Anthropic last-resort. Fires once daily
+  //     (~$0.07–0.16/run on Sonnet) so the Anthropic fallback is rounding-error
+  //     and prevents silent single-day-loss patterns.
   const AGENT_LLM_TEAMS: Record<string, FailoverLLM> = {
-    alfred: buildTeamLLM(["gemini", "groq", "anthropic"], 1, false),    // S127: Gemini -> Groq -> Anthropic last-resort.
-    anita: buildTeamLLM(["anthropic", "gemini", "groq"], 1),    // S125+ Phase 7: MARKETING LEAD — Anthropic primary.
-    sapphire: buildTeamLLM(["anthropic", "gemini", "groq"], 1),  // Anthropic Primary — S121d ddxfish intelligence level restored.
-    veritas: buildTeamLLM(["anthropic", "gemini", "groq"], 1),  // S125+ Phase 7: CHIEF OF STAFF — Anthropic primary.
-    vector: buildTeamLLM(["gemini", "groq"], 1, false),    // Gemini -> Groq. NO Anthropic.
-    yuki: buildTeamLLM(["gemini", "groq"], 1, true),       // Gemini -> Groq. NO Anthropic.
+    alfred: buildTeamLLM(["gemini", "groq", "anthropic"], 1, false),    // Gemini -> Groq -> Anthropic last-resort.
+    anita: buildTeamLLM(["anthropic", "gemini", "groq"], 1),            // Marketing Lead — Anthropic primary.
+    sapphire: buildTeamLLM(["anthropic", "gemini", "groq"], 1),         // PA / COO — Anthropic primary.
+    veritas: buildTeamLLM(["anthropic", "gemini", "groq"], 1),          // Chief Brand Officer — Anthropic primary.
+    vector: buildTeamLLM(["gemini", "groq"], 1, false),                 // Gemini -> Groq. NO Anthropic.
+    yuki: buildTeamLLM(["gemini", "groq"], 1, true),                    // Gemini -> Groq. NO Anthropic.
   };
 
-  // S121d: Pipeline LLMs — Gemini-first, NO Anthropic fallback.
+  // Pipeline LLMs — Gemini-first, NO Anthropic fallback.
   // High-volume bulk work (30-50+ calls per video) — never let pipeline grunt
-  // work touch Anthropic credits reserved for Sapphire.
+  // work touch Anthropic credits.
   const pipelineLLM = buildTeamLLM(["gemini", "groq"], 1, false);     // Key A — SS pipeline. NO Anthropic.
   const tcfPipelineLLM = buildTeamLLM(["gemini", "groq"], 1, true);   // Key B — TCF pipeline. NO Anthropic.
 
   if (groqTcfKey) {
-    console.log(`🔑 [LLM Teams] S121d routing: Anthropic LOCKED to Sapphire only. Other agents + pipelines = Gemini -> Groq, no Claude fallback.`);
+    console.log(`🔑 [LLM Teams] Routing: Anthropic primary on Sapphire/Veritas/Anita; Yuki/Vector on Gemini -> Groq; Alfred Gemini -> Groq -> Anthropic last-resort.`);
   } else {
     console.warn(`⚠️ [LLM Teams] GROQ_API_KEY_TCF not set — TCF pipeline shares Groq Key A with SS pipeline.`);
   }
@@ -580,7 +575,7 @@ async function main() {
   // Crew Dispatch (Supabase-backed inter-agent routing — the ONLY agent-to-agent system)
   tools.push(new CrewDispatchTool("veritas"));
 
-  // Action Surface — Veritas gets all tools (lead agent)
+  // Action Surface — Veritas (Chief Brand Officer) tools
   tools.push(new ProposeTaskTool("veritas"));
   tools.push(new CheckApprovedTasksTool("veritas"));
   tools.push(new SaveContentDraftTool("veritas"));
@@ -591,18 +586,17 @@ async function main() {
     tools.push(new KnowledgeWriterTool(pineconeMemory, "veritas", "brand"));
   }
 
-  // ── S125+ Phase 7: Marketing Tool (Anita Marketing Lead's primary surface) ──
-  // Architect directive 2026-04-30: NO cross-crew dispatch — Anita drafts
-  // briefs, defines audiences, logs experiments. Architect coordinates Yuki
-  // for distribution + Vector for metrics until pattern is proven.
+  // ── Marketing Tool (Anita Marketing Lead's primary surface) ──
+  // NO cross-crew dispatch — Anita drafts briefs, defines audiences, logs
+  // experiments. Architect coordinates Yuki for distribution + Vector for
+  // metrics.
   const { MarketingTool } = await import("./tools/marketing");
   tools.push(new MarketingTool());
 
-  // ── S125+ Phase 8: Memory fat tool (agent-aware via ToolContext) ──
+  // ── Memory fat tool (agent-aware via ToolContext) ──
   // Each agent calling memory.core_* auto-routes to their own slot rows.
   // memory.archival_* defaults to {agent}-personal Pinecone namespace.
   // memory.entity_* / relate / graph_query operate on the SHARED graph.
-  // Memory infrastructure generalized from sapphire_core_memory → agent_core_memory.
   const { MemoryTool: MemoryFatTool, DiaryTool: DiaryFatTool } = await import("./tools/sapphire/_fat");
   tools.push(new MemoryFatTool());
 
@@ -656,8 +650,9 @@ async function main() {
   // ── 4. Initialize Agent Loop ──
   // CRITICAL: Veritas chat must use the Veritas team LLM (Anthropic-first), NOT failoverLLM (Groq-first).
   // failoverLLM has Groq at position #1, which competes with pipeline for rate limits and burns
-  // the Architect's $10 Anthropic reserve when Groq 429s cascade through the chain.
-  // AGENT_LLM_TEAMS.veritas = ["anthropic", "gemini", "groq"] — strategic brain, not pipeline grunt.
+  // Anthropic credits when Groq 429s cascade through the chain.
+  // AGENT_LLM_TEAMS.veritas routes Anthropic primary because Chief Brand Officer
+  // strategic reasoning is the work; this is not a pipeline grunt path.
   const agentLoop = new AgentLoop(AGENT_LLM_TEAMS.veritas, tools, memoryProviders);
   const providersMap = new Map<string, LLMProvider>();
   llmProviders.forEach((p) => providersMap.set(p.model, p));
@@ -2122,7 +2117,7 @@ async function main() {
   const isAutonomousPaused = () => process.env.PAUSE_AUTONOMOUS === "true";
 
   // In-memory guard to prevent briefings from firing every 60s during the matching hour
-  const briefingFiredDates = { morning: "", evening: "" };
+  const briefingFiredDates = { weekly: "" };
 
   // ── Sapphire PA channel reference (populated once Sapphire's bot inits below) ──
   // Three scheduled jobs (reminder poll, morning brief, evening wrap) need to send
@@ -2413,42 +2408,27 @@ async function main() {
     },
   });
 
-  // Schedule morning briefing (10:00 AM CDT = 15:00 UTC — first thing, before any agent dispatches)
+  // Veritas weekly briefing (Monday 17:10 UTC — Chief Brand Officer reflection cycle).
+  // Reads state widely, writes reflection vector to Pinecone `brand` namespace, only
+  // DMs Architect if drift exceeds threshold or a milestone closed. On-trigger reviews
+  // (milestone close, first paid conversion, 7+ days zero pipeline shipments, sub-count
+  // tier crossed) fire on their own schedules elsewhere — this is the default cadence.
   scheduler.add({
-    name: "Morning Briefing",
+    name: "Veritas Weekly Briefing",
     intervalMs: 60_000, // Check every minute
     nextRun: new Date(),
     enabled: true,
     handler: async () => {
       if (isAutonomousPaused()) return;
       const now = new Date();
+      const isMonday = now.getUTCDay() === 1;
       const hour = now.getUTCHours();
       const minute = now.getUTCMinutes();
-      const dateKey = now.toDateString();
-      if (hour === config.scheduler.morningBriefingHour && minute >= 0 && minute <= 2 && briefingFiredDates.morning !== dateKey) {
-        briefingFiredDates.morning = dateKey;
-        console.log(`📋 Pulse 1: Morning briefing firing for ${dateKey}`);
-        await briefings.morningBriefing();
-      }
-    },
-  });
-
-  // Schedule evening recap (8:00 PM CDT = 01:00 UTC)
-  scheduler.add({
-    name: "Evening Recap",
-    intervalMs: 60_000,
-    nextRun: new Date(),
-    enabled: true,
-    handler: async () => {
-      if (isAutonomousPaused()) return;
-      const now = new Date();
-      const hour = now.getUTCHours();
-      const minute = now.getUTCMinutes();
-      const dateKey = now.toDateString();
-      if (hour === config.scheduler.eveningRecapHour && minute >= 0 && minute <= 2 && briefingFiredDates.evening !== dateKey) {
-        briefingFiredDates.evening = dateKey;
-        console.log(`📋 Pulse 2: Evening recap firing for ${dateKey}`);
-        await briefings.eveningRecap();
+      const weekKey = `${now.getUTCFullYear()}-W${Math.floor(now.getUTCDate() / 7)}-${now.getUTCMonth()}`;
+      if (isMonday && hour === 17 && minute >= 10 && minute <= 12 && briefingFiredDates.weekly !== weekKey) {
+        briefingFiredDates.weekly = weekKey;
+        console.log(`📋 Veritas weekly briefing firing for ${weekKey}`);
+        await briefings.weeklyBriefing();
       }
     },
   });
@@ -2633,13 +2613,13 @@ async function main() {
             priority: 1,
             chat_id: defaultChatId,
             payload: {
-              directive: "WEEKLY STRATEGIC DIRECTIVE — Execute your Chief Strategy Officer protocol. " +
+              directive: "WEEKLY BRAND REFLECTION — Execute your Chief Brand Officer protocol. " +
                 "Review the past 7 days of crew activity, revenue movement, and content performance. " +
                 "Assess mission velocity toward $1.2M liquid by Jan 2027 and 100K minds liberated. " +
                 "Evaluate each crew member's output quality and identify any drift from brand standards. " +
-                "Issue this week's strategic priority — one clear directive the entire crew should orient around. " +
+                "Surface this week's macro pattern — and one direction shift to propose with a stay-course alternative. " +
                 "Flag any risks, bottlenecks, or resource gaps that need the Architect's attention. " +
-                "Deliver as a concise executive briefing.",
+                "Deliver as a concise executive briefing. Cite the Supabase row IDs or Pinecone vector IDs that triggered each observation.",
               triggered_at: new Date().toISOString(),
               directive_type: "weekly",
             },
@@ -4559,7 +4539,7 @@ async function main() {
   // ── Map to hold each agent's AgentLoop + Channel for dispatch processing ──
   const agentLoops: Map<string, { loop: AgentLoop; channel: TelegramChannel }> = new Map();
 
-  // Register Veritas in the dispatch map so system-dispatched tasks reach the lead agent
+  // Register Veritas in the dispatch map so system-dispatched tasks reach the Chief Brand Officer
   agentLoops.set("veritas", { loop: agentLoop, channel: telegram });
 
   if (process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)) {

@@ -62,8 +62,8 @@ export class GroupManager {
     // Broadcast triggers — all bots respond (roll call, check in, etc.)
     if (this.isBroadcastTrigger(message)) return true;
 
-    // Lead agent (Veritas) and CoPilot (Sapphire) ALWAYS respond to the Architect in groups
-    // Lead responds immediately, CoPilot responds after a delay with plain English assessment
+    // Lead (Veritas, Chief Brand Officer) and CoPilot (Sapphire) ALWAYS respond to the Architect in groups.
+    // Lead responds immediately, CoPilot responds after a delay with plain English assessment.
     if ((this.groupRole === "lead" || this.groupRole === "copilot") &&
         message.userId && this.isAdmin(message.userId)) return true;
 

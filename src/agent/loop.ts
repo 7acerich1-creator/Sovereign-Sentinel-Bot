@@ -188,24 +188,37 @@ export class AgentLoop {
       context = await this.buildContext(message);
       console.log(`🧠 [AgentLoop] Context built: ${context.length} messages`);
 
-      // 1b. Pinecone semantic recall — inject relevant past intelligence (user chat only)
+      // 1b. Pinecone semantic recall — inject relevant past intelligence.
+      // Cross-namespace: query own namespace AND `shared` (cross-cutting insights
+      // written by the insight-extractor when an agent's output applies beyond
+      // its own lane). Weight own > shared via topK split (3 own + 2 shared).
+      // Dedup by id when merging so a vector that lives in both can't double-count.
       if (this.pinecone?.isReady() && message.content.length > 10) {
         try {
-          const recalls = await this.pinecone.queryRelevant(
-            message.content,
-            3,
-            this.identity.namespace,
-            0.75
-          );
-          if (recalls.length > 0) {
-            const recallText = recalls.map(
+          const [ownRecalls, sharedRecalls] = await Promise.all([
+            this.pinecone.queryRelevant(message.content, 3, this.identity.namespace, 0.75),
+            this.identity.namespace === "shared"
+              ? Promise.resolve([])
+              : this.pinecone.queryRelevant(message.content, 2, "shared", 0.75),
+          ]);
+          // Merge: own first (higher weight), then shared, dedup by content prefix.
+          const seen = new Set<string>();
+          const merged: typeof ownRecalls = [];
+          for (const r of [...ownRecalls, ...sharedRecalls]) {
+            const key = r.content.slice(0, 80);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            merged.push(r);
+          }
+          if (merged.length > 0) {
+            const recallText = merged.map(
               (r, i) => `[${i + 1}] (${r.agent}/${r.type}, score: ${r.score.toFixed(2)}) ${r.content}`
             ).join("\n");
             context.push({
               role: "system",
               content: `[RELEVANT PAST INTELLIGENCE — from crew semantic memory]\n${recallText}`,
             });
-            console.log(`🔮 [Pinecone] Injected ${recalls.length} relevant memories (scores: ${recalls.map(r => r.score.toFixed(2)).join(", ")})`);
+            console.log(`🔮 [Pinecone] Injected ${merged.length} relevant memories (own=${ownRecalls.length}, shared=${sharedRecalls.length}, scores: ${merged.map(r => r.score.toFixed(2)).join(", ")})`);
           }
         } catch (err: any) {
           console.error(`[Pinecone recall] ${err.message}`);

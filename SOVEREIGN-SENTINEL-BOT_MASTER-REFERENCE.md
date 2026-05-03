@@ -449,14 +449,13 @@ scripts/
 
 | Job | Fires (UTC / CDT) | Purpose |
 |---|---|---|
-| Morning Briefing | 15:00 UTC / 10 AM CDT | Telegram to Architect |
 | Alfred Trend Scan | 15:05 UTC / 10:05 AM CDT | Topic discovery, feeds VidRush |
 | Vector Metrics Sweep | 17:00 UTC / 12 PM CDT | Stripe data, performance |
 | ContentEngine Production | 18:30 UTC / 1:30 PM CDT | 12 posts generated deterministically |
 | Distribution Sweep | every 5 min | Posts ready drafts to Buffer |
 | Stasis Detection | 20:30 UTC / 3:30 PM CDT | 6 LIGHT MODE agent self-checks (S44) |
-| Evening Recap | 01:00 UTC next day / 8 PM CDT | Telegram to Architect |
-| Veritas Weekly Directive | Mon 17:10 UTC / 12:10 PM CDT | Strategic assessment |
+| Veritas Weekly Briefing | Mon 17:10 UTC / 12:10 PM CDT | Chief Brand Officer reflection — reads state, writes Pinecone brand vector, DMs Architect on drift |
+| Veritas Weekly Directive | Mon 17:10 UTC | Crew strategic directive payload via crew_dispatch |
 
 ---
 

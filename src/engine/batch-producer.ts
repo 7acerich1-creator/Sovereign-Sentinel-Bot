@@ -374,7 +374,7 @@ async function produceBatchOnPod(
         const aestheticStyle: AestheticStyle = await pickNextAesthetic(brand);
         const aestheticMod = AESTHETIC_MODIFIERS[brand]?.[aestheticStyle] ?? "";
 
-        // Build pod job spec — auto-split oversized TTS scenes (S91)
+        // Build pod job spec — auto-split oversized TTS scenes
         const rawScenes: PodScene[] = script.segments.map((seg, idx) => ({
           index: idx,
           image_prompt: brand === "sovereign_synthesis"
@@ -423,7 +423,7 @@ async function produceBatchOnPod(
         );
 
         // Record niche cooldown + angle consumption + aesthetic style
-        // (S113+ — aesthetic logged for the 30-video A/B/C performance test)
+        //
         // (S114 — jobId threaded through so vidrush-orchestrator can patch
         //  niche_cooldown.youtube_video_id back after publish)
         try {
@@ -525,7 +525,7 @@ async function distributeVideo(
     }
 
     // Build a FacelessResult for the preProduced orchestrator path
-    // SESSION 91 FIX: Use actual video duration / segment count instead of
+    // FIX: Use actual video duration / segment count instead of
     // duration_hint guesses — inflated hints were causing shorts curator to
     // reject every clip as >175s, resulting in 0 shorts + 0 Buffer posts.
     const actualPerSeg = video.durationS / video.script.segments.length;
@@ -652,7 +652,7 @@ export async function produceBatch(
   }
 
   // ── Phase 3: Distribute each video ──
-  // SESSION 86: Stagger YouTube publish times 3 hours apart. Videos upload as
+  // Stagger YouTube publish times 3 hours apart. Videos upload as
   // PRIVATE with publishAt, then YouTube auto-publishes at the scheduled time.
   // First video publishes 1 hour from now (gives upload time to complete),
   // then every 3 hours after. 6 videos = 16 hours of staggered content.

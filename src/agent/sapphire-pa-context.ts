@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Sapphire PA Context + Vision
-// Session 114 (S114j) — 2026-04-24
+// Session 114 — 2026-04-24
 //
 // Two exports:
 //   1. buildPersonalContextPrefix() — composes a rich Mode A context block
@@ -31,7 +31,7 @@ async function getSupabase() {
 
 // ── 1. CONTEXT PREFIX ──────────────────────────────────────────────────────
 
-// S114t: Now ALSO prepends the assembled-prompt block (persona + goals +
+// Now ALSO prepends the assembled-prompt block (persona + goals +
 // scenario + emotions + extras + spice) — replaces the static personality.
 // This is the ddxfish/sapphire pattern: dynamic, fresh, swappable per-piece.
 //
@@ -75,7 +75,7 @@ export async function buildPersonalContextPrefix(userMessage = ""): Promise<stri
   // ── 2. Live state hints ──
   parts.push(`# LIVE STATE (this message)`);
 
-  // S121e: TEAM ROSTER — single source of truth from PERSONA_REGISTRY.
+  // TEAM ROSTER — single source of truth from PERSONA_REGISTRY.
   // Without this Sapphire hallucinates Buffer/X/CapCut/Munch/old role descriptions
   // because her training/baked picture is months out of date. Inject FRESH every turn.
     // Roster is only for crew-aware agents. Sapphire (PA) is focused on Ace's life/tasks.
@@ -115,7 +115,7 @@ export async function buildPersonalContextPrefix(userMessage = ""): Promise<stri
       ? `\n[ACTIVE PLANS — you are currently executing these]:\n${planLines.join("\n")}` 
       : "";
 
-    // S121e: HARD EXECUTION MANDATE
+    // HARD EXECUTION MANDATE
     if (planLines.length > 0) {
       planSummary += `\n\n[HARD EXECUTIVE MANDATE]: You are in EXECUTION MODE for the active plans above. ` +
         `If Ace says 'do it', 'go', or similar, you are FORBIDDEN from replying with 'Ready' or 'I will begin'. ` +
@@ -133,7 +133,7 @@ export async function buildPersonalContextPrefix(userMessage = ""): Promise<stri
   // surfaces "girls_birthday_parties: $25" because of similarity, not exact match.
   // Only fires when the user's message is substantive (>10 chars).
   //
-  // S125+ Phase 2 (2026-04-30): TIGHTENED. Was (6, 0.55) — the "wider net" was
+  // TIGHTENED. Was (6, 0.55) — the "wider net" was
   // actively polluting Sapphire's context. Smoke test post-Phase-1 ship surfaced
   // a turn where "is there a YouTube video showing this [briefcase]?" injected
   // three unrelated past Ace conversations about *uploading videos and content

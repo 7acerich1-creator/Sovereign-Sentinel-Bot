@@ -101,7 +101,7 @@ export class SqliteMemory implements MemoryProvider {
     `).all(chatId, limit) as any[];
 
     if (rows.length === 0) {
-      // S122: Log if we find nothing, as this triggers the Hydration Protocol in AgentLoop.
+      // Log if we find nothing, as this triggers the Hydration Protocol in AgentLoop.
       console.log(`🧠 [SqliteMemory] No history found for chat ${chatId}`);
     } else {
       console.log(`🧠 [SqliteMemory] Found ${rows.length} messages for chat ${chatId}`);

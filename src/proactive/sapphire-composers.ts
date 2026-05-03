@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Sapphire PA — Reminder COMPOSER mechanism
-// Session 114 (S114w) — 2026-04-25
+// Session 114 — 2026-04-25
 //
 // Some reminders shouldn't be dumped raw — they should be COMPOSED into a
 // warm, conversational message by Sapphire based on what she knows about

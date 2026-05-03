@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Sovereign Clip Generator
-// @deprecated Phase 5 Task 5.5 (S72): NON-PIPELINE TOOL ONLY.
+// @deprecated Phase 5 Task 5.5: NON-PIPELINE TOOL ONLY.
 // The faceless pipeline now uses shorts-curator.ts for surgical clip
 // extraction (0-4 curated shorts from long-form). This tool remains
 // as an AGENT TOOL for ad-hoc external YouTube video clipping only.

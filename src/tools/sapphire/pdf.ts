@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Sapphire PA — PDF Reader Tool (Gap 2)
-// Session 114 (S114n) — 2026-04-25
+// Session 114 — 2026-04-25
 //
 // Takes a Telegram document file_id (sent as a PDF), downloads via Sapphire's
 // own bot token, splits to base64 page images, runs Gemini Flash vision on

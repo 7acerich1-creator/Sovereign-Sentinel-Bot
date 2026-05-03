@@ -10,7 +10,7 @@ import type { Tool, ToolDefinition } from "../../types";
 import { config } from "../../config";
 
 async function sb() {
-  // S121b: use service-role key (anon can't write to RLS-enabled sapphire_* tables).
+  // use service-role key (anon can't write to RLS-enabled sapphire_* tables).
   const { getSapphireSupabase } = await import("./_supabase");
   return getSapphireSupabase();
 }
@@ -94,7 +94,7 @@ export class ReadDiaryTool implements Tool {
 
 // Used by morning brief / scheduler — finds diary entries + relationship_context
 // rows from the same MM-DD as today in past years. "A year ago today..."
-// S125+ Phase 9: agentName param added (default 'sapphire' for backward compat).
+// agentName param added (default 'sapphire' for backward compat).
 export async function fetchSignificanceForToday(agentName = "sapphire"): Promise<{
   diary: Array<{ entry: string; created_at: string; mood?: string | null }>;
   relctx: Array<{ observation: string; category: string; created_at: string }>;

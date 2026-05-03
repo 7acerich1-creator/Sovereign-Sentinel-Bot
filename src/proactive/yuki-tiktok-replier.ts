@@ -457,7 +457,7 @@ export async function runTikTokReplyPoll(brand: Brand): Promise<{ scanned: numbe
     return stats;
   }
 
-  // S126e: FAIL-CLOSED if no working residential proxy. Running TT polling
+  // FAIL-CLOSED if no working residential proxy. Running TT polling
   // from Railway's datacenter IP with cookies extracted from Ace's home
   // browser is a textbook session-hijack signal. We refuse to run rather
   // than risk an account flag. Alert via the same authFailure path the
@@ -473,7 +473,7 @@ export async function runTikTokReplyPoll(brand: Brand): Promise<{ scanned: numbe
     return stats;
   }
 
-  // S126e: Use a DEDICATED browser instance with residential proxy applied.
+  // Use a DEDICATED browser instance with residential proxy applied.
   // Don't reuse the singleton (which other tools might use without proxy —
   // would leak datacenter IP to anything else launched concurrently).
   let browser: Browser;
@@ -600,7 +600,7 @@ export async function runTikTokReplyPoll(brand: Brand): Promise<{ scanned: numbe
     console.log(`[YukiTTReplier] ${brand}: scanned=${stats.scanned} replied=${stats.replied} skipped=${stats.skipped} errors=${stats.errors}`);
     return stats;
   } finally {
-    // S126e: close dedicated browser fully (not singleton) — frees memory + avoids
+    // close dedicated browser fully (not singleton) — frees memory + avoids
     // the proxy-leaked browser instance lingering for non-TT callers.
     try { await page.close(); } catch {}
     try { await browser.close(); } catch {}

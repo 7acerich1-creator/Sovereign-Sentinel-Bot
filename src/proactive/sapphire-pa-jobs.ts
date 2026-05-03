@@ -102,7 +102,7 @@ export async function runReminderPoll(channel: Channel): Promise<void> {
     for (const r of due as any[]) {
 
       try {
-        // S114w: COMPOSER routing — if payload.composer is set, route through
+        // COMPOSER routing — if payload.composer is set, route through
         // the composer (Gemini Flash compose-and-send) instead of dumping the
         // raw reminder text. Used for daily check-ins, ritual reminders, etc.
         const composerName = r.payload?.composer;
@@ -213,7 +213,7 @@ export async function runMorningBrief(channel: Channel, chatId: string): Promise
     notionSections.push(...clickUpSection);
   }
 
-  // S114w: Filter out composer-routed reminders — they ARE the brief or are
+  // Filter out composer-routed reminders — they ARE the brief or are
   // sent as their own composed message, not items to list here.
   const visibleReminders = (reminders.data as any[] || []).filter((r) => !r.payload?.composer && !/BlueSky|Phase/i.test(r.message));
   if (visibleReminders.length > 0) {
@@ -630,7 +630,7 @@ export async function runSapphireDiary(channel: Channel, chatId: string): Promis
     const geminiKey = process.env.GEMINI_API_KEY;
     if (!geminiKey) return;
 
-    // S125d: inject today's actual date so Gemini stops hallucinating dates
+    // inject today's actual date so Gemini stops hallucinating dates
     // from its training cutoff (was writing entries like "October 26th" and
     // "December 12th" in April 2026 — see screenshot debugging session).
     const nowCdt = new Date(Date.now() - 5 * 60 * 60 * 1000); // CDT offset

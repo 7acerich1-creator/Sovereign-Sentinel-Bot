@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Sapphire PA — Tool-call indicators for DM transparency
-// Session 114 (S114q) — 2026-04-25
+// Session 114 — 2026-04-25
 //
 // Maps each PA tool name to a brief friendly Telegram message that fires
 // BEFORE the tool runs. Lets Ace see what she's doing in real-time, the way
@@ -52,7 +52,7 @@ const TOOL_LABELS: Record<string, string> = {
   web_search: "🔍 Searching the web…",
   browser: "🌐 Browsing…",
   read_protocols: "📜 Reading protocols…",
-  // Self-mod meta-tools (S114u)
+  // Self-mod meta-tools
   set_piece: "🎚️ Adjusting myself…",
   remove_piece: "🎚️ Dropping a mode…",
   create_piece: "✨ Adding to my library…",

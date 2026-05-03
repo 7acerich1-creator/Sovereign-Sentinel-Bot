@@ -368,7 +368,7 @@ export async function runWeeklyNewsletterCycle(opts: {
   alertChatId?: string;
   dryRun?: boolean;
 }): Promise<{ status: string; details: string }> {
-  // S121: every alert routes through Anita's voice (ddxfish blueprint + content-namespace
+  // every alert routes through Anita's voice (ddxfish blueprint + content-namespace
   // recall). Falls back to the raw `text` on any failure — alert delivery never breaks.
   const alert = async (text: string, fact?: FactPayload) => {
     if (opts.alertChannel && opts.alertChatId) {

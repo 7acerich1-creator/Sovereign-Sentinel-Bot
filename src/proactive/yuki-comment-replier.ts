@@ -7,7 +7,7 @@
 //   1. Generates a 1-3 sentence reply in plain-Ace conversational voice
 //      (NO memetic triggers, NO Sovereign / Containment lexicon — just Ace
 //      talking like a normal channel owner who replies to viewers).
-//      Mirrors the Sapphire PA dual-mode precedent (S114).
+// Mirrors the Sapphire PA dual-mode precedent.
 //   2. Posts the reply via replyToYouTubeComment (the /comments + parentId
 //      threaded-reply endpoint, NOT the top-level /commentThreads endpoint).
 //   3. PATCHes youtube_comments_seen with replied_at, reply_comment_id,

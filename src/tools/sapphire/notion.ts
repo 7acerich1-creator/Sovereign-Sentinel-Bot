@@ -126,7 +126,7 @@ export class NotionCreatePageTool implements Tool {
       finalParentId = hubRes.pageId.replace(/-/g, "");
     }
 
-    // S125+ Phase 2: dedup-in-tool. Before creating, check if a page with this
+    // dedup-in-tool. Before creating, check if a page with this
     // exact title already exists under finalParentId. If yes, return its URL
     // instead of creating a duplicate. This replaces the doctrine band-aid
     // (signal_discipline_s125 rule 3) with a structural guarantee.
@@ -413,7 +413,7 @@ export async function findOrCreateChildPage(parentPageId: string, title: string)
   return { ok: true, pageId: result.data.id, url: result.data.url };
 }
 
-// S121: Restored for backward compatibility with older jobs (Evening Wrap, Diary, Frequency Brief)
+// Restored for backward compatibility with older jobs (Evening Wrap, Diary, Frequency Brief)
 // Routes all generic "daily page" requests into the Daily Briefs hub.
 export async function findOrCreateDailyPage(date: Date, parentPageId: string): Promise<{ ok: true; pageId: string; url: string } | { ok: false; error: string }> {
   const hub = await getOrCreateHubPage(parentPageId, "📁 Daily Briefs");

@@ -131,7 +131,7 @@ export interface ToolContext {
   channel: ChannelType;
   sendMessage: (text: string) => Promise<void>;
   requestConfirmation?: (prompt: string) => Promise<boolean>;
-  // S125+ Phase 8: agent name populated by AgentLoop from this.identity.agentName.
+  // agent name populated by AgentLoop from this.identity.agentName.
   // Tools that need to scope by agent (memory, archival, sleeptime) read this
   // to route to the correct namespace/table. Defaults to 'sapphire' if absent
   // (backward compat with code paths that haven't been updated yet).

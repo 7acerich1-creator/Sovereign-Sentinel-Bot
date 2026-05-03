@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Sapphire PA — News Brief Tools (Gap 7)
-// Session 114 (S114n) — 2026-04-25
+// Session 114 — 2026-04-25
 //
 // Pulls RSS from sources Ace configures, Gemini Flash filters for relevance
 // based on standing facts, returns top 5 items. Used in morning brief.

@@ -79,12 +79,12 @@ import {
 import {
   WriteDiaryEntryTool, ReadDiaryTool, ReadSignificanceTool,
 } from "./diary";
-// S125+ Phase 5 — core memory (Letta-style) + archival memory + temporal supersession
+// Phase 5 — core memory (Letta-style) + archival memory + temporal supersession
 import {
   CoreMemoryViewTool, CoreMemoryAppendTool, CoreMemoryReplaceTool,
   ArchivalInsertTool, ArchivalSearchTool, SupersedeMemoryTool,
 } from "./core_memory";
-// S125+ Phase 6 — Zep-style temporal knowledge graph (Postgres-as-graph)
+// Phase 6 — Zep-style temporal knowledge graph (Postgres-as-graph)
 import {
   EntityUpsertTool, EntityGetTool, RelateTool, UnrelateTool, GraphQueryTool,
 } from "./temporal_graph";
@@ -399,10 +399,10 @@ export class MemoryTool implements Tool {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
-    // S125+ Phase 8: agent name from ToolContext routes core/archival to per-agent storage.
+    // agent name from ToolContext routes core/archival to per-agent storage.
     const agentName = ctx.agentName || "sapphire";
     switch (action) {
-      // S125+ Phase 8: inject agent_name from ToolContext for actions that scope by agent.
+      // inject agent_name from ToolContext for actions that scope by agent.
       // Agents calling memory.core_* automatically write to THEIR own slot rows.
       // archival_* defaults to {agent}-personal namespace if not explicitly overridden.
       // Graph actions (entity_upsert/relate/etc.) operate on the SHARED graph (Phase 6 decision).
@@ -786,7 +786,7 @@ export class DiaryTool implements Tool {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
-    // S125+ Phase 9: per-agent diary via ctx.agentName
+    // per-agent diary via ctx.agentName
     const agentName = ctx.agentName || "sapphire";
     const argsWithAgent = { ...args, agent_name: agentName };
     switch (action) {
@@ -806,7 +806,7 @@ export class DiaryTool implements Tool {
           `  ✓ ${worked || "(nothing surfaced)"}\n` +
           `  ✗ ${didnt || "(nothing missed)"}\n` +
           `  → ${takeaway}`;
-        // S125+ Phase 9: column is `entry`, not `text`. Bug from Phase 5.
+        // column is `entry`, not `text`. Bug from Phase 5.
         return this.writeT.execute({
           entry: reflectionText,
           tags: ["reflection"],

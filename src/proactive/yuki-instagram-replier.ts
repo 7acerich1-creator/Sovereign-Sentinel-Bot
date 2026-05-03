@@ -1,7 +1,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Yuki Instagram Auto-Reply
 // Session 126 (2026-04-30) — community engagement on Instagram comments
-// for both brand accounts. Mirrors the YT comment replier pattern (S115).
+// for both brand accounts. Mirrors the YT comment replier pattern.
 //
 // FLOW (per brand, per run):
 //   1. Fetch the Business Account's most recent N media via Graph API.

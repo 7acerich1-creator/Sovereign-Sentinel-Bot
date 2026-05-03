@@ -28,7 +28,7 @@ export interface PineconeMatch {
 // so we don't pull in extra SDK dependencies for a single call.
 // NOTE: text-embedding-004 was deprecated Jan 14 2026, replaced by gemini-embedding-001
 async function embedText(text: string): Promise<number[]> {
-  // SESSION 36: GEMINI_API_KEY is set in Railway but getting 403 on embeddings.
+  // GEMINI_API_KEY is set in Railway but getting 403 on embeddings.
   // Likely cause: API key has API restrictions (check Google Cloud Console →
   // Credentials → click the key → "API restrictions" tab. Must include
   // "Generative Language API" or be set to "Don't restrict key").
@@ -254,7 +254,7 @@ export class PineconeMemory {
   }
 
   // ── Supabase mirror ──
-  // S117: must use SERVICE ROLE key — anon key fails RLS on insert.
+  // must use SERVICE ROLE key — anon key fails RLS on insert.
   // Both knowledge_nodes and sync_log have RLS enabled with service-role-only
   // write policies. Prior code used config.memory.supabaseKey (which resolves
   // to SUPABASE_ANON_KEY) and silently swallowed the JS-client error →
@@ -499,7 +499,7 @@ export class PineconeMemory {
         return 0;
       }
 
-      // SESSION 35: Cap boot sync to 25 nodes per deploy to prevent API rate-limit storms.
+      // Cap boot sync to 25 nodes per deploy to prevent API rate-limit storms.
       // 1000 nodes × embedText() at boot was hammering Gemini embedding API with 1000 calls
       // in ~10 seconds, causing 403s and saturating the network egress.
       // Remaining nodes will be picked up on subsequent deploys (25/deploy).

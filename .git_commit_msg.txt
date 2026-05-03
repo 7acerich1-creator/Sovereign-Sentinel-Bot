@@ -1,0 +1,15 @@
+Strip session/phase breadcrumbs from code comments across src/ (63 files, 267 lines)
+
+Single-pass Node sweep that touches comment lines ONLY (// or *) and removes:
+- Leading session prefixes: "// S125+ Phase 4: foo" -> "// foo"
+- "// SESSION 108: foo" -> "// foo"
+- "// S121d: foo" -> "// foo"
+- Parenthetical refs: "(S125+ Phase 8)", "(S121d)", "(S122 - non-negotiable)" -> stripped
+- Mid-text leading session tokens: "// foo. S125+ Phase X: bar" -> "// foo. bar"
+
+Functional comment content preserved. No code touched. tsc --noEmit clean,
+verify-disk-integrity all 4 checks passing.
+
+Closes the Myspace-rule cleanup across the entire codebase. LLM-visible
+prompts were scrubbed in the earlier Veritas sweep; this finishes the job
+on internal code comments.

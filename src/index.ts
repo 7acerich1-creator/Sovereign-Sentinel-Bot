@@ -199,7 +199,7 @@ async function hasAlreadyFiredToday(toAgent: string, taskType: string): Promise<
 }
 
 async function main() {
-  // SESSION 51: Graceful shutdown state — declared at main() scope
+  // Graceful shutdown state — declared at main() scope
   // so both dispatch poller (inner block) and shutdown handler can access them.
   let shuttingDown = false;
   let activeDispatchCount = 0;
@@ -279,7 +279,7 @@ async function main() {
   const memoryProviders: MemoryProvider[] = [sqliteMemory, markdownMemory, supabaseMemory];
   console.log("# ✅ Environment validated");
 
-  // S127: Key audit. GEMINI_IMAGEN_KEY removed — Imagen path is dead (RunPod handles images).
+  // Key audit. GEMINI_IMAGEN_KEY removed — Imagen path is dead (RunPod handles images).
   const hasGeminiApi = !!process.env.GEMINI_API_KEY;
   const hasOpenAi = !!process.env.OPENAI_API_KEY;
   console.log(`🔑 [KEY AUDIT] GEMINI_API_KEY: ${hasGeminiApi ? "SET" : "NOT SET"} | OPENAI_API_KEY: ${hasOpenAi ? "SET" : "NOT SET"}`);
@@ -353,7 +353,7 @@ async function main() {
   // (set before Groq was added) didn't list it. Pipeline ran without its free LLM.
   const llmProviders: LLMProvider[] = [];
   // First pass: initialize in failoverOrder sequence
-  // SESSION 93: Gemini RE-ADMITTED to text-gen. Was excluded S29c due to Anita billing leak
+  // Gemini RE-ADMITTED to text-gen. Was excluded S29c due to Anita billing leak
   // (root cause: Supabase overwriting prompts, fixed commit 624fc28). Anthropic credits
   // exhausted — Gemini is now primary for all text-gen. Groq backup. Anthropic emergency only.
   for (const providerName of config.llm.failoverOrder) {
@@ -375,8 +375,8 @@ async function main() {
   }
 
   // Second pass: catch any providers with keys that were NOT in failoverOrder.
-  // SESSION 93: Gemini exclusion REMOVED. All providers with keys are eligible for text-gen.
-  // S127: GEMINI_IMAGEN_KEY references removed — Imagen path purged, RunPod handles images.
+  // Gemini exclusion REMOVED. All providers with keys are eligible for text-gen.
+  // GEMINI_IMAGEN_KEY references removed — Imagen path purged, RunPod handles images.
   for (const providerName of Object.keys(config.llm.providers)) {
     if (llmProviders.some(p => p.name === providerName)) continue; // Already initialized
     const providerConfig = (config.llm.providers as Record<string, any>)[providerName];
@@ -404,7 +404,7 @@ async function main() {
     process.exit(1);
   }
 
-  // S121d: Global failoverLLM EXCLUDES Anthropic. This chain is consumed by
+  // Global failoverLLM EXCLUDES Anthropic. This chain is consumed by
   // AgentSwarm, MeshWorkflow, the content engine, and unknown-agent fallback —
   // none of which should drain Sapphire's reserved Anthropic budget on a
   // Gemini+Groq outage. Sapphire's team chain is the ONLY runtime path to Claude.
@@ -419,7 +419,7 @@ async function main() {
 
   // LLM_TIMEOUT_MS env var lets Railway override per-call timeout without a code deploy.
   // Default 60s is too short for 6144-token Groq completions under rate limiting.
-  // S95: Default bumped 60s → 120s to stop Gemini thinking-model timeouts.
+  // Default bumped 60s → 120s to stop Gemini thinking-model timeouts.
   // Override via LLM_TIMEOUT_MS env var on Railway if needed.
   const llmTimeoutMs = parseInt(process.env.LLM_TIMEOUT_MS || "120000", 10);
 
@@ -560,7 +560,7 @@ async function main() {
   tools.push(new CalendarListTool());
   tools.push(new CalendarCreateEventTool());
 
-  // S127 (2026-05-01): ImageGeneratorTool REMOVED. All image gen runs through
+  // ImageGeneratorTool REMOVED. All image gen runs through
   // RunPod (FLUX). Tool was vestigial since S68 — kept for /imagine that nobody
   // uses. Removing it strips the tool's schema bloat from every agent's prompt.
 
@@ -687,7 +687,7 @@ async function main() {
   // ── 6. Wire Message Handler ──
   const defaultChatId = String(config.telegram.authorizedUserIds[0]);
 
-  // S119g: NO bootstrap registration with Veritas's channel. Email is Anita-only.
+  // NO bootstrap registration with Veritas's channel. Email is Anita-only.
   // The actual setEmailReplyChannel call happens AFTER Maven Crew is online,
   // pointing at @Anita_SovereignBot's channel. If Anita doesn't come up, no
   // email approval prompts fire (better than routing through Veritas).
@@ -946,7 +946,7 @@ async function main() {
   // to the brand's niche allowlist (src/data/shared-context.ts). This closes the
   // Alfred-shared-seed cross-contamination bug where Sovereign Synthesis was producing
   // burnout-themed content (which belongs exclusively to The Containment Field).
-  // S48 Brand Routing Matrix fixed RENDER layers; this fixes INTAKE.
+  // Brand Routing Matrix fixed RENDER layers; this fixes INTAKE.
   //
   // Phase 3 Task 3.5 (2026-04-15): COOLDOWN INJECTION.
   // This is now an async builder — at every dispatch it queries niche_last_run
@@ -1513,7 +1513,7 @@ async function main() {
         return true;
       }
 
-      // SESSION 105: /produce — trigger Content Engine cycle (generate drafts + FLUX images + distribute)
+      // /produce — trigger Content Engine cycle (generate drafts + FLUX images + distribute)
       case "/produce": {
         try {
           // /produce force — bypass date check and regenerate today's drafts
@@ -1552,7 +1552,7 @@ async function main() {
         return true;
       }
 
-      // SESSION 105: Deterministic /flux-batch — no LLM, no tools, no Gemini burn.
+      // Deterministic /flux-batch — no LLM, no tools, no Gemini burn.
       case "/flux-batch": {
         try {
           await telegram.sendMessage(message.chatId, "🎨 Running FLUX pod batch...");
@@ -1575,7 +1575,7 @@ async function main() {
         return true;
       }
 
-      // SESSION 92: Manual backlog drain — replaces automatic sweep + boot drainer.
+      // Manual backlog drain — replaces automatic sweep + boot drainer.
       // Single-pass, zero-retry. Pre-flight rate limit check. Full Telegram reporting.
       case "/drain": {
         try {
@@ -1650,7 +1650,7 @@ async function main() {
         return true;
       }
 
-      // SESSION 94: Rechop pipeline — generate native vertical shorts from
+      // Rechop pipeline — generate native vertical shorts from
       // existing R2 long-forms that never got shorts (23 videos identified).
       // /rechop             → list unchopped videos + summary
       // /rechop all         → batch process ALL unchopped long-forms
@@ -1707,7 +1707,7 @@ async function main() {
 
           } else if (cleanArg && /^[\d,\s]+$/.test(cleanArg)) {
             // Single or multiple videos by index: /rechop 0 or /rechop 1,2,3
-            // SESSION 101: --force bypasses dedup and clears rechop entries for retry.
+            // --force bypasses dedup and clears rechop entries for retry.
             const indices = cleanArg.split(/[,\s]+/).map(Number).filter((n) => !isNaN(n));
             const allVideos = await listR2LongForms({ force: forceMode }); // full list, stable indices
 
@@ -1812,7 +1812,7 @@ async function main() {
               return true;
             }
 
-            // SESSION 116: rebuilt list output. Old format crammed the full
+            // rebuilt list output. Old format crammed the full
             // jobId UUID into each line, mixed brands chronologically, and ran
             // unreadable on phone Telegram. New layout: group by brand, show
             // open work first with done count summarized, last 8 chars of
@@ -1948,7 +1948,7 @@ async function main() {
         return true;
       }
 
-      // SESSION 92: One-shot rescue — upload rendered R2 videos to YouTube
+      // One-shot rescue — upload rendered R2 videos to YouTube
       // when distribution was interrupted by a redeploy or crash. Remove after use.
       case "/rescue": {
         try {
@@ -2066,7 +2066,7 @@ async function main() {
         return true;
       }
 
-      // SESSION 109/110: /comment <videoId|URL> [brand] — post diagnostic link comment on a YouTube video
+      // /110: /comment <videoId|URL> [brand] — post diagnostic link comment on a YouTube video
       case "/comment": {
         try {
           const rawArg = args[0];
@@ -2100,7 +2100,7 @@ async function main() {
         return true;
       }
 
-      // S119g: /approve and /edit removed from Veritas. Email is 100% Anita's job.
+      // /approve and /edit removed from Veritas. Email is 100% Anita's job.
       // These commands are handled deterministically in the per-agent crew bot router
       // (in @Anita_SovereignBot's chat, where the approval card lands).
 
@@ -2116,7 +2116,7 @@ async function main() {
   const briefings = new ProactiveBriefings(AGENT_LLM_TEAMS.veritas, memoryProviders, telegram, defaultChatId);
   const heartbeat = new HeartbeatSystem(telegram, defaultChatId);
 
-  // SESSION 104: PAUSE_AUTONOMOUS env var — set to "true" to freeze ALL scheduled agent work.
+  // PAUSE_AUTONOMOUS env var — set to "true" to freeze ALL scheduled agent work.
   // Briefings, agent dispatches, content engine, stasis checks — everything stops.
   // The bot still responds to Telegram commands. Only scheduled autonomous ops pause.
   // Toggle via Railway env vars without redeploying code.
@@ -2576,7 +2576,7 @@ async function main() {
               priority: 1,
               chat_id: defaultChatId,
               payload: {
-                // SESSION 47b — NATIVE SEED GENERATOR PIVOT.
+                // b — NATIVE SEED GENERATOR PIVOT.
                 // Alfred no longer scrapes YouTube. The machine projects the Sovereign frequency
                 // outward from its own core. Alfred generates ONE original thesis per day from
                 // the Sovereign Synthesis framework and hands it to VidRush as a raw_idea. This
@@ -2638,7 +2638,7 @@ async function main() {
   });
 
   // ── Faceless Factory — Daily Video Production (16:00 UTC, alternating brands) ──
-  // S115d: makes the 30-video A/B/C performance test progress autonomously.
+  // makes the 30-video A/B/C performance test progress autonomously.
   // Each fire pulls Alfred's most-recent daily_trend_scan result as source intelligence,
   // selects ONE brand by day-of-month parity (even=SS, odd=TCF), and produces ONE faceless
   // video. The aesthetic LRU rotation in pickNextAesthetic naturally cycles A→B→C across the
@@ -2723,10 +2723,10 @@ async function main() {
 
   const contentEngineFiredDate = { production: "" };
 
-  // SESSION 89: Pre-warm shared channel cache at boot (1 API call, shared by all consumers)
+  // Pre-warm shared channel cache at boot (1 API call, shared by all consumers)
   warmChannelCache();
 
-  // SESSION 105: Backlog drainer — fixed daily at 20:00 UTC (3:00 PM CDT).
+  // Backlog drainer — fixed daily at 20:00 UTC (3:00 PM CDT).
   // Was boot-relative (fired every deploy, burned Buffer quota). Now once/day on a clock.
   // Manual /drain still works for immediate triggers.
   const drainFiredDate = { key: "" };
@@ -2828,7 +2828,7 @@ async function main() {
     },
   });
 
-  // SESSION 105: Distribution sweep — fixed 2x daily at 12:00 UTC + 19:00 UTC.
+  // Distribution sweep — fixed 2x daily at 12:00 UTC + 19:00 UTC.
   // Was boot-relative (fired every deploy). Now clock-based: morning sweep (12:00 UTC / 7AM CDT)
   // catches overnight drafts, evening sweep (19:00 UTC / 2PM CDT) catches daily production output.
   // Capped at 6 drafts/sweep × ~5 channels = ~30 API calls/sweep. 2 sweeps/day = ~60 max.
@@ -2890,7 +2890,7 @@ async function main() {
 
   console.log("⚡ [ContentEngine] Scheduled: Production 18:30 UTC, Sweep 12:00+19:00 UTC, Drain 20:00 UTC, FB Planner pre-stage every 30m.");
 
-  // SESSION 104: Draft Auto-Publisher — promotes agent content_drafts to distribution queue.
+  // Draft Auto-Publisher — promotes agent content_drafts to distribution queue.
   // Runs every 4h. Picks up social-type drafts (caption, social_post, post, tweet, hook)
   // with pending_review status older than 2h and inserts them into content_engine_queue.
   // Non-social drafts (email, blog, landing_page) are left for manual review.
@@ -2912,8 +2912,8 @@ async function main() {
     },
   });
 
-  // SESSION 104: FLUX Pod Batch — generate images for Content Engine queue entries.
-  // SESSION 115 (2026-04-24): Cadence 3d → 1d. Content Engine generates 24/day
+  // FLUX Pod Batch — generate images for Content Engine queue entries.
+  // (2026-04-24): Cadence 3d → 1d. Content Engine generates 24/day
   // (12 per brand), FLUX caps at 50/run. At 3-day cadence, 72 needed but only 50
   // processed = 22-row backlog grows every cycle. Distribution sweep marks the
   // image-missing rows as "partial" and they loop forever. Daily cadence keeps
@@ -3021,7 +3021,7 @@ async function main() {
     handler: async () => {
       if (!defaultChatId || !telegram) return;
       try {
-        // S117: route comment alerts to Yuki's DM (she owns social presence).
+        // route comment alerts to Yuki's DM (she owns social presence).
         // agentLoops is populated during multi-bot init (later in this file);
         // by the time the cron fires (5 min after boot at earliest), Yuki's
         // channel is wired. Falls back to primary `telegram` if not.
@@ -3143,7 +3143,7 @@ async function main() {
           const ss = await runHookDrops("sovereign_synthesis");
           const cf = await runHookDrops("containment_field");
           if (defaultChatId && telegram) {
-            // S126c: route Yuki's own activity DMs through Yuki's bot, not Veritas
+            // route Yuki's own activity DMs through Yuki's bot, not Veritas
             const sender = agentLoops.get("yuki")?.channel ?? telegram;
             await sender.sendMessage(defaultChatId,
               `🟡 *Yuki Hook Drops — 9 AM CDT*\n\n` +
@@ -3176,7 +3176,7 @@ async function main() {
           const ss = await runHookDrops("sovereign_synthesis");
           const cf = await runHookDrops("containment_field");
           if (defaultChatId && telegram) {
-            // S126c: route Yuki's own activity DMs through Yuki's bot, not Veritas
+            // route Yuki's own activity DMs through Yuki's bot, not Veritas
             const sender = agentLoops.get("yuki")?.channel ?? telegram;
             await sender.sendMessage(defaultChatId,
               `🟡 *Yuki Hook Drops — 5 PM CDT*\n\n` +
@@ -3234,7 +3234,7 @@ async function main() {
           const ss = await runBlueskyHookDrops("sovereign_synthesis");
           const cf = await runBlueskyHookDrops("containment_field");
           if (defaultChatId && telegram) {
-            // S126c: route Yuki's own activity DMs through Yuki's bot, not Veritas
+            // route Yuki's own activity DMs through Yuki's bot, not Veritas
             const sender = agentLoops.get("yuki")?.channel ?? telegram;
             await sender.sendMessage(defaultChatId,
               `🦋 *Yuki Bluesky Hook Drops — 9:30 AM CDT*\n\n` +
@@ -3267,7 +3267,7 @@ async function main() {
           const ss = await runBlueskyHookDrops("sovereign_synthesis");
           const cf = await runBlueskyHookDrops("containment_field");
           if (defaultChatId && telegram) {
-            // S126c: route Yuki's own activity DMs through Yuki's bot, not Veritas
+            // route Yuki's own activity DMs through Yuki's bot, not Veritas
             const sender = agentLoops.get("yuki")?.channel ?? telegram;
             await sender.sendMessage(defaultChatId,
               `🦋 *Yuki Bluesky Hook Drops — 5:30 PM CDT*\n\n` +
@@ -3345,14 +3345,14 @@ async function main() {
   // Skips quietly if BROWSER_ENABLED=false or no cookies / handle env.
   scheduler.add({
     name: "Yuki TikTok Reply Poll (3h, organic-volume)",
-    // S126e: 3-hour interval (was 30min). With max 2 replies/run × 2 brands × 8 runs/day,
+    // 3-hour interval (was 30min). With max 2 replies/run × 2 brands × 8 runs/day,
     // worst case = 32 replies/day, realistic with LLM should_reply filtering = 6-12/day.
     // Datacenter→residential proxy hop and low cadence kill the bot-flag signature.
     intervalMs: 3 * 60 * 60_000,
     nextRun: new Date(Date.now() + 5 * 60_000), // first run 5min after boot
     enabled: true,
     handler: async () => {
-      // S126e: 25% random skip per run to break perfectly-periodic firing patterns.
+      // 25% random skip per run to break perfectly-periodic firing patterns.
       // Real humans don't open the comments section every 3 hours on the dot.
       if (Math.random() < 0.25) {
         console.log("[YukiTTReplier] random skip — organic-volume jitter");
@@ -3486,7 +3486,7 @@ async function main() {
   // ── 8. Webhook Server ──
   const webhookServer = new WebhookServer();
 
-  // ── /api/sapphire/memory-audit ── (S114u)
+  // ── /api/sapphire/memory-audit ──
   // Returns vector counts per namespace + sample matches against the namespaces
   // Sapphire reads from. Use to verify if seed memory (pool hall, egregore,
   // war with reality) is actually in Pinecone and which namespace.
@@ -3516,7 +3516,7 @@ async function main() {
 
   webhookServer.register("/api/notify", async (payload: any) => {
     const text = payload?.text || "";
-    // SESSION 35: Guard against empty notifications — something was hitting this endpoint
+    // Guard against empty notifications — something was hitting this endpoint
     // with no payload at 00:30 UTC, producing "🔔 NOTIFICATION" with no content.
     if (!text || text === "{}" || text.trim().length === 0) {
       console.warn(`⚠️ [Notify] Empty notification payload received — suppressed. Raw: ${JSON.stringify(payload).slice(0, 200)}`);
@@ -3624,14 +3624,14 @@ async function main() {
     diag.xtts_server_url_set = !!process.env.XTTS_SERVER_URL;
 
     // ── API key status ──
-    // S127: GEMINI_IMAGEN_KEY removed (Imagen path purged, RunPod handles images).
+    // GEMINI_IMAGEN_KEY removed (Imagen path purged, RunPod handles images).
     const geminiTextKey = process.env.GEMINI_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
     diag.gemini_text_key_set = !!geminiTextKey;
     diag.openai_key_set = !!openaiKey;
     diag.openai_key_length = openaiKey?.length || 0;
 
-    // S127: Image-gen probe block removed (Pollinations/Imagen/DALL-E tests). All
+    // Image-gen probe block removed (Pollinations/Imagen/DALL-E tests). All
     // image generation goes through RunPod FLUX — see /api/content-engine/flux-batch
     // and the runpod-client module for the actual live path.
 
@@ -3747,7 +3747,7 @@ async function main() {
           }
         }
 
-        // S119 FALLBACK: If body fetch returned empty (short email, missing API key,
+        // FALLBACK: If body fetch returned empty (short email, missing API key,
         // or Resend API change), synthesize a placeholder so Anita STILL dispatches
         // and the Architect STILL gets the Telegram alert. Loop must never die silently.
         if (!bodyText || bodyText.trim() === "") {
@@ -3768,7 +3768,7 @@ async function main() {
         payload = incoming as any;
       }
 
-      // S119g: route inbound email alerts through Anita's bot (NOT Veritas).
+      // route inbound email alerts through Anita's bot (NOT Veritas).
       // Veritas watches the whole business; Anita owns email end-to-end.
       // Falls back to main telegram only if Anita's bot didn't come online.
       const inboundChannel = agentLoops.get("anita")?.channel || telegram;
@@ -4574,7 +4574,7 @@ async function main() {
       console.error(`❌ [PersonalityLoader] Bundled JSON failed: ${err.message}`);
     }
 
-    // S117: ddxfish pattern — for the 5 non-Sapphire crew bots, OVERRIDE the
+    // ddxfish pattern — for the 5 non-Sapphire crew bots, OVERRIDE the
     // static blueprint with the runtime-assembled prompt from per-bot pieces
     // libraries + bot_active_state selections. Sapphire keeps her own
     // per-turn assembler (sapphire-prompt-builder.ts). See
@@ -4666,7 +4666,7 @@ async function main() {
         };
 
         // Build per-agent tool set: selectively include tools from the global registry
-        // S121: LEAN TOOL TIERING. Stop spreading the entire 64-tool arsenal into
+        // LEAN TOOL TIERING. Stop spreading the entire 64-tool arsenal into
         // every crew bot. Veritas (lead) gets everything; Sapphire gets PA +
         // core; others get Dispatch + core. Saves ~15K tokens per turn.
         const CORE_TOOL_NAMES = new Set([
@@ -4693,7 +4693,7 @@ async function main() {
           agentTools.push(new ProtocolWriterTool());
           agentTools.push(new RelationshipContextTool());
           
-          // S121: SELECTIVE TOOL TIERING (TOKEN HEAT SINK)
+          // SELECTIVE TOOL TIERING (TOKEN HEAT SINK)
           // Sapphire carries ~41 tools total, but Sonnet charges $3/1M. 
           // We only inject the "Life" pack if she's in a personal chat.
           // By default, she gets Core + Workflow + Research.
@@ -4723,7 +4723,7 @@ async function main() {
           agentTools.push(new FileBriefingTool(agentCfg.name));
         }
 
-        // S117: Memetic Trigger Judge — Yuki + Alfred quality gate before
+        // Memetic Trigger Judge — Yuki + Alfred quality gate before
         // posting/emitting. See MAVEN-CREW-DIRECTIVES.md §4.7 + §5.7.
         if (agentCfg.name === "yuki" || agentCfg.name === "alfred") {
           const { MemeticTriggerJudgeTool } = await import("./tools/memetic-trigger-judge");
@@ -5095,7 +5095,7 @@ async function main() {
 
             // ── /dryrun, /pipeline, /alfred commands are handled by Veritas handleCommand() ──
             // Crew bots should NOT run pipeline commands — redirect to Veritas
-            // SESSION 80: Added /alfred — was being swallowed by crew bots instead of routing
+            // Added /alfred — was being swallowed by crew bots instead of routing
             // to Veritas for Alfred's daily_trend_scan dispatch.
             else if (/^\/dryrun\b/i.test(message.content) || /^\/pipeline\b/i.test(message.content) || /^\/alfred\b/i.test(message.content)) {
               await agentChannel.sendMessage(message.chatId,
@@ -5172,7 +5172,7 @@ async function main() {
             // Snapshot tools + observer + context state BEFORE the LLM call, restore in
             // finally so they NEVER leak across messages even if processMessage throws.
             let sapphireToolSnapshot: Map<string, Tool> | null = null;
-            // S121e: hoisted so the post-processMessage Pinecone embed can reference it.
+            // hoisted so the post-processMessage Pinecone embed can reference it.
             let sapphireRawText = "";
             const isSapphireDM = agentCfg.name === "sapphire" && !message.metadata?.isGroup;
             if (isSapphireDM) {
@@ -5180,12 +5180,12 @@ async function main() {
                 const { makeSapphireToolObserver } = await import("./agent/sapphire-tool-indicators");
                 agentBotLoop.setToolCallObserver(makeSapphireToolObserver(agentChannel, message.chatId));
 
-                // S121e: FORCED LEAN TIERING — Slash tokens by 50%
-                // S125+: Filter out the custom Gemini-bridged WebSearchTool (name: "web_search")
+                // FORCED LEAN TIERING — Slash tokens by 50%
+                // Filter out the custom Gemini-bridged WebSearchTool (name: "web_search")
                 // so the Anthropic-native web_search_20250305 server tool can take that name
                 // without conflict. If Anthropic fails over to Gemini mid-turn, that turn
                 // degrades to no web search (acceptable — research_brief tool still works).
-                // S125+ (2026-04-30, second pass): Re-added buildSapphireLifeTools() —
+                // Re-added buildSapphireLifeTools() —
                 // calendar_create_event / gmail_send / calendar_reschedule / family member
                 // tools were missing from her DM lane, which is why she said "the calendar
                 // tool wasn't found by the system" when Ace asked her to put Aliza/Maddy's
@@ -5213,7 +5213,7 @@ async function main() {
                   .trim();
                 sapphireRawText = rawText;
 
-                // S127: dropped 50 → 15 to cut Sapphire's per-turn input tokens.
+                // dropped 50 → 15 to cut Sapphire's per-turn input tokens.
                 // Conversation summary already compresses older history; 50 raw msgs
                 // was double-paying. 15 holds enough working continuity for a DM
                 // thread without hauling 20-30k tokens of prior turns into context.
@@ -5248,7 +5248,7 @@ async function main() {
             }
 
             // ── try/finally guarantees state restore even on processMessage throw ──
-            // S125+: iterationCap=6 for Sapphire (generalist with complex-task latitude
+            // iterationCap=6 for Sapphire (generalist with complex-task latitude
             // per Architect directive 2026-04-30). Anita/Yuki specialists stay at 3 via
             // their default config.security.maxAgentIterations path.
             let response: string;
@@ -5264,14 +5264,14 @@ async function main() {
                 agentBotLoop.setContextOverrides(undefined);
                 agentBotLoop.setLLMOptionsOverrides(undefined);
                 if (sapphireToolSnapshot) agentBotLoop.restoreTools(sapphireToolSnapshot);
-                // S121e: Restore Gemini primary after every Sapphire turn (idempotent).
+                // Restore Gemini primary after every Sapphire turn (idempotent).
                 try {
                   const sapphireFailover = agentBotLoop.llm as any;
                   if (sapphireFailover && typeof sapphireFailover.switchPrimary === "function") {
                     sapphireFailover.switchPrimary("gemini");
                   }
                 } catch { /* swallow */ }
-                // S121e: clear identity-ledger trigger so the next turn doesn't borrow this one's message.
+                // clear identity-ledger trigger so the next turn doesn't borrow this one's message.
                 try {
                   const { clearIdentityLogTrigger } = await import("./tools/sapphire/_ledger");
                   clearIdentityLogTrigger();
@@ -5279,7 +5279,7 @@ async function main() {
               }
             }
 
-            // S121e: sapphire-personal namespace deepening — every substantive
+            // sapphire-personal namespace deepening — every substantive
             // Sapphire DM (response >= 30 chars + user msg >= 12 chars) gets embedded
             // with {sentiment, scenario, timestamp, chat_id} so semantic recall has
             // a rich corpus across years. Fire-and-forget.
@@ -5426,7 +5426,7 @@ async function main() {
       console.log(`📡 [CrewDispatch] Starting batched dispatch poller for [${agentNames.join(", ")}] (base: ${DISPATCH_POLL_BASE_MS / 1000}s)`);
 
       const runDispatchPoll = async () => {
-        // SESSION 51: Respect shutdown flag — don't pick up new work while draining
+        // Respect shutdown flag — don't pick up new work while draining
         if (shuttingDown) {
           console.log(`🛑 [DispatchPoller] Skipped — container shutting down`);
           return; // No reschedule — we're done
@@ -5439,7 +5439,7 @@ async function main() {
           return;
         }
 
-        // SESSION 34: Primary-only mode REMOVED.
+        // Primary-only mode REMOVED.
         // Session 33 added setPrimaryOnly(true) to prevent Anthropic spend on dispatch tasks.
         // ROOT CAUSE DISCOVERY (Session 34): This is why ALL agent tasks fail when Groq 429s.
         // Groq free tier = 1,000 req/day shared across the ENTIRE org. One VidRush pipeline
@@ -5479,7 +5479,7 @@ async function main() {
                 await new Promise((resolve) => setTimeout(resolve, 3000));
               }
 
-              // SESSION 51: Track in-flight dispatches for graceful shutdown
+              // Track in-flight dispatches for graceful shutdown
               activeDispatchCount++;
 
               // Build a synthetic message from the dispatch payload
@@ -5492,7 +5492,7 @@ async function main() {
               // the completion crew_dispatch call without a final text response.
               // Light mode: tools=undefined, iterCap=1, strip "use crew_dispatch" tail.
               //
-              // SESSION 51: STASIS TRAP OVERRIDE — if the dispatch payload contains
+              // STASIS TRAP OVERRIDE — if the dispatch payload contains
               // signals that require tool execution or memory extraction, override
               // LIGHT_TASKS and route to full agent loop. Prevents execution-heavy
               // tasks from being lobotomized by stasis_self_check's zero-tool mode.
@@ -5612,7 +5612,7 @@ async function main() {
                 // Heavy tasks (distribution, scheduling) need more tool call rounds
                 // Light tasks (analysis, captions) can finish in fewer
                 // LIGHT tasks (Session 44): introspection — 1 pass, zero tools
-                // S118 (2026-04-25): bumped caps after MC cross-sync flagged 47% crew_dispatch
+                // bumped caps after MC cross-sync flagged 47% crew_dispatch
                 // failure rate. Gemini 2.5 Flash Lite emits more "thinking" tool-call rounds
                 // than Anthropic models did. Light 1→2 (allow one tool retry), heavy 6→10
                 // (give distribution full pipeline space), default 4→6.
@@ -5621,7 +5621,7 @@ async function main() {
                 const iterCap = isLightTask ? 2 : (isHeavyTask ? 10 : 6);
                 const response = await agentLoop.processMessage(dispatchMessage, undefined, iterCap, isLightTask);
 
-                // SESSION 33: Detect if the response is actually a failure — mark appropriately.
+                // Detect if the response is actually a failure — mark appropriately.
                 // Prevents "completed" status on tasks where all LLM providers failed,
                 // and blocks downstream handoffs from cascading error messages.
                 const isErrorResponse = response.toLowerCase().includes("all llm providers failed") ||
@@ -5629,7 +5629,7 @@ async function main() {
                   response.includes("SYSTEM STATUS: DEGRADED") ||
                   response.includes("completely broken");
 
-                // SESSION 122 (2026-04-26): file_briefing GATE for sweep tasks.
+                // (2026-04-26): file_briefing GATE for sweep tasks.
                 // Vector's daily_metrics_sweep degraded over 4 days from full intel report
                 // (2026-04-23 worked) → max iterations → tool-call trace fragment → pure
                 // hallucinated meta-line ("the sweep is complete and findings have been
@@ -5643,7 +5643,7 @@ async function main() {
                 // hardened to the same contract.
                 const BRIEFING_GATED_TASKS = new Set(["daily_metrics_sweep"]);
                 // Extract briefing ID once — used both for the gate check AND the
-                // S122b Telegram relay. UUID v4 is 8-4-4-4-12 hex chars; we accept
+                // Telegram relay. UUID v4 is 8-4-4-4-12 hex chars; we accept
                 // anything hex+dash so a future ID format change doesn't silently
                 // skip the relay.
                 const briefingMatch = response.match(/✅ Briefing filed:\s*([0-9a-f-]{8,})/i);
@@ -5726,7 +5726,7 @@ async function main() {
                 }
 
                 // ── AUTO-PIPELINE TRIGGER: Alfred's daily NATIVE SEEDS → VidRush ──
-                // SESSION 47b — NATIVE SEED GENERATOR PIVOT.
+                // b — NATIVE SEED GENERATOR PIVOT.
                 // Phase 3 Task 3.3 (2026-04-15) — DUAL-SEED CONTRACT.
                 // Alfred emits TWO brand-bound seeds per run with format:
                 //   PIPELINE_IDEA_SS: <niche> :: <thesis>
@@ -6031,7 +6031,7 @@ async function main() {
                 console.error(`[DispatchPoller] ${agentName} failed on ${task.id}: ${processErr.message}`);
                 await completeDispatch(task.id, "failed", processErr.message);
               } finally {
-                // SESSION 51: Always decrement in-flight counter
+                // Always decrement in-flight counter
                 activeDispatchCount = Math.max(0, activeDispatchCount - 1);
               }
             }
@@ -6050,7 +6050,7 @@ async function main() {
           }
         }
 
-        // SESSION 34: setPrimaryOnly removed — agents are Anthropic-first now, no need to toggle.
+        // setPrimaryOnly removed — agents are Anthropic-first now, no need to toggle.
 
         // Schedule next poll (dynamic interval for backoff)
         dispatchPollTimer = setTimeout(runDispatchPoll, dispatchPollMs);
@@ -6216,7 +6216,7 @@ async function main() {
   console.log("📡 Channels: " + router.listChannels().join(", "));
   console.log("✅ Maven Crew ONLINE — [" + activeBotHandles.join(", ") + "]");
 
-  // S119f: Once Anita's bot is initialized, route the inbound-email approval
+  // Once Anita's bot is initialized, route the inbound-email approval
   // card through HER bot DM (not Veritas's). Falls back to main telegram if
   // Anita didn't come online.
   try {
@@ -6239,7 +6239,7 @@ async function main() {
   }, 300_000);
 
   // ── Graceful Shutdown ──
-  // SESSION 51: Railway sends SIGTERM before killing the container (~10s grace).
+  // Railway sends SIGTERM before killing the container (~10s grace).
   // Set shuttingDown flag to prevent new dispatch pickups, then drain in-flight tasks.
   const shutdown = async () => {
     console.log("🛑 GRAVITY CLAW shutting down — draining queue...");
@@ -6269,7 +6269,7 @@ async function main() {
     await mcpBridge.shutdown();
     await router.shutdownAll();
 
-    // SESSION 75: Kill any warm GPU pod to prevent orphan charges.
+    // Kill any warm GPU pod to prevent orphan charges.
     await shutdownPodSession();
     // Belt-and-suspenders: sweep any pod that somehow survived prior crashes.
     await sweepStalePods().catch((err) =>

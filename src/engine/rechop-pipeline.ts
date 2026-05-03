@@ -1,5 +1,5 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// SESSION 94 — Rechop Pipeline
+// — Rechop Pipeline
 // Retroactively generates native vertical shorts from existing
 // long-form videos stored in R2. Flow:
 //
@@ -12,7 +12,7 @@
 //   6. Open single pod session → produceShort() for each
 //   7. Rendered shorts land in R2 clips/ prefix → backlog-drainer distributes
 //
-// SESSION 103b: Replaced curateShorts() chop approach with generateStandaloneShorts().
+// b: Replaced curateShorts() chop approach with generateStandaloneShorts().
 // The curator was picking segment ranges that cut mid-thought, producing incoherent
 // shorts. Standalone generation creates each short as a complete narrative from the
 // same thesis — one LLM call, 4 perfect shorts, no chopping math.
@@ -461,7 +461,7 @@ export async function rechopVideo(
     }
 
     // ── Step 3: Generate standalone shorts from transcript thesis ──
-    // SESSION 103b: Replaced curateShorts() chopping with generateStandaloneShorts().
+    // b: Replaced curateShorts() chopping with generateStandaloneShorts().
     // Each short is a complete self-contained story — no mid-thought cuts.
     await log("STEP 3/6", "Generating standalone shorts from thesis...");
     const niche = detectNiche(whisper.transcript);
@@ -485,8 +485,8 @@ export async function rechopVideo(
     }
 
     // ── Step 4: TTS each standalone short ──
-    // SESSION 103b: Each short gets its own TTS — complete fresh audio, no chopping.
-    // SESSION 105: TTS runs on pod (XTTS) — Edge TTS chain broken since XTTS_SERVER_URL purged.
+    // b: Each short gets its own TTS — complete fresh audio, no chopping.
+    // TTS runs on pod (XTTS) — Edge TTS chain broken since XTTS_SERVER_URL purged.
     await log("STEP 4/6", `TTS for ${standaloneShorts.length} standalone shorts (XTTS on pod)...`);
     const clipDir = `${jobDir}/clips`;
     if (!existsSync(clipDir)) mkdirSync(clipDir, { recursive: true });
@@ -499,7 +499,7 @@ export async function rechopVideo(
     }
     const podQueue: PreparedShort[] = [];
 
-    // SESSION 105: Pod TTS function — wraps podTTS for renderAudio's TTSFunction signature
+    // Pod TTS function — wraps podTTS for renderAudio's TTSFunction signature
     const podTTSForRender = async (ttsHandle: import("../pod/types").PodHandle): Promise<TTSFunction> => {
       return async (text: string, brand: Brand): Promise<Buffer> => {
         const { audioBuffer } = await podTTS(ttsHandle, { text, brand });
@@ -588,7 +588,7 @@ export async function rechopVideo(
           audio_duration_s: audioDuration,
           scenes: vScenes,
           hook_text: standalone.script.hook?.slice(0, 200),
-          // S117: dual-field thumbnail (headline + subhead) with backward-compat alias.
+          // dual-field thumbnail (headline + subhead) with backward-compat alias.
           thumbnail_headline: standalone.script.thumbnail_headline || undefined,
           thumbnail_subhead: standalone.script.thumbnail_subhead || undefined,
           thumbnail_text: standalone.script.thumbnail_text
@@ -654,7 +654,7 @@ export async function rechopVideo(
     }
 
     // Mark as rechopped in Supabase — but ONLY if most shorts survived.
-    // SESSION 101: If majority failed, DON'T mark as done so the video can be retried
+    // If majority failed, DON'T mark as done so the video can be retried
     // after fixes are deployed. This prevents partial runs from permanently blocking retries.
     const totalAttempted = result.shortsRendered + result.shortsFailed;
     const successRate = totalAttempted > 0 ? result.shortsRendered / totalAttempted : 0;
@@ -903,7 +903,7 @@ async function rechopVideoPrepOnly(
   }
 
   // Step 3: Generate standalone shorts from transcript thesis
-  // SESSION 103b: Same standalone approach as main rechopVideo — no curator chopping.
+  // b: Same standalone approach as main rechopVideo — no curator chopping.
   await log("PREP 3/5", `Generating standalone shorts for ${video.jobId.slice(0, 40)}...`);
   const niche = detectNiche(whisper.transcript);
   const title = humanizeTitle(video.jobId, video.brand);
@@ -922,7 +922,7 @@ async function rechopVideoPrepOnly(
   }
 
   // Step 4: TTS each standalone short + upload audio to R2
-  // SESSION 105: TTS runs on the GPU pod (XTTS) via withPodSession.
+  // TTS runs on the GPU pod (XTTS) via withPodSession.
   // XTTS_SERVER_URL was purged — the fallback chain (Edge TTS) crashes on Railway.
   // Pod session manager reuses the same pod for the render phase that follows.
   await log("PREP 4/5", `TTS for ${standaloneShorts.length} standalone shorts (XTTS on pod)...`);
@@ -1013,7 +1013,7 @@ async function rechopVideoPrepOnly(
         audio_duration_s: audioDuration,
         scenes: vScenes,
         hook_text: standalone.script.hook?.slice(0, 200),
-        // S117: dual-field thumbnail (headline + subhead) with backward-compat alias.
+        // dual-field thumbnail (headline + subhead) with backward-compat alias.
         thumbnail_headline: standalone.script.thumbnail_headline || undefined,
         thumbnail_subhead: standalone.script.thumbnail_subhead || undefined,
         thumbnail_text: standalone.script.thumbnail_text

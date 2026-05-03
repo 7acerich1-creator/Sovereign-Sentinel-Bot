@@ -308,7 +308,7 @@ export async function runMilestoneSync(opts: {
     }
   }
 
-  // Optional alert if anything closed — voiced through Vector (S121)
+  // Optional alert if anything closed — voiced through Vector
   if (closed > 0 && opts.alertChannel && opts.alertChatId) {
     const closures = details.filter((d) => d.startsWith("🎯")).join("\n");
     const fallback = `🎯 *Milestone closures (${closed})*\n\n${closures}`;

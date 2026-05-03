@@ -2,7 +2,7 @@
 // GRAVITY CLAW v3.0 — Relationship Context Tool
 // Sapphire writes observations about Ace's working patterns.
 //
-// S119c: Schema loosened. Original enum (preference|frustration|pattern|win)
+// Schema loosened. Original enum (preference|frustration|pattern|win)
 // was rejecting nuanced relational observations Sapphire wanted to log
 // ("the feeling of speaking your thoughts to someone who doesn't know me",
 // "soulful tone preference", etc.). She literally said it was like trying
@@ -100,7 +100,7 @@ export class RelationshipContextTool implements Tool {
     }
 
     try {
-      // S121b: use service-role key — anon was blocked by RLS even with my new policies
+      // use service-role key — anon was blocked by RLS even with my new policies
       // because the bot's createClient was using SUPABASE_ANON_KEY. Service role bypasses RLS.
       const { getSapphireSupabase } = await import("./sapphire/_supabase");
       const supabase = await getSapphireSupabase();
@@ -117,7 +117,7 @@ export class RelationshipContextTool implements Tool {
       const flair = isNovelCategory ? " (novel category)" : "";
       console.log(`💎 [RelContext] Sapphire noted${flair}: [${category}] ${observation}`);
 
-      // S121: Pinecone deepening — embed every observation into sapphire-personal
+      // Pinecone deepening — embed every observation into sapphire-personal
       // with rich metadata so semantic recall can filter by category/sentiment/scenario.
       // Fire-and-forget — never blocks the tool reply.
       (async () => {

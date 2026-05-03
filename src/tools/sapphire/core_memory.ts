@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Sapphire — Core Memory + Archival Memory + Temporal Supersession
-// S125+ Phase 5 (2026-04-30) — Letta-style + Zep-lite memory operations
+// Phase 5 (2026-04-30) — Letta-style + Zep-lite memory operations
 //
 // Core memory (Letta/MemGPT pattern):
 //   • Sapphire-owned in-context state, always visible to her every turn.
@@ -40,7 +40,7 @@ const CORE_MEMORY_HARD_CAP_PER_SLOT = 800;     // chars per slot
 const CORE_MEMORY_HARD_CAP_TOTAL = 6000;       // chars across all slots ≈ 1500 tokens
 
 // ── Slot reader (also used by context-prefix injectors per agent) ─────────────
-// S125+ Phase 8: agentName param (default 'sapphire' for backward compat with
+// agentName param (default 'sapphire' for backward compat with
 // existing sapphire-pa-context.ts caller).
 
 export async function readAllCoreMemory(agentName = "sapphire"): Promise<Array<{ slot: string; content: string; updated_at: string }>> {
@@ -188,7 +188,7 @@ export class CoreMemoryReplaceTool implements Tool {
 const PINECONE_HOST = process.env.PINECONE_HOST;
 const PINECONE_API_KEY = process.env.PINECONE_API_KEY;
 
-// S125+ Phase 8: per-agent namespaces locked in strategy session 2026-04-30.
+// per-agent namespaces locked in strategy session 2026-04-30.
 // Each agent has their own personal namespace; shared + sovereign-synthesis
 // remain cross-cutting.
 const ALLOWED_ARCHIVAL_NAMESPACES = [

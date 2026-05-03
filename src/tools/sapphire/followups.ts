@@ -12,7 +12,7 @@ import type { Tool, ToolDefinition } from "../../types";
 import { config } from "../../config";
 
 async function sb() {
-  // S121b: use service-role key (anon can't write to RLS-enabled sapphire_* tables).
+  // use service-role key (anon can't write to RLS-enabled sapphire_* tables).
   const { getSapphireSupabase } = await import("./_supabase");
   return getSapphireSupabase();
 }

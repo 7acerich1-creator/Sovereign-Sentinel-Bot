@@ -5,7 +5,7 @@
 
 import type { LLMProvider, LLMMessage, LLMOptions, LLMResponse } from "../types";
 
-// S95: Bumped from 60s → 120s. Gemini thinking-model calls on complex script
+// Bumped from 60s → 120s. Gemini thinking-model calls on complex script
 // generation routinely hit 60-90s. 13 timeouts in one batch at 60s threshold.
 const DEFAULT_TIMEOUT_MS = 120_000;
 const PRIMARY_RETRY_DELAY_MS = 3000;
@@ -52,7 +52,7 @@ export class FailoverLLM implements LLMProvider {
   async generate(messages: LLMMessage[], options?: LLMOptions): Promise<LLMResponse> {
     const errors: string[] = [];
 
-    // SESSION 33: If primary-only mode is active, only try the first provider.
+    // If primary-only mode is active, only try the first provider.
     // This prevents dispatch tasks from cascading to paid providers (Anthropic)
     // when the free primary (Groq) is rate-limited.
     const providerLimit = this._primaryOnly ? 1 : this.providers.length;

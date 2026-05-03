@@ -6,7 +6,7 @@
 import { config } from "../config";
 
 export async function transcribeAudio(audioBuffer: Buffer, mimeType = "audio/ogg"): Promise<string> {
-  // S114q: Groq Whisper-large-v3 PRIMARY (free), OpenAI fallback (paid).
+  // Groq Whisper-large-v3 PRIMARY (free), OpenAI fallback (paid).
   // OpenAI quota exceeded 2026-04-25 — Groq has GROQ_API_KEY already set.
   const groqKey = process.env.GROQ_API_KEY;
   const openaiKey = config.voice.whisperApiKey;

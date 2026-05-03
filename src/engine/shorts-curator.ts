@@ -65,7 +65,7 @@ export interface CuratorResult {
 
 const MAX_SHORTS = 6;
 const MIN_SHORTS = 0; // If curator returns fewer than 2, that's acceptable
-// SESSION 86: YouTube Shorts expanded to 3 minutes (180s) in late 2024.
+// YouTube Shorts expanded to 3 minutes (180s) in late 2024.
 // No arbitrary floor — a 5-second value-bomb is valid content. Quality decides, not duration.
 const MAX_SHORT_DURATION_S = 175; // 175 + padding = ~177s, safely under 180s YouTube limit
 const MIN_SHORT_DURATION_S = 3; // Only reject true glitches (sub-3s = something broke)
@@ -95,7 +95,7 @@ function buildCuratorPrompt(
     const startTs = cumulativeTs;
     const dur = segmentDurations[i] || seg.duration_hint || 20;
     cumulativeTs += dur;
-    // SESSION 92: Show FULL voiceover text (was sliced to 200 chars — LLM couldn't
+    // Show FULL voiceover text (was sliced to 200 chars — LLM couldn't
     // see how segments end, causing incoherent shorts that cut mid-thought).
     return `[${i}] ${startTs.toFixed(1)}s-${cumulativeTs.toFixed(1)}s (${dur.toFixed(1)}s): "${seg.voiceover}"`;
   }).join("\n");
@@ -190,7 +190,7 @@ export async function curateShorts(
 
   console.log(`🎬 [ShortsCurator] Analyzing ${script.segments.length} segments for ${script.brand} (${totalDurationEarly.toFixed(0)}s, avg ${(totalDurationEarly / script.segments.length).toFixed(1)}s/seg)...`);
 
-  // SESSION 99: Retry up to 2 times on parse failure. The #1 cause of
+  // Retry up to 2 times on parse failure. The #1 cause of
   // "0 curated shorts" was unparseable LLM output (commentary wrapping
   // the JSON, or invalid escape sequences). A single retry at temp 0.1
   // almost always produces clean JSON on the second attempt.
@@ -357,7 +357,7 @@ export async function curateShorts(
   validShorts.sort((a, b) => b.confidence - a.confidence);
   const finalShorts = validShorts.slice(0, MAX_SHORTS);
 
-  // SESSION 99: Diagnostic summary so Railway logs always show WHY shorts were rejected
+  // Diagnostic summary so Railway logs always show WHY shorts were rejected
   const rejected = candidates.length - validShorts.length;
   console.log(
     `🎬 [ShortsCurator] ${finalShorts.length} shorts curated from ${candidates.length} candidates ` +

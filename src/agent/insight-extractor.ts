@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Business Learning Loop
-// Session 114 (S114p) — 2026-04-25
+// Session 114 — 2026-04-25
 //
 // Every successful crew_dispatch completion → Gemini Flash extracts ONE
 // reusable insight → writes to that agent's Pinecone namespace.

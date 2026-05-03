@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Sapphire PA — Multi-Step Planner Meta-Tool (Gap 10)
-// Session 114 (S114n) — 2026-04-25
+// Session 114 — 2026-04-25
 //
 // The "plan my anniversary" pattern. Sapphire decomposes a complex goal into
 // 3-8 ordered steps, persists to sapphire_plans, returns the plan for Ace to

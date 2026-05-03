@@ -134,7 +134,7 @@ export async function runCalendarLookahead(): Promise<void> {
 // Track seen IDs in sapphire_known_facts under key=email_seen:<gmail_id>.
 // If important + new, DM Ace.
 
-// S125k tightening: dropped bare "reminder" and "confirmation" — too broad,
+// tightening: dropped bare "reminder" and "confirmation" — too broad,
 // caught HubSpot 2FA-backup-code emails and other auto-generated SaaS noise.
 // "permission" also dropped — too broad.
 // Sapphire learns specific noise patterns via log_email_classification, then
@@ -177,7 +177,7 @@ async function markSeenEmail(supabase: any, gmailId: string, summary: string): P
 }
 
 function isPriorityEmail(subject: string, snippet: string, fromHeader?: string): boolean {
-  // S125k: sender-domain noise filter (kills auto-generated SaaS pings even if
+  // sender-domain noise filter (kills auto-generated SaaS pings even if
   // they contain priority keywords like "reminder" / "appointment confirmation").
   if (fromHeader) {
     const lowerFrom = fromHeader.toLowerCase();

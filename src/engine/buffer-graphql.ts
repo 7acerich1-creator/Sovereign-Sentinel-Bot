@@ -1,10 +1,10 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Shared Buffer GraphQL Client
-// SESSION 85: Single rate limiter for ALL Buffer API consumers.
-// SESSION 87: Adaptive pacing via RateLimit-Remaining/Reset headers.
+// Single rate limiter for ALL Buffer API consumers.
+// Adaptive pacing via RateLimit-Remaining/Reset headers.
 //             Quota-exhaustion is now a typed error so consumers can
 //             degrade gracefully instead of crashing entire sweeps.
-// SESSION 89: Daily budget tracker (250 calls/24h on Essentials plan).
+// Daily budget tracker (250 calls/24h on Essentials plan).
 //             Shared channel cache — all consumers use getChannelServiceMap()
 //             instead of making redundant channel discovery API calls.
 //
@@ -165,14 +165,14 @@ export async function bufferGraphQL(
   query: string,
   variables?: Record<string, unknown>
 ): Promise<any> {
-  // SESSION 87: Pre-flight check — if we already know quota is blown, fail fast
+  // Pre-flight check — if we already know quota is blown, fail fast
   if (isBufferQuotaExhausted()) {
     throw new BufferQuotaExhaustedError(
       Math.ceil((quotaExhaustedUntil - Date.now()) / 1000)
     );
   }
 
-  // SESSION 89: Daily budget check — stop before hitting Buffer's 250/day hard cap
+  // Daily budget check — stop before hitting Buffer's 250/day hard cap
   const dailyCount = getDailyCallCount();
   if (dailyCount >= DAILY_BUDGET_HARD_STOP) {
     console.warn(
@@ -212,10 +212,10 @@ export async function bufferGraphQL(
       body: JSON.stringify(body),
     });
 
-    // SESSION 89: Track this call against daily budget
+    // Track this call against daily budget
     recordDailyCall();
 
-    // SESSION 87: Always read rate limit headers for adaptive pacing
+    // Always read rate limit headers for adaptive pacing
     updateRateLimitState(resp);
 
     // ── HTTP 429 — rate limit hit ──

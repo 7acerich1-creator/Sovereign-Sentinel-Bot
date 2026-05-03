@@ -116,7 +116,7 @@ interface RecentUpload {
   publishedAt: string; // ISO timestamp
 }
 
-// S117e (2026-04-25): switched from search.list (100 quota units/call) to
+// switched from search.list (100 quota units/call) to
 // playlistItems.list on the channel's uploads playlist (1 unit/call). The
 // uploads playlist ID is the channel ID with the "UC" prefix replaced by "UU".
 // Daily cost: was ~57,000 units, now ~570 units. Critical fix — search.list

@@ -153,7 +153,7 @@ const _SS_EXIT = "Cinematic photograph of a massive steel vault door swinging op
 const _SS_MEMETIC = "Cinematic photograph of data streams rendered as amber light filaments flowing through dark fiber-optic channels, neural network patterns emerging in warm gold against void black, the signal crystallizing from noise, 1:1 square format, photorealistic cinematic quality, NO people NO faces NO skin, ";
 const _SS_TIME = "Cinematic close-up photograph of a shattered clock face with warm golden light bleeding through the cracks onto a dark wooden surface, time as a physical material being bent, gears and springs scattered in amber tungsten light, 1:1 square format, photorealistic cinematic quality, NO people NO faces NO skin, ";
 
-// S119i AUDIT FIX (2026-04-26): Mood adjectives ("oppressive atmosphere", "clinical cold")
+// AUDIT FIX (2026-04-26): Mood adjectives ("oppressive atmosphere", "clinical cold")
 // were being flattened by Imagen 4 into bright sterile stock-photo slop — TCF was shipping
 // images that read like corporate offices instead of noir surveillance. Photographer-led
 // anchors ("in the style of [name]") are robustly trained style tokens that survive the
@@ -226,7 +226,7 @@ const BRAND_IMAGE_STYLE: Record<Brand, string> = {
 // rotation in niche-cooldown.pickNextAesthetic(brand). All scenes in a
 // single video share the same aesthetic — the NEXT video rotates.
 //
-// Mapped 1:1 from the 6 test prompts Ace validated externally (S113+).
+// Mapped 1:1 from the 6 test prompts Ace validated externally.
 // DO NOT edit without updating NORTH_STAR.md's "30-video A/B/C performance
 // test" section — these strings are the ground-truth spec.
 
@@ -266,7 +266,7 @@ export const AESTHETIC_MODIFIERS: Record<Brand, Record<AestheticStyleLabel, stri
   },
 };
 
-// S127 (2026-05-01): Removed dead Imagen path —
+// Removed dead Imagen path —
 //   - aestheticModifier() helper (orphaned export, no callers)
 //   - DALLE_SIZE_MAP (only used by deleted generateContentImage)
 //   - uploadImageToStorage() (only used by deleted generateContentImage)
@@ -278,11 +278,11 @@ export const AESTHETIC_MODIFIERS: Record<Brand, Record<AestheticStyleLabel, stri
 // FLUX path (dailyContentProduction builds image_prompt from them, FLUX pod
 // batch consumes the prompt) and by faceless-factory + batch-producer.
 
-// SESSION 85: bufferGraphQL + BUFFER_ORG_ID imported from shared ./buffer-graphql.ts
+// bufferGraphQL + BUFFER_ORG_ID imported from shared ./buffer-graphql.ts
 // Single rate limiter across all Buffer consumers.
 
 // ── Channel Discovery & Caching ──
-// SESSION 89: Now backed by shared cache in buffer-graphql.ts (4h TTL).
+// Now backed by shared cache in buffer-graphql.ts (4h TTL).
 // This function categorizes the shared channel list into brand buckets.
 // The local brandMapCache avoids re-categorizing on every call but
 // the actual API call is handled once by getBufferChannels().
@@ -299,7 +299,7 @@ export async function discoverChannels(): Promise<BrandChannelMap> {
   if (cachedChannelMap && Date.now() - channelCacheTimestamp < CHANNEL_CACHE_TTL_MS) return cachedChannelMap;
 
   try {
-    // SESSION 89: Use shared channel cache from buffer-graphql.ts
+    // Use shared channel cache from buffer-graphql.ts
     const channels = await getBufferChannels();
 
     if (channels.length === 0) {
@@ -336,7 +336,7 @@ export async function discoverChannels(): Promise<BrandChannelMap> {
 
     return map;
   } catch (err: any) {
-    // SESSION 87: If quota is exhausted but we have a cached channel map, use it.
+    // If quota is exhausted but we have a cached channel map, use it.
     // This prevents VidRush's shorts distribution from killing ContentEngine's
     // entire distribution sweep. Stale channels (hours old) are better than zero posts.
     if (cachedChannelMap) {
@@ -729,7 +729,7 @@ export async function dailyContentProduction(
  * by avoiding velocity spikes. Do NOT raise frequency without explicit approval.
  */
 export async function distributionSweep(): Promise<number> {
-  // SESSION 87+97: Buffer quota check — skip Buffer channels but still run Facebook direct.
+  // +97: Buffer quota check — skip Buffer channels but still run Facebook direct.
   const bufferBlocked = isBufferQuotaExhausted();
   if (bufferBlocked) {
     console.warn(`⏸️ [ContentEngine] Buffer quota exhausted — skipping Buffer channels, Facebook direct still active`);
@@ -737,7 +737,7 @@ export async function distributionSweep(): Promise<number> {
 
   const now = new Date().toISOString();
 
-  // SESSION 105: Cap drafts per sweep to stay inside the 250/day Buffer budget.
+  // Cap drafts per sweep to stay inside the 250/day Buffer budget.
   // At ~5 Buffer channels per draft, 6 drafts = ~30 API calls. Safe ceiling.
   const SWEEP_DRAFT_CAP = 6;
 
@@ -748,20 +748,20 @@ export async function distributionSweep(): Promise<number> {
   );
 
   // CE-6 FIX: Also pick up "partial" items — channels that failed can be retried without duplicating successes
-  // SESSION 105: Capped at 4 (was 12 — caused 60+ API calls on retry storms)
+  // Capped at 4 (was 12 — caused 60+ API calls on retry storms)
   const partialDrafts = await supabaseQuery(
     "content_engine_queue",
     `status=eq.partial&order=scheduled_time.asc&limit=4`
   );
 
-  // SESSION 92 FIX: Retry "failed" drafts too — previously abandoned forever.
+  // FIX: Retry "failed" drafts too — previously abandoned forever.
   // Cap at 3 retries (check retry_count column, default 0) to avoid infinite loops.
   const failedDrafts = await supabaseQuery(
     "content_engine_queue",
     `status=eq.failed&retry_count=lt.3&order=scheduled_time.asc&limit=3`
   );
 
-  // SESSION 105: Hard cap total drafts at SWEEP_DRAFT_CAP to prevent budget blowout
+  // Hard cap total drafts at SWEEP_DRAFT_CAP to prevent budget blowout
   const allDrafts = [...readyDrafts, ...partialDrafts, ...failedDrafts];
   const drafts = allDrafts.slice(0, SWEEP_DRAFT_CAP);
 
@@ -804,7 +804,7 @@ export async function distributionSweep(): Promise<number> {
       const postResults: string[] = [];
 
       // Post to each channel with platform-specific text
-      // SESSION 97: Skip entire Buffer loop if quota is blown — Facebook direct still fires below
+      // Skip entire Buffer loop if quota is blown — Facebook direct still fires below
       if (bufferBlocked) {
         postResults.push(`⏸️ ALL_BUFFER: Skipped — Buffer quota exhausted`);
       }
@@ -837,7 +837,7 @@ export async function distributionSweep(): Promise<number> {
           postResults.push(`⏭️ ${channel.service}(${channel.id}): Skipped — Buffer YouTube requires video (community image posts not supported by Buffer API)`);
           continue;
         }
-        // SESSION 105: Facebook goes through direct Graph API publisher (below), NOT Buffer.
+        // Facebook goes through direct Graph API publisher (below), NOT Buffer.
         // Skip any facebook Buffer channel to prevent double-posting attempts.
         if (service === "facebook") {
           postResults.push(`⏭️ ${channel.service}(${channel.id}): Skipped — Facebook uses direct Graph API (not Buffer)`);
@@ -883,7 +883,7 @@ export async function distributionSweep(): Promise<number> {
 
           // CE-2 FIX: schedulingType enum is "automatic" or "notification" (NOT "scheduled")
           // "automatic" = Buffer picks the optimal time from its queue
-          // SESSION 87: Added LimitReachedError to union — plan-level post cap detection
+          // Added LimitReachedError to union — plan-level post cap detection
           const postQuery = `
             mutation CreatePost {
               createPost(input: {
@@ -911,7 +911,7 @@ export async function distributionSweep(): Promise<number> {
           if (result?.post) {
             postResults.push(`✅ ${channel.service}(${channel.id}): ${result.post.id}`);
           } else if (result?.message?.toLowerCase().includes('limit')) {
-            // SESSION 95+104: Buffer removed LimitReachedError from union entirely (Apr 2026).
+            // +104: Buffer removed LimitReachedError from union entirely (Apr 2026).
             // Detect plan-level cap from MutationError message text.
             postResults.push(`⏸️ ${channel.service}(${channel.id}): Plan limit reached — ${result.message}`);
             break; // No point trying more channels — they'll all hit the same limit
@@ -921,7 +921,7 @@ export async function distributionSweep(): Promise<number> {
             postResults.push(`⚠️ ${channel.service}(${channel.id}): Unknown response`);
           }
         } catch (err: any) {
-          // SESSION 87: Quota exhausted mid-sweep — stop posting remaining channels,
+          // Quota exhausted mid-sweep — stop posting remaining channels,
           // mark draft as partial so the next sweep (when quota resets) picks it up.
           if (err instanceof BufferQuotaExhaustedError) {
             postResults.push(`⏸️ ${channel.service}(${channel.id}): Buffer quota exhausted — deferring`);
@@ -976,7 +976,7 @@ export async function distributionSweep(): Promise<number> {
         buffer_results: allResults,
         channels_hit: successCount,
         channels_total: channels.length,
-        // SESSION 92: Track retry count so failed drafts don't loop forever
+        // Track retry count so failed drafts don't loop forever
         retry_count: (draft.retry_count || 0) + 1,
       });
 
@@ -1190,7 +1190,7 @@ export async function fluxBatchImageGen(): Promise<FluxBatchResult> {
 
   let patched = 0;
 
-  // SESSION 105: ONE image per brand, DIFFERENT hook text captions burned on each copy.
+  // ONE image per brand, DIFFERENT hook text captions burned on each copy.
   // Pod deduplicates by prompt — generates FLUX once, creates N branded videos.
   // This eliminates the "all 12 images look the same" problem: now they share one
   // high-quality hero image but each has a unique hook text overlay.
@@ -1300,7 +1300,7 @@ export async function draftAutoPublisher(): Promise<number> {
       }
 
       // Insert into content_engine_queue with immediate scheduling.
-      // SESSION 115 FIX (2026-04-24): Removed `source: "draft_auto_publisher"`.
+      // FIX (2026-04-24): Removed `source: "draft_auto_publisher"`.
       // The content_engine_queue table has NO `source` column (verified
       // against information_schema). Including the field caused every MC
       // draft promotion INSERT to silently 4xx, which is why the queue

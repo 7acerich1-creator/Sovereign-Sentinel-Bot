@@ -1,7 +1,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Sapphire Identity Ledger
 //
-// S121: Append-only record of every self-modification Sapphire performs.
+// Append-only record of every self-modification Sapphire performs.
 // Persists to public.sapphire_identity_log — survives Railway redeploys,
 // readable by /history command + the dashboard.
 //
@@ -45,7 +45,7 @@ export interface IdentityLogEntry {
 export async function logIdentityChange(entry: IdentityLogEntry): Promise<void> {
   if (!config.memory.supabaseUrl || !config.memory.supabaseKey) return;
   try {
-    // S121b: service-role key (anon can't write through RLS).
+    // service-role key (anon can't write through RLS).
     const { getSapphireSupabase } = await import("./_supabase");
     const supabase = await getSapphireSupabase();
 
@@ -87,7 +87,7 @@ export async function readIdentityHistory(
 ): Promise<IdentityHistoryRow[]> {
   if (!config.memory.supabaseUrl || !config.memory.supabaseKey) return [];
   try {
-    // S121b: service-role key.
+    // service-role key.
     const { getSapphireSupabase } = await import("./_supabase");
     const supabase = await getSapphireSupabase();
 

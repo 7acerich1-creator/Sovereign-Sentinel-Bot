@@ -24,7 +24,7 @@ import {
 } from "../data/shared-context";
 import type { Brand } from "../pod/types";
 
-// S66 re-tune: original 30/14 starved daily cadence with 5-niche allowlist.
+// re-tune: original 30/14 starved daily cadence with 5-niche allowlist.
 // Math: each niche can recycle via soft-relax every RELAX_DAYS → theoretical max
 // throughput = (allowlist_size ÷ RELAX_DAYS) per brand. At 14/7 with the widened
 // 8-niche allowlist, that's ~8/week/brand — comfortably above the 5-7/week target.

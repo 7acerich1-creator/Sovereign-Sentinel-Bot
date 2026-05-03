@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Sapphire PA — Assembled Prompt Builder (ddxfish pattern)
-// Session 114 (S114u) — 2026-04-25
+// Session 114 — 2026-04-25
 //
 // Implements ddxfish/sapphire's library + active-state + spice architecture:
 //   1. PIECES JSON is a LIBRARY — each section has multiple named pieces

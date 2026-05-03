@@ -1,7 +1,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GRAVITY CLAW v3.0 — Sapphire Introspection Detector
 //
-// S121: Routes introspective / relational / self-reflective Sapphire DMs
+// Routes introspective / relational / self-reflective Sapphire DMs
 // to Claude (Anthropic) instead of Gemini Flash-Lite. Reason: Gemini's
 // safety classifier silently zeroes out self-modification language and
 // "war with reality" framings even with BLOCK_ONLY_HIGH. Claude doesn't.

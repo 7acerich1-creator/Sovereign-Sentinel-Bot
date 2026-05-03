@@ -8,7 +8,7 @@
 import type { Tool, ToolDefinition } from "../types";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
-// SESSION 31: Use service role key for action surface writes — bypasses RLS.
+// Use service role key for action surface writes — bypasses RLS.
 // tasks, briefings, content_drafts tables all blocked by RLS with anon key (401 errors).
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
@@ -271,7 +271,7 @@ export class FileBriefingTool implements Tool {
     });
 
     if (id) {
-      // S122c (2026-04-26): canonicalized marker.
+      // canonicalized marker.
       // The dispatch poller's relay regex is `/✅ Briefing filed:\s*([0-9a-f-]{8,})/i`.
       // First line MUST be exactly `✅ Briefing filed: <id>` so the relay fires
       // for ALL crew agents that use this tool — not just the ones with hardened

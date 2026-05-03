@@ -47,7 +47,7 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 const RUNPOD_API_BASE = "https://rest.runpod.io/v1";
 const DEFAULT_IMAGE = "ghcr.io/7acerich1-creator/sovereign-sentinel-pod:latest";
-// S76: Volume dependency removed — speaker WAVs baked into Docker image,
+// Volume dependency removed — speaker WAVs baked into Docker image,
 // model weights download to container disk on cold start. Pod can now
 // schedule in ANY datacenter worldwide instead of being pinned to US-KS-2.
 const DEFAULT_NETWORK_VOLUME_ID = "gai851lcfw"; // Legacy — only used if explicitly requested
@@ -55,7 +55,7 @@ const DEFAULT_VOLUME_MOUNT_PATH = "/runpod-volume";
 const DEFAULT_CONTAINER_DISK_GB = 75; // Bumped from 50 — models cache on container disk now
 const DEFAULT_WORKER_PORT = 8000;
 
-// S93 GPU ordering: 48GB cards ONLY. Peak VRAM ~31GB (FLUX+XTTS+Whisper).
+// GPU ordering: 48GB cards ONLY. Peak VRAM ~31GB (FLUX+XTTS+Whisper).
 // 80GB cards removed — 5-10x more expensive, zero quality benefit.
 // Retry protocol (3 rounds × SECURE+COMMUNITY) + no volume (all datacenters)
 // means 5 cards × 14+ datacenters × 2 cloud types = massive scheduling pool.
@@ -175,12 +175,12 @@ export async function startPod(options: StartPodOptions = {}): Promise<PodHandle
   const dataCenterId = options.dataCenterId ?? process.env.RUNPOD_DATACENTER_ID;
   const namePrefix = options.namePrefix ?? "sovereign-worker";
 
-  // S93: Volume DROPPED. Trade-off analysis:
+  // Volume DROPPED. Trade-off analysis:
   //   With volume: ~$0.55/batch, pinned to US-KS-2 only → GPU timeout failures.
   //   Without volume: ~$0.58/batch (+$0.03), schedules across ALL 14+ datacenters.
   // $0.03/batch penalty is negligible. Scheduling across all datacenters eliminates
   // the "no GPU available" failures that killed 50% of the last batch run.
-  // Speaker WAVs baked into Docker image (S76). Models download to container disk.
+  // Speaker WAVs baked into Docker image. Models download to container disk.
   // Cold start ~8min (model download) vs ~2min (cached) — acceptable for 96min batch.
   const noVolume = options.noVolume ?? true;
   const networkVolumeId =
@@ -198,7 +198,7 @@ export async function startPod(options: StartPodOptions = {}): Promise<PodHandle
   forwardedEnv["XTTS_SPEAKER_WAV_ACE"] = "/app/brand-assets/ace_ref.wav";
   forwardedEnv["XTTS_SPEAKER_WAV_TCF"] = "/app/brand-assets/tcf_ref.wav";
 
-  // S80: When volume is attached, point model caches to the persistent volume
+  // When volume is attached, point model caches to the persistent volume
   // so FLUX + XTTS weights survive across pod creates. When volume-free,
   // models cache to container disk (lost on pod termination).
   if (!noVolume) {
@@ -206,7 +206,7 @@ export async function startPod(options: StartPodOptions = {}): Promise<PodHandle
     forwardedEnv["TORCH_HOME"] = "/runpod-volume/cache/torch";
     forwardedEnv["XDG_CACHE_HOME"] = "/runpod-volume/cache";
   } else {
-    // S93: Safety — if Railway has stale HF_HOME pointing to /runpod-volume/,
+    // Safety — if Railway has stale HF_HOME pointing to /runpod-volume/,
     // the worker would try to write models to a non-existent mount and crash.
     // Force container-disk paths so the worker's defaults take over cleanly.
     delete forwardedEnv["HF_HOME"];
@@ -214,7 +214,7 @@ export async function startPod(options: StartPodOptions = {}): Promise<PodHandle
     delete forwardedEnv["XDG_CACHE_HOME"];
   }
 
-  // S76: Retry protocol — try SECURE first, fall back to COMMUNITY, wait, retry.
+  // Retry protocol — try SECURE first, fall back to COMMUNITY, wait, retry.
   // Prevents single-attempt failures from killing the whole pipeline when a
   // datacenter is temporarily at capacity.
   const cloudTypeOrder: Array<"SECURE" | "COMMUNITY"> =
@@ -244,7 +244,7 @@ export async function startPod(options: StartPodOptions = {}): Promise<PodHandle
       if (!noVolume) {
         createBody["networkVolumeId"] = networkVolumeId;
         createBody["volumeMountPath"] = DEFAULT_VOLUME_MOUNT_PATH;
-        // S80: Volume is in US-KS-2 — pin datacenter so RunPod doesn't try to
+        // Volume is in US-KS-2 — pin datacenter so RunPod doesn't try to
         // schedule in a region where the volume doesn't exist.
         if (!dataCenterId) {
           createBody["dataCenterIds"] = ["US-KS-2"];
@@ -405,7 +405,7 @@ export async function produceVideo(
   const timeoutMs = options.timeoutMs ?? DEFAULT_JOB_TIMEOUT_MS;
   const pollMs = options.pollMs ?? DEFAULT_JOB_POLL_MS;
 
-  // SESSION 81 FIX: Wrap POST /produce in a retry loop.
+  // FIX: Wrap POST /produce in a retry loop.
   // RunPod's NGINX proxy frequently returns empty 404s or 502s for the first
   // few seconds after a cold boot, even after GET /health returns 200.
   let accepted: ProduceAccepted | undefined;
@@ -788,7 +788,7 @@ export async function generateImageBatch(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SESSION 105: Pod TTS — synthesize text via XTTS on the GPU pod.
+// Pod TTS — synthesize text via XTTS on the GPU pod.
 // Returns raw WAV audio buffer. Used by rechop pipeline + faceless factory
 // now that XTTS_SERVER_URL is retired and TTS lives on the same pod as FLUX.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -858,7 +858,7 @@ export async function podTTS(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SESSION 92: Pod log capture — download logs BEFORE termination.
+// Pod log capture — download logs BEFORE termination.
 // Ring buffer on the pod holds last 2000 lines. We fetch them and store to R2
 // so failures are diagnosable even after the pod is destroyed.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1232,7 +1232,7 @@ function backoffMs(attempt: number): number {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SESSION 91 FIX: Split oversized TTS scenes before pod submission.
+// FIX: Split oversized TTS scenes before pod submission.
 // LLM occasionally writes segments >4000 chars. Instead of crashing the
 // entire production, split at the nearest sentence boundary under the cap.
 // ─────────────────────────────────────────────────────────────────────────────

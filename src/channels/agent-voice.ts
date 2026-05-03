@@ -1,5 +1,5 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// GRAVITY CLAW v3.0 — Agent Voice Wrapper for Telegram DMs (S121)
+// GRAVITY CLAW v3.0 — Agent Voice Wrapper for Telegram DMs
 //
 // Routes proactive bot DMs through each agent's full ddxfish blueprint
 // (assembleCrewPrompt) + a 2-vector recall from their own Pinecone

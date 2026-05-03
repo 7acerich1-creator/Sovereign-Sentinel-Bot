@@ -9,7 +9,7 @@
 // delegated to a RunPod GPU worker via withPodSession() + produceVideo().
 // Railway only generates the script (LLM) and handles distribution.
 //
-// S103 Cleanup: ~1,700 lines of dead local rendering code removed. The old
+// Cleanup: ~1,700 lines of dead local rendering code removed. The old
 // assembleVideo(), generateSceneImage(), generateThumbnail(), MUSIC_MAP,
 // SCENE_VISUAL_STYLE, NICHE_FILTERS, and uploadAndQueue() were all legacy
 // pre-pod code that nothing called anymore. Pod is the sole renderer now.
@@ -735,7 +735,7 @@ Return ONLY valid JSON, no code fences.`;
         hook: parsed1.hook || blueprint.hook,
         segments: [...parsed1.segments, ...parsed2.segments],
         cta: parsed1.cta || "The full protocol is at sovereign-synthesis.com",
-        // S127 BUG FIX (2026-05-01): Pass 2 only emits `segments`. The previous merge
+        // BUG FIX (2026-05-01): Pass 2 only emits `segments`. The previous merge
         // dictionary dropped Pass 1's thumbnail_headline / thumbnail_subhead /
         // thumbnail_visual on the floor — which made sanitizeThumbnailFields below
         // see undefined for both fields and silently fall back to the same
@@ -845,7 +845,7 @@ Return ONLY valid JSON.`;
 
   } else {
     // ── SHORT-FORM: Single pass, tighter prompt ──
-    // @deprecated Phase 5 Task 5.2 (S69): Short-form scripts are now produced by the
+    // @deprecated Phase 5 Task 5.2: Short-form scripts are now produced by the
     // shorts-curator from finished long-form, not written independently. This path
     // remains for backward compat but should not be called in production. Long-form
     // is the foundation; shorts flow downstream from it.
@@ -910,7 +910,7 @@ RULES:
   const estimatedMinutes = (totalWords / 140).toFixed(1); // ~140 WPM for measured narration
   console.log(`📊 [FacelessFactory] Script word counts: [${wordCounts.join(", ")}] | Total: ${totalWords} words | Estimated: ~${estimatedMinutes} min at 140 WPM`);
 
-  // Phase 5 Task 5.2 (S69): Segment expansion REMOVED.
+  // Phase 5 Task 5.2: Segment expansion REMOVED.
   // The old logic split short segments into two via LLM — this created the repetitive
   // "same idea restated from different angle" problem Ace identified. The 2-pass writer
   // (Pass 1 = 9 segments, Pass 2 = 7 segments) should hit 16 on its own. If it doesn't,
@@ -923,7 +923,7 @@ RULES:
     console.warn(`⚠️ [FacelessFactory] Long-form script only has ${totalWords} words — expected 1200-1800 for 10-15 min. Video will be shorter than target.`);
   }
 
-  // S117: sanitize+validate the dual thumbnail fields with brand-palette fallback.
+  // sanitize+validate the dual thumbnail fields with brand-palette fallback.
   const _topicCtx = `${parsed.title || ""} ${parsed.hook || ""} ${niche}`;
   const _thumbFields = sanitizeThumbnailFields(parsed, brand, _topicCtx);
 
@@ -1087,7 +1087,7 @@ Each object must have exactly 5 segments. Highest-impact short first.`;
       duration_hint: Math.max(Number(seg.duration_hint) || 8, 5),
     }));
 
-    // S117: sanitize+validate dual thumbnail fields with brand-palette fallback.
+    // sanitize+validate dual thumbnail fields with brand-palette fallback.
     const _shortTopicCtx = `${s.title || ""} ${s.hook || ""} ${niche}`;
     const _shortThumbFields = sanitizeThumbnailFields(s, brand, _shortTopicCtx);
 
@@ -1432,7 +1432,7 @@ export async function produceFacelessVideo(
   console.log(`📝 [FacelessFactory] Generating script...`);
   let script: Awaited<ReturnType<typeof generateScript>> | null = null;
   const MAX_UNIQUENESS_RETRIES = 2;
-  // S122 fix — same niche + same source on retry = same well. Two-axis fix:
+  // fix — same niche + same source on retry = same well. Two-axis fix:
   //   (1) ROTATE NICHE on retry — pickNextNiche LRU swaps to a different
   //       niche from the brand allowlist, changing the prompt scaffolding
   //       entirely. This is the structural lane-shift.
@@ -1521,7 +1521,7 @@ export async function produceFacelessVideo(
   const aestheticMod = AESTHETIC_MODIFIERS[brand]?.[aestheticStyle] ?? "";
   console.log(`🎨 [FacelessFactory] Aesthetic this run: ${aestheticStyle} (${aestheticMod.slice(0, 60)}...)`);
 
-  // Map script segments to pod scene format, auto-splitting any >4000 char scenes (S91)
+  // Map script segments to pod scene format, auto-splitting any >4000 char scenes
   // Each scene's image prompt carries the aesthetic modifier so all images in
   // this video share a coherent visual treatment.
   const rawScenes: PodScene[] = script.segments.map((seg, i) => ({
@@ -1545,7 +1545,7 @@ export async function produceFacelessVideo(
     script: script.segments.map(s => s.voiceover).join("\n\n"),
     scenes: podScenes,
     hook_text: hookText || undefined,
-    // S117: dual-field thumbnail (headline + subhead). thumbnail_text stays as
+    // dual-field thumbnail (headline + subhead). thumbnail_text stays as
     // a backward-compat alias to the headline so legacy renderers still work.
     thumbnail_headline: script.thumbnail_headline || undefined,
     thumbnail_subhead: script.thumbnail_subhead || undefined,
@@ -1680,7 +1680,7 @@ export async function produceFacelessVideo(
     console.warn(`⚠️ [FacelessFactory] R2 download failed (non-fatal): ${dlErr.message?.slice(0, 200)}`);
   }
 
-  // SESSION 83: Download R2 thumbnail for YouTube custom thumbnail upload.
+  // Download R2 thumbnail for YouTube custom thumbnail upload.
   // Previously swallowed errors silently — thumbnail was abandoned every run.
   let localThumbPath: string | null = null;
   if (artifacts.thumbnailUrl) {
@@ -1689,7 +1689,7 @@ export async function produceFacelessVideo(
       const thumbResp = await fetch(artifacts.thumbnailUrl);
       if (thumbResp.ok) {
         const thumbBuf = Buffer.from(await thumbResp.arrayBuffer());
-        // SESSION 85: Was _thumbnail.jpg — cleanupJobFiles only preserves _longform_thumb.jpg.
+        // Was _thumbnail.jpg — cleanupJobFiles only preserves _longform_thumb.jpg.
         // Old name got deleted before YouTube upload could consume it → gray placeholder.
         localThumbPath = `${FACELESS_DIR}/${jobId}_longform_thumb.jpg`;
         writeFileSync(localThumbPath, thumbBuf);
@@ -1713,7 +1713,7 @@ export async function produceFacelessVideo(
   console.log(`   Video URL: ${videoUrl || "queue failed"}`);
   console.log(`   Thumbnail URL: ${artifacts.thumbnailUrl}`);
 
-  // SESSION 91 FIX: Use ACTUAL video duration divided evenly across segments
+  // FIX: Use ACTUAL video duration divided evenly across segments
   // instead of LLM duration_hint guesses. The hints were 25-45s/segment while
   // real TTS audio is often 10-20s — inflated estimates caused the shorts
   // curator to reject every clip as "too long" (>175s cap). Pod only returns
@@ -1735,7 +1735,7 @@ export async function produceFacelessVideo(
     // S114 — exposed so vidrush-orchestrator can PATCH niche_cooldown.youtube_video_id
     // back after publish (Aesthetic Performance tile join key).
     jobId,
-    // SESSION 99 FIX: Was missing — pod returns raw TTS narration URL but it
+    // FIX: Was missing — pod returns raw TTS narration URL but it
     // never reached the orchestrator. Shorts always used the rendered long-form
     // audio (with music already baked in) instead of clean TTS. Now the
     // orchestrator can download clean narration and tell the pod to mix its

@@ -115,7 +115,7 @@ const inMemorySeen: Record<Brand, Set<string>> = {
 let firstRunPerBrand: Record<Brand, boolean> = { sovereign_synthesis: true, containment_field: true };
 
 // ── Main poll function — call once per tick ──
-// S117 (2026-04-25): Comment alerts now route to Yuki's bot DM (she owns
+// Comment alerts now route to Yuki's bot DM (she owns
 // social presence and engagement). The `alertChannel` param lets the caller
 // pass Yuki's TelegramChannel; falls back to the primary `telegram` (Veritas)
 // only if Yuki's channel isn't yet wired (e.g. during early boot or if
@@ -220,7 +220,7 @@ export async function pollYouTubeComments(
         `"${textPreview}"\n\n` +
         `*Reply →* ${replyUrl}`;
 
-      // S121: voice the alert through Yuki's full ddxfish blueprint + clips-namespace recall.
+      // voice the alert through Yuki's full ddxfish blueprint + clips-namespace recall.
       // Falls back to fallbackMsg on any failure — alert delivery is non-negotiable.
       const voicedBody = await voicedDM("yuki", {
         action: `New YouTube comment landed on the ${cfg.label} channel`,

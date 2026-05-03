@@ -8,7 +8,7 @@
  *   FACEBOOK_CF_PAGE_ACCESS_TOKEN — The Containment Field page token
  *   FACEBOOK_CF_PAGE_ID           — The Containment Field page ID (987809164425935)
  *
- * Optional env (S118c — Planner-staged hybrid):
+ * Optional env:
  *   FACEBOOK_PLANNER_LEAD_MIN     — minutes ahead to schedule each post in
  *                                    Business Suite Planner instead of live.
  *                                    `0` or unset = live publishing (legacy).
@@ -143,15 +143,15 @@ export async function publishToFacebook(
   }
 
   const { token: seedToken, pageId } = creds;
-  // S115b: Always exchange the env-var token for a true Page Access Token before
+  // Always exchange the env-var token for a true Page Access Token before
   // calling /PAGE_ID/feed. Cached per pageId for 24h. Fallback-safe.
   const token = await resolvePageAccessToken(seedToken, pageId);
 
-  // S118c: Resolve scheduled-publish timestamp (null = live mode).
+  // Resolve scheduled-publish timestamp (null = live mode).
   const scheduledFor = resolveScheduledTime(options?.scheduledPublishTime);
 
   try {
-    // S115c: Detect video URLs (.mp4, .mov, .webm, etc.) and route to /videos
+    // Detect video URLs (.mp4, .mov, .webm, etc.) and route to /videos
     // instead of /photos. Prior to this fix, content_engine_queue rows with
     // R2-hosted .mp4 in media_url were being POSTed to /photos as `url=...mp4`,
     // which Meta rejected with "Invalid parameter (code=100)".

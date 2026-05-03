@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Sapphire PA — Pinecone helper (PERSONAL namespace ONLY)
-// Session 114 (S114l) — 2026-04-25
+// Session 114 — 2026-04-25
 //
 // Strict separation: personal memories live in `sapphire-personal` namespace.
 // Brand/business insights stay in the `brand` namespace (untouched by PA).
@@ -55,7 +55,7 @@ async function embedText(text: string): Promise<number[] | null> {
   return null;
 }
 
-// ── UPSERT a free-form observation (S121) ───────────────────────────────────
+// ── UPSERT a free-form observation ───────────────────────────────────
 //
 // Used by relationship_context observations and substantive Sapphire DMs.
 // Metadata schema: {type, category?, timestamp, scenario?, sentiment?, ...}

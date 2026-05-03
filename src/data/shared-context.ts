@@ -80,7 +80,7 @@ export const SOVEREIGN_SYNTHESIS_NICHES = [
   "exit-velocity",
   "memetic-engineering",
   "signal-discipline",
-  // S103 expansion — 7 new axes to prevent cooldown starvation on daily runs
+  // expansion — 7 new axes to prevent cooldown starvation on daily runs
   "pattern-recognition",
   "resource-dynamics",
   "time-sovereignty",
@@ -102,7 +102,7 @@ export const CONTAINMENT_FIELD_NICHES = [
   "information-warfare",
   "narrative-capture",
   "frame-control",
-  // S103 expansion — 7 new axes to prevent cooldown starvation on daily runs
+  // expansion — 7 new axes to prevent cooldown starvation on daily runs
   "cognitive-traps",
   "emotional-engineering",
   "social-programming",

@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Sapphire PA — Self-Modification Meta Tools (ddxfish pattern)
-// Session 114 (S114u) — 2026-04-25
+// Session 114 — 2026-04-25
 //
 // Lets Sapphire modify her own prompt pieces at runtime:
 //   - set_piece(section, key)     — change which piece is active in a section
@@ -246,7 +246,7 @@ export class ViewSelfPromptTool implements Tool {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// VIEW IDENTITY HISTORY — read your own evolution narrative (S121)
+// VIEW IDENTITY HISTORY — read your own evolution narrative
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export class ViewIdentityHistoryTool implements Tool {

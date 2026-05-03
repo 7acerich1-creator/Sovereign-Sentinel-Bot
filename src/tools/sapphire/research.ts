@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Sapphire PA — Research Brief Tool (Gap 3)
-// Session 114 (S114n) — 2026-04-25
+// Session 114 — 2026-04-25
 //
 // Web search + page fetch + Gemini Flash summarization → 1-pager research brief.
 // "Research this company before my Tuesday meeting." "Background-check this contractor."

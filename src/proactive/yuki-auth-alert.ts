@@ -1,5 +1,5 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// GRAVITY CLAW v3.0 — Yuki Auth Failure Alert (S126b)
+// GRAVITY CLAW v3.0 — Yuki Auth Failure Alert
 // Shared helper for IG/FB/TT repliers. Per Architect feedback 2026-04-30:
 // "if these ever stop working will yuki just stop working and i'll never know,
 // or can we set her up to dm saying heads up cookies went bad im locked out"

@@ -29,7 +29,7 @@ import { LogEmailClassificationTool, RequestCodeChangeTool, ListDeferredBuildsTo
 // in a single call. Closes the gap where Sapphire was promising "I'll propose
 // a task" and not actually calling the tool.
 import { CreateTaskForAceTool } from "./task_orchestrator";
-// S125+ Phase 2 — Conditional/threshold-triggered reminders. Architect's
+// Phase 2 — Conditional/threshold-triggered reminders. Architect's
 // bank-account use case (revenue hits $X → fire alert).
 import { ConditionalRemindersTool } from "./conditional_reminders";
 import type { Tool } from "../../types";

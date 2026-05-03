@@ -18,7 +18,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
 
 // ── Supabase logging helper ──
-// SESSION 51: Sanitize payload before insert to prevent CHECK constraint 23514.
+// Sanitize payload before insert to prevent CHECK constraint 23514.
 async function logVideoPost(data: Record<string, unknown>): Promise<void> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return;
   try {
@@ -616,7 +616,7 @@ export class YouTubeLongFormPublishTool implements Tool {
       }
 
       // Initialize resumable upload — NO #Shorts, category 27 (Education) for long-form
-      // SESSION 86: publishAt support for batch scheduling. When set, video uploads as
+      // publishAt support for batch scheduling. When set, video uploads as
       // PRIVATE and YouTube auto-publishes at the specified time. Standard YouTube API
       // feature used by every creator tool — no AI flags, no ban risk.
       const statusBlock: Record<string, unknown> = {

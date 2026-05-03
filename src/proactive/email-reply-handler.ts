@@ -23,7 +23,7 @@ import { voicedDM } from "../channels/agent-voice";
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_EMAIL = "Sovereign Synthesis <ace@sovereign-synthesis.com>";
 
-// S119c: Module-level Telegram channel singleton so crew-dispatch.completeDispatch
+// Module-level Telegram channel singleton so crew-dispatch.completeDispatch
 // can fire the approval prompt without threading the channel through every call site.
 let _telegramChannel: Channel | null = null;
 let _defaultChatId: string | null = null;
@@ -87,7 +87,7 @@ export async function handleInboundEmail(
 
   const replyId = `reply_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-  // 1. Notify Architect immediately that a reply came in — voiced through Anita (S121)
+  // 1. Notify Architect immediately that a reply came in — voiced through Anita
   const alertFallback =
     `📧 *Inbound Email Reply*\n\n` +
     `*From:* ${from}\n` +
@@ -173,7 +173,7 @@ export async function storeDraftAndRequestApproval(
 
   pending.draftText = draftText;
 
-  // S121: a short voiced preamble from Anita presenting her own draft.
+  // a short voiced preamble from Anita presenting her own draft.
   // The structured card below stays mechanical so /approve and /edit remain parseable.
   const preambleFallback = `_Draft ready for your read — ${pending.to}._`;
   const preamble = await voicedDM("anita", {
@@ -198,7 +198,7 @@ export async function storeDraftAndRequestApproval(
   }
 }
 
-// S119h: deduplication so the same replyId can't be approval-carded twice
+// deduplication so the same replyId can't be approval-carded twice
 // (e.g. if completeDispatch fires twice for the same dispatch). 24h TTL.
 const _approvalCardSent = new Map<string, number>();
 function _cleanApprovalCardSent(): void {

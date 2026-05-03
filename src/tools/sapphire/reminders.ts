@@ -323,7 +323,7 @@ export class CancelReminderTool implements Tool {
 
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// CANCEL REMINDER SERIES (S125c)
+// CANCEL REMINDER SERIES
 // Cancels ALL pending reminders matching a message keyword OR a recurrence rule.
 // Solves the "ghost reminder series" problem where Ace had to cancel each
 // reminder individually by ID — e.g., 6 BlueSky reminders, or a daily Edward

@@ -584,7 +584,7 @@ export function hashStringToAngleOffset(s: string): number {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// SESSION 48 — FREQUENCY BIFURCATION PROTOCOL
+// — FREQUENCY BIFURCATION PROTOCOL
 // Single source of truth for brand voice bifurcation.
 // Consumed by Anita (faceless-factory.ts) and Yuki (vidrush-orchestrator.ts
 // + buildSocialOptimizationPrompt above) so updating ONE file updates every

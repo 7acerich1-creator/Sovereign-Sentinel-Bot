@@ -1,5 +1,5 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// SESSION 90: Backlog Drainer — Push existing R2 clips to Buffer
+// Backlog Drainer — Push existing R2 clips to Buffer
 // One-shot function that runs at boot. Lists clips from R2 that haven't
 // been distributed yet, routes them to the correct brand channels,
 // and schedules them across Buffer with proper metadata + anti-ghost jitter.
@@ -199,7 +199,7 @@ export async function drainBacklog(): Promise<void> {
     return;
   }
 
-  // SESSION 105: Reserve 100 calls for ContentEngine sweeps + channel discovery + /drain manual.
+  // Reserve 100 calls for ContentEngine sweeps + channel discovery + /drain manual.
   // In-memory counter resets on deploy, so be conservative — assume we might be mid-day.
   const RESERVED_BUDGET = 100;
   const availableBudget = 240 - getDailyCallCount() - RESERVED_BUDGET;
@@ -386,7 +386,7 @@ export async function drainBacklog(): Promise<void> {
         }
       }
 
-      // SESSION 92 FIX: Only mark as distributed if at least one channel succeeded.
+      // FIX: Only mark as distributed if at least one channel succeeded.
       // Prior bug: marked clips "distributed" with empty buffer_post_ids[], hiding 40 unposted clips.
       if (bufferPostIds.length > 0) {
         await markDistributed(clip.key, bufferPostIds);

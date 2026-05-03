@@ -1,6 +1,6 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Sapphire PA — Family Profiles Tools (Gap 8)
-// Session 114 (S114n) — 2026-04-25
+// Session 114 — 2026-04-25
 //
 // First-class family member records so Sapphire can surface relevant context
 // without Ace having to repeat himself.

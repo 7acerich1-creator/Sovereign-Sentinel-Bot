@@ -1,5 +1,5 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Sapphire PA — Live Team Roster (S121d)
+// Sapphire PA — Live Team Roster
 //
 // Reads PERSONA_REGISTRY at runtime so Sapphire never relies on her stale
 // baked-in picture of who does what. Single source of truth = personas.ts.

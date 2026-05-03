@@ -70,7 +70,7 @@ export function sanitizeTransmissionPayload(raw: Record<string, unknown>): Recor
   return clean;
 }
 
-// SESSION 85: bufferGraphQL + BUFFER_ORG_ID imported from shared ../engine/buffer-graphql.ts
+// bufferGraphQL + BUFFER_ORG_ID imported from shared ../engine/buffer-graphql.ts
 // Single rate limiter across all Buffer consumers (social-scheduler, content-engine, buffer-analytics).
 
 // ── List Channels Tool ──
@@ -84,7 +84,7 @@ export class SocialSchedulerListProfilesTool implements Tool {
 
   async execute(): Promise<string> {
     try {
-      // SESSION 89: Use shared channel cache — zero extra API calls
+      // Use shared channel cache — zero extra API calls
       const channels = await getBufferChannels();
 
       if (channels.length === 0) {
@@ -184,7 +184,7 @@ export class SocialSchedulerPostTool implements Tool {
       const results: string[] = [];
 
       // ── PRE-FLIGHT: Resolve channel service types for smart routing ──
-      // SESSION 89: Uses shared channel cache — zero extra API calls.
+      // Uses shared channel cache — zero extra API calls.
       // YouTube rejects image-only payloads (requires video). Facebook requires type: "post".
       let channelServiceMap: Map<string, string> = new Map();
       try {
@@ -290,14 +290,14 @@ export class SocialSchedulerPostTool implements Tool {
             }
           `;
 
-          // SESSION 85: Retry logic moved to shared buffer-graphql.ts (10s pacing + 900s cap).
+          // Retry logic moved to shared buffer-graphql.ts (10s pacing + 900s cap).
           const postData = await bufferGraphQL(query);
           const result = postData?.createPost;
 
           if (result?.post) {
             results.push(`✅ ${channelId}: Post created (ID: ${result.post.id})`);
           } else if (result?.message?.toLowerCase().includes('limit')) {
-            // SESSION 95+104: Buffer removed LimitReachedError from union entirely.
+            // +104: Buffer removed LimitReachedError from union entirely.
             // Detect plan-level cap from MutationError message text.
             results.push(`⏸️ ${channelId}: Plan limit reached — ${result.message}`);
             break; // No point trying more channels, they'll all hit the same limit
@@ -312,7 +312,7 @@ export class SocialSchedulerPostTool implements Tool {
       }
 
       // Log to Supabase if available
-      // SESSION 51: Sanitize payload to prevent CHECK constraint 23514 violations.
+      // Sanitize payload to prevent CHECK constraint 23514 violations.
       try {
         const supabaseUrl = process.env.SUPABASE_URL;
         // Session 42: Use SERVICE_ROLE_KEY to bypass RLS (Session 31 directive)

@@ -23,7 +23,7 @@
 
 import type { Tool, ToolDefinition } from "../../types";
 import { config } from "../../config";
-// S125l hotfix2: use the same proven Notion helpers the morning brief uses,
+// hotfix2: use the same proven Notion helpers the morning brief uses,
 // so we walk from the integration-shared parent page down to the right hub
 // instead of hitting a hardcoded ID the integration may not have access to.
 import {

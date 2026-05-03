@@ -33,7 +33,7 @@ export const config: GravityClawConfig = {
 
   llm: {
     defaultProvider: process.env.LLM_DEFAULT_PROVIDER || "gemini",
-    // SESSION 93: GEMINI PRIMARY. Anthropic credits exhausted — parked as emergency-only.
+    // GEMINI PRIMARY. Anthropic credits exhausted — parked as emergency-only.
     // Gemini re-admitted to text-gen (was excluded S29c due to Anita billing leak,
     // root cause was Supabase overwriting prompts — fixed in S29c commit 624fc28).
     // Order: Gemini (primary, has API credit) → Groq (free backup) → Anthropic (emergency only).
@@ -42,12 +42,12 @@ export const config: GravityClawConfig = {
     providers: {
       gemini: {
         apiKey: process.env.GEMINI_API_KEY || "",
-        // S95: Swapped from gemini-3.1-pro-preview ($2/$12 per 1M tokens) to
+        // Swapped from gemini-3.1-pro-preview ($2/$12 per 1M tokens) to
         // gemini-2.5-flash ($0.30/$2.50). Flash benchmarks HIGHER than Pro on
         // 6/6 evals and costs 75% less. Override via GEMINI_MODEL env var.
         model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
         baseUrl: process.env.GEMINI_BASE_URL,
-        // S127 (2026-05-01): imagenKey REMOVED. All image generation runs through
+        // imagenKey REMOVED. All image generation runs through
         // RunPod (FLUX). Imagen path was vestigial since S68 (faceless-factory
         // migration to RunPod) — the agent /imagine tool, the ContentEngine
         // generateContentImage helper, and the diagnostics imagen probe were all
@@ -55,7 +55,7 @@ export const config: GravityClawConfig = {
       },
       anthropic: {
         apiKey: process.env.ANTHROPIC_API_KEY || "",
-        // S127 (2026-05-01): Default bumped from `claude-sonnet-4-20250514` (old May-2025
+        // Default bumped from `claude-sonnet-4-20250514` (old May-2025
         // Sonnet 4) to `claude-sonnet-4-6` (current Sonnet 4.6 alias). Per
         // `feedback_audit_veritas_pre_opus.md` memory: Sonnet 4.6 across the board until
         // Veritas scope audit completes. ANTHROPIC_MODEL env var on Railway will override
@@ -96,7 +96,7 @@ export const config: GravityClawConfig = {
 
   voice: {
     whisperApiKey: process.env.OPENAI_API_KEY || process.env.WHISPER_API_KEY,
-    // SESSION 106: ElevenLabs + Edge TTS + OpenAI TTS PURGED. Everything is XTTS.
+    // ElevenLabs + Edge TTS + OpenAI TTS PURGED. Everything is XTTS.
   },
 
   gmail: {

@@ -68,12 +68,12 @@ async function summarizeYesterday(diaryEntries: string[]): Promise<string | null
   }
 }
 
-// S125+ Phase 8: generalized to per-agent + crew iterator. Strategy session
+// generalized to per-agent + crew iterator. Strategy session
 // 2026-04-30 locked: ONE unified job, runs at 8 AM CDT (13:00 UTC), iterates
 // over each agent in turn. Each agent's diary entries get consolidated into
 // THEIR own significance + core_memory recent_themes slot.
 //
-// S125+ Phase 9: per-agent cadence gating. The job runs daily, but each agent
+// per-agent cadence gating. The job runs daily, but each agent
 // only consolidates if their cadence window has elapsed since their last
 // consolidation. This implements the strategy session decision: Yuki + Anita
 // every 3 days (most active), Vector + Veritas + Alfred weekly, Sapphire daily.
@@ -222,7 +222,7 @@ async function runConsolidationForAgent(agentName: string): Promise<void> {
 }
 
 async function writeSignificance(supabase: any, agentName: string, summary: string, kind: string): Promise<void> {
-  // S125+ Phase 9: unified agent_significance table with agent_name column.
+  // unified agent_significance table with agent_name column.
   try {
     await supabase.from("agent_significance").insert({
       agent_name: agentName,

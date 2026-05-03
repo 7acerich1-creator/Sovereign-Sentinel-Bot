@@ -91,7 +91,7 @@ function scheduleIdleStop(session: ActiveSession): void {
     // our handler, `active` may have been reset or replaced.
     if (active && active.handle.podId === handleToStop.podId && active.inFlight === 0) {
       active = null;
-      // SESSION 92: Capture logs before termination
+      // Capture logs before termination
       void capturePodLogs(handleToStop, "idle_stop").finally(() => stopPod(handleToStop.podId));
     }
   }, session.idleWindowMs);
@@ -114,7 +114,7 @@ function stopImmediately(session: ActiveSession): void {
   if (active && active.handle.podId === handleToStop.podId) {
     active = null;
   }
-  // SESSION 92: Capture logs before termination (especially important on errors)
+  // Capture logs before termination (especially important on errors)
   void capturePodLogs(handleToStop, "error_stop").finally(() => stopPod(handleToStop.podId));
 }
 
@@ -252,7 +252,7 @@ export async function shutdownPodSession(): Promise<void> {
   const session = active;
   cancelIdleTimer(session);
   active = null;
-  // SESSION 92: Capture logs before graceful shutdown
+  // Capture logs before graceful shutdown
   await capturePodLogs(session.handle, "graceful_shutdown").catch(() => {});
   await stopPod(session.handle.podId).catch(() => {
     // stopPod is already 404-safe; swallow transport errors on shutdown.

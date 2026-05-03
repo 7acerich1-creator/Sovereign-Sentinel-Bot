@@ -7,11 +7,11 @@ import { GoogleGenerativeAI, Content, Part, FunctionDeclarationSchema } from "@g
 import type { LLMProvider, LLMMessage, LLMOptions, LLMResponse, ToolDefinition, ToolCall } from "../types";
 
 // ── Rate-limit retry with exponential backoff ──
-// SESSION 31 FIX (revised S55, S95): Raised MAX_RETRIES to 2 and cap to 15s.
+// FIX (revised S55, S95): Raised MAX_RETRIES to 2 and cap to 15s.
 // Original S31 reduced to 1 retry / 5s cap to avoid racing FailoverLLM's timeout.
 // But Anthropic's retry-after headers are typically 15-20s for temporary rate limits.
 // Capping at 5s meant the retry always hit a STILL-limited endpoint → instant failure.
-// With 2 retries x 15s cap = 30s worst case, well within the 120s outer timeout (S95).
+// With 2 retries x 15s cap = 30s worst case, well within the 120s outer timeout.
 // Groq's 30s retry-after headers are STILL capped — they'd burn 30s of 60s budget.
 const MAX_RETRIES = 2;
 const BASE_DELAY_MS = 2000;
@@ -121,7 +121,7 @@ export class GeminiProvider implements LLMProvider {
     const modelConfig: any = {
       model: this.apiModel,
       ...(systemInstruction ? { systemInstruction } : {}),
-      // S119c: Relax the four user-tunable safety categories so Sapphire's
+      // Relax the four user-tunable safety categories so Sapphire's
       // introspective threads (self-modification, relational language, "war
       // with reality" framing) aren't silently zeroed out by the classifier.
       // Default thresholds block benign content that's adjacent to dark-psych
@@ -292,7 +292,7 @@ export class GeminiProvider implements LLMProvider {
         }
       }
 
-      // S119c: Surface the ACTUAL finishReason from the candidate. Old code
+      // Surface the ACTUAL finishReason from the candidate. Old code
       // hardcoded "stop" which made silent safety blocks invisible in logs —
       // exactly the bug we're hunting on Sapphire's empty completions. We map
       // Gemini's wider vocabulary down into the LLMResponse union and emit a
@@ -396,7 +396,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     };
 
     // Convert tools to OpenAI format
-    // SESSION 55: Groq's Llama models choke on large tool payloads (35 tools = ~6K tokens
+    // Groq's Llama models choke on large tool payloads (35 tools = ~6K tokens
     // of schema JSON). When Groq is the FALLBACK after Anthropic 429, this bloat causes
     // instant failure. Cap tools at 12 for Groq to keep payload under its effective limit.
     if (options?.tools && options.tools.length > 0) {

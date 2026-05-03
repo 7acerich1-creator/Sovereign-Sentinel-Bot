@@ -198,16 +198,31 @@ export class GmailTool implements Tool {
       bcc: { type: "string", description: "[send, draft] BCC (comma-separated)." },
       subject: { type: "string", description: "[send, draft] Email subject." },
       body: { type: "string", description: "[send, draft] Email body (plain text)." },
-      limit: { type: "number", description: "[inbox, search] Max results, default 10." },
+      limit: { type: "number", description: "[inbox, search] Max results, default 10 (inbox) / 20 (search)." },
+      hours_back: { type: "number", description: "[inbox] Look back N hours for unread/recent. Default 24." },
+      unread_only: { type: "boolean", description: "[inbox] Only return unread messages. Default true." },
     },
     required: ["action"],
   };
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
+    // S129b — Param remap. Narrow tools read `max`, `unread_only`, `hours_back`.
+    // Fat exposes `limit` historically; translate to `max` and pass through inbox-specific knobs.
     switch (action) {
-      case "inbox": return this.inboxT.execute(args);
-      case "search": return this.searchT.execute(args);
+      case "inbox":
+        return this.inboxT.execute({
+          account: args.account,
+          max: args.limit ?? args.max,
+          unread_only: args.unread_only,
+          hours_back: args.hours_back,
+        });
+      case "search":
+        return this.searchT.execute({
+          account: args.account,
+          query: args.query,
+          max: args.limit ?? args.max,
+        });
       case "send": return this.sendT.execute(args);
       case "draft": return this.draftT.execute(args);
       default: return unknownAction("gmail", action, ["inbox", "search", "send", "draft"]);
@@ -236,7 +251,7 @@ export class CalendarTool implements Tool {
     parameters: {
       action: { type: "string", description: "list | create | reschedule", enum: ["list", "create", "reschedule"] },
       account: { type: "string", description: "[all] 'empoweredservices2013', '7ace.rich1', or 'girls_special_events'." },
-      title: { type: "string", description: "[create] Event title." },
+      title: { type: "string", description: "[create] Event title (mapped to Google Calendar 'summary')." },
       start: { type: "string", description: "[create] Start time (ISO8601 or natural)." },
       end: { type: "string", description: "[create, reschedule] End time. If omitted, defaults to start + 1 hour." },
       location: { type: "string", description: "[create] Location string." },
@@ -245,7 +260,7 @@ export class CalendarTool implements Tool {
       event_id: { type: "string", description: "[reschedule] The Google Calendar event ID." },
       new_start: { type: "string", description: "[reschedule] New start time." },
       new_end: { type: "string", description: "[reschedule] New end time." },
-      days_ahead: { type: "number", description: "[list] Lookahead window in days, default 7." },
+      days_ahead: { type: "number", description: "[list] Lookahead window in days from now. Default 2 days." },
       limit: { type: "number", description: "[list] Max results, default 20." },
     },
     required: ["action"],
@@ -253,9 +268,34 @@ export class CalendarTool implements Tool {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
+    // S129b — Param remap. Narrow CalendarListTool reads time_min/time_max/max,
+    // CalendarCreateEventTool reads `summary` (not `title`).
     switch (action) {
-      case "list": return this.listT.execute(args);
-      case "create": return this.createT.execute(args);
+      case "list": {
+        // Translate days_ahead → time_max if not explicitly passed.
+        const daysAhead = Number(args.days_ahead);
+        const timeMax = args.time_max
+          ? args.time_max
+          : (Number.isFinite(daysAhead) && daysAhead > 0
+              ? new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000).toISOString()
+              : undefined);
+        return this.listT.execute({
+          account: args.account,
+          time_min: args.time_min,
+          time_max: timeMax,
+          max: args.limit ?? args.max,
+        });
+      }
+      case "create":
+        return this.createT.execute({
+          account: args.account,
+          summary: args.title ?? args.summary,
+          start: args.start,
+          end: args.end,
+          location: args.location,
+          description: args.description,
+          attendees: args.attendees,
+        });
       case "reschedule": return this.rescheduleT.execute(args);
       default: return unknownAction("calendar", action, ["list", "create", "reschedule"]);
     }
@@ -437,7 +477,15 @@ export class MemoryTool implements Tool {
       // archival_* defaults to {agent}-personal namespace if not explicitly overridden.
       // Graph actions (entity_upsert/relate/etc.) operate on the SHARED graph (Phase 6 decision).
       case "remember": return this.rememberT.execute(args);
-      case "recall": return this.recallT.execute(args);
+      case "recall":
+        // S129b — Param remap. Narrow RecallFactsTool reads `key_match` and `max`,
+        // not `keyword` / `limit`. Translate.
+        return this.recallT.execute({
+          query: args.query,
+          category: args.category,
+          key_match: args.keyword ?? args.key_match,
+          max: args.limit ?? args.max,
+        });
       case "core_view": return this.coreViewT.execute({ ...args, agent_name: agentName });
       case "core_append": return this.coreAppendT.execute({ ...args, agent_name: agentName });
       case "core_replace": return this.coreReplaceT.execute({ ...args, agent_name: agentName });
@@ -472,17 +520,19 @@ export class FamilyTool implements Tool {
     description:
       "Family-member structured memory: Aliza, Maddy, and any other relatives. ALWAYS call get before answering questions about family members — never claim 'I don't remember' without checking first (per family_first doctrine).\n\n" +
       "ACTIONS:\n" +
-      "• save — create or update a family member's structured info. Required: name. Optional: relationship, dob, school, allergies, doctor, notes.\n" +
+      "• save — create or update a family member's structured info. Required: name. Optional: relationship, dob, school, allergies, doctor, notes, current_activities, emergency_contact.\n" +
       "• get — retrieve family member info. Optional: name (returns specific member if given, else returns all).",
     parameters: {
       action: { type: "string", description: "save | get", enum: ["save", "get"] },
       name: { type: "string", description: "[save, get] Person's name (e.g. 'Aliza', 'Maddy')." },
-      relationship: { type: "string", description: "[save] e.g. 'daughter', 'son', 'wife'." },
-      dob: { type: "string", description: "[save] Date of birth (YYYY-MM-DD)." },
+      relationship: { type: "string", description: "[save, get] e.g. 'daughter', 'son', 'wife'." },
+      dob: { type: "string", description: "[save] Date of birth (YYYY-MM-DD). Mapped to date_of_birth on save." },
       school: { type: "string", description: "[save] Current school." },
-      allergies: { type: "string", description: "[save] Allergies / dietary restrictions." },
+      allergies: { type: "string", description: "[save] Allergies / dietary restrictions (comma-separated)." },
       doctor: { type: "string", description: "[save] Pediatrician / primary care." },
       notes: { type: "string", description: "[save] Free-form notes." },
+      current_activities: { type: "string", description: "[save] Current sports, classes, hobbies (comma-separated)." },
+      emergency_contact: { type: "string", description: "[save] Backup contact name + phone." },
     },
     required: ["action"],
   };
@@ -490,7 +540,19 @@ export class FamilyTool implements Tool {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
     switch (action) {
-      case "save": return this.saveT.execute(args);
+      case "save":
+        // S129b — Param remap. Narrow SaveFamilyMemberTool reads `date_of_birth`, not `dob`.
+        return this.saveT.execute({
+          name: args.name,
+          relationship: args.relationship,
+          date_of_birth: args.dob ?? args.date_of_birth,
+          school: args.school,
+          allergies: args.allergies,
+          doctor: args.doctor,
+          notes: args.notes,
+          current_activities: args.current_activities,
+          emergency_contact: args.emergency_contact,
+        });
       case "get": return this.getT.execute(args);
       default: return unknownAction("family", action, ["save", "get"]);
     }
@@ -525,6 +587,8 @@ export class FollowupsTool implements Tool {
       source_excerpt: { type: "string", description: "[record] Optional quote from the conversation that triggered it." },
       id: { type: "string", description: "[complete, cancel] Followup ID." },
       keyword: { type: "string", description: "[list] Filter by keyword." },
+      limit: { type: "number", description: "[list] Max results, default 20." },
+      status: { type: "string", description: "[list] Filter by status (pending | done | cancelled). Default pending.", enum: ["pending", "done", "cancelled"] },
     },
     required: ["action"],
   };
@@ -533,7 +597,12 @@ export class FollowupsTool implements Tool {
     const action = String(args.action || "").toLowerCase();
     switch (action) {
       case "record": return this.recordT.execute(args);
-      case "list": return this.listT.execute(args);
+      case "list":
+        // S129b — narrow ListFollowupsTool reads `limit` and `status`; expose them.
+        return this.listT.execute({
+          limit: args.limit,
+          status: args.status,
+        });
       case "complete": return this.completeT.execute(args);
       case "cancel": return this.cancelT.execute(args);
       default: return unknownAction("followups", action, ["record", "list", "complete", "cancel"]);
@@ -568,8 +637,9 @@ export class ResearchTool implements Tool {
         enum: ["web_search", "youtube_search", "youtube_transcript", "analyze_pdf", "research_brief"] },
       query: { type: "string", description: "[web_search, youtube_search] Search query." },
       url: { type: "string", description: "[youtube_transcript] YouTube video URL." },
-      file_path: { type: "string", description: "[analyze_pdf] PDF file path." },
-      attachment_id: { type: "string", description: "[analyze_pdf] Telegram attachment ID." },
+      file_path: { type: "string", description: "[analyze_pdf] PDF file path on disk." },
+      attachment_id: { type: "string", description: "[analyze_pdf] Telegram attachment ID (mapped to file_id on dispatch)." },
+      focus: { type: "string", description: "[analyze_pdf] What to extract: 'all' | 'dates' | 'addresses' | 'amounts' | 'links' | free-form. Default 'all'." },
       topic: { type: "string", description: "[research_brief] Topic to research." },
       depth: { type: "string", description: "[research_brief] 'shallow' or 'deep'.", enum: ["shallow", "deep"] },
       max_results: { type: "number", description: "[youtube_search] Max results (1-10), default 5." },
@@ -584,7 +654,14 @@ export class ResearchTool implements Tool {
       case "web_search": return this.webT.execute(args);
       case "youtube_search": return this.ytSearchT.execute(args);
       case "youtube_transcript": return this.ytTranscriptT.execute(args);
-      case "analyze_pdf": return this.pdfT.execute(args);
+      case "analyze_pdf":
+        // S129b — Param remap. AnalyzePdfTool reads `file_id` and `focus`,
+        // not `attachment_id`. Translate; file_path passes through.
+        return this.pdfT.execute({
+          file_id: args.attachment_id ?? args.file_id,
+          file_path: args.file_path,
+          focus: args.focus,
+        });
       case "research_brief": return this.briefT.execute(args);
       default: return unknownAction("research", action, ["web_search", "youtube_search", "youtube_transcript", "analyze_pdf", "research_brief"]);
     }
@@ -657,10 +734,11 @@ export class SelfTool implements Tool {
     parameters: {
       action: { type: "string", description: "set_piece | remove_piece | create_piece | list_pieces | view_self_prompt | view_identity_history",
         enum: ["set_piece", "remove_piece", "create_piece", "list_pieces", "view_self_prompt", "view_identity_history"] },
-      section: { type: "string", description: "[set_piece, remove_piece, create_piece, list_pieces] Section name.",
+      section: { type: "string", description: "[set_piece, remove_piece, create_piece, list_pieces, view_identity_history] Section name.",
         enum: ["persona", "goals", "format", "scenario", "extras", "emotions", "relationship"] },
       key: { type: "string", description: "[set_piece, remove_piece, create_piece] Piece key (slug)." },
-      body: { type: "string", description: "[create_piece] Piece body text." },
+      body: { type: "string", description: "[create_piece] Piece body text (mapped to 'value' on dispatch)." },
+      limit: { type: "number", description: "[view_identity_history] Max history entries, default 20." },
     },
     required: ["action"],
   };
@@ -670,7 +748,13 @@ export class SelfTool implements Tool {
     switch (action) {
       case "set_piece": return this.setPieceT.execute(args);
       case "remove_piece": return this.removePieceT.execute(args);
-      case "create_piece": return this.createPieceT.execute(args);
+      case "create_piece":
+        // S129b — Param remap. Narrow CreatePieceTool reads `value`, not `body`.
+        return this.createPieceT.execute({
+          section: args.section,
+          key: args.key,
+          value: args.body ?? args.value,
+        });
       case "list_pieces": return this.listPiecesT.execute(args);
       case "view_self_prompt": return (this.viewPromptT.execute as any)();
       case "view_identity_history": return this.viewHistoryT.execute(args);
@@ -704,10 +788,15 @@ export class LearningTool implements Tool {
       verdict: { type: "string", description: "[log_email_classification] Architect's verdict.",
         enum: ["noise", "important", "urgent", "unsure"] },
       reasoning: { type: "string", description: "[log_email_classification] Architect's reason." },
+      snippet: { type: "string", description: "[log_email_classification] Optional first ~500 chars of the email body for pattern context." },
       category: { type: "string", description: "[request_code_change] e.g. 'watcher_filter', 'tool_gap', 'doctrine'." },
       title: { type: "string", description: "[request_code_change] Title of the change." },
       why_it_matters: { type: "string", description: "[request_code_change] Justification." },
       recommended_fix: { type: "string", description: "[request_code_change] Suggested fix." },
+      what_was_tried: { type: "string", description: "[request_code_change] Optional — what Sapphire already attempted before deferring." },
+      related_subjects: { type: "array", description: "[request_code_change] Optional — related email subjects/cases that motivated this.", items: { type: "string", description: "subject or case ID" } },
+      limit: { type: "number", description: "[list_deferred_builds] Max entries, default 20." },
+      status: { type: "string", description: "[list_deferred_builds] Filter by status. Default 'pending'.", enum: ["pending", "shipped", "wontfix"] },
     },
     required: ["action"],
   };
@@ -745,21 +834,21 @@ export class PlanTool implements Tool {
       "• approve — confirm the plan and begin execution. Required: plan_id.\n" +
       "• advance — move to the next step. Required: plan_id.\n" +
       "• record_step — record a step's result. Required: plan_id, step_index, result.\n" +
-      "• execute — run a registered workflow (mesh pattern). Required: workflow_id, params.\n" +
-      "• record_artifact — store a workflow output. Required: workflow_id, artifact_id, content.\n" +
+      "• execute — run a registered workflow (mesh pattern). Required: plan_id.\n" +
+      "• record_artifact — store a workflow output. Required: plan_id, target_name, artifact (JSON-serializable).\n" +
       "• cancel — abort a plan. Required: plan_id, reason.",
     parameters: {
       action: { type: "string", description: "create | approve | advance | record_step | execute | record_artifact | cancel",
         enum: ["create", "approve", "advance", "record_step", "execute", "record_artifact", "cancel"] },
       goal: { type: "string", description: "[create] What the plan aims to achieve." },
       steps: { type: "array", description: "[create] Array of step objects.", items: { type: "object", description: "{title, description}" } },
-      plan_id: { type: "string", description: "[approve, advance, record_step, cancel] Plan ID." },
-      step_index: { type: "number", description: "[record_step] Zero-indexed step." },
+      plan_id: { type: "string", description: "[approve, advance, record_step, execute, record_artifact, cancel] Plan ID." },
+      step_index: { type: "number", description: "[record_step] Zero-indexed step (mapped to step_idx on dispatch)." },
       result: { type: "string", description: "[record_step] Step result." },
-      workflow_id: { type: "string", description: "[execute, record_artifact] Workflow ID." },
-      params: { type: "object", description: "[execute] Workflow params." },
-      artifact_id: { type: "string", description: "[record_artifact] Artifact ID." },
-      content: { type: "string", description: "[record_artifact] Artifact content." },
+      target_name: { type: "string", description: "[record_artifact] Logical name of the workflow step that produced the artifact." },
+      artifact: { type: "string", description: "[record_artifact] JSON-stringified artifact payload." },
+      artifact_id: { type: "string", description: "[record_artifact] (deprecated alias — use 'target_name' + 'artifact' instead)." },
+      content: { type: "string", description: "[record_artifact] (deprecated alias — use 'artifact' instead)." },
       reason: { type: "string", description: "[cancel] Reason for cancellation." },
     },
     required: ["action"],
@@ -771,9 +860,22 @@ export class PlanTool implements Tool {
       case "create": return this.createT.execute(args);
       case "approve": return this.approveT.execute(args);
       case "advance": return this.advanceT.execute(args);
-      case "record_step": return this.recordStepT.execute(args);
+      case "record_step":
+        // S129b — Param remap. Narrow RecordStepResultTool reads `step_idx`, not `step_index`.
+        return this.recordStepT.execute({
+          plan_id: args.plan_id,
+          step_idx: args.step_index ?? args.step_idx,
+          result: args.result,
+        });
       case "execute": return this.executeT.execute(args);
-      case "record_artifact": return this.recordArtifactT.execute(args);
+      case "record_artifact":
+        // S129b — Param remap. Narrow RecordWorkflowArtifactTool reads `artifact` and `target_name`,
+        // not `artifact_id` / `content`. Accept both name styles.
+        return this.recordArtifactT.execute({
+          plan_id: args.plan_id,
+          target_name: args.target_name ?? args.artifact_id,
+          artifact: args.artifact ?? args.content,
+        });
       case "cancel": return this.cancelT.execute(args);
       default: return unknownAction("plan", action, ["create", "approve", "advance", "record_step", "execute", "record_artifact", "cancel"]);
     }

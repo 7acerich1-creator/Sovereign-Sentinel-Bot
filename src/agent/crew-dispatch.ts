@@ -561,7 +561,7 @@ export class CrewDispatchTool implements Tool {
   definition: ToolDefinition = {
     name: "crew_dispatch",
     description:
-      "Dispatch tasks to other Maven Crew agents. Use this to send work to Sapphire (operations), Alfred (content intelligence), " +
+      "Dispatch tasks to other Maven Crew agents. ONLY-WHEN: you have a SPECIFIC handoff for a SPECIFIC agent (campaign brief to Anita, distribution to Yuki, content seed to Alfred, metrics ask to Vector). Do NOT use to forward your own freeform output. Send work to Sapphire (operations), Alfred (content intelligence), " +
       "Yuki (distribution & creative — SOLE posting authority), Anita (conversion & nurture), or Vector (revenue intelligence — analytics only, NOT posting). " +
       "Also check pipeline status and claim tasks assigned to you.",
     parameters: {

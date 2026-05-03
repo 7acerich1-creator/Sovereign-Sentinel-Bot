@@ -110,19 +110,23 @@ export class RemindersTool implements Tool {
     description:
       "Time-based reminders (clock-driven). For metric-threshold-driven alerts use conditional_reminders instead.\n\n" +
       "ACTIONS:\n" +
-      "• set — schedule a reminder. Required: text, fire_at (ISO8601 or natural date) OR recurrence_rule. Optional: chat_id (defaults to current).\n" +
-      "• list — list active reminders. Optional: keyword filter, limit.\n" +
-      "• cancel — cancel a single reminder. Required: id.\n" +
-      "• cancel_series — cancel ALL reminders matching a keyword (use when Architect says 'cancel all the X reminders').\n\n" +
+      "• set — schedule a reminder. Required: text, fire_at (ISO8601 — convert natural language yourself first). Optional: recurrence_rule, force_create.\n" +
+      "• list — list active reminders. Optional: keyword filter, window_hours (default 168), include_all_statuses.\n" +
+      "• cancel — cancel a single reminder. Required: id (full UUID or 8-char prefix).\n" +
+      "• cancel_series — cancel ALL pending reminders matching keyword and/or recurrence_rule. Optional: dry_run to preview.\n\n" +
+      "VAGUE TIMES: When Ace says 'later tonight' / 'this evening' / 'in a bit' WITHOUT a specific time, pick a sensible default (evening → 8pm CDT, late night → 11pm CDT) and just CONFIRM the time in your acknowledgment. DO NOT ping-pong asking for an exact minute — that wastes his attention. He'll correct you if it's wrong.\n\n" +
       "Before setting a recurring reminder, FIRST call list with a keyword to check for duplicates (per reminder_dedup doctrine).",
     parameters: {
       action: { type: "string", description: "set | list | cancel | cancel_series", enum: ["set", "list", "cancel", "cancel_series"] },
-      text: { type: "string", description: "[set] The reminder text." },
-      fire_at: { type: "string", description: "[set] When to fire (ISO8601 timestamp or natural language)." },
-      recurrence_rule: { type: "string", description: "[set] Recurrence (e.g. 'daily 8am', 'weekly Mon 9am'). Mutually exclusive with fire_at." },
-      id: { type: "string", description: "[cancel] Reminder ID." },
-      keyword: { type: "string", description: "[list, cancel_series] Filter by keyword." },
-      limit: { type: "number", description: "[list] Max results, default 20." },
+      text: { type: "string", description: "[set] The reminder text Sapphire will DM Ace at fire_at." },
+      fire_at: { type: "string", description: "[set] ISO8601 timestamp. Convert natural language ('tonight at 8', 'tomorrow 9am') to ISO yourself; Ace is CDT (UTC-5). For vague evening times default to 8pm CDT (01:00:00Z next day)." },
+      recurrence_rule: { type: "string", description: "[set, cancel_series] 'daily' | 'weekday' | 'weekend' | 'weekly:mon,wed,fri' | 'monthly:15'. Leave empty for one-off." },
+      force_create: { type: "boolean", description: "[set] Bypass the dedup-preflight that warns about overlapping reminders in the same hour. Only use for intentional distinct reminders at similar times." },
+      id: { type: "string", description: "[cancel] Full UUID or 8-char prefix of the reminder to cancel." },
+      keyword: { type: "string", description: "[list, cancel_series] Case-insensitive substring to match against reminder messages." },
+      window_hours: { type: "number", description: "[list] Lookahead window in hours from now. Default 168 (1 week)." },
+      include_all_statuses: { type: "boolean", description: "[list] If true, also returns fired/cancelled/failed. Use for troubleshooting." },
+      dry_run: { type: "boolean", description: "[cancel_series] Preview what would be cancelled without changing anything." },
     },
     required: ["action"],
   };
@@ -130,11 +134,37 @@ export class RemindersTool implements Tool {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
     const action = String(args.action || "").toLowerCase();
     switch (action) {
-      case "set": return this.setT.execute(args);
-      case "list": return this.listT.execute(args);
-      case "cancel": return this.cancelT.execute(args);
-      case "cancel_series": return this.cancelSeriesT.execute(args);
-      default: return unknownAction("reminders", action, ["set", "list", "cancel", "cancel_series"]);
+      case "set":
+        // S127 — Param remap fix. Fat schema uses `text`, narrow tool reads `message`.
+        // Without this, every set_reminder call returned "set_reminder: message is required."
+        // Accept both names so the dispatch is forgiving.
+        return this.setT.execute({
+          message: args.text ?? args.message,
+          fire_at: args.fire_at,
+          recurrence_rule: args.recurrence_rule,
+          force_create: args.force_create,
+        });
+      case "list":
+        // Fat: keyword | Narrow: query
+        return this.listT.execute({
+          window_hours: args.window_hours,
+          query: args.keyword ?? args.query,
+          include_all_statuses: args.include_all_statuses,
+        });
+      case "cancel":
+        // Fat: id | Narrow: reminder_id
+        return this.cancelT.execute({
+          reminder_id: args.id ?? args.reminder_id,
+        });
+      case "cancel_series":
+        // Fat: keyword | Narrow: message_contains
+        return this.cancelSeriesT.execute({
+          message_contains: args.keyword ?? args.message_contains,
+          recurrence_rule: args.recurrence_rule,
+          dry_run: args.dry_run,
+        });
+      default:
+        return unknownAction("reminders", action, ["set", "list", "cancel", "cancel_series"]);
     }
   }
 }

@@ -4742,6 +4742,21 @@ async function main() {
         // Yuki gets the YouTube comment tool for engagement automation
         if (agentCfg.name === "yuki") {
           agentTools.push(new YouTubeCommentTool());
+          // S130k (2026-05-04): Yuki gets the SocialScheduler trio.
+          // Per maven-crew/SKILL.md + agent/personas.ts: Yuki is the SOLE Buffer
+          // posting authority. The crew_dispatch system was sending her
+          // content_for_distribution + content_scheduling directives that
+          // explicitly instructed her to use social_scheduler_list_profiles
+          // and social_scheduler_create_post — but those tools were registered
+          // to the global tools array (index.ts:534-536) and the per-agent
+          // CORE_TOOL_NAMES filter at index.ts:4686 silently dropped them
+          // because they're not in the core set. Result: every Alfred → Yuki
+          // distribution dispatch failed with "tools not available to me"
+          // for weeks. Marketing pipeline's distribution leg was effectively
+          // disabled. This fix restores it.
+          agentTools.push(new SocialSchedulerListProfilesTool());
+          agentTools.push(new SocialSchedulerPostTool());
+          agentTools.push(new SocialSchedulerPendingTool());
         }
 
         // Vector gets full CRO visibility: Stripe + Buffer + YouTube + Landing + Email + Meta Pixel

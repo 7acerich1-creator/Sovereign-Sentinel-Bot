@@ -826,15 +826,26 @@ export async function distributionSweep(): Promise<number> {
           continue;
         }
 
-        // CE-1 FIX: Skip image-required platforms when no image is attached
-        if (IMAGE_REQUIRED_PLATFORMS.has(service) && !draft.media_url) {
-          postResults.push(`⏭️ ${channel.service}(${channel.id}): Skipped — platform requires image, none attached`);
+        // S130b (2026-05-04): Detect video media up-front so per-channel skips
+        // and the Buffer asset block can both reason about it. Until S130b the
+        // dispatch was image-only and YouTube was unconditionally skipped — but
+        // the content engine now ships .mp4 to R2, and Buffer GraphQL supports
+        // assets.videos[] (mirror of social-scheduler.ts:165-229).
+        const hasMedia = !!draft.media_url;
+        const mediaIsVideo = hasMedia && (
+          /\.(mp4|mov|avi|webm|mkv|mpeg|mpg)(\?|$)/i.test(draft.media_url!) ||
+          draft.media_url!.includes("/video/")
+        );
+
+        // CE-1 FIX: Skip media-required platforms when no media is attached
+        if (IMAGE_REQUIRED_PLATFORMS.has(service) && !hasMedia) {
+          postResults.push(`⏭️ ${channel.service}(${channel.id}): Skipped — platform requires media, none attached`);
           continue;
         }
-        // CE-3 FIX: Buffer YouTube integration requires VIDEO — image posts are rejected.
-        // YouTube community posts not supported by Buffer API. Skip until video pipeline (Scenario F) is live.
-        if (service === "youtube") {
-          postResults.push(`⏭️ ${channel.service}(${channel.id}): Skipped — Buffer YouTube requires video (community image posts not supported by Buffer API)`);
+        // S130b: Buffer YouTube accepts videos via assets.videos[]. Skip ONLY
+        // when media is missing or non-video (image post would still be rejected).
+        if (service === "youtube" && !mediaIsVideo) {
+          postResults.push(`⏭️ ${channel.service}(${channel.id}): Skipped — Buffer YouTube requires video, none attached`);
           continue;
         }
         // Facebook goes through direct Graph API publisher (below), NOT Buffer.
@@ -865,16 +876,34 @@ export async function distributionSweep(): Promise<number> {
 
         try {
           // Build mutation
+          // S130b (2026-05-04): Detect video and use the videos[] asset key.
+          // Sending .mp4 as `images:` causes Buffer to call its image-dimension
+          // fetcher, which 400s with "Failed to fetch image dimensions" — that
+          // bug silently failed every TT/IG/Threads/LinkedIn/BSky post for
+          // content_engine_queue rows where media_url is the R2 .mp4 URL.
+          // Pattern mirrors social-scheduler.ts:165-229 (the canonical lane).
           let assetsBlock = "";
-          if (draft.media_url) {
-            assetsBlock = `assets: { images: [{ url: "${draft.media_url.replace(/"/g, '\\"')}" }] }`;
+          if (hasMedia) {
+            const escapedUrl = draft.media_url!.replace(/"/g, '\\"');
+            assetsBlock = mediaIsVideo
+              ? `assets: { videos: [{ url: "${escapedUrl}" }] }`
+              : `assets: { images: [{ url: "${escapedUrl}" }] }`;
           }
 
-          // CE-5 FIX: Instagram requires metadata.instagram.type = post for image posts
-          // Buffer GraphQL schema: PostInputMetaData → instagram: InstagramPostMetadataInput → type: PostType
+          // Per-platform metadata.
+          //   Instagram: type=post + shouldShareToFeed (Buffer schema requirement).
+          //   YouTube (S130b): title + categoryId (REQUIRED for video uploads via
+          //     Buffer GraphQL — mirror of vidrush-orchestrator.ts:1369-1393).
+          //     Title source: first line of post text, capped at 90 chars + #Shorts.
+          //     categoryId 22 = People & Blogs (safe default for short-form).
           let metadataBlock = "";
           if (service === "instagram") {
             metadataBlock = `metadata: { instagram: { type: post, shouldShareToFeed: true } }`;
+          } else if (service === "youtube" && mediaIsVideo) {
+            const ytTitleRaw = (postText.split("\n")[0] || "Sovereign Synthesis").slice(0, 90).trim();
+            // JSON.stringify handles all GraphQL string escaping (quotes, backslashes, etc.)
+            // — same pattern used for `text: ${JSON.stringify(postText)}` below.
+            metadataBlock = `metadata: { youtube: { title: ${JSON.stringify(ytTitleRaw + " #Shorts")}, categoryId: "22" } }`;
           }
 
           // CE-6 REMOVED: Buffer dropped `type` from CreatePostInput schema (Apr 2026).

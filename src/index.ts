@@ -536,8 +536,11 @@ async function main() {
   tools.push(new ClipGeneratorTool());
   tools.push(new VidRushTool());
 
-  // Direct Video Publisher (Path A — bypasses Buffer for video content)
-  // Buffer v1 API has NO video upload capability. Videos go direct to platform APIs.
+  // Direct Video Publisher (Path A — for tighter control + per-platform features
+  // like YouTube custom thumbnails). Buffer GraphQL DOES support video uploads
+  // via assets.videos[]; the Deterministic Content Engine + social-scheduler
+  // both use that path. VideoPublisher remains for cases where direct platform
+  // APIs are needed (custom thumbnail, scheduled-as-private, fine-grained metadata).
   tools.push(new VideoPublisherTool());
 
   // YouTube CTA Optimization Tools (Session 50 — NORTH_STAR spine tools)

@@ -419,14 +419,28 @@ export async function produceVideo(
         "/produce",
         {
           body: spec,
-          signal: options.signal,
+          // 60s budget — POST /produce can hang on cold-start when the RunPod
+          // proxy hasn't fully wired the route, even after /health/live + /health
+          // both return 200. Default podFetchJson timeout is 30s, which lost
+          // pod iopo1x6lvautka on 2026-05-05 with a TimeoutError that wasn't retried.
+          signal: options.signal ?? AbortSignal.timeout(60_000),
         },
       );
       break; // Success, exit retry loop
     } catch (err) {
       lastPostErr = err;
+      // Caller-side cancellation must never trigger a retry.
+      if (options.signal?.aborted) throw err;
       if (err instanceof PodContractError && (err.httpStatus === 404 || err.httpStatus === 502)) {
         console.warn(`⚠️ [RunPod] POST /produce returned ${err.httpStatus} (proxy stabilization). Retrying in 2s (attempt ${attempt}/5)...`);
+        await sleep(2000);
+        continue;
+      }
+      // AbortSignal.timeout fires DOMException name="TimeoutError" — same
+      // proxy-not-routed condition as 404/502, just hung instead of erroring.
+      // Retry on the same 5-attempt budget.
+      if (err instanceof Error && err.name === "TimeoutError") {
+        console.warn(`⚠️ [RunPod] POST /produce timed out (proxy stabilization). Retrying in 2s (attempt ${attempt}/5)...`);
         await sleep(2000);
         continue;
       }
@@ -560,13 +574,21 @@ export async function produceShort(
         handle,
         "POST",
         "/produce-short",
-        { body: spec, signal: options.signal },
+        // 60s budget — same cold-start proxy-stabilization story as /produce.
+        { body: spec, signal: options.signal ?? AbortSignal.timeout(60_000) },
       );
       break;
     } catch (err) {
       lastPostErr = err;
+      if (options.signal?.aborted) throw err;
       if (err instanceof PodContractError && (err.httpStatus === 404 || err.httpStatus === 502)) {
         console.warn(`⚠️ [RunPod] POST /produce-short returned ${err.httpStatus}. Retrying (${attempt}/5)...`);
+        await sleep(2000);
+        continue;
+      }
+      // AbortSignal.timeout fires DOMException name="TimeoutError" — proxy hung; retry.
+      if (err instanceof Error && err.name === "TimeoutError") {
+        console.warn(`⚠️ [RunPod] POST /produce-short timed out (proxy stabilization). Retrying (${attempt}/5)...`);
         await sleep(2000);
         continue;
       }

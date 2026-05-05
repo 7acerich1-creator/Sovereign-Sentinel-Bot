@@ -31,7 +31,13 @@ export class AgentLoop {
   private memoryProviders: MemoryProvider[];
   private llmProviders: Map<string, LLMProvider> = new Map();
   private pinecone: PineconeMemory | null = null;
-  private identity: AgentIdentity = { agentName: "veritas", namespace: "general" };
+  // S130h (2026-05-04): default identity is now a SENTINEL, not "veritas".
+  // Before this change, every AgentLoop instance silently posed as veritas
+  // until setIdentity was called. If setIdentity ever failed for any agent,
+  // it would write to / recall from the wrong silo invisibly. The sentinel
+  // makes that failure mode loud — any unconfigured agent shows up clearly
+  // in logs as "_uninitialized" instead of impersonating Veritas.
+  private identity: AgentIdentity = { agentName: "_uninitialized", namespace: "_orphan" };
   // Optional callback fired before each tool execution (per-message). Used by
   // Sapphire DM handler to send tool indicators to Telegram.
   private toolCallObserver?: (name: string, args: Record<string, unknown>) => Promise<void> | void;
@@ -198,20 +204,39 @@ export class AgentLoop {
       // explicit instructions; the agent's own past chitchat isn't relevant.
       if (this.pinecone?.isReady() && message.content.length > 10) {
         try {
-          const sharedRecalls = this.identity.namespace === "shared"
-            ? []
-            : await this.pinecone.queryRelevant(message.content, 2, "shared", 0.70);
-          if (sharedRecalls.length > 0) {
-            const recallText = sharedRecalls.map(
+          // S130h: Also pull from legacy namespaces during dispatch-mode recall,
+          // so pre-rename rules and patterns flow into automated work too.
+          const { legacyNamespacesFor } = await import("./agent-namespaces");
+          const legacyNs = legacyNamespacesFor(this.identity.agentName);
+
+          const sharedQueries: Promise<any[]>[] = [];
+          sharedQueries.push(
+            this.identity.namespace === "shared"
+              ? Promise.resolve([])
+              : this.pinecone.queryRelevant(message.content, 2, "shared", 0.70)
+          );
+          // Add a small (top 1) legacy read so pre-rename rules also reach
+          // dispatched work. Threshold 0.70 (matching shared) — dispatch
+          // directives are short/structured, so we lower the bar slightly.
+          for (const ns of legacyNs) {
+            if (ns !== this.identity.namespace && ns !== "shared") {
+              sharedQueries.push(this.pinecone.queryRelevant(message.content, 1, ns, 0.70));
+            }
+          }
+          const results = await Promise.all(sharedQueries);
+          const merged = results.flat();
+
+          if (merged.length > 0) {
+            const recallText = merged.map(
               (r, i) => `[${i + 1}] (${r.agent}/${r.type}, score: ${r.score.toFixed(2)}) ${r.content}`
             ).join("\n");
             context.push({
               role: "system",
               content: `[ACTIVE CROSS-CREW RULES — apply when executing this dispatch]\n${recallText}`,
             });
-            console.log(`🔮 [Pinecone] Dispatch shared-recall: injected ${sharedRecalls.length} active rules (scores: ${sharedRecalls.map(r => r.score.toFixed(2)).join(", ")})`);
+            console.log(`🔮 [Pinecone] Dispatch shared-recall: injected ${merged.length} active rules (scores: ${merged.map(r => r.score.toFixed(2)).join(", ")})`);
           } else {
-            console.log(`⚡ [AgentLoop] DISPATCH MODE — no shared rules matched the directive`);
+            console.log(`⚡ [AgentLoop] DISPATCH MODE — no shared/legacy rules matched the directive`);
           }
         } catch (err: any) {
           console.error(`[Pinecone dispatch-recall] ${err.message} — proceeding without shared rules`);
@@ -225,20 +250,43 @@ export class AgentLoop {
       // 1b. Pinecone semantic recall — inject relevant past intelligence.
       // Cross-namespace: query own namespace AND `shared` (cross-cutting insights
       // written by the insight-extractor when an agent's output applies beyond
-      // its own lane). Weight own > shared via topK split (3 own + 2 shared).
-      // Dedup by id when merging so a vector that lives in both can't double-count.
+      // its own lane), AND legacy namespaces (S130h transitional dual-read so
+      // pre-rename data stays accessible). Weight own > shared > legacy.
+      // Dedup by content prefix when merging so a vector that lives in two
+      // namespaces (mid-migration) can't double-count.
       if (this.pinecone?.isReady() && message.content.length > 10) {
         try {
-          const [ownRecalls, sharedRecalls] = await Promise.all([
+          // Resolve legacy namespaces this agent should also read from.
+          // S130h: during the namespace rename transition (e.g. "hooks" → "alfred"),
+          // pre-rename data lives in the old namespace. Pulling from both ensures
+          // continuity until the legacy data ages out naturally.
+          const { legacyNamespacesFor } = await import("./agent-namespaces");
+          const legacyNs = legacyNamespacesFor(this.identity.agentName);
+
+          const queries: Promise<any[]>[] = [
             this.pinecone.queryRelevant(message.content, 3, this.identity.namespace, 0.75),
-            this.identity.namespace === "shared"
-              ? Promise.resolve([])
-              : this.pinecone.queryRelevant(message.content, 2, "shared", 0.75),
-          ]);
-          // Merge: own first (higher weight), then shared, dedup by content prefix.
+          ];
+          if (this.identity.namespace !== "shared") {
+            queries.push(this.pinecone.queryRelevant(message.content, 2, "shared", 0.75));
+          } else {
+            queries.push(Promise.resolve([]));
+          }
+          // Add a small (top 1 each) read from any legacy namespace this agent has.
+          for (const ns of legacyNs) {
+            if (ns !== this.identity.namespace) {
+              queries.push(this.pinecone.queryRelevant(message.content, 1, ns, 0.75));
+            }
+          }
+
+          const results = await Promise.all(queries);
+          const ownRecalls = results[0];
+          const sharedRecalls = results[1];
+          const legacyRecalls = results.slice(2).flat();
+
+          // Merge: own first (higher weight), then shared, then legacy, dedup by content prefix.
           const seen = new Set<string>();
           const merged: typeof ownRecalls = [];
-          for (const r of [...ownRecalls, ...sharedRecalls]) {
+          for (const r of [...ownRecalls, ...sharedRecalls, ...legacyRecalls]) {
             const key = r.content.slice(0, 80);
             if (seen.has(key)) continue;
             seen.add(key);
@@ -252,7 +300,7 @@ export class AgentLoop {
               role: "system",
               content: `[RELEVANT PAST INTELLIGENCE — from crew semantic memory]\n${recallText}`,
             });
-            console.log(`🔮 [Pinecone] Injected ${merged.length} relevant memories (own=${ownRecalls.length}, shared=${sharedRecalls.length}, scores: ${merged.map(r => r.score.toFixed(2)).join(", ")})`);
+            console.log(`🔮 [Pinecone] Injected ${merged.length} relevant memories (own=${ownRecalls.length}, shared=${sharedRecalls.length}, legacy=${legacyRecalls.length}, scores: ${merged.map(r => r.score.toFixed(2)).join(", ")})`);
           }
         } catch (err: any) {
           console.error(`[Pinecone recall] ${err.message}`);

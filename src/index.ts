@@ -20,6 +20,9 @@ import { FailoverLLM } from "./llm/failover";
 
 // ── Agent ──
 import { AgentLoop } from "./agent/loop";
+// S130h (2026-05-04): canonical namespace map. Replaces two duplicate maps
+// (one previously inline at ~line 4753, missing veritas; one in insight-extractor.ts).
+import { AGENT_NAMESPACES } from "./agent/agent-namespaces";
 import { AgentSwarm, SwarmTool } from "./agent/swarm";
 // AgentComms REMOVED (Session 26) — legacy in-memory message bus, fully replaced by Supabase crew-dispatch.
 // Source file retained at ./agent/comms.ts for reference but no longer imported or instantiated.
@@ -668,9 +671,12 @@ async function main() {
   agentLoop.setLLMProviders(providersMap);
 
   // Wire Pinecone semantic memory to Veritas
+  // S130h (2026-05-04): namespace was hardcoded to "brand" — that's Sapphire's
+  // namespace. Veritas's writes pooled in the wrong silo for weeks. Now
+  // resolved through the canonical AGENT_NAMESPACES map (namespace = agent name).
   if (pineconeMemory.isReady()) {
     agentLoop.setPinecone(pineconeMemory);
-    agentLoop.setIdentity({ agentName: "veritas", namespace: "brand", defaultNiche: "general" });
+    agentLoop.setIdentity({ agentName: "veritas", namespace: AGENT_NAMESPACES.veritas, defaultNiche: "general" });
   }
 
   // Mesh Workflow
@@ -4748,16 +4754,15 @@ async function main() {
           agentTools.push(new MetaPixelAnalyticsTool()); // S119: Meta Pixel (1513312646866512) + retargeting pool monitoring
         }
 
-        // Pinecone KnowledgeWriter — agent-specific namespaces
-        // Alfred: hooks | Yuki: clips | Anita: content | Vector: funnels | Sapphire: brand
-        const AGENT_NAMESPACES: Record<string, string> = {
-          alfred: "hooks",
-          yuki: "clips",
-          anita: "content",
-          vector: "funnels",
-          sapphire: "brand",
-        };
-        const agentNamespace = AGENT_NAMESPACES[agentCfg.name] || "general";
+        // Pinecone KnowledgeWriter — agent-specific namespaces.
+        // S130h (2026-05-04): inline duplicate replaced by the single canonical
+        // map at src/agent/agent-namespaces.ts. The old inline map was missing
+        // veritas entirely (fell to "general" → orphaned writes). Now consistent
+        // across boot identity setup AND the insight-extractor.
+        const agentNamespace = AGENT_NAMESPACES[agentCfg.name] || (() => {
+          console.error(`⚠️ [AgentBoot] No namespace mapping for "${agentCfg.name}" — using sentinel "_orphan_${agentCfg.name}". Add to src/agent/agent-namespaces.ts.`);
+          return `_orphan_${agentCfg.name}`;
+        })();
         // Sapphire keeps write_knowledge for COO-mode brand intelligence (so the
         // business semantic memory keeps growing) — but her personality prompt
         // restricts it to crew/brand topics ONLY. Personal stuff (Ace's life)

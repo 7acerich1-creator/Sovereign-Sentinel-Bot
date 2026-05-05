@@ -18,15 +18,11 @@
 
 import { PineconeMemory, KnowledgeNode } from "../memory/pinecone";
 import { randomUUID } from "crypto";
-
-const AGENT_NAMESPACES: Record<string, string> = {
-  alfred: "hooks",
-  yuki: "clips",
-  anita: "content",
-  vector: "funnels",
-  sapphire: "brand",  // COO mode brand insights only — personal stays in sapphire-personal
-  veritas: "veritas",
-};
+// S130h (2026-05-04): single source of truth for agent namespaces.
+// Was a duplicated local map; the duplicate disagreed with the one in
+// src/index.ts (which was missing veritas entirely). Both now import from
+// src/agent/agent-namespaces.ts.
+import { AGENT_NAMESPACES } from "./agent-namespaces";
 
 interface ExtractionResult {
   insight: string;

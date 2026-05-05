@@ -255,7 +255,19 @@ export async function saveDraftIssue(input: {
 }
 
 // ── 6. Mark issue as sent + patch idea graph ──────────────────────────────
-export async function markIssueSent(issueId: string, resendEmailId: string, recipientCount: number): Promise<void> {
+// S130e (2026-05-04): The function name was always "markIssueSent + patch idea
+// graph" but the idea-graph patch was never wired. Result: every newsletter
+// cycle re-picked `the_simulation` because no idea ever got
+// `introduced_in_issue_number` set, so `pickNextIdeaToIntroduce` saw all
+// ideas as never-introduced and returned the same root each time. This
+// extension adds the write-back so the graph compounds as designed.
+export async function markIssueSent(
+  issueId: string,
+  resendEmailId: string,
+  recipientCount: number,
+  issueNumber?: number,
+  ideasIntroduced?: string[],
+): Promise<void> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return;
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/newsletter_issues?id=eq.${issueId}`, {
@@ -273,7 +285,33 @@ export async function markIssueSent(issueId: string, resendEmailId: string, reci
       }),
     });
   } catch (err: any) {
-    console.error(`[AnitaSend] markIssueSent failed: ${err.message}`);
+    console.error(`[AnitaSend] markIssueSent (issues PATCH) failed: ${err.message}`);
+  }
+
+  // S130e: Patch each newly-introduced idea with the issue number so future
+  // cycles know it's been introduced. Best-effort — failures here don't
+  // unship the issue. If issueNumber is undefined, skip silently (caller
+  // didn't pass enough info to do this safely).
+  if (typeof issueNumber === "number" && ideasIntroduced && ideasIntroduced.length > 0) {
+    for (const ideaId of ideasIntroduced) {
+      try {
+        await fetch(`${SUPABASE_URL}/rest/v1/newsletter_ideas?id=eq.${ideaId}`, {
+          method: "PATCH",
+          headers: {
+            apikey: SUPABASE_KEY,
+            Authorization: `Bearer ${SUPABASE_KEY}`,
+            "Content-Type": "application/json",
+            Prefer: "return=minimal",
+          },
+          body: JSON.stringify({
+            introduced_in_issue_number: issueNumber,
+          }),
+        });
+        console.log(`[AnitaSend] idea-graph: marked ${ideaId.slice(0, 8)}… as introduced in issue #${issueNumber}`);
+      } catch (err: any) {
+        console.error(`[AnitaSend] markIssueSent (ideas PATCH ${ideaId}) failed: ${err.message}`);
+      }
+    }
   }
 }
 
@@ -499,8 +537,10 @@ export async function runWeeklyNewsletterCycle(opts: {
     return { status: "send_failed", details: send.error || "unknown" };
   }
 
-  // 9. Mark sent
-  await markIssueSent(draft.id, send.resendEmailId!, recipients.length);
+  // 9. Mark sent — also patches newsletter_ideas.introduced_in_issue_number
+  // for each idea introduced in this issue (S130e). Without this, the graph
+  // never compounds and pickNextIdeaToIntroduce keeps returning the same root.
+  await markIssueSent(draft.id, send.resendEmailId!, recipients.length, issueNumber, ideasIntroducedArr);
   await alert(
     `📧 *Anita newsletter shipped*\n` +
     `Issue #${issueNumber}: "${composed.subject}"\n` +

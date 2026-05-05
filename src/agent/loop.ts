@@ -178,11 +178,45 @@ export class AgentLoop {
     // Dispatch tasks carry their own instructions — memory/history is pure waste.
     const isDispatch = message.metadata?.isDispatch === true;
 
-    // 1. Build context from memory (SKIP for dispatch — they carry their own payload)
+    // 1. Build context from memory (SKIP conversation history for dispatch —
+    // they carry their own payload), but still inject ACTIVE CROSS-CREW RULES
+    // from the shared namespace so dispatched agents act under current rules.
     let context: LLMMessage[];
     if (isDispatch) {
       context = [];
-      console.log(`⚡ [AgentLoop] DISPATCH MODE — skipping memory load (zero-context)`);
+      console.log(`⚡ [AgentLoop] DISPATCH MODE — skipping conversation history`);
+
+      // S130g (2026-05-04): Hive-mind continuity for automated work.
+      // Without this, when Veritas (or any agent) dispatches to Alfred/Yuki/etc,
+      // the receiving agent had ZERO visibility into cross-crew rules persisted
+      // in the `shared` namespace. The hive mind worked in DM mode but
+      // collapsed during automated dispatches — defeating the whole point.
+      // Cost: 1 Pinecone query per dispatch, top 2 results @ score >= 0.70.
+      // Threshold 0.70 (vs DM mode 0.75) because dispatch directives are
+      // shorter/more structured and may not match recall vectors as densely.
+      // Own-namespace recall is intentionally skipped — dispatch payloads are
+      // explicit instructions; the agent's own past chitchat isn't relevant.
+      if (this.pinecone?.isReady() && message.content.length > 10) {
+        try {
+          const sharedRecalls = this.identity.namespace === "shared"
+            ? []
+            : await this.pinecone.queryRelevant(message.content, 2, "shared", 0.70);
+          if (sharedRecalls.length > 0) {
+            const recallText = sharedRecalls.map(
+              (r, i) => `[${i + 1}] (${r.agent}/${r.type}, score: ${r.score.toFixed(2)}) ${r.content}`
+            ).join("\n");
+            context.push({
+              role: "system",
+              content: `[ACTIVE CROSS-CREW RULES — apply when executing this dispatch]\n${recallText}`,
+            });
+            console.log(`🔮 [Pinecone] Dispatch shared-recall: injected ${sharedRecalls.length} active rules (scores: ${sharedRecalls.map(r => r.score.toFixed(2)).join(", ")})`);
+          } else {
+            console.log(`⚡ [AgentLoop] DISPATCH MODE — no shared rules matched the directive`);
+          }
+        } catch (err: any) {
+          console.error(`[Pinecone dispatch-recall] ${err.message} — proceeding without shared rules`);
+        }
+      }
     } else {
       console.log(`🧠 [AgentLoop] Building context for message: "${message.content.slice(0, 50)}"`);
       context = await this.buildContext(message);
@@ -398,6 +432,30 @@ export class AgentLoop {
           this.extractAndEmbed(message.content, finalResponse).catch((err) =>
             console.error("[Pinecone embed] failed:", err.message)
           );
+
+          // S130g (2026-05-04): Fire insight-extractor on DM turn completion.
+          // Previously the extractor only ran on dispatch completions, which
+          // meant rules the Architect dictated in real-time DM conversations
+          // (the most strategically valuable kind — e.g. Veritas's
+          // "legacy outliers are noise, post-reset outliers are signal" rule)
+          // were persisted to the agent's own namespace + knowledge_nodes
+          // but NEVER got promoted to `shared`, so other agents' next turns
+          // couldn't recall them. This closes that gap. Per-turn cost is
+          // ~$0.00003 (Gemini Flash); the extractor SKIPs non-novel turns
+          // so chitchat doesn't pollute the shared store. Substantive
+          // turns only — short fallbacks (under 100 chars) are skipped.
+          if (finalResponse.length >= 100) {
+            const agentKey = (this.identity.agentName || persona.name || "").toLowerCase();
+            if (agentKey) {
+              import("./insight-extractor")
+                .then(({ extractAndStoreInsight }) =>
+                  extractAndStoreInsight(agentKey, "dm_conversation", finalResponse)
+                )
+                .catch((err: any) =>
+                  console.error(`[InsightExtractor] DM-turn extraction failed: ${err?.message}`)
+                );
+            }
+          }
         }
 
         return finalResponse;

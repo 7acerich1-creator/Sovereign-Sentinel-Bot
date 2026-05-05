@@ -219,9 +219,18 @@ export class SapphireSentinel {
       const hasWarnings = alerts.some(a => a.level === "warning");
       const hasActivity = activityParts.length > 0;
 
-      // Critical alerts ALWAYS get sent, even if nothing else is happening
-      if (!hasActivity && !hasCriticalAlerts && !hasWarnings) {
-        console.log(`👁️ [SapphireSentinel] Scan complete — nothing notable, no alerts triggered. Staying silent.`);
+      // S130c (2026-05-04): Gate sentinel DMs on alerts only. Routine activity
+      // (content_transmissions rolling over, command queue churn) is no longer
+      // a DM trigger — that was up to 12 noise messages/day. The activity is
+      // still gathered and fed to the LLM as CONTEXT when an alert does fire,
+      // but if no critical/warning alert exists, this scan is silent and
+      // logged only. Per Architect 2026-05-04: "I want only signal, not 'I'm
+      // working' updates."
+      if (!hasCriticalAlerts && !hasWarnings) {
+        const reason = hasActivity
+          ? `routine activity, no alerts triggered (${activityParts.length} activity parts logged)`
+          : `nothing notable, no alerts triggered`;
+        console.log(`👁️ [SapphireSentinel] Scan complete — ${reason}. Staying silent.`);
         return;
       }
 

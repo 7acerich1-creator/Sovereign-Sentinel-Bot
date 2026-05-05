@@ -24,6 +24,18 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABA
 
 type Brand = "sovereign_synthesis" | "containment_field";
 
+// S130c (2026-05-04): Cross-brand author dedup for DM noise control.
+// A single human who comments on BOTH the Sovereign Synthesis channel and
+// The Containment Field channel previously generated TWO Telegram DMs (one
+// per brand) because each brand watcher polled independently. This map is
+// keyed by author handle/name across BOTH brands; if the same author was
+// already DM'd within the last 24h, we suppress the second DM and just log.
+// The Supabase row still records (no data loss) and Yuki's auto-reply still
+// fires (engagement is per-comment, not per-author). Map is cleared on
+// container restart — at worst, a single double-DM after a deploy.
+const lastAlertedAuthor = new Map<string, number>();
+const AUTHOR_DEDUP_WINDOW_MS = 24 * 60 * 60 * 1000; // 24h
+
 const BRAND_CONFIG: Record<Brand, { label: string; channelId: string }> = {
   sovereign_synthesis: {
     label: "Sovereign Synthesis",
@@ -233,11 +245,26 @@ export async function pollYouTubeComments(
         ? voicedBody
         : `${voicedBody}\n\n*Reply →* ${replyUrl}`;
 
-      try {
-        await alerter.sendMessage(chatId, finalMsg, { parseMode: "Markdown" });
-        console.log(`[YTCommentWatcher] alerted via ${opts.alertChannel ? "Yuki" : "primary"}: ${cfg.label} / ${authorName} / ${commentId}`);
-      } catch (err: any) {
-        console.error(`[YTCommentWatcher] Telegram send failed: ${err.message}`);
+      // S130c: Cross-brand author dedup (see lastAlertedAuthor doc above).
+      // Suppress the DM (NOT the Supabase record, NOT the auto-reply) when
+      // the same human was already DM'd in the last 24h — covers the case
+      // where one person follows + comments on both brands within a day.
+      const authorKey = (authorHandle || authorName || "").trim().toLowerCase();
+      const lastAlerted = authorKey ? lastAlertedAuthor.get(authorKey) || 0 : 0;
+      const dupAgeMs = Date.now() - lastAlerted;
+      const isDup = authorKey && lastAlerted > 0 && dupAgeMs < AUTHOR_DEDUP_WINDOW_MS;
+
+      if (isDup) {
+        const dupAgeMin = Math.floor(dupAgeMs / 60000);
+        console.log(`[YTCommentWatcher] Suppressed dup DM (${cfg.label}): ${authorName} already alerted ${dupAgeMin}m ago. Comment recorded; Yuki auto-reply will still fire.`);
+      } else {
+        if (authorKey) lastAlertedAuthor.set(authorKey, Date.now());
+        try {
+          await alerter.sendMessage(chatId, finalMsg, { parseMode: "Markdown" });
+          console.log(`[YTCommentWatcher] alerted via ${opts.alertChannel ? "Yuki" : "primary"}: ${cfg.label} / ${authorName} / ${commentId}`);
+        } catch (err: any) {
+          console.error(`[YTCommentWatcher] Telegram send failed: ${err.message}`);
+        }
       }
 
       // Yuki auto-reply (fire-and-forget) — Session 115 (2026-04-24).

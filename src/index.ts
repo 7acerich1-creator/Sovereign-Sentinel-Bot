@@ -5619,7 +5619,13 @@ async function main() {
                 // failure rate. Gemini 2.5 Flash Lite emits more "thinking" tool-call rounds
                 // than Anthropic models did. Light 1→2 (allow one tool retry), heavy 6→10
                 // (give distribution full pipeline space), default 4→6.
-                const HEAVY_TASKS = new Set(["content_for_distribution", "content_scheduling", "daily_metrics_sweep", "daily_trend_scan"]);
+                // S130d (2026-05-04): added weekly_strategic_directive — Veritas's
+                // strategic chain (file_briefing → write_knowledge → crew_dispatch
+                // handoff to Alfred + reflective writes) regularly hits 6+ tool-call
+                // rounds and was getting cut off mid-handoff with cap=6. Veritas is
+                // Chief Brand Officer; his weekly directive is high-leverage and
+                // should not silently fail because the cap was tuned for shorter tasks.
+                const HEAVY_TASKS = new Set(["content_for_distribution", "content_scheduling", "daily_metrics_sweep", "daily_trend_scan", "weekly_strategic_directive"]);
                 const isHeavyTask = HEAVY_TASKS.has(task.task_type);
                 const iterCap = isLightTask ? 2 : (isHeavyTask ? 10 : 6);
                 const response = await agentLoop.processMessage(dispatchMessage, undefined, iterCap, isLightTask);

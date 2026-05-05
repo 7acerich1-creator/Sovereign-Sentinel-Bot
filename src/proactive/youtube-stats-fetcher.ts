@@ -31,9 +31,11 @@ const BRAND_CONFIG: Record<Brand, { label: string; channelId: string; channelNam
   sovereign_synthesis: {
     label: "Sovereign Synthesis",
     channelId: "UCbj9a6brDL9hNIY1BpxOJfQ",
-    // Matches existing youtube_analytics.channel_name (legacy "Ace Richie" until
-    // the brand-rename migration runs — see master ref cross-sync log item).
-    channelName: "Ace Richie",
+    // S130m (2026-05-04): channelName was "Ace Richie" — the original YouTube
+    // channel display name. The channel has since been renamed to "Sovereign
+    // Synthesis", and the 210 historical youtube_analytics rows were backfilled
+    // ('Ace Richie' → 'Sovereign Synthesis'). Code + DB now agree on the live name.
+    channelName: "Sovereign Synthesis",
   },
   containment_field: {
     label: "The Containment Field",

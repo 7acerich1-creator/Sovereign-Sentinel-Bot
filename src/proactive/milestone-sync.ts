@@ -115,7 +115,9 @@ async function fetchWatchHours(channel: ChannelKey): Promise<number | null> {
 // ── Top video views (single best video) from youtube_analytics ──
 async function fetchTopVideoViews(channel: ChannelKey): Promise<number | null> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return null;
-  const channelName = channel === "containment_field" ? "The Containment Field" : "Ace Richie";
+  // S130m (2026-05-04): "Ace Richie" → "Sovereign Synthesis" alongside the
+  // youtube_stats-fetcher cleanup. youtube_analytics rows were backfilled.
+  const channelName = channel === "containment_field" ? "The Containment Field" : "Sovereign Synthesis";
   try {
     const resp = await fetch(
       `${SUPABASE_URL}/rest/v1/youtube_analytics?select=views&channel_name=eq.${encodeURIComponent(channelName)}&order=views.desc&limit=1`,

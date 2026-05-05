@@ -2355,6 +2355,36 @@ async function main() {
     },
   });
 
+  // ── CREW DIARY — Daily cadence check (06:30 UTC = 1:30 AM CDT) ──
+  // S130n (2026-05-05). Runs 10 min after Sapphire's diary so we don't pile
+  // LLM calls in the same minute. Internally cadence-gated — each of the 5
+  // crew agents only writes if their cadence has elapsed (Yuki+Anita 3d,
+  // Vector+Veritas+Alfred 7d). On most days this is a no-op for ~half the
+  // crew; on others 1-2 entries land. Sleeptime-consolidator finally has
+  // fuel for the whole crew, not just Sapphire.
+  const crewDiaryFiredKey = { date: "" };
+  scheduler.add({
+    name: "Crew Diary — Cadence Check (1:30 AM CDT)",
+    intervalMs: 60_000,
+    nextRun: new Date(),
+    enabled: true,
+    handler: async () => {
+      if (isAutonomousPaused()) return;
+      const now = new Date();
+      const dateKey = now.toDateString();
+      if (now.getUTCHours() === 6 && now.getUTCMinutes() >= 30 && now.getUTCMinutes() <= 32 && crewDiaryFiredKey.date !== dateKey) {
+        crewDiaryFiredKey.date = dateKey;
+        console.log(`📖 [CrewDiary] Daily cadence check tick — running 5-agent loop`);
+        try {
+          const { runAllCrewDiaries } = await import("./proactive/crew-diary");
+          await runAllCrewDiaries();
+        } catch (e: any) {
+          console.error(`[CrewDiary] Cadence loop error: ${e.message}`);
+        }
+      }
+    },
+  });
+
   // ── SAPPHIRE PA — Weekly Recap (Sunday 8 PM CDT = Monday 01:00 UTC) ──
   scheduler.add({
     name: "Sapphire PA — Weekly Recap (Sun 8 PM CDT)",

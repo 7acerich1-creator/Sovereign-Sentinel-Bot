@@ -20,10 +20,47 @@
  *                                    scheduled_publish_time > 10 min ahead).
  */
 
+import { shouldAlertOnce, formatAuthAlert } from "../proactive/yuki-auth-alert";
+
 const FB_API = "https://graph.facebook.com/v25.0";
 const META_MIN_SCHEDULE_LEAD_MIN = 11; // Meta requires > 10 min lead
 
 export type FacebookBrand = "sovereign_synthesis" | "containment_field";
+
+// ── S130 (2026-05-04): Self-healing FB auth alert ────────────────────────
+// When Meta returns a token-failure-class error (expired token, revoked
+// admin permission, 2FA toggle on the page's business), fire a Telegram DM
+// to the Architect once per 6h per brand. Without this, FB publishing can
+// silently fail for days. Pattern mirrors yuki-auth-alert.ts (the IG/TT/FB
+// reply-poll alerts that already run on this bot).
+function isFacebookTokenFailure(data: any): boolean {
+  const errMsg = String(data?.error?.message || "").toLowerCase();
+  const errCode = data?.error?.code;
+  // 190 = token expired/invalid. 200 + admin/2FA wording = revoked or 2FA-locked.
+  if (errCode === 190) return true;
+  if (errCode === 200 && /sufficient administrative permission|two factor authentication|access token/i.test(errMsg)) return true;
+  if (errCode === 10 && /permission/i.test(errMsg)) return true;
+  return false;
+}
+
+async function alertFacebookAuthFailure(brand: FacebookBrand, errMsg: string): Promise<void> {
+  if (!shouldAlertOnce("facebook", brand)) return;
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const chatIdRaw = process.env.TELEGRAM_AUTHORIZED_USER_IDS || process.env.TELEGRAM_AUTHORIZED_USER_ID || process.env.AUTHORIZED_USER_ID || "8593700720";
+  const chatId = chatIdRaw.split(",")[0].trim();
+  if (!botToken || !chatId) return;
+  const message = formatAuthAlert("facebook", brand, errMsg);
+  try {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: "Markdown" }),
+    });
+    console.log(`📡 [FacebookPublisher] Auth-failure alert dispatched for ${brand}`);
+  } catch (err: any) {
+    console.warn(`[FacebookPublisher] Failed to send auth alert: ${err?.message}`);
+  }
+}
 
 interface FacebookPostResult {
   success: boolean;
@@ -200,6 +237,7 @@ export async function publishToFacebook(
     const errSubcode = data.error?.error_subcode || "";
     const errMsg = data.error?.message || JSON.stringify(data);
     console.error(`❌ [FacebookPublisher] API error (${brand}): code=${errCode} subcode=${errSubcode} - ${errMsg}`);
+    if (isFacebookTokenFailure(data)) await alertFacebookAuthFailure(brand, errMsg);
     return { success: false, error: `${errMsg} (code=${errCode})` };
   } catch (err: any) {
     console.error(`❌ [FacebookPublisher] Network error (${brand}): ${err.message}`);
@@ -253,6 +291,7 @@ async function postPhoto(
   const errSubcode = data.error?.error_subcode || "";
   const errMsg = data.error?.message || JSON.stringify(data);
   console.error(`❌ [FacebookPublisher] Photo API error: code=${errCode} subcode=${errSubcode} - ${errMsg}`);
+  if (isFacebookTokenFailure(data)) await alertFacebookAuthFailure(brand, errMsg);
   return { success: false, error: `${errMsg} (code=${errCode})` };
 }
 
@@ -303,5 +342,6 @@ async function postVideo(
   const errSubcode = data.error?.error_subcode || "";
   const errMsg = data.error?.message || JSON.stringify(data);
   console.error(`❌ [FacebookPublisher] Video API error: code=${errCode} subcode=${errSubcode} - ${errMsg}`);
+  if (isFacebookTokenFailure(data)) await alertFacebookAuthFailure(brand, errMsg);
   return { success: false, error: `${errMsg} (code=${errCode})` };
 }

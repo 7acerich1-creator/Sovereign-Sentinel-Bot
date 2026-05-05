@@ -696,6 +696,30 @@ Write a 3-paragraph diary entry:
     console.warn(`[SapphirePA] Notion append (diary) failed: ${e.message}`);
   }
 
+  // S130j (2026-05-04): ALSO write to agent_diary Supabase table.
+  // The diary was being written to Notion only — but the sleeptime
+  // consolidator reads from agent_diary, so for ~1 month nothing was
+  // flowing through. agent_diary was empty across all agents. With this
+  // dual-write, sleeptime-consolidator finally has fuel to consume,
+  // and the read_diary tool (used by /diary command + significance
+  // recall) can surface entries too.
+  try {
+    const { error: diaryErr } = await supabase.from("agent_diary").insert({
+      agent_name: "sapphire",
+      entry: diaryText.slice(0, 4000),
+      scenario: "evening_wrap",
+      mood: null,
+      tags: ["nightly", "self_reflection"],
+    });
+    if (diaryErr) {
+      console.warn(`[SapphirePA] agent_diary insert failed: ${diaryErr.message}`);
+    } else {
+      console.log(`[SapphirePA] agent_diary entry written for sapphire/${todayIso}`);
+    }
+  } catch (e: any) {
+    console.warn(`[SapphirePA] agent_diary insert threw: ${e?.message}`);
+  }
+
   // Mark done
   await supabase.from("sapphire_known_facts").upsert(
     { key: "last_diary_date", value: todayIso, category: "system" },

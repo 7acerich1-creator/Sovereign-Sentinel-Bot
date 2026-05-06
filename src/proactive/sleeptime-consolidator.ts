@@ -149,7 +149,13 @@ async function runConsolidationForAgent(agentName: string): Promise<void> {
   console.log(`💤 [Sleeptime/${agentName}] Starting consolidation`);
 
   const supabase = await getSupabase();
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  // S130n (2026-05-05): lookback was hardcoded 24h, but Vector/Veritas/Alfred
+  // write diary entries weekly (cadence 7d). With a 24h window the consolidator
+  // would NEVER find their entries — they'd fall outside the window every time.
+  // Lookback now matches the agent's cadence so the chain completes.
+  const cadenceDays = AGENT_CADENCE_DAYS[agentName] ?? 7;
+  const lookbackHours = Math.max(cadenceDays * 24, 24);
+  const since = new Date(Date.now() - lookbackHours * 60 * 60 * 1000).toISOString();
 
   // 1. Fetch yesterday's diary entries for THIS agent (S125+ Phase 9: unified
   // agent_diary table with agent_name filter — was sapphire_diary in Phase 5).

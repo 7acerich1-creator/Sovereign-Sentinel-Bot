@@ -540,6 +540,53 @@ export class AgentLoop {
           toolCallId: result.toolCallId,
         });
       }
+
+      // ─── REPLY-MODE TERMINATION (S130r, 2026-05-05) ───
+      // The unnamed pattern Ace flagged: in DM mode, agents have a 10-iter
+      // budget and use it. Once they've filed work for the Architect
+      // (propose_task / file_briefing / save_content_draft / crew_dispatch
+      // dispatch action), they keep iterating into autonomous content
+      // production (memetic_trigger_judge cycles, social_scheduler probing,
+      // etc.) and the user gets a confused reply rooted in autonomous
+      // context, not the conversation. Fix: deterministically strip tools
+      // for the next iteration after a filing tool is detected. The model
+      // is then forced into a single final text response, which terminates
+      // the loop via the `no toolCalls` branch above. Modes become explicit:
+      // REPLY mode = "you can do ONE filing action then you must reply
+      // and stop." DISPATCH mode + CONVERSATIONAL mode + LIGHT mode are
+      // unchanged — this only affects non-dispatch DM iterations after a
+      // filing event.
+      if (!isDispatch && !isConversational && !isTextOnly) {
+        const FILING_TOOLS = new Set([
+          "propose_task",
+          "file_briefing",
+          "save_content_draft",
+        ]);
+        let calledFiling = response.toolCalls.some((tc) => FILING_TOOLS.has(tc.name));
+        // crew_dispatch counts as a filing event ONLY when action=dispatch
+        // (a peer handoff has been made). Other actions (claim/status/complete)
+        // are bookkeeping and shouldn't terminate the conversation.
+        if (!calledFiling) {
+          calledFiling = response.toolCalls.some((tc) => {
+            if (tc.name !== "crew_dispatch") return false;
+            try {
+              const parsed =
+                typeof (tc as any).arguments === "string"
+                  ? JSON.parse((tc as any).arguments)
+                  : (tc as any).arguments || (tc as any).input;
+              return parsed?.action === "dispatch";
+            } catch {
+              return false;
+            }
+          });
+        }
+        if (calledFiling) {
+          console.log(
+            `📮 [AgentLoop] REPLY MODE: filing tool detected (iter ${iterations}) — stripping tools next iteration to force text reply and exit autonomous detour`
+          );
+          toolDefs = [];
+        }
+      }
     }
 
     // Max iterations reached

@@ -30,14 +30,18 @@ export async function getClickUpSummaryForBrief(): Promise<string> {
 export class ClickUpTool implements Tool {
   definition = {
     name: "clickup_manage_tasks",
-    description: "Interact with ClickUp tasks via Sovereign Proxy. Use 'verify' to test connection.",
+    description:
+      "Manage Ace's ClickUp tasks via Sovereign Proxy. " +
+      "Full CRUD: 'list' (read tasks in a list), 'create' (add a new task), 'update' (edit an existing task's name/description/status — pass task_id), 'delete' (remove a task — pass task_id), 'verify' (test connection). " +
+      "Use 'update' to keep Ace's task state current as he completes things; use 'delete' to clear out tasks that are no longer relevant. " +
+      "Both are required for keeping his queue real-time, not just append-only.",
     parameters: {
-      action: { type: "string" as const, description: "Action: list, create, update, verify", enum: ["list", "create", "update", "verify"] },
-      list_id: { type: "string" as const, description: "The ClickUp List ID" },
-      task_id: { type: "string" as const, description: "The ClickUp Task ID" },
-      name: { type: "string" as const, description: "Task name" },
-      description: { type: "string" as const, description: "Task description" },
-      status: { type: "string" as const, description: "Task status" },
+      action: { type: "string" as const, description: "Action: list, create, update, delete, verify", enum: ["list", "create", "update", "delete", "verify"] },
+      list_id: { type: "string" as const, description: "The ClickUp List ID (defaults to CLICKUP_LIST_ID env var)" },
+      task_id: { type: "string" as const, description: "The ClickUp Task ID — required for update and delete" },
+      name: { type: "string" as const, description: "Task name (for create or update)" },
+      description: { type: "string" as const, description: "Task description (for create or update)" },
+      status: { type: "string" as const, description: "Task status (for update — e.g. 'in progress', 'complete')" },
     },
     required: ["action"],
   };
@@ -78,11 +82,23 @@ export class ClickUpTool implements Tool {
           method = "POST";
           body = { name: args.name, description: args.description };
           break;
-        case "update":
+        case "update": {
           if (!args.task_id) return "Error: task_id required for update.";
           url = `${PROXY_BASE}/api/v2/task/${args.task_id}`;
           method = "PUT";
-          body = { name: args.name, description: args.description, status: args.status };
+          // Only include fields the caller actually set — ClickUp accepts partial updates.
+          // Sending `null` for unspecified fields can clobber existing values.
+          const updateBody: Record<string, unknown> = {};
+          if (args.name !== undefined && args.name !== null) updateBody.name = args.name;
+          if (args.description !== undefined && args.description !== null) updateBody.description = args.description;
+          if (args.status !== undefined && args.status !== null) updateBody.status = args.status;
+          body = updateBody;
+          break;
+        }
+        case "delete":
+          if (!args.task_id) return "Error: task_id required for delete.";
+          url = `${PROXY_BASE}/api/v2/task/${args.task_id}`;
+          method = "DELETE";
           break;
       }
 
@@ -92,6 +108,15 @@ export class ClickUpTool implements Tool {
       
       if (args.action === "verify") {
         return `Connection Verified via Proxy. Authenticated as: ${response.data.user?.username} (${response.data.user?.email})`;
+      }
+
+      if (args.action === "delete") {
+        // ClickUp returns 204 No Content on success — there's no body. Synthesize a clean confirmation.
+        return `✅ Task deleted: ${args.task_id}`;
+      }
+
+      if (args.action === "update") {
+        return `✅ Task updated: ${args.task_id}\n${JSON.stringify(response.data)}`;
       }
 
       return JSON.stringify(response.data);

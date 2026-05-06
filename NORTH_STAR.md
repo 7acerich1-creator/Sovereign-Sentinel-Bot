@@ -351,6 +351,37 @@ Supabase migration applied: `initiates.dominant_pattern text` column live on pro
 
 ---
 
+## 🌱 Bot Maturity Trajectory — Stage 1 → 2 → 3 (named 2026-05-05)
+
+> Architect's articulation, first surfaced 2026-05-05. This is the lens for every "should I build X now or later" decision. If a proposed feature lives at a stage we haven't reached, it's premature.
+
+**Stage 1 — DETERMINISTIC (current).** Crons run. The bot core works. Crew agents barely touch their tool surface because most work flows through deterministic pipelines (Faceless Factory, ContentEngine, scheduled jobs) and simple DM replies. Metrics are theatrical — no traffic volume to read signal from. Bots can't reason from milestones because milestones haven't moved enough to teach them. Pinecone diaries thin, cross-cutting "shared" rules sparse.
+
+**Stage 2 — MEMORY ACCRETION (next).** Pinecone fills with real reflections + diaries. Each agent's namespace develops density. Milestones move enough that progress is readable. Cross-cutting hive rules accumulate. Architect starts handing the crew multi-step directives. **This is where the human-in-the-loop checkpoint protocol becomes useful** — bots restate the task, identify staging, pause between phases. Not as default ceremony; only when complex directives land.
+
+**Stage 3 — AUTONOMOUS (target).** Paid ads run. Conversion data is real. Metrics aren't theatrical. Agents have a stable basis to reason from — actual movement rate, role boundaries, what's worked and hasn't. MC alerts fire on real signal. Complex tasks can be given without checkpoint babysitting because the substrate is there.
+
+### Design rules this trajectory creates
+
+1. **Don't build Stage 2/3 ceremony during Stage 1.** Complex-task confirmation flows, elaborate alert thresholds, agent-led strategy proposals — these are theatrical when there's nothing real to apply them to. Capture as dormant rules; activate when triggered.
+2. **Quiet ≠ broken.** Quiet MC + light bot DMs in Stage 1 means the deterministic layer is working and there's not yet enough signal for autonomous reasoning to be valuable. Stage 3 starts when paid ads start.
+3. **Scaffolding is fine; theater is not.** Mode architecture, scope guards, MC push notifications — these are scaffolding ready for Stage 3 signal. Adding ten more guardrails on top is theater. Build once, let it sit, see what breaks under real load.
+4. **Pushback test for "more autonomy" requests.** If a proposal expands agent autonomy, check the substrate. Memory thin? Metrics flat? Milestones unmoved? Then the autonomy expansion is premature — the bots can't reason from what doesn't exist yet.
+
+### What activates Stage 2
+
+Substrate gates that need to clear:
+- Top-of-funnel attention crosses ~10K/wk (NORTH_STAR metric #1 baseline) — enough volume that anomalies are statistically real
+- Pinecone shared namespace accumulates 50+ cross-cutting rules from real Architect-DM moments (currently sparse)
+- Each crew agent's personal namespace passes 100+ entries of real reflections (not seed data)
+- Channel milestones have moved enough that current_value vs target_value tells a story
+
+### What activates Stage 3
+
+When paid ads run. That's the cleanest gate — paid traffic produces signal density that organic doesn't, and the cost discipline forces real measurement. MC alerts and autonomous strategy work go from theatrical to useful the day paid spend begins.
+
+---
+
 ## The Pushback Rule (NON-NEGOTIABLE)
 If Ace proposes a build task — any new code, any refactor, any infrastructure work — the first question is:
 

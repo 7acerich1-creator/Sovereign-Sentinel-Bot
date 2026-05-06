@@ -2390,6 +2390,84 @@ def compose_short(
             import shutil
             shutil.copy2(thumb_src, thumb_path)
 
+    # ── S130-FB3 — Prepend thumbnail card as first 0.3s of the video ──
+    # Why: Meta's /PAGE_ID/video_reels endpoint does not expose a custom-cover
+    # parameter at publish time. Reels covers are auto-extracted from the
+    # video frame. Without this prepend, frame 0 is the first scene's Ken
+    # Burns image — generic AI shot, no hook text. Prepending a 0.3s flash
+    # of the designed branded thumbnail forces Meta's auto-extractor to pick
+    # the branded card as the cover, while remaining short enough that
+    # viewers barely register a "title flash" before content begins.
+    #
+    # Safe-by-default: if the prepend ffmpeg command fails for any reason
+    # (codec mismatch, missing thumb, etc.), we log and SHIP THE VIDEO AS-IS.
+    # That's a regression to prior auto-cover behavior, not a pipeline break.
+    THUMB_PREPEND_S = 0.3
+    REELS_MAX_DURATION_S = 60.0
+    if (
+        os.path.isfile(thumb_path)
+        and os.path.isfile(final_path)
+        and (total_duration + THUMB_PREPEND_S) <= REELS_MAX_DURATION_S
+    ):
+        final_with_thumb = os.path.join(job_dir, "short_with_thumb.mp4")
+        prepend_cmd = [
+            "ffmpeg", "-y",
+            # input 0: looped thumbnail JPG → 0.3s vertical clip
+            "-loop", "1", "-t", f"{THUMB_PREPEND_S:.3f}", "-i", thumb_path,
+            # input 1: silent audio source for the prepend (48 kHz stereo)
+            "-f", "lavfi", "-t", f"{THUMB_PREPEND_S:.3f}",
+            "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+            # input 2: the existing final video (with audio + captions + CTA)
+            "-i", final_path,
+            "-filter_complex",
+            # v0: thumb scaled+padded to SHORT_WIDTH x SHORT_HEIGHT @ SHORT_FPS
+            f"[0:v]scale={SHORT_WIDTH}:{SHORT_HEIGHT}:force_original_aspect_ratio=decrease,"
+            f"pad={SHORT_WIDTH}:{SHORT_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black,"
+            f"setsar=1,format=yuv420p,fps={SHORT_FPS}[v0];"
+            # v2: existing video normalized to same fps/sar/format
+            f"[2:v]fps={SHORT_FPS},format=yuv420p,setsar=1[v2];"
+            # a0/a2: normalize both audio streams to 48 kHz stereo before concat
+            f"[1:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a0];"
+            f"[2:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a2];"
+            # concat the prepend + existing video into one stream
+            f"[v0][a0][v2][a2]concat=n=2:v=1:a=1[v][a]",
+            "-map", "[v]", "-map", "[a]",
+            "-c:v", VIDEO_CODEC, "-preset", VIDEO_PRESET, "-crf", SHORT_CRF,
+            "-c:a", AUDIO_CODEC, "-b:a", AUDIO_BITRATE, "-ar", "48000",
+            "-movflags", "+faststart",
+            final_with_thumb,
+        ]
+        log.info(
+            "compose_short_thumb_prepend_start",
+            prepend_s=THUMB_PREPEND_S,
+            pre_duration_s=round(total_duration, 2),
+        )
+        prepend_result = subprocess.run(
+            prepend_cmd, capture_output=True, text=True, timeout=180,
+        )
+        if prepend_result.returncode != 0:
+            log.warning(
+                "compose_short_thumb_prepend_failed",
+                stderr=(prepend_result.stderr[:500] if prepend_result.stderr else ""),
+                msg="Shipping video as-is; Reels cover will auto-extract from scene 0 (prior behavior).",
+            )
+        else:
+            final_path = final_with_thumb
+            total_duration = total_duration + THUMB_PREPEND_S
+            log.info(
+                "compose_short_thumb_prepend_ok",
+                out=final_with_thumb,
+                final_duration_s=round(total_duration, 2),
+            )
+    else:
+        log.info(
+            "compose_short_thumb_prepend_skipped",
+            thumb_exists=os.path.isfile(thumb_path) if thumb_path else False,
+            video_exists=os.path.isfile(final_path) if final_path else False,
+            duration_s=round(total_duration, 2),
+            duration_limit_s=REELS_MAX_DURATION_S,
+        )
+
     elapsed = time.monotonic() - t0
     log.info("compose_short_done",
              duration_s=round(total_duration, 2),

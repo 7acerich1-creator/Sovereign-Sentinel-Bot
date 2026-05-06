@@ -14,11 +14,20 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABA
 
 // S130s (2026-05-05): Push notifications for Mission Control.
 // Architect doesn't sit and watch the dashboard; he needs to be PULLED to it
-// when something actually requires him. Fire-and-forget Telegram alert when:
-//   • file_briefing fires with requires_action=true OR priority='critical' / 'high'
-//   • propose_task fires with priority='high' (case-insensitive)
-// Lower-priority items stay silent — they show up in MC for review when he chooses.
-// This converts MC from "place I should remember to check" → "place I'm pulled to."
+// when something actually requires him.
+//
+// S130t (2026-05-06): Narrowed scope after first day in the wild caused a
+// triple-fire incident — Vector's routine `revenue_report` briefings carry
+// priority='high' but `requires_action=false`, and the previous threshold
+// fired on priority alone. Result: Vector's own daily DM + this push alert
+// for the same event = noise. Per the bot maturity trajectory in NORTH_STAR,
+// this push is Stage 2/3 capability — only requires_action=true should
+// trigger it. Lower bars are theater while signal density is sparse.
+//
+// Final rule: ONLY fire on briefings explicitly flagged requires_action=true.
+// All other items live silently in MC for normal review (or via the agent's
+// own DM channel where applicable). Task push removed entirely — propose_task
+// surfaces in MC for review, the agent's reply in chat already announces it.
 async function alertArchitectOfPendingMC(payload: {
   kind: "task" | "briefing";
   title: string;
@@ -27,12 +36,8 @@ async function alertArchitectOfPendingMC(payload: {
   requiresAction: boolean;
   id: string;
 }): Promise<void> {
-  const { kind, title, agent, priority, requiresAction, id } = payload;
-  const p = priority.toLowerCase();
-  const shouldAlert =
-    kind === "briefing"
-      ? requiresAction || p === "critical" || p === "high"
-      : p === "high";
+  const { kind, title, agent, requiresAction, id } = payload;
+  const shouldAlert = kind === "briefing" && requiresAction === true;
   if (!shouldAlert) return;
 
   const token = process.env.SAPPHIRE_TOKEN || process.env.VERITAS_TOKEN;
@@ -43,20 +48,12 @@ async function alertArchitectOfPendingMC(payload: {
     "8593700720";
   if (!token) return;
 
-  const icon = kind === "briefing" ? "📋" : "📌";
-  const kindLabel = kind === "briefing" ? "Briefing filed" : "Task proposed";
   const agentDisplay = agent.charAt(0).toUpperCase() + agent.slice(1);
-  const reason =
-    kind === "briefing" && requiresAction
-      ? "Requires your action"
-      : `Priority: ${priority}`;
-
   const text =
-    `${icon} *Mission Control — ${kindLabel}*\n` +
-    `*From:* ${agentDisplay}\n` +
-    `*${reason}*\n\n` +
+    `📋 *Mission Control — Action Required*\n` +
+    `*From:* ${agentDisplay}\n\n` +
     `*${title}*\n\n` +
-    `_ID:_ \`${id}\``;
+    `_Briefing ID:_ \`${id}\``;
 
   try {
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {

@@ -2131,6 +2131,18 @@ async function main() {
   // Toggle via Railway env vars without redeploying code.
   const isAutonomousPaused = () => process.env.PAUSE_AUTONOMOUS === "true";
 
+  // S130o (2026-05-05): Boot-time visibility of pause state. Past silent-Sunday
+  // mystery (Architect noticed Anita newsletter never fired 2026-05-03 14:00 UTC)
+  // pointed at this flag, but historical Railway env state can't be inspected.
+  // From now on, every container boot prints the current pause state loudly so
+  // it's never invisible again. If you see "🛑 PAUSED" and aren't expecting it,
+  // unset PAUSE_AUTONOMOUS in Railway env vars.
+  if (isAutonomousPaused()) {
+    console.log("🛑 [Boot] PAUSE_AUTONOMOUS=true — all scheduled autonomous work is FROZEN. Bot will only respond to direct Telegram commands. Unset in Railway to resume.");
+  } else {
+    console.log("✅ [Boot] PAUSE_AUTONOMOUS unset — scheduled autonomous work is LIVE.");
+  }
+
   // In-memory guard to prevent briefings from firing every 60s during the matching hour
   const briefingFiredDates = { weekly: "" };
 
@@ -3086,8 +3098,20 @@ async function main() {
     nextRun: new Date(),
     enabled: true,
     handler: async () => {
-      if (isAutonomousPaused()) return;
       const now = new Date();
+      // S130o (2026-05-05): pause-aware visibility. The 2026-05-03 silent
+      // Sunday couldn't be diagnosed post-hoc because the cron returned
+      // silently when paused. Now: if it WOULD have fired but pause is on,
+      // log it loudly with date + reason. Future Sundays make pause-state
+      // forensically visible in Railway logs.
+      const wouldFire = now.getUTCDay() === 0 && now.getUTCHours() === 14;
+      if (isAutonomousPaused()) {
+        if (wouldFire) {
+          const dateStr = now.toISOString().slice(0, 10);
+          console.log(`📭 [AnitaNewsletter] WOULD have fired Sunday ${dateStr} 14:00 UTC but PAUSE_AUTONOMOUS=true. Newsletter SKIPPED. Unset PAUSE_AUTONOMOUS in Railway env to resume.`);
+        }
+        return;
+      }
       // Sunday = 0, target hour 14:00 UTC
       if (now.getUTCDay() !== 0 || now.getUTCHours() !== 14) return;
       const fireKey = `newsletter-${now.toISOString().slice(0, 10)}`;

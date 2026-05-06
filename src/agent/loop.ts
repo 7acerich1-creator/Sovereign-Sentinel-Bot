@@ -541,50 +541,63 @@ export class AgentLoop {
         });
       }
 
-      // ─── REPLY-MODE TERMINATION (S130r, 2026-05-05) ───
-      // The unnamed pattern Ace flagged: in DM mode, agents have a 10-iter
-      // budget and use it. Once they've filed work for the Architect
-      // (propose_task / file_briefing / save_content_draft / crew_dispatch
-      // dispatch action), they keep iterating into autonomous content
-      // production (memetic_trigger_judge cycles, social_scheduler probing,
-      // etc.) and the user gets a confused reply rooted in autonomous
-      // context, not the conversation. Fix: deterministically strip tools
-      // for the next iteration after a filing tool is detected. The model
-      // is then forced into a single final text response, which terminates
-      // the loop via the `no toolCalls` branch above. Modes become explicit:
-      // REPLY mode = "you can do ONE filing action then you must reply
-      // and stop." DISPATCH mode + CONVERSATIONAL mode + LIGHT mode are
-      // unchanged — this only affects non-dispatch DM iterations after a
-      // filing event.
-      if (!isDispatch && !isConversational && !isTextOnly) {
-        const FILING_TOOLS = new Set([
-          "propose_task",
-          "file_briefing",
-          "save_content_draft",
-        ]);
-        let calledFiling = response.toolCalls.some((tc) => FILING_TOOLS.has(tc.name));
-        // crew_dispatch counts as a filing event ONLY when action=dispatch
-        // (a peer handoff has been made). Other actions (claim/status/complete)
-        // are bookkeeping and shouldn't terminate the conversation.
-        if (!calledFiling) {
-          calledFiling = response.toolCalls.some((tc) => {
-            if (tc.name !== "crew_dispatch") return false;
-            try {
-              const parsed =
-                typeof (tc as any).arguments === "string"
-                  ? JSON.parse((tc as any).arguments)
-                  : (tc as any).arguments || (tc as any).input;
-              return parsed?.action === "dispatch";
-            } catch {
-              return false;
-            }
-          });
+      // ─── FILING-TOOL TERMINATION (S130r, 2026-05-05; widened S130t, 2026-05-06) ───
+      // Once an agent calls a "filing" tool (propose_task / file_briefing /
+      // save_content_draft / crew_dispatch.dispatch), it should not call that
+      // SAME filing tool again in the same turn — that's the double-file race
+      // (Vector filed today's daily report twice, 26s apart, on dispatch).
+      //
+      // Additionally, in non-dispatch DM mode, after ANY filing event the
+      // agent should stop iterating entirely and produce one final text
+      // reply — that closes the "Yuki responds 'Yes' then drifts into
+      // memetic_trigger_judge cycles" hijack pattern.
+      //
+      // Implementation: track which filing tools fired this turn; remove
+      // them from the available tool surface for subsequent iterations.
+      // In DM mode, strip ALL tools after first filing (force text reply).
+      // In dispatch mode, strip only the filing tool that fired (so the
+      // agent can still call crew_dispatch.complete to close the dispatch).
+      const FILING_TOOLS = new Set([
+        "propose_task",
+        "file_briefing",
+        "save_content_draft",
+      ]);
+      const filedThisTurn: string[] = [];
+      for (const tc of response.toolCalls) {
+        if (FILING_TOOLS.has(tc.name)) {
+          filedThisTurn.push(tc.name);
+        } else if (tc.name === "crew_dispatch") {
+          try {
+            const parsed =
+              typeof (tc as any).arguments === "string"
+                ? JSON.parse((tc as any).arguments)
+                : (tc as any).arguments || (tc as any).input;
+            if (parsed?.action === "dispatch") filedThisTurn.push("crew_dispatch_dispatch");
+          } catch { /* ignore parse errors */ }
         }
-        if (calledFiling) {
+      }
+
+      if (filedThisTurn.length > 0) {
+        if (!isDispatch && !isConversational && !isTextOnly) {
+          // DM mode — strip everything to force final text reply
           console.log(
-            `📮 [AgentLoop] REPLY MODE: filing tool detected (iter ${iterations}) — stripping tools next iteration to force text reply and exit autonomous detour`
+            `📮 [AgentLoop] REPLY MODE: filing tool detected (${filedThisTurn.join(", ")}, iter ${iterations}) — stripping all tools next iteration to force final text reply`
           );
           toolDefs = [];
+        } else {
+          // Dispatch / scheduled / other modes — only strip the specific
+          // filing tools that fired, so the agent can't double-file but
+          // can still call crew_dispatch.complete or other bookkeeping.
+          const stripNames = new Set(
+            filedThisTurn.filter((n) => n !== "crew_dispatch_dispatch")
+          );
+          if (stripNames.size > 0) {
+            const before = toolDefs.length;
+            toolDefs = toolDefs.filter((td) => !stripNames.has(td.name));
+            console.log(
+              `📮 [AgentLoop] DISPATCH MODE: filing tool fired (${[...stripNames].join(", ")}, iter ${iterations}) — removed from surface (${before}→${toolDefs.length}) to prevent double-file`
+            );
+          }
         }
       }
     }

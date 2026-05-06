@@ -2568,18 +2568,18 @@ async function main() {
             priority: 1,
             chat_id: defaultChatId,
             payload: {
-              directive: "DAILY CRO METRICS SWEEP — Execute your Chief Revenue Officer protocol. " +
-                "MANDATORY TOOL SEQUENCE — you MUST call every tool listed below in order. There is NO `dm_architect` or `send_telegram_message` tool — the ONLY way your work reaches the Architect is via file_briefing. If you skip file_briefing, the Architect receives nothing. " +
-                "1) Call stripe_metrics with report=dashboard to pull MRR, active subs, failed payments, new customers, and velocity toward $100K/month. " +
-                "2) Call buffer_analytics with report=overview to pull content reach, impressions, clicks, engagement rate across all channels. " +
-                "3) Call buffer_analytics with report=top_posts to identify top 5 performing posts and what made them work. " +
-                "4) Call buffer_analytics with report=channel_breakdown to compare channel performance — which platforms drive reach vs clicks. " +
-                "5) Cross-reference revenue signals (Stripe) vs content signals (Buffer) — is content driving conversions? " +
-                "6) Identify the #1 bottleneck and recommend one specific optimization. " +
-                "7) MANDATORY FINAL STEP — call file_briefing with title='Daily CRO Sweep — <today\\'s date>', briefing_type='revenue_report', priority='high', and the FULL intelligence report (numbers, top posts, channel breakdown, cross-reference, bottleneck, recommendation) in the body parameter. The body IS the report; the briefings table IS the Architect's inbox. " +
-                "After file_briefing returns, your final assistant message MUST be exactly: '✅ Briefing filed: <briefing_id>' — nothing else. No prose summary, no 'I have reported', no narration. The briefing ID confirms delivery. " +
-                "FAILURE MODES THAT WILL MARK THIS TASK FAILED: (a) skipping any of the 4 tool calls in steps 1-4, (b) skipping file_briefing in step 7, (c) returning a meta-narration like 'the sweep is complete' instead of the briefing ID. " +
-                "Do NOT dispatch tasks to other agents — file the briefing and stop.",
+              directive: "DAILY CRO METRICS SWEEP — Stage-1 calibrated (S130t).\n\n" +
+                "Context: the funnel is in Stage 1 of the bot maturity trajectory — paid ads haven't started, traffic is light, and most days the answer is going to be '$0/0/0, no change.' That's correct, not failure. Your job is to confirm-or-flag, NOT to manufacture a wall of analysis when data is flat.\n\n" +
+                "TOOL SEQUENCE (call in this order, then stop):\n" +
+                "1) stripe_metrics with report=dashboard — MRR, active subs, failed payments, new customers.\n" +
+                "2) buffer_analytics with report=overview — total posts and channels active.\n" +
+                "3) Compare today's numbers to the most recent prior daily-sweep briefing in the briefings table (you can recall the last revenue_report you filed). Did anything material change?\n\n" +
+                "FILING RULE — keep the briefings table clean:\n" +
+                "• If nothing changed materially (Stripe identical, Buffer post count ±2 from yesterday): file_briefing with priority='low', requires_action=false, briefing_type='revenue_report'. Body is THREE LINES MAX: line 1 = headline numbers ($MRR / N subs / N posts), line 2 = '(no material change from yesterday)', line 3 = the source citations. Do NOT list channel breakdowns, top posts, or restate the bottleneck — those are noise on flat days.\n" +
+                "• If something MOVED (first dollar in Stripe, sub count changed, post volume jumped, retargeting pool crossed 1000): file_briefing with priority='high'. Body names the moved metric, what it means, and ONE suggested next move. Set requires_action=true ONLY if the Architect must take a specific action (e.g., approve a lookalike audience). Routine 'numbers improved' does NOT require action.\n" +
+                "• Call file_briefing AT MOST ONCE per sweep. The agent loop now blocks double-files at the tool level, but don't try.\n\n" +
+                "After file_briefing returns, your final assistant message MUST be exactly: '✅ Briefing filed: <briefing_id>' — nothing else. No prose, no narration, no 'sweep complete'.\n\n" +
+                "Do NOT call buffer_analytics top_posts or channel_breakdown — those produce noise when nothing has converted yet. Do NOT dispatch tasks to other agents. Do NOT report on YouTube Analytics or Meta Pixel — those are not connected via this path; their absence is not news. When they come online, this directive will be updated.",
               triggered_at: new Date().toISOString(),
               sweep_type: "daily",
             },

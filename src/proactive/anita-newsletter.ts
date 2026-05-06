@@ -1,16 +1,25 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// GRAVITY CLAW v3.0 — Anita Newsletter System
-// Session 117 (2026-04-25) — Anita autonomous send + compounding-ideas
-// newsletter program. Per Ace S117: Anita gets autonomy (no per-email
-// approval) capped at 3 emails/week. Newsletter is separate from the
-// existing nurture sequence: each issue compounds on prior ideas, tracked
-// in semantic memory (Pinecone `content` namespace).
+// GRAVITY CLAW v3.0 — Anita Newsletter System (S131 realignment, 2026-05-06)
 //
-// Tables (created in migration anita_newsletter_s117):
-//   - newsletter_ideas    (compounding-concept graph)
-//   - newsletter_issues   (sequential issues)
-//   - anita_send_log      (cap enforcement source of truth)
-//   - anita_weekly_send_count (helper view)
+// Realignment swept four drift points that accumulated from the 5/1 brand
+// voice fix:
+//   1. Compose function hardcoded the OLD dark email wrapper. Replaced with
+//      structured-content + light-canonical email renderer per
+//      .claude/skills/brand-identity/resources/email-templates.md.
+//   2. Recipient list read from `initiates` only. Now unions
+//      `newsletter_subscribers` + `initiates`, deduped, unsubscribed excluded.
+//   3. `bot_active_state.active_format` for anita pointed at a key removed
+//      from prompt-pieces.json. Realigned to `email_html_light_canonical`
+//      via DB migration.
+//   4. Idea graph treated mechanisms and foundations as one linear queue.
+//      Now `kind` column splits them: 9 mechanism rows (issues 02-10) get
+//      pulled in `mechanism_sequence` order; foundations stay pinned and
+//      never auto-pick. Compose enters open mode after the queue exhausts.
+//
+// New: `publishToWebsite()` writes each new issue as
+// `/newsletter/{slug}/index.html` and prepends it to `/newsletter/index.html`
+// in the sovereign-landing repo via GitHub Contents API. Graceful no-op when
+// `GITHUB_TOKEN` is unset.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import type { Channel } from "../types";
@@ -21,6 +30,11 @@ const FROM_EMAIL = "Sovereign Synthesis <ace@sovereign-synthesis.com>";
 const WEEKLY_CAP = 3;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GITHUB_OWNER = process.env.GITHUB_OWNER || "7acerich1-creator";
+const GITHUB_REPO = process.env.GITHUB_REPO || "sovereign-landing";
+const GITHUB_BRANCH = process.env.GITHUB_BRANCH || "main";
+const SITE_BASE_URL = "https://sovereign-synthesis.com";
 
 type SendType = "newsletter" | "inbound_reply" | "nurture_step" | "broadcast";
 
@@ -28,6 +42,26 @@ interface CapStatus {
   sends_last_7d: number;
   budget_remaining: number;
   capped: boolean;
+}
+
+export interface NewsletterContent {
+  issueNumber: number;
+  slug: string;
+  ideaSlug: string;
+  subject: string;
+  preheader: string;
+  publishedDate: string;
+  headline: string;
+  dek: string;
+  sections: Array<{
+    marker: string;
+    paragraphs: string[];
+  }>;
+  cta: {
+    buttonText: string;
+    url: string;
+  };
+  closing: string;
 }
 
 // ── 1. Cap status query ────────────────────────────────────────────────────
@@ -55,8 +89,6 @@ export async function getWeeklyCapStatus(): Promise<CapStatus> {
 }
 
 // ── 2. Cap-enforced send primitive ─────────────────────────────────────────
-// Every Anita-initiated send goes through here. Checks weekly cap, sends via
-// Resend, logs to anita_send_log on success.
 export async function sendWithCap(input: {
   sendType: SendType;
   to: string | string[];
@@ -64,24 +96,22 @@ export async function sendWithCap(input: {
   htmlBody: string;
   plainBody?: string;
   referenceId?: string;
-  bypassCap?: boolean;  // ONLY for inbound_reply (those are 1:1, not broadcast)
+  bypassCap?: boolean;
 }): Promise<{ sent: boolean; resendEmailId?: string; error?: string; capStatus?: CapStatus }> {
   if (!RESEND_API_KEY) return { sent: false, error: "RESEND_API_KEY not set" };
 
-  // Cap check (skip for inbound_reply since those are direct 1:1 responses)
   let capStatus: CapStatus | undefined;
   if (!input.bypassCap && input.sendType !== "inbound_reply") {
     capStatus = await getWeeklyCapStatus();
     if (capStatus.capped) {
       return {
         sent: false,
-        error: `Weekly send cap reached (${capStatus.sends_last_7d}/${WEEKLY_CAP} sent in last 7 days). This send is blocked. Try again next week or surface to Ace as a 'meeting requested' if urgent.`,
+        error: `Weekly send cap reached (${capStatus.sends_last_7d}/${WEEKLY_CAP} sent in last 7 days). This send is blocked.`,
         capStatus,
       };
     }
   }
 
-  // Send via Resend
   let resendId: string | undefined;
   try {
     const resp = await fetch("https://api.resend.com/emails", {
@@ -111,7 +141,6 @@ export async function sendWithCap(input: {
     return { sent: false, error: err.message, capStatus };
   }
 
-  // Log to anita_send_log (best-effort — failure here doesn't block the actual send)
   if (SUPABASE_URL && SUPABASE_KEY) {
     try {
       const recipientCount = Array.isArray(input.to) ? input.to.length : 1;
@@ -140,64 +169,42 @@ export async function sendWithCap(input: {
   return { sent: true, resendEmailId: resendId, capStatus };
 }
 
-// ── 3. Idea graph traversal: pick the next idea to introduce ──────────────
-// Returns the idea whose parents are ALL already introduced (status: ready
-// to be expounded), preferring ones never used yet. Falls back to suggesting
-// expansion of an existing idea if no new ones are ready.
-export async function pickNextIdeaToIntroduce(): Promise<{
-  next?: { id: string; slug: string; title: string; summary: string };
-  suggestExpand?: { id: string; slug: string; title: string };
-  reason: string;
-}> {
-  if (!SUPABASE_URL || !SUPABASE_KEY) return { reason: "Supabase not configured" };
+// ── 3. Picker (kind-aware) ─────────────────────────────────────────────────
+type PickResult =
+  | { mode: "mechanism"; idea: { id: string; slug: string; title: string; summary: string; cta_path: string | null }; reason: string }
+  | { mode: "open"; reason: string }
+  | { mode: "error"; reason: string };
+
+export async function pickNextIdeaToIntroduce(): Promise<PickResult> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return { mode: "error", reason: "Supabase not configured" };
 
   try {
     const resp = await fetch(
-      `${SUPABASE_URL}/rest/v1/newsletter_ideas?select=id,slug,title,summary,parent_ids,introduced_in_issue_number&order=created_at.asc`,
+      `${SUPABASE_URL}/rest/v1/newsletter_ideas?kind=eq.mechanism&introduced_in_issue_number=is.null&select=id,slug,title,summary,cta_path,mechanism_sequence&order=mechanism_sequence.asc&limit=1`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
-    if (!resp.ok) return { reason: `query failed: ${resp.status}` };
+    if (!resp.ok) return { mode: "error", reason: `query failed: ${resp.status}` };
     const ideas = (await resp.json()) as Array<{
       id: string; slug: string; title: string; summary: string;
-      parent_ids: string[]; introduced_in_issue_number: number | null;
+      cta_path: string | null; mechanism_sequence: number;
     }>;
 
-    if (ideas.length === 0) {
-      return { reason: "No ideas in graph yet. Anita should propose foundational ideas before composing first issue." };
-    }
-
-    const introducedIds = new Set(
-      ideas.filter((i) => i.introduced_in_issue_number != null).map((i) => i.id)
-    );
-    const readyToIntroduce = ideas.filter(
-      (i) => i.introduced_in_issue_number == null &&
-             (i.parent_ids || []).every((pid) => introducedIds.has(pid))
-    );
-
-    if (readyToIntroduce.length > 0) {
-      const pick = readyToIntroduce[0];
-      return { next: { id: pick.id, slug: pick.slug, title: pick.title, summary: pick.summary }, reason: "ready_to_introduce" };
-    }
-
-    // No new ideas ready — suggest expanding an introduced one (oldest unexpanded first)
-    const introducedSorted = ideas
-      .filter((i) => i.introduced_in_issue_number != null)
-      .sort((a, b) => (a.introduced_in_issue_number || 0) - (b.introduced_in_issue_number || 0));
-    if (introducedSorted.length > 0) {
-      const pick = introducedSorted[0];
+    if (ideas.length > 0) {
+      const pick = ideas[0];
       return {
-        suggestExpand: { id: pick.id, slug: pick.slug, title: pick.title },
-        reason: "no_ready_new_ideas_expand_oldest",
+        mode: "mechanism",
+        idea: { id: pick.id, slug: pick.slug, title: pick.title, summary: pick.summary, cta_path: pick.cta_path },
+        reason: `next mechanism in sequence (${pick.mechanism_sequence})`,
       };
     }
 
-    return { reason: "no actionable ideas" };
+    return { mode: "open", reason: "mechanism queue exhausted — open mode" };
   } catch (err: any) {
-    return { reason: `error: ${err.message}` };
+    return { mode: "error", reason: err.message };
   }
 }
 
-// ── 4. Get next issue number (for sequential numbering) ───────────────────
+// ── 4. Get next issue number ──────────────────────────────────────────────
 export async function getNextIssueNumber(): Promise<number> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return 1;
   try {
@@ -213,162 +220,150 @@ export async function getNextIssueNumber(): Promise<number> {
   }
 }
 
-// ── 5. Save a draft issue ─────────────────────────────────────────────────
-export async function saveDraftIssue(input: {
-  issueNumber: number;
-  subject: string;
-  preheader?: string;
-  bodyHtml: string;
-  bodyPlain?: string;
-  ideasIntroduced?: string[];
-  ideasExpounded?: string[];
-}): Promise<{ ok: boolean; id?: string; error?: string }> {
-  if (!SUPABASE_URL || !SUPABASE_KEY) return { ok: false, error: "Supabase not configured" };
-  try {
-    const resp = await fetch(`${SUPABASE_URL}/rest/v1/newsletter_issues`, {
-      method: "POST",
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        "Content-Type": "application/json",
-        Prefer: "return=representation",
-      },
-      body: JSON.stringify({
-        issue_number: input.issueNumber,
-        subject: input.subject,
-        preheader: input.preheader || null,
-        body_html: input.bodyHtml,
-        body_plain: input.bodyPlain || null,
-        ideas_introduced: input.ideasIntroduced || [],
-        ideas_expounded: input.ideasExpounded || [],
-        status: "draft",
-      }),
-    });
-    if (!resp.ok) {
-      return { ok: false, error: `${resp.status}: ${(await resp.text()).slice(0, 300)}` };
-    }
-    const rows = (await resp.json()) as Array<{ id: string }>;
-    return { ok: true, id: rows[0]?.id };
-  } catch (err: any) {
-    return { ok: false, error: err.message };
-  }
-}
-
-// ── 6. Mark issue as sent + patch idea graph ──────────────────────────────
-// S130e (2026-05-04): The function name was always "markIssueSent + patch idea
-// graph" but the idea-graph patch was never wired. Result: every newsletter
-// cycle re-picked `the_simulation` because no idea ever got
-// `introduced_in_issue_number` set, so `pickNextIdeaToIntroduce` saw all
-// ideas as never-introduced and returned the same root each time. This
-// extension adds the write-back so the graph compounds as designed.
-export async function markIssueSent(
-  issueId: string,
-  resendEmailId: string,
-  recipientCount: number,
-  issueNumber?: number,
-  ideasIntroduced?: string[],
-): Promise<void> {
-  if (!SUPABASE_URL || !SUPABASE_KEY) return;
-  try {
-    await fetch(`${SUPABASE_URL}/rest/v1/newsletter_issues?id=eq.${issueId}`, {
-      method: "PATCH",
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        "Content-Type": "application/json",
-        Prefer: "return=minimal",
-      },
-      body: JSON.stringify({
-        status: "sent",
-        sent_at: new Date().toISOString(),
-        recipient_count: recipientCount,
-      }),
-    });
-  } catch (err: any) {
-    console.error(`[AnitaSend] markIssueSent (issues PATCH) failed: ${err.message}`);
-  }
-
-  // S130e: Patch each newly-introduced idea with the issue number so future
-  // cycles know it's been introduced. Best-effort — failures here don't
-  // unship the issue. If issueNumber is undefined, skip silently (caller
-  // didn't pass enough info to do this safely).
-  if (typeof issueNumber === "number" && ideasIntroduced && ideasIntroduced.length > 0) {
-    for (const ideaId of ideasIntroduced) {
-      try {
-        await fetch(`${SUPABASE_URL}/rest/v1/newsletter_ideas?id=eq.${ideaId}`, {
-          method: "PATCH",
-          headers: {
-            apikey: SUPABASE_KEY,
-            Authorization: `Bearer ${SUPABASE_KEY}`,
-            "Content-Type": "application/json",
-            Prefer: "return=minimal",
-          },
-          body: JSON.stringify({
-            introduced_in_issue_number: issueNumber,
-          }),
-        });
-        console.log(`[AnitaSend] idea-graph: marked ${ideaId.slice(0, 8)}… as introduced in issue #${issueNumber}`);
-      } catch (err: any) {
-        console.error(`[AnitaSend] markIssueSent (ideas PATCH ${ideaId}) failed: ${err.message}`);
-      }
-    }
-  }
-}
-
-// ── 7. List recipients for newsletter (initiates with email + opted in) ──
-export async function listNewsletterRecipients(): Promise<string[]> {
+// ── 5. Foundations (pinned reference library) ─────────────────────────────
+async function loadFoundations(): Promise<Array<{ slug: string; title: string; summary: string }>> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return [];
   try {
     const resp = await fetch(
-      `${SUPABASE_URL}/rest/v1/initiates?select=email&payment_status=neq.unsubscribed`,
+      `${SUPABASE_URL}/rest/v1/newsletter_ideas?kind=eq.foundation&select=slug,title,summary&order=created_at.asc`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
     if (!resp.ok) return [];
-    const rows = (await resp.json()) as Array<{ email: string }>;
-    return rows.map((r) => r.email).filter(Boolean);
+    return (await resp.json()) as Array<{ slug: string; title: string; summary: string }>;
   } catch {
     return [];
   }
 }
 
-// ── 8. Compose a draft issue via Gemini (Anita's voice) ───────────────────
-async function geminiComposeIssue(input: {
+// ── 6. Recipient union ────────────────────────────────────────────────────
+export async function listNewsletterRecipients(): Promise<string[]> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return [];
+  const seen = new Set<string>();
+
+  try {
+    const r1 = await fetch(
+      `${SUPABASE_URL}/rest/v1/newsletter_subscribers?select=email&status=eq.active&unsubscribed_at=is.null`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+    );
+    if (r1.ok) {
+      const rows = (await r1.json()) as Array<{ email: string }>;
+      for (const row of rows) {
+        const e = (row.email || "").trim().toLowerCase();
+        if (e) seen.add(e);
+      }
+    }
+  } catch (err: any) {
+    console.error(`[AnitaRecipients] newsletter_subscribers fetch failed: ${err.message}`);
+  }
+
+  try {
+    const r2 = await fetch(
+      `${SUPABASE_URL}/rest/v1/initiates?select=email&payment_status=neq.unsubscribed`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+    );
+    if (r2.ok) {
+      const rows = (await r2.json()) as Array<{ email: string | null }>;
+      for (const row of rows) {
+        const e = (row.email || "").trim().toLowerCase();
+        if (e) seen.add(e);
+      }
+    }
+  } catch (err: any) {
+    console.error(`[AnitaRecipients] initiates fetch failed: ${err.message}`);
+  }
+
+  return Array.from(seen);
+}
+
+// ── 7. Slug derivation ────────────────────────────────────────────────────
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/['']/g, "")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80);
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function formatPublishDate(iso: string): string {
+  const d = new Date(iso + "T00:00:00Z");
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+}
+
+// ── 8. Compose via Gemini → structured content ────────────────────────────
+async function composeIssueContent(input: {
   issueNumber: number;
-  isFirstIssue: boolean;
-  introduceIdea?: { id: string; title: string; summary: string };
-  expandIdea?: { id: string; title: string };
+  mode: "mechanism" | "open";
+  mechanism?: { slug: string; title: string; summary: string; cta_path: string | null };
   priorIssues: Array<{ issue_number: number; subject: string; ideas_introduced: string[] }>;
-}): Promise<{ ok: boolean; subject?: string; preheader?: string; bodyHtml?: string; bodyPlain?: string; error?: string }> {
+  foundations: Array<{ slug: string; title: string; summary: string }>;
+}): Promise<{ ok: boolean; content?: NewsletterContent; error?: string }> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { ok: false, error: "GEMINI_API_KEY not set" };
 
   const priorContext = input.priorIssues.length === 0
-    ? "This is the FIRST issue. Establish the foundation."
-    : `Prior issues established: ${input.priorIssues.slice(-5).map((i) => `#${i.issue_number} "${i.subject}"`).join(" | ")}`;
+    ? "This is the foundational issue. Establish the frame."
+    : `Prior issues established (most recent first): ${input.priorIssues.slice(-5).map((i) => `#${i.issue_number} "${i.subject}"`).join(" | ")}`;
 
-  const focusInstruction = input.introduceIdea
-    ? `INTRODUCE this concept: "${input.introduceIdea.title}" — ${input.introduceIdea.summary}. Build on what prior issues established.`
-    : input.expandIdea
-    ? `EXPAND on this prior concept: "${input.expandIdea.title}". Add a new angle or implication that compounds on what readers already know.`
-    : "Introduce ONE foundational concept of the Sovereign Synthesis frame (e.g., the Simulation, the Glitch, Sovereign Synthesis as architecture). This sets up future issues.";
+  const foundationContext = input.foundations.length === 0
+    ? ""
+    : `Foundational concepts (pinned, all-season, you may reference but do NOT introduce these as if new):\n${input.foundations.map((f) => `  - ${f.title} (${f.slug}): ${f.summary}`).join("\n")}\n`;
 
-  const prompt = `You are Anita, copy specialist for Sovereign Synthesis. You write a compounding-ideas newsletter — every issue builds on prior ones. Voice: cynical, sharp, dark humor, anti-circle. NEVER marketing jargon. Always one concrete glitch in the reader's reality logic.
+  const focusInstruction = input.mode === "mechanism" && input.mechanism
+    ? `THIS ISSUE INTRODUCES one specific mechanism: "${input.mechanism.title}".
 
-Context: Issue #${input.issueNumber}. ${priorContext}
+Mechanism summary (from the editorial graph):
+${input.mechanism.summary}
 
-This issue: ${focusInstruction}
+CTA destination: ${input.mechanism.cta_path || "/diagnostic"}
 
-Brand email standard (NON-NEGOTIABLE):
-- Dark HTML wrapper, table-based 600px card, #121212 bg, #252525 border, 8px radius
-- Header: "SOVEREIGN SYNTHESIS" left, "Transmission #${input.issueNumber}" right
-- Gradient accent line: linear-gradient(#E5850F → #5A9CF5 → #2ECC8F)
-- Section label color coding: Gold=welcome/scarcity, Blue=defense/blueprint, Green=activation
-- CTA button: #E5850F bg, #000000 text, uppercase, 1.5px letter-spacing
-- Footer with unsubscribe link to https://sovereign-synthesis.com/unsubscribe
-- Signature: "— Ace" + "Sovereign Synthesis"
+Editorial structure (per the Anita newsletter spec):
+  - Section 1: open with a question or scene the reader recognizes — the body-level signal of this mechanism. They feel it before they have words for it.
+  - Section 2: name the mechanism explicitly. Plain English. Mom Test enforced — a smart adult outside the sovereignty subculture must understand every sentence on first read.
+  - Section 3: the first move out — what naming it changes. Not a fix-it-all promise. Just the door.
+  - Close with a single line that activates.
+  - Total length under 400 words across all three sections. Short, dense, repeatable.
+  - Section markers (you choose): something like "Welcome · Scarcity", "Defense · Blueprint", "Activation" — three short kicker labels separated by ·`
+    : `THE MECHANISM QUEUE IS EXHAUSTED — open mode.
 
-Output STRICT JSON, no other text:
-{"subject":"<subject line, max 60 chars, no emoji>","preheader":"<15-90 chars preview>","body_html":"<full HTML conforming to brand standard>","body_plain":"<plain-text version for email clients that block HTML>"}`;
+Compose freely in character. You may:
+  - Observe a new mechanism you have noticed in the field that has not been named in prior issues.
+  - Deepen a prior mechanism by threading it to a foundation or to another mechanism.
+  - Surface a contradiction the framework has not yet addressed.
+
+Voice rules in force. Mom Test mandatory. 3-section structure (body-signal → name → first-move-out). CTA destination: pick the funnel rung that fits — /diagnostic for pattern-naming issues, /protocol-zero for awareness-installation issues, /p77 for defensive-architecture issues, /manifesto-portal for synthesis or pivot issues.`;
+
+  const prompt = `You are Anita, copy specialist for Sovereign Synthesis. You write a compounding-mechanism newsletter — every issue names ONE thing that was operating invisibly. By the time a reader has consumed twenty issues they have twenty things named that nobody around them can name. That is the function.
+
+Voice: cynical, sharp, dark humor, anti-circle. NEVER marketing jargon ("limited time", "unlock", "transform your life", "last chance" are all banned). Copy that names the loop and shows the move out. The reader is sophisticated; treat them that way.
+
+Issue #${input.issueNumber}. ${priorContext}
+
+${foundationContext}${focusInstruction}
+
+Output STRICT JSON matching this shape, no other text:
+{
+  "subject": "<email subject line, max 60 chars, no emoji>",
+  "preheader": "<inbox preview, 60-110 chars>",
+  "headline": "<the issue title, may exceed subject in length>",
+  "dek": "<one italic subhead line introducing the mechanism, max 120 chars>",
+  "sections": [
+    { "marker": "<section 1 kicker, 2-3 words separated by ·>", "paragraphs": ["<para>", "<para>"] },
+    { "marker": "<section 2 kicker>", "paragraphs": ["<para>"] },
+    { "marker": "<section 3 kicker>", "paragraphs": ["<para>"] }
+  ],
+  "cta": {
+    "buttonText": "<short uppercase-friendly verb phrase, e.g. 'See the code'>",
+    "url": "${input.mode === "mechanism" && input.mechanism?.cta_path ? input.mechanism.cta_path : "/diagnostic"}"
+  },
+  "closing": "<one line that lands the issue, no signature — that is added separately>"
+}`;
 
   try {
     const resp = await fetch(
@@ -386,28 +381,461 @@ Output STRICT JSON, no other text:
     const data = (await resp.json()) as any;
     const text = (data?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
     const parsed = JSON.parse(text);
-    if (!parsed.subject || !parsed.body_html) return { ok: false, error: "Missing subject or body_html in Gemini output" };
-    return {
-      ok: true,
-      subject: String(parsed.subject),
+
+    if (!parsed.subject || !parsed.headline || !Array.isArray(parsed.sections) || parsed.sections.length < 1) {
+      return { ok: false, error: "Gemini output missing required fields (subject/headline/sections)" };
+    }
+
+    const slug = slugify(parsed.headline);
+    if (!slug) return { ok: false, error: `slugify produced empty result for headline: "${parsed.headline}"` };
+
+    const content: NewsletterContent = {
+      issueNumber: input.issueNumber,
+      slug,
+      ideaSlug: input.mode === "mechanism" && input.mechanism ? input.mechanism.slug : "open",
+      subject: String(parsed.subject).slice(0, 80),
       preheader: String(parsed.preheader || ""),
-      bodyHtml: String(parsed.body_html),
-      bodyPlain: String(parsed.body_plain || ""),
+      publishedDate: new Date().toISOString().slice(0, 10),
+      headline: String(parsed.headline),
+      dek: String(parsed.dek || parsed.preheader || ""),
+      sections: (parsed.sections as any[]).slice(0, 3).map((s) => ({
+        marker: String(s.marker || ""),
+        paragraphs: Array.isArray(s.paragraphs) ? s.paragraphs.map(String) : [String(s.paragraphs || "")],
+      })),
+      cta: {
+        buttonText: String(parsed.cta?.buttonText || "See the code"),
+        url: String(parsed.cta?.url || "/diagnostic"),
+      },
+      closing: String(parsed.closing || ""),
     };
+    return { ok: true, content };
   } catch (err: any) {
     return { ok: false, error: err.message };
   }
 }
 
-// ── 9. The weekly cron orchestrator ───────────────────────────────────────
-// Invoked by the scheduler in index.ts. Produces a draft, sends if cap allows.
+// ── 9. Email renderer (light canonical) ───────────────────────────────────
+export function renderNewsletterEmail(c: NewsletterContent): string {
+  const fullCtaUrl = c.cta.url.startsWith("http") ? c.cta.url : `${SITE_BASE_URL}${c.cta.url}`;
+  const headerTag = `Transmission #${c.issueNumber}`;
+
+  const sectionsHtml = c.sections.map((s) => `
+              <p style="margin:32px 0 14px 0;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#E5850F;font-weight:700;">${escapeHtml(s.marker)}</p>
+              ${s.paragraphs.map((p) => `<p style="margin:0 0 18px 0;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:16px;line-height:1.7;color:#3A3A3A;">${escapeHtml(p)}</p>`).join("\n              ")}`).join("\n");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(c.subject)}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f5f4f0;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#1a1a2e;">
+
+  <div style="display:none;font-size:1px;color:#f5f4f0;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
+    ${escapeHtml(c.preheader)}
+  </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f5f4f0;">
+    <tr>
+      <td align="center" style="padding:40px 16px;">
+
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background-color:#ffffff;border:1px solid #ddd8d0;border-radius:8px;overflow:hidden;">
+
+          <tr>
+            <td style="background-color:#ffffff;padding:28px 40px;border-bottom:1px solid #ddd8d0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td><span style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#E5850F;">SOVEREIGN SYNTHESIS</span></td>
+                  <td align="right"><span style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:11px;color:#8E8C9A;letter-spacing:2px;text-transform:uppercase;">${escapeHtml(headerTag)}</span></td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr><td style="height:3px;background-color:#d4a843;font-size:0;line-height:0;">&nbsp;</td></tr>
+
+          <tr>
+            <td style="padding:48px 40px 8px 40px;">
+              <h1 style="margin:0 0 14px 0;font-family:Georgia,'Times New Roman',serif;font-size:30px;font-weight:600;color:#1a1a2e;line-height:1.25;letter-spacing:-0.3px;">${escapeHtml(c.headline)}</h1>
+              <p style="margin:0 0 8px 0;font-family:Georgia,'Times New Roman',serif;font-style:italic;font-size:17px;line-height:1.6;color:#555555;">${escapeHtml(c.dek)}</p>
+${sectionsHtml}
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:32px 40px 8px 40px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="background-color:#d4a843;border-radius:4px;">
+                    <a href="${escapeHtml(fullCtaUrl)}" style="display:inline-block;padding:16px 36px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#1a1a2e;text-decoration:none;">${escapeHtml(c.cta.buttonText)} &rarr;</a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:14px 0 0 0;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;color:#8E8C9A;line-height:1.6;">
+                If the button doesn't work, paste this into your browser:<br/>
+                <a href="${escapeHtml(fullCtaUrl)}" style="color:#E5850F;text-decoration:underline;word-break:break-all;">${escapeHtml(fullCtaUrl)}</a>
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:32px 40px 40px 40px;">
+              ${c.closing ? `<p style="margin:0 0 14px 0;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:15px;line-height:1.7;color:#3A3A3A;">${escapeHtml(c.closing)}</p>` : ""}
+              <p style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:16px;color:#1a1a2e;font-weight:600;">— Ace</p>
+              <p style="margin:4px 0 0 0;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;color:#8E8C9A;letter-spacing:1px;">Sovereign Synthesis</p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background-color:#f5f4f0;padding:24px 40px;border-top:1px solid #ddd8d0;">
+              <p style="margin:0 0 8px 0;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:11px;color:#8E8C9A;line-height:1.6;text-align:center;">
+                You're receiving this because you entered your email at sovereign-synthesis.com.<br/>
+                <a href="https://sovereign-synthesis.com/unsubscribe" style="color:#8E8C9A;text-decoration:underline;">Unsubscribe</a>
+              </p>
+              <p style="margin:0;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:11px;color:#aaaaaa;text-align:center;letter-spacing:2px;text-transform:uppercase;">
+                Sovereign Synthesis · sovereign-synthesis.com
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>`;
+}
+
+export function renderNewsletterEmailPlain(c: NewsletterContent): string {
+  const fullCtaUrl = c.cta.url.startsWith("http") ? c.cta.url : `${SITE_BASE_URL}${c.cta.url}`;
+  const sections = c.sections.map((s) => `${s.marker.toUpperCase()}\n\n${s.paragraphs.join("\n\n")}`).join("\n\n");
+  return `${c.headline}\n\n${c.dek}\n\n${sections}\n\n${c.cta.buttonText}: ${fullCtaUrl}\n\n${c.closing}\n\n— Ace\nSovereign Synthesis\n\nUnsubscribe: ${SITE_BASE_URL}/unsubscribe`;
+}
+
+// ── 10. Web page renderer ──────────────────────────────────────────────────
+export function renderNewsletterWebPage(c: NewsletterContent): string {
+  const issueLabel = String(c.issueNumber).padStart(2, "0");
+  const dateLabel = formatPublishDate(c.publishedDate);
+  const fullCtaUrl = c.cta.url;
+  const sectionsHtml = c.sections.map((s) => `    <span class="section-marker">${escapeHtml(s.marker)}</span>
+
+${s.paragraphs.map((p) => `    <p>${escapeHtml(p)}</p>`).join("\n\n")}`).join("\n\n");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${escapeHtml(c.headline)} | Newsletter | Sovereign Synthesis</title>
+<meta name="description" content="${escapeHtml(c.preheader)}" />
+<link rel="canonical" href="${SITE_BASE_URL}/newsletter/${escapeHtml(c.slug)}" />
+<link rel="stylesheet" href="/css/sovereign.css" />
+<style>
+  .article-meta { text-align: center; padding: 80px 0 24px; border-bottom: 1px solid var(--border); margin-bottom: 48px; }
+  .article-num { font-family: var(--mono); font-size: 11px; letter-spacing: 3px; color: var(--gold); font-weight: 700; text-transform: uppercase; margin-bottom: 18px; display: block; }
+  .article-title { font-family: var(--serif); font-size: clamp(36px, 6vw, 56px); font-weight: 600; line-height: 1.1; letter-spacing: -0.6px; color: var(--text); margin: 0 auto 20px; max-width: 760px; }
+  .article-dek { font-family: var(--serif); font-style: italic; font-size: 19px; color: var(--body-dim); line-height: 1.5; max-width: 620px; margin: 0 auto 22px; }
+  .article-date { font-family: var(--mono); font-size: 10px; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; }
+  .article-body { max-width: 660px; margin: 0 auto; }
+  .article-body p { font-family: var(--serif); font-size: 19px; line-height: 1.7; color: var(--body); margin: 0 0 22px; }
+  .article-body p:first-of-type::first-letter { font-family: var(--serif); font-weight: 700; font-size: 64px; float: left; line-height: 0.85; margin: 4px 8px -4px 0; color: var(--gold); }
+  .section-marker { font-family: var(--mono); font-size: 11px; letter-spacing: 3px; color: var(--gold); font-weight: 700; text-transform: uppercase; text-align: center; margin: 48px 0 24px; display: block; padding: 14px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .article-cta { text-align: center; margin: 48px auto 24px; max-width: 660px; }
+  .article-cta a { display: inline-block; font-family: var(--sans); font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text); text-decoration: none; background: var(--gold); padding: 16px 36px; border-radius: var(--radius-sm); }
+  .article-cta a:hover { opacity: 0.9; }
+  .article-signoff { max-width: 660px; margin: 56px auto 0; padding: 32px 0; border-top: 1px solid var(--border); text-align: left; font-family: var(--serif); font-size: 16px; color: var(--body-dim); line-height: 1.6; }
+  .article-signoff strong { color: var(--text); font-weight: 600; }
+  .article-nav { max-width: 660px; margin: 24px auto 48px; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 24px 0; border-top: 1px solid var(--border); }
+  .article-nav a { font-family: var(--mono); font-size: 11px; letter-spacing: 1.5px; color: var(--muted); text-decoration: none; font-weight: 700; text-transform: uppercase; }
+  .article-nav a:hover { color: var(--gold); }
+</style>
+<script defer src="/_vercel/insights/script.js"></script>
+</head>
+<body>
+
+<div class="top">
+  <div class="top-inner">
+    <a href="/" class="wordmark">Sovereign Synthesis</a>
+    <nav class="nav">
+      <a href="/about">About</a>
+      <a href="/diagnostic">Diagnostic</a>
+      <a href="/p77">Protocol 77</a>
+      <a href="/newsletter">Newsletter</a>
+      <a href="/members">Members</a>
+    </nav>
+  </div>
+</div>
+<div class="gold-line"></div>
+
+<article>
+  <header class="article-meta">
+    <span class="article-num">Edition ${issueLabel} · Newsletter</span>
+    <h1 class="article-title">${escapeHtml(c.headline)}</h1>
+    <p class="article-dek">${escapeHtml(c.dek)}</p>
+    <span class="article-date">${escapeHtml(dateLabel)}</span>
+  </header>
+
+  <div class="article-body">
+
+${sectionsHtml}
+
+    <div class="article-cta">
+      <a href="${escapeHtml(fullCtaUrl)}">${escapeHtml(c.cta.buttonText)} &rarr;</a>
+    </div>
+
+    <div class="article-signoff">
+      <p>${escapeHtml(c.closing)}</p>
+      <p style="margin-top:24px;"><strong>&mdash; Ace</strong><br/>Sovereign Synthesis</p>
+    </div>
+
+  </div>
+
+  <div class="article-nav">
+    <a href="/newsletter">&larr; All editions</a>
+    <span style="font-family:var(--mono);font-size:10px;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase;">Edition ${issueLabel}</span>
+    <span style="opacity:0.4;">Next &rarr;</span>
+  </div>
+</article>
+
+<footer>
+  <div class="foot-inner">
+    <p>
+      <a href="/about">About</a>
+      <a href="/diagnostic">Diagnostic</a>
+      <a href="/p77">Protocol 77</a>
+      <a href="/newsletter">Newsletter</a>
+      <a href="/members">Members</a>
+      <a href="/unsubscribe">Unsubscribe</a>
+    </p>
+    <p style="margin-top: 16px; color: #aaaaaa;">© Sovereign Synthesis · sovereign-synthesis.com</p>
+  </div>
+</footer>
+
+</body>
+</html>
+`;
+}
+
+// ── 11. Save draft issue ──────────────────────────────────────────────────
+export async function saveDraftIssue(input: {
+  issueNumber: number;
+  content: NewsletterContent;
+  bodyHtml: string;
+  bodyPlain: string;
+  ideasIntroduced: string[];
+}): Promise<{ ok: boolean; id?: string; error?: string }> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return { ok: false, error: "Supabase not configured" };
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/newsletter_issues`, {
+      method: "POST",
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        issue_number: input.issueNumber,
+        slug: input.content.slug,
+        subject: input.content.subject,
+        preheader: input.content.preheader,
+        body_html: input.bodyHtml,
+        body_plain: input.bodyPlain,
+        structured_content: input.content,
+        ideas_introduced: input.ideasIntroduced,
+        ideas_expounded: [],
+        status: "draft",
+      }),
+    });
+    if (!resp.ok) {
+      return { ok: false, error: `${resp.status}: ${(await resp.text()).slice(0, 300)}` };
+    }
+    const rows = (await resp.json()) as Array<{ id: string }>;
+    return { ok: true, id: rows[0]?.id };
+  } catch (err: any) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// ── 12. Mark issue sent + idea-graph patch + publish-to-website ───────────
+export async function markIssueSent(
+  issueId: string,
+  resendEmailId: string,
+  recipientCount: number,
+  issueNumber: number,
+  ideasIntroduced: string[],
+  content: NewsletterContent,
+): Promise<{ webPublishStatus: "ok" | "skipped_no_token" | "failed"; webPublishError?: string }> {
+  if (SUPABASE_URL && SUPABASE_KEY) {
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/newsletter_issues?id=eq.${issueId}`, {
+        method: "PATCH",
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+        body: JSON.stringify({ status: "sent", sent_at: new Date().toISOString(), recipient_count: recipientCount }),
+      });
+    } catch (err: any) {
+      console.error(`[AnitaSend] markIssueSent (issues PATCH) failed: ${err.message}`);
+    }
+
+    if (ideasIntroduced.length > 0) {
+      for (const ideaId of ideasIntroduced) {
+        try {
+          await fetch(`${SUPABASE_URL}/rest/v1/newsletter_ideas?id=eq.${ideaId}`, {
+            method: "PATCH",
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+            body: JSON.stringify({ introduced_in_issue_number: issueNumber }),
+          });
+          console.log(`[AnitaSend] idea-graph: marked ${ideaId.slice(0, 8)}… as introduced in issue #${issueNumber}`);
+        } catch (err: any) {
+          console.error(`[AnitaSend] markIssueSent (ideas PATCH ${ideaId}) failed: ${err.message}`);
+        }
+      }
+    }
+  }
+
+  const pub = await publishToWebsite(content);
+
+  if (pub.status === "ok" && SUPABASE_URL && SUPABASE_KEY) {
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/newsletter_issues?id=eq.${issueId}`, {
+        method: "PATCH",
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+        body: JSON.stringify({
+          published_to_website_at: new Date().toISOString(),
+          web_archive_url: `${SITE_BASE_URL}/newsletter/${content.slug}/`,
+        }),
+      });
+    } catch (err: any) {
+      console.error(`[AnitaPublish] mark-published PATCH failed: ${err.message}`);
+    }
+  }
+
+  return { webPublishStatus: pub.status, webPublishError: pub.error };
+}
+
+// ── 13. publishToWebsite (GitHub Contents API) ────────────────────────────
+async function publishToWebsite(c: NewsletterContent): Promise<{ status: "ok" | "skipped_no_token" | "failed"; error?: string }> {
+  if (!GITHUB_TOKEN) {
+    console.warn(`[AnitaPublish] GITHUB_TOKEN not set — skipping web publish for issue #${c.issueNumber} ("${c.slug}"). Set GITHUB_TOKEN on Railway to enable.`);
+    return { status: "skipped_no_token" };
+  }
+
+  const ghBase = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents`;
+  const ghHeaders = {
+    Authorization: `Bearer ${GITHUB_TOKEN}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "Content-Type": "application/json",
+  };
+  const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
+
+  const articleHtml = renderNewsletterWebPage(c);
+  const articlePath = `newsletter/${c.slug}/index.html`;
+
+  try {
+    let articleSha: string | undefined;
+    try {
+      const probe = await fetch(`${ghBase}/${articlePath}?ref=${GITHUB_BRANCH}`, { headers: ghHeaders });
+      if (probe.ok) {
+        const data = (await probe.json()) as any;
+        articleSha = data.sha;
+      }
+    } catch {}
+
+    const articleBody: any = {
+      message: `newsletter: publish issue #${c.issueNumber} — ${c.slug}`,
+      content: b64(articleHtml),
+      branch: GITHUB_BRANCH,
+    };
+    if (articleSha) articleBody.sha = articleSha;
+
+    const articleResp = await fetch(`${ghBase}/${articlePath}`, {
+      method: "PUT",
+      headers: ghHeaders,
+      body: JSON.stringify(articleBody),
+    });
+    if (!articleResp.ok) {
+      const errText = (await articleResp.text()).slice(0, 300);
+      return { status: "failed", error: `article PUT ${articleResp.status}: ${errText}` };
+    }
+  } catch (err: any) {
+    return { status: "failed", error: `article publish: ${err.message}` };
+  }
+
+  try {
+    const indexPath = `newsletter/index.html`;
+    const indexResp = await fetch(`${ghBase}/${indexPath}?ref=${GITHUB_BRANCH}`, { headers: ghHeaders });
+    if (!indexResp.ok) {
+      return { status: "failed", error: `index GET ${indexResp.status}: ${(await indexResp.text()).slice(0, 200)}` };
+    }
+    const indexData = (await indexResp.json()) as any;
+    const currentIndexHtml = Buffer.from(indexData.content, "base64").toString("utf8");
+    const indexSha = indexData.sha;
+
+    const newRowHtml = renderArchiveRow(c);
+    const updatedIndexHtml = injectRowIntoArchive(currentIndexHtml, newRowHtml, c.slug);
+    if (updatedIndexHtml === currentIndexHtml) {
+      console.log(`[AnitaPublish] archive index already contains row for ${c.slug} — skipping update`);
+    } else {
+      const indexPutResp = await fetch(`${ghBase}/${indexPath}`, {
+        method: "PUT",
+        headers: ghHeaders,
+        body: JSON.stringify({
+          message: `newsletter: link issue #${c.issueNumber} into archive`,
+          content: b64(updatedIndexHtml),
+          branch: GITHUB_BRANCH,
+          sha: indexSha,
+        }),
+      });
+      if (!indexPutResp.ok) {
+        const errText = (await indexPutResp.text()).slice(0, 300);
+        return { status: "failed", error: `index PUT ${indexPutResp.status}: ${errText}` };
+      }
+    }
+  } catch (err: any) {
+    return { status: "failed", error: `index update: ${err.message}` };
+  }
+
+  console.log(`[AnitaPublish] ✅ Published issue #${c.issueNumber} → ${SITE_BASE_URL}/newsletter/${c.slug}/`);
+  return { status: "ok" };
+}
+
+function renderArchiveRow(c: NewsletterContent): string {
+  const num = String(c.issueNumber).padStart(2, "0");
+  const date = formatPublishDate(c.publishedDate);
+  return `    <a href="/newsletter/${escapeHtml(c.slug)}/" class="news-row">
+      <span class="news-num">${num}</span>
+      <div class="news-meta">
+        <span class="news-date">${escapeHtml(date)}</span>
+        <p class="news-title">${escapeHtml(c.headline)}</p>
+        <p class="news-dek">${escapeHtml(c.dek)}</p>
+      </div>
+      <span class="news-arrow">Read &rarr;</span>
+    </a>
+
+`;
+}
+
+function injectRowIntoArchive(currentHtml: string, newRow: string, slug: string): string {
+  if (currentHtml.includes(`/newsletter/${slug}/`)) return currentHtml;
+  const marker = `<div class="news-list">`;
+  const idx = currentHtml.indexOf(marker);
+  if (idx === -1) {
+    console.error(`[AnitaPublish] archive index missing news-list marker — cannot inject row`);
+    return currentHtml;
+  }
+  const insertPos = idx + marker.length;
+  return currentHtml.slice(0, insertPos) + "\n\n" + newRow + currentHtml.slice(insertPos);
+}
+
+// ── 14. Weekly cron orchestrator ──────────────────────────────────────────
 export async function runWeeklyNewsletterCycle(opts: {
   alertChannel?: Channel;
   alertChatId?: string;
   dryRun?: boolean;
 }): Promise<{ status: string; details: string }> {
-  // every alert routes through Anita's voice (ddxfish blueprint + content-namespace
-  // recall). Falls back to the raw `text` on any failure — alert delivery never breaks.
   const alert = async (text: string, fact?: FactPayload) => {
     if (opts.alertChannel && opts.alertChatId) {
       const body = fact ? await voicedDM("anita", fact, text) : text;
@@ -416,23 +844,24 @@ export async function runWeeklyNewsletterCycle(opts: {
     console.log(`[AnitaNewsletterCron] ${text.replace(/\n/g, " | ").slice(0, 200)}`);
   };
 
-  // 1. Cap check
   const cap = await getWeeklyCapStatus();
   if (cap.capped) {
     await alert(
-      `📭 *Anita newsletter — skipped (cap reached)*\nSent ${cap.sends_last_7d}/3 in last 7 days. Next opportunity opens as old sends roll out.`,
-      {
-        action: "Newsletter cycle skipped — weekly send cap reached",
-        detail: `${cap.sends_last_7d}/3 sends in last 7 days. No new issue this cycle.`,
-        metric: "leads",
-      },
+      `📭 *Anita newsletter — skipped (cap reached)*\nSent ${cap.sends_last_7d}/3 in last 7 days.`,
+      { action: "Newsletter cycle skipped — weekly send cap reached", detail: `${cap.sends_last_7d}/3 in last 7 days`, metric: "leads" },
     );
     return { status: "skipped_cap", details: `${cap.sends_last_7d}/3` };
   }
 
-  // 2. Pick the next idea
   const pick = await pickNextIdeaToIntroduce();
-  // 3. Get prior context for compose
+  if (pick.mode === "error") {
+    await alert(
+      `⚠️ *Anita newsletter — picker error*\n${pick.reason}`,
+      { action: "Newsletter picker errored", detail: pick.reason, metric: "leads" },
+    );
+    return { status: "picker_error", details: pick.reason };
+  }
+
   let priorIssues: Array<{ issue_number: number; subject: string; ideas_introduced: string[] }> = [];
   if (SUPABASE_URL && SUPABASE_KEY) {
     try {
@@ -443,115 +872,97 @@ export async function runWeeklyNewsletterCycle(opts: {
       if (r.ok) priorIssues = (await r.json()) as any[];
     } catch {}
   }
+  const foundations = await loadFoundations();
   const issueNumber = await getNextIssueNumber();
 
-  // 4. Compose
-  const composed = await geminiComposeIssue({
+  const composed = await composeIssueContent({
     issueNumber,
-    isFirstIssue: priorIssues.length === 0,
-    introduceIdea: pick.next ? { id: pick.next.id, title: pick.next.title, summary: pick.next.summary } : undefined,
-    expandIdea: pick.suggestExpand ? { id: pick.suggestExpand.id, title: pick.suggestExpand.title } : undefined,
+    mode: pick.mode === "mechanism" ? "mechanism" : "open",
+    mechanism: pick.mode === "mechanism" ? pick.idea : undefined,
     priorIssues,
+    foundations,
   });
-  if (!composed.ok) {
+  if (!composed.ok || !composed.content) {
     await alert(
       `⚠️ *Anita newsletter — compose failed*\n${composed.error}`,
-      {
-        action: "Newsletter compose step failed — Gemini call did not produce a usable issue",
-        detail: `Error: ${composed.error}`,
-        metric: "leads",
-      },
+      { action: "Newsletter compose step failed", detail: composed.error || "unknown", metric: "leads" },
     );
     return { status: "compose_failed", details: composed.error || "unknown" };
   }
 
-  // 5. Save draft
-  const ideasIntroducedArr = pick.next ? [pick.next.id] : [];
-  const ideasExpoundedArr = pick.suggestExpand ? [pick.suggestExpand.id] : [];
+  const emailHtml = renderNewsletterEmail(composed.content);
+  const emailPlain = renderNewsletterEmailPlain(composed.content);
+  const ideasIntroducedArr = pick.mode === "mechanism" ? [pick.idea.id] : [];
+
   const draft = await saveDraftIssue({
     issueNumber,
-    subject: composed.subject!,
-    preheader: composed.preheader,
-    bodyHtml: composed.bodyHtml!,
-    bodyPlain: composed.bodyPlain,
+    content: composed.content,
+    bodyHtml: emailHtml,
+    bodyPlain: emailPlain,
     ideasIntroduced: ideasIntroducedArr,
-    ideasExpounded: ideasExpoundedArr,
   });
   if (!draft.ok || !draft.id) {
     await alert(
       `⚠️ *Anita newsletter — draft save failed*\n${draft.error}`,
-      {
-        action: "Newsletter draft save failed at the newsletter_issues insert step",
-        detail: `Error: ${draft.error}`,
-        metric: "leads",
-      },
+      { action: "Newsletter draft save failed", detail: draft.error || "unknown", metric: "leads" },
     );
     return { status: "draft_save_failed", details: draft.error || "unknown" };
   }
 
-  // 6. Dry-run exit
   if (opts.dryRun) {
     await alert(
-      `📝 *Anita newsletter draft saved (dry-run)*\nIssue #${issueNumber}: "${composed.subject}"\n\nNot sent — dry-run mode. Inspect newsletter_issues table.`,
-      {
-        action: `Newsletter issue #${issueNumber} drafted in dry-run mode (not sent)`,
-        detail: `Subject: "${composed.subject}". Available in newsletter_issues for review.`,
-        metric: "leads",
-      },
+      `📝 *Anita newsletter draft saved (dry-run)*\nIssue #${issueNumber}: "${composed.content.subject}"\n\nNot sent — dry-run.`,
+      { action: `Newsletter issue #${issueNumber} drafted in dry-run`, detail: `Subject: "${composed.content.subject}"`, metric: "leads" },
     );
     return { status: "draft_only_dryrun", details: `issue ${issueNumber} draft id ${draft.id}` };
   }
 
-  // 7. Get recipients
   const recipients = await listNewsletterRecipients();
   if (recipients.length === 0) {
     await alert(
-      `📭 *Anita newsletter — no recipients*\nIssue #${issueNumber} drafted but \`initiates\` table has 0 valid emails. Draft saved; will not send until audience exists.`,
-      {
-        action: `Newsletter issue #${issueNumber} drafted but cannot ship — zero recipients in initiates table`,
-        detail: `Issue is saved to newsletter_issues; will hold until at least one valid email exists.`,
-        metric: "leads",
-      },
+      `📭 *Anita newsletter — no recipients*\nIssue #${issueNumber} drafted but recipient union returned 0. Draft saved.`,
+      { action: `Newsletter issue #${issueNumber} drafted but cannot ship — zero recipients`, detail: `Draft saved; will hold until at least one valid email exists.`, metric: "leads" },
     );
     return { status: "no_recipients", details: `issue ${issueNumber} drafted, 0 recipients` };
   }
 
-  // 8. Send
   const send = await sendWithCap({
     sendType: "newsletter",
     to: recipients,
-    subject: composed.subject!,
-    htmlBody: composed.bodyHtml!,
-    plainBody: composed.bodyPlain,
+    subject: composed.content.subject,
+    htmlBody: emailHtml,
+    plainBody: emailPlain,
     referenceId: draft.id,
   });
   if (!send.sent) {
     await alert(
       `⚠️ *Anita newsletter — send failed*\nIssue #${issueNumber}: ${send.error}`,
-      {
-        action: `Newsletter issue #${issueNumber} failed to ship via Resend`,
-        detail: `Error: ${send.error}`,
-        metric: "leads",
-      },
+      { action: `Newsletter issue #${issueNumber} failed to ship via Resend`, detail: send.error || "unknown", metric: "leads" },
     );
     return { status: "send_failed", details: send.error || "unknown" };
   }
 
-  // 9. Mark sent — also patches newsletter_ideas.introduced_in_issue_number
-  // for each idea introduced in this issue (S130e). Without this, the graph
-  // never compounds and pickNextIdeaToIntroduce keeps returning the same root.
-  await markIssueSent(draft.id, send.resendEmailId!, recipients.length, issueNumber, ideasIntroducedArr);
+  const post = await markIssueSent(draft.id, send.resendEmailId!, recipients.length, issueNumber, ideasIntroducedArr, composed.content);
+
+  const publishLine = post.webPublishStatus === "ok"
+    ? `Web: ${SITE_BASE_URL}/newsletter/${composed.content.slug}/`
+    : post.webPublishStatus === "skipped_no_token"
+      ? `Web: SKIPPED (GITHUB_TOKEN not set on Railway)`
+      : `Web: FAILED — ${post.webPublishError}`;
+
   await alert(
     `📧 *Anita newsletter shipped*\n` +
-    `Issue #${issueNumber}: "${composed.subject}"\n` +
+    `Issue #${issueNumber}: "${composed.content.subject}"\n` +
+    `Mode: ${pick.mode}${pick.mode === "mechanism" ? ` (${pick.idea.slug})` : ""}\n` +
     `Recipients: ${recipients.length}\n` +
     `Cap: ${(cap.sends_last_7d ?? 0) + 1}/3 in last 7 days\n` +
-    `Resend ID: \`${send.resendEmailId}\``,
+    `Resend ID: \`${send.resendEmailId}\`\n` +
+    publishLine,
     {
       action: `Newsletter issue #${issueNumber} shipped to ${recipients.length} recipient${recipients.length === 1 ? "" : "s"}`,
-      detail: `Subject: "${composed.subject}". Cap usage: ${(cap.sends_last_7d ?? 0) + 1}/3 in last 7 days. Resend ID: ${send.resendEmailId}`,
+      detail: `Subject: "${composed.content.subject}". Cap usage: ${(cap.sends_last_7d ?? 0) + 1}/3. ${publishLine}`,
       metric: "leads",
     },
   );
-  return { status: "sent", details: `issue ${issueNumber} → ${recipients.length} recipients` };
+  return { status: "sent", details: `issue ${issueNumber} → ${recipients.length} recipients (${publishLine})` };
 }

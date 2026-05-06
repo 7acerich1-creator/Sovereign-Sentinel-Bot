@@ -47,6 +47,24 @@ const BRAND_CONFIG: Record<Brand, { label: string; channelId: string }> = {
   },
 };
 
+// S130s (2026-05-05): Self-comment suppression. Architect's own comments on his
+// own videos shouldn't trigger DM alerts or auto-replies — they inflate
+// engagement signal and create chaotic notification noise. The two brand
+// channels are owned by him; if he comments AS the channel, authorChannelId
+// matches one of these. If he comments from his personal Google account, set
+// ARCHITECT_PERSONAL_YT_CHANNEL_ID env var to suppress those too.
+// Self-comments are still recorded in youtube_comments_seen (no data loss),
+// just silently — no DM, no Yuki auto-reply.
+function getOwnerChannelIds(): Set<string> {
+  const ids = new Set<string>([
+    BRAND_CONFIG.sovereign_synthesis.channelId,
+    BRAND_CONFIG.containment_field.channelId,
+  ]);
+  const personal = (process.env.ARCHITECT_PERSONAL_YT_CHANNEL_ID || "").trim();
+  if (personal) ids.add(personal);
+  return ids;
+}
+
 // ── OAuth helper (mirrors pattern in tools/youtube-cta-tools.ts) ──
 async function getYouTubeToken(brand: Brand): Promise<string | null> {
   const directToken = process.env.YOUTUBE_ACCESS_TOKEN;
@@ -185,6 +203,10 @@ export async function pollYouTubeComments(
       const videoId: string = thread.snippet?.videoId || "";
       const authorName: string = top.authorDisplayName || "(unknown)";
       const authorChannelUrl: string = top.authorChannelUrl || "";
+      const authorChannelId: string =
+        (typeof top.authorChannelId === "object" ? top.authorChannelId?.value : top.authorChannelId) ||
+        // Fallback: extract from URL like https://www.youtube.com/channel/UCxxx
+        (authorChannelUrl.match(/\/channel\/([^/?#]+)/)?.[1] || "");
       const authorHandle = authorChannelUrl.split("/").pop() || authorName;
       const textOriginal: string = top.textOriginal || top.textDisplay || "";
       const publishedAt: string = top.publishedAt || "";
@@ -203,6 +225,18 @@ export async function pollYouTubeComments(
         published_at: publishedAt || new Date().toISOString(),
       });
       inMemorySeen[brand].add(commentId);
+
+      // S130s: Skip self-comments. Architect commenting on his own videos
+      // (as either brand channel or his personal Google account) shouldn't
+      // trigger Yuki DMs OR Yuki auto-replies. The Supabase row above keeps
+      // the data; we just silence the surface.
+      const ownerIds = getOwnerChannelIds();
+      if (authorChannelId && ownerIds.has(authorChannelId)) {
+        console.log(
+          `[YTCommentWatcher] Suppressed self-comment (${cfg.label}): ${authorName} commenting from owned channel ${authorChannelId}. Recorded but no DM, no auto-reply.`
+        );
+        continue;
+      }
 
       // Skip alerting on the seed pass OR if comment is older than the alert window
       if (isFirstRun && seenFromDb.size === 0) continue;

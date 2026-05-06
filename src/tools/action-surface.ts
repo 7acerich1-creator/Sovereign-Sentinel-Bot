@@ -12,6 +12,67 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 // tasks, briefings, content_drafts tables all blocked by RLS with anon key (401 errors).
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
+// S130s (2026-05-05): Push notifications for Mission Control.
+// Architect doesn't sit and watch the dashboard; he needs to be PULLED to it
+// when something actually requires him. Fire-and-forget Telegram alert when:
+//   • file_briefing fires with requires_action=true OR priority='critical' / 'high'
+//   • propose_task fires with priority='high' (case-insensitive)
+// Lower-priority items stay silent — they show up in MC for review when he chooses.
+// This converts MC from "place I should remember to check" → "place I'm pulled to."
+async function alertArchitectOfPendingMC(payload: {
+  kind: "task" | "briefing";
+  title: string;
+  agent: string;
+  priority: string;
+  requiresAction: boolean;
+  id: string;
+}): Promise<void> {
+  const { kind, title, agent, priority, requiresAction, id } = payload;
+  const p = priority.toLowerCase();
+  const shouldAlert =
+    kind === "briefing"
+      ? requiresAction || p === "critical" || p === "high"
+      : p === "high";
+  if (!shouldAlert) return;
+
+  const token = process.env.SAPPHIRE_TOKEN || process.env.VERITAS_TOKEN;
+  const chatId =
+    process.env.ARCHITECT_CHAT_ID ||
+    process.env.TELEGRAM_AUTHORIZED_USER_ID ||
+    process.env.AUTHORIZED_USER_ID ||
+    "8593700720";
+  if (!token) return;
+
+  const icon = kind === "briefing" ? "📋" : "📌";
+  const kindLabel = kind === "briefing" ? "Briefing filed" : "Task proposed";
+  const agentDisplay = agent.charAt(0).toUpperCase() + agent.slice(1);
+  const reason =
+    kind === "briefing" && requiresAction
+      ? "Requires your action"
+      : `Priority: ${priority}`;
+
+  const text =
+    `${icon} *Mission Control — ${kindLabel}*\n` +
+    `*From:* ${agentDisplay}\n` +
+    `*${reason}*\n\n` +
+    `*${title}*\n\n` +
+    `_ID:_ \`${id}\``;
+
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: "Markdown",
+      }),
+    });
+  } catch (err: any) {
+    console.warn(`[ActionSurface] MC alert failed: ${err.message}`);
+  }
+}
+
 async function supabasePost(table: string, data: Record<string, unknown>): Promise<string | null> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return null;
 
@@ -100,6 +161,17 @@ export class ProposeTaskTool implements Tool {
     });
 
     if (id) {
+      // Fire-and-forget Telegram alert when priority warrants immediate attention.
+      // Lower-priority tasks stay silent — they surface via MC review.
+      alertArchitectOfPendingMC({
+        kind: "task",
+        title,
+        agent: this.agentName,
+        priority: priority.charAt(0).toUpperCase() + priority.slice(1),
+        requiresAction: false,
+        id,
+      }).catch(() => { /* silent — alert is additive, never blocks the tool result */ });
+
       return `✅ Task proposed and visible in Mission Control.\n` +
         `ID: ${id}\n` +
         `Title: ${title}\n` +
@@ -271,6 +343,18 @@ export class FileBriefingTool implements Tool {
     });
 
     if (id) {
+      // Fire-and-forget Telegram alert when priority warrants immediate attention
+      // (requires_action=true OR priority high/critical). Routine briefings stay
+      // silent and surface in MC for normal review.
+      alertArchitectOfPendingMC({
+        kind: "briefing",
+        title,
+        agent: this.agentName,
+        priority,
+        requiresAction,
+        id,
+      }).catch(() => { /* silent — alert is additive, never blocks the tool result */ });
+
       // canonicalized marker.
       // The dispatch poller's relay regex is `/✅ Briefing filed:\s*([0-9a-f-]{8,})/i`.
       // First line MUST be exactly `✅ Briefing filed: <id>` so the relay fires

@@ -1882,6 +1882,11 @@ export async function executeFullPipeline(
                   index: i,
                   localPath: clipPath,
                   publicUrl: artifacts.videoUrl,
+                  // S130-FB1 — capture the pod's designed branded thumbnail so
+                  // it can travel through to publishToFacebook (videoUrl + thumb
+                  // multipart upload). Was previously dropped, leaving FB to
+                  // auto-pick a frame (often black).
+                  thumbnailUrl: artifacts.thumbnailUrl,
                   startSec: 0,
                   endSec: audioDuration,
                   captionText: `${standalone.script.title} | ${standalone.script.hook}`,

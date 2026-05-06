@@ -62,6 +62,90 @@ async function alertFacebookAuthFailure(brand: FacebookBrand, errMsg: string): P
   }
 }
 
+// ── S130-FB4 — Publish-failure alerts (non-auth Meta errors) ──────────────
+// The auth-alert layer above catches token-class failures (190/200/10) so
+// Architect knows to refresh tokens. But Meta also returns *content-class*
+// errors that the auth layer ignores — invalid parameter (100), upload
+// failure (6000), abusive content (368), and novel/unknown codes. Without
+// this layer those are silent: error logged to console only, no Telegram
+// DM, Architect misses every failed publish until manually checking the
+// FB pages or Railway logs. This adds a separate alert channel for those,
+// throttled per (brand, lane, error-class) so a recurring problem doesn't
+// spam the DM channel.
+
+const lastPublishAlerted = new Map<string, number>();
+const PUBLISH_ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6h, mirrors auth-alert cadence
+
+type PublishLane = "feed" | "photo" | "video" | "reel";
+
+/**
+ * Classify a Meta API error response into an error-class string used for
+ * alert routing + throttle keying. The classification deliberately keeps
+ * "auth" and "rate" silent here (auth has its own alert path; rate is
+ * transient and Meta will accept retries). Everything else gets surfaced.
+ */
+function classifyFacebookPublishError(data: any): string {
+  const code = data?.error?.code;
+  if (code === 190 || code === 200 || code === 10) return "auth";   // handled by alertFacebookAuthFailure
+  if (code === 613) return "rate";                                  // transient, no alert
+  if (code === 100) return "param";                                 // aspect/resolution/duration violation
+  if (code === 6000) return "upload";                               // CDN/file fetch issue
+  if (code === 368) return "abuse";                                 // content flagged by Meta
+  return "unknown";                                                 // catch-all so we don't miss novel modes
+}
+
+function shouldAlertPublishOnce(brand: FacebookBrand, lane: PublishLane, errClass: string): boolean {
+  const key = `fb-publish:${brand}:${lane}:${errClass}`;
+  const now = Date.now();
+  const last = lastPublishAlerted.get(key) || 0;
+  if (now - last < PUBLISH_ALERT_COOLDOWN_MS) return false;
+  lastPublishAlerted.set(key, now);
+  return true;
+}
+
+async function alertFacebookPublishFailure(
+  brand: FacebookBrand,
+  lane: PublishLane,
+  errMsg: string,
+  errCode: number | string,
+  errClass: string,
+): Promise<void> {
+  // Auth + rate are not surfaced through this path
+  if (errClass === "auth" || errClass === "rate") return;
+  if (!shouldAlertPublishOnce(brand, lane, errClass)) return;
+
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const chatIdRaw = process.env.TELEGRAM_AUTHORIZED_USER_IDS || process.env.TELEGRAM_AUTHORIZED_USER_ID || process.env.AUTHORIZED_USER_ID || "8593700720";
+  const chatId = chatIdRaw.split(",")[0].trim();
+  if (!botToken || !chatId) return;
+
+  const brandLabel = brand === "sovereign_synthesis" ? "Sovereign Synthesis" : "Containment Field";
+  const laneLabel = lane === "reel" ? "Reel" : lane === "video" ? "Video" : lane === "photo" ? "Photo" : "Feed post";
+  const fixHint =
+    errClass === "param"   ? "Likely an aspect-ratio / resolution / duration violation. For Reels: 9:16, ≥540p, 4-60s, ≥23fps. Check the queue row's media_url and the pod's compose params."
+    : errClass === "upload" ? "Meta couldn't fetch the .mp4 from R2. Verify the R2 URL is publicly reachable and the file isn't 0-byte or partially uploaded."
+    : errClass === "abuse"  ? "Meta flagged this content as abusive. Review the caption + thumbnail — could be a banned term or imagery that triggered Meta's classifiers."
+    : /* unknown */          "Unrecognized Meta error code. Check Railway logs for the full response and cross-reference at developers.facebook.com/docs/graph-api/guides/error-handling.";
+
+  const message =
+    `📘 *${laneLabel} publish failed (${brandLabel})*\n` +
+    `Code: ${errCode} (${errClass})\n` +
+    `Reason: ${errMsg.slice(0, 300)}\n\n` +
+    `${fixHint}\n\n` +
+    `(Throttled to once per 6h per brand/lane/error-class.)`;
+
+  try {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: "Markdown" }),
+    });
+    console.log(`📡 [FacebookPublisher] Publish-failure alert dispatched (${brand}/${lane}/${errClass})`);
+  } catch (err: any) {
+    console.warn(`[FacebookPublisher] Failed to send publish-failure alert: ${err?.message}`);
+  }
+}
+
 interface FacebookPostResult {
   success: boolean;
   postId?: string;
@@ -296,6 +380,7 @@ export async function publishToFacebook(
     const errMsg = data.error?.message || JSON.stringify(data);
     console.error(`❌ [FacebookPublisher] API error (${brand}): code=${errCode} subcode=${errSubcode} - ${errMsg}`);
     if (isFacebookTokenFailure(data)) await alertFacebookAuthFailure(brand, errMsg);
+    await alertFacebookPublishFailure(brand, "feed", errMsg, errCode, classifyFacebookPublishError(data));
     return { success: false, error: `${errMsg} (code=${errCode})` };
   } catch (err: any) {
     console.error(`❌ [FacebookPublisher] Network error (${brand}): ${err.message}`);
@@ -350,6 +435,7 @@ async function postPhoto(
   const errMsg = data.error?.message || JSON.stringify(data);
   console.error(`❌ [FacebookPublisher] Photo API error: code=${errCode} subcode=${errSubcode} - ${errMsg}`);
   if (isFacebookTokenFailure(data)) await alertFacebookAuthFailure(brand, errMsg);
+  await alertFacebookPublishFailure(brand, "photo", errMsg, errCode, classifyFacebookPublishError(data));
   return { success: false, error: `${errMsg} (code=${errCode})` };
 }
 
@@ -418,6 +504,7 @@ async function postVideo(
         const errMsg = data.error?.message || JSON.stringify(data);
         console.error(`❌ [FacebookPublisher] Video+thumb API error: code=${errCode} subcode=${errSubcode} - ${errMsg}`);
         if (isFacebookTokenFailure(data)) await alertFacebookAuthFailure(brand, errMsg);
+        await alertFacebookPublishFailure(brand, "video", errMsg, errCode, classifyFacebookPublishError(data));
         return { success: false, error: `${errMsg} (code=${errCode})` };
       }
     } catch (err: any) {
@@ -461,6 +548,7 @@ async function postVideo(
   const errMsg = data.error?.message || JSON.stringify(data);
   console.error(`❌ [FacebookPublisher] Video API error: code=${errCode} subcode=${errSubcode} - ${errMsg}`);
   if (isFacebookTokenFailure(data)) await alertFacebookAuthFailure(brand, errMsg);
+  await alertFacebookPublishFailure(brand, "video", errMsg, errCode, classifyFacebookPublishError(data));
   return { success: false, error: `${errMsg} (code=${errCode})` };
 }
 
@@ -519,6 +607,7 @@ async function postReel(
       const errCode = startData.error?.code || "unknown";
       console.error(`❌ [FacebookPublisher] Reel init error (${brand}): code=${errCode} - ${errMsg}`);
       if (isFacebookTokenFailure(startData)) await alertFacebookAuthFailure(brand, errMsg);
+      await alertFacebookPublishFailure(brand, "reel", `init: ${errMsg}`, errCode, classifyFacebookPublishError(startData));
       return { success: false, error: `reel-init: ${errMsg} (code=${errCode})` };
     }
     videoId = String(startData.video_id);
@@ -540,6 +629,10 @@ async function postReel(
     if (!uploadRes.ok) {
       const errText = await uploadRes.text();
       console.error(`❌ [FacebookPublisher] Reel upload error (${brand}): http=${uploadRes.status} body=${errText.slice(0, 300)}`);
+      // The rupload endpoint returns text/HTTP status, not Meta's standard JSON
+      // error envelope, so we hard-classify these as "upload" errors and pass
+      // the HTTP status as the error code for the alert.
+      await alertFacebookPublishFailure(brand, "reel", `upload http ${uploadRes.status}: ${errText.slice(0, 200)}`, `http_${uploadRes.status}`, "upload");
       return { success: false, error: `reel-upload: http ${uploadRes.status} - ${errText.slice(0, 200)}` };
     }
   } catch (err: any) {
@@ -581,6 +674,7 @@ async function postReel(
     const errMsg = finishData.error?.message || JSON.stringify(finishData).slice(0, 300);
     console.error(`❌ [FacebookPublisher] Reel finish error (${brand}): code=${errCode} subcode=${errSubcode} - ${errMsg}`);
     if (isFacebookTokenFailure(finishData)) await alertFacebookAuthFailure(brand, errMsg);
+    await alertFacebookPublishFailure(brand, "reel", `finish: ${errMsg}`, errCode, classifyFacebookPublishError(finishData));
     return { success: false, error: `reel-finish: ${errMsg} (code=${errCode})` };
   } catch (err: any) {
     console.error(`❌ [FacebookPublisher] Reel finish network error (${brand}): ${err.message}`);

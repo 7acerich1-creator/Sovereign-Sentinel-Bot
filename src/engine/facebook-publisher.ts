@@ -175,8 +175,29 @@ export async function publishToFacebook(
      * The image is fetched server-side and sent as multipart `thumb` to the
      * /videos endpoint so FB renders a non-black preview frame.
      * Spec: ≥720p, ≤2MB, JPG/PNG, 16:9 or 1:1 recommended.
+     *
+     * NOTE: ignored when `asReel` is true. Meta's /video_reels endpoint does
+     * not expose a custom-cover parameter at publish time — Reels covers are
+     * auto-extracted from the video and can only be updated via a separate
+     * post-publish call to /VIDEO_ID/thumbnails (not yet wired here).
      */
     thumbnailUrl?: string;
+    /**
+     * When true (and `videoUrl` is also set), publish to /PAGE_ID/video_reels
+     * instead of /PAGE_ID/videos. Reels lane gets significantly more algorithmic
+     * reach for vertical short-form content (per Meta's Reels-prioritization).
+     *
+     * Constraints — Meta will reject the publish if the video doesn't meet:
+     *   - Aspect ratio 9:16 (vertical)
+     *   - Resolution ≥ 540×960
+     *   - Duration 4-60 seconds
+     *   - Frame rate ≥ 23 fps
+     *
+     * Use only for content that satisfies these (e.g. faceless-factory standalone
+     * shorts, VidRush chopped clips). Do NOT enable for content_engine_queue feed
+     * posts — those don't meet aspect-ratio / duration constraints.
+     */
+    asReel?: boolean;
     brand?: FacebookBrand;
     /** Unix timestamp (seconds). Overrides FACEBOOK_PLANNER_LEAD_MIN env. */
     scheduledPublishTime?: number;
@@ -203,11 +224,17 @@ export async function publishToFacebook(
 
   try {
     // Explicit video upload path — caller passes `videoUrl` (the .mp4) and
-    // optionally `thumbnailUrl` (the preview image). Routes to /videos as a
-    // native FB video, with the thumbnail attached as multipart `thumb` so
-    // FB doesn't auto-pick a black frame. This is the path VidRush should
-    // use for posting clips/standalone shorts to FB Page.
+    // optionally `thumbnailUrl` (the preview image) and/or `asReel` to choose
+    // the Reels lane vs feed-video lane.
+    //   asReel=true  → /PAGE_ID/video_reels (3-phase upload). More algorithmic
+    //                  reach. Auto-cover only (Meta doesn't expose custom cover
+    //                  at publish). thumbnailUrl is ignored on this path.
+    //   asReel=false → /PAGE_ID/videos (feed video). Custom thumbnail attached
+    //                  as multipart `thumb` when thumbnailUrl is provided.
     if (options?.videoUrl) {
+      if (options?.asReel) {
+        return await postReel(pageId, token, text, options.videoUrl, scheduledFor, brand);
+      }
       return await postVideo(
         pageId,
         token,
@@ -435,4 +462,128 @@ async function postVideo(
   console.error(`❌ [FacebookPublisher] Video API error: code=${errCode} subcode=${errSubcode} - ${errMsg}`);
   if (isFacebookTokenFailure(data)) await alertFacebookAuthFailure(brand, errMsg);
   return { success: false, error: `${errMsg} (code=${errCode})` };
+}
+
+/**
+ * S130-FB2 — Publish a Reel via /PAGE_ID/video_reels (3-phase upload flow).
+ *
+ * Reels lane gets significantly more algorithmic reach than feed videos for
+ * vertical short-form content. For 9:16 ≤60s clips (faceless-factory standalone
+ * shorts, VidRush chopped clips), this is the right destination.
+ *
+ * Per Meta's Reels publishing API (verified against
+ * https://developers.facebook.com/docs/video-api/guides/reels-publishing/ +
+ * https://developers.facebook.com/docs/graph-api/reference/page/video_reels/),
+ * the flow is three sequential calls:
+ *
+ *   1. POST /PAGE_ID/video_reels?upload_phase=start
+ *      → returns { video_id, upload_url, success }
+ *   2. POST <upload host>/video-upload/v25.0/<video_id>
+ *      with header `Authorization: OAuth <token>` and `file_url: <CDN URL>`
+ *      → Meta fetches the video server-side from our R2 hosted URL
+ *   3. POST /PAGE_ID/video_reels?upload_phase=finish&video_id=...
+ *      &video_state=PUBLISHED&description=...   (or SCHEDULED + scheduled_publish_time)
+ *
+ * Cover image: NOT exposed by /video_reels at publish time (no thumb / cover_url
+ * parameter is documented). Cover is auto-extracted from the video frame. To set
+ * a custom cover, a separate POST /VIDEO_ID/thumbnails call is required AFTER
+ * publish — that's a follow-up if/when auto-cover quality proves insufficient.
+ * The caller's thumbnailUrl is silently ignored on this lane.
+ *
+ * Failure modes (all surface via FacebookPostResult.error):
+ *   - 100 Invalid parameter   → typically aspect/resolution/duration violation
+ *   - 6000 Upload failure     → CDN URL unreachable from Meta or invalid file
+ *   - 190/200/10 token errors → Telegram alert via alertFacebookAuthFailure
+ *   - 613 Rate limit          → backoff (no retry here yet — left to caller)
+ *
+ * Reels constraints (Meta-enforced):
+ *   - Aspect ratio: 9:16 (vertical)        - Resolution:  ≥540×960 (540p)
+ *   - Duration:    4-60 seconds            - Frame rate:  ≥23 fps
+ */
+async function postReel(
+  pageId: string,
+  token: string,
+  description: string,
+  videoUrl: string,
+  scheduledFor: number | null = null,
+  brand: FacebookBrand = "sovereign_synthesis",
+): Promise<FacebookPostResult> {
+  // ── Phase 1 — Initialize upload session ────────────────────────────
+  let videoId: string;
+  try {
+    const startUrl = `${FB_API}/${pageId}/video_reels?upload_phase=start&access_token=${encodeURIComponent(token)}`;
+    const startRes = await fetch(startUrl, { method: "POST" });
+    const startData = (await startRes.json()) as any;
+    if (!startData.video_id) {
+      const errMsg = startData.error?.message || JSON.stringify(startData).slice(0, 300);
+      const errCode = startData.error?.code || "unknown";
+      console.error(`❌ [FacebookPublisher] Reel init error (${brand}): code=${errCode} - ${errMsg}`);
+      if (isFacebookTokenFailure(startData)) await alertFacebookAuthFailure(brand, errMsg);
+      return { success: false, error: `reel-init: ${errMsg} (code=${errCode})` };
+    }
+    videoId = String(startData.video_id);
+  } catch (err: any) {
+    console.error(`❌ [FacebookPublisher] Reel init network error (${brand}): ${err.message}`);
+    return { success: false, error: `reel-init network: ${err.message}` };
+  }
+
+  // ── Phase 2 — Hosted-file upload (Meta fetches videoUrl server-side) ──
+  try {
+    const uploadEndpoint = `https://rupload.facebook.com/video-upload/v25.0/${videoId}`;
+    const uploadRes = await fetch(uploadEndpoint, {
+      method: "POST",
+      headers: {
+        "Authorization": `OAuth ${token}`,
+        "file_url": videoUrl,
+      },
+    });
+    if (!uploadRes.ok) {
+      const errText = await uploadRes.text();
+      console.error(`❌ [FacebookPublisher] Reel upload error (${brand}): http=${uploadRes.status} body=${errText.slice(0, 300)}`);
+      return { success: false, error: `reel-upload: http ${uploadRes.status} - ${errText.slice(0, 200)}` };
+    }
+  } catch (err: any) {
+    console.error(`❌ [FacebookPublisher] Reel upload network error (${brand}): ${err.message}`);
+    return { success: false, error: `reel-upload network: ${err.message}` };
+  }
+
+  // ── Phase 3 — Finish (publish or schedule) ────────────────────────
+  try {
+    const finishParams = new URLSearchParams({
+      access_token: token,
+      video_id: videoId,
+      upload_phase: "finish",
+      description,
+    });
+    if (scheduledFor !== null) {
+      finishParams.set("video_state", "SCHEDULED");
+      finishParams.set("scheduled_publish_time", String(scheduledFor));
+    } else {
+      finishParams.set("video_state", "PUBLISHED");
+    }
+    const finishUrl = `${FB_API}/${pageId}/video_reels?${finishParams.toString()}`;
+    const finishRes = await fetch(finishUrl, { method: "POST" });
+    const finishData = (await finishRes.json()) as any;
+
+    if (finishData.success === true || finishData.post_id) {
+      const mode = scheduledFor !== null
+        ? `🗓️ STAGED Reel for ${new Date(scheduledFor * 1000).toISOString()}`
+        : `✅ Reel posted live`;
+      const idForResult = finishData.post_id || videoId;
+      console.log(`${mode} to ${brand}: ${idForResult}`);
+      return scheduledFor !== null
+        ? { success: true, postId: idForResult, scheduled: true, scheduledFor }
+        : { success: true, postId: idForResult };
+    }
+
+    const errCode = finishData.error?.code || "unknown";
+    const errSubcode = finishData.error?.error_subcode || "";
+    const errMsg = finishData.error?.message || JSON.stringify(finishData).slice(0, 300);
+    console.error(`❌ [FacebookPublisher] Reel finish error (${brand}): code=${errCode} subcode=${errSubcode} - ${errMsg}`);
+    if (isFacebookTokenFailure(finishData)) await alertFacebookAuthFailure(brand, errMsg);
+    return { success: false, error: `reel-finish: ${errMsg} (code=${errCode})` };
+  } catch (err: any) {
+    console.error(`❌ [FacebookPublisher] Reel finish network error (${brand}): ${err.message}`);
+    return { success: false, error: `reel-finish network: ${err.message}` };
+  }
 }

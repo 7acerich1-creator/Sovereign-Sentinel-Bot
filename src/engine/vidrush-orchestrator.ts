@@ -1323,14 +1323,19 @@ async function scheduleBufferWeek(
           ? `Firmware Update incoming. sovereign-synthesis.com #SovereignSynthesis #${niche.replace(/_/g, "")}`
           : `The containment field runs deeper than you think. sovereign-synthesis.com #TheContainmentField #${niche.replace(/_/g, "")}`);
       try {
-        // S130-FB1 — Switched from { imageUrl, link } to { videoUrl, thumbnailUrl }.
-        // Old call posted the .mp4 as a `link`, which made FB render a blank
-        // link-card preview (R2 dev URLs return no Open Graph metadata).
-        // New call uploads the .mp4 to /PAGE_ID/videos as a native FB video,
-        // with the per-clip ffmpeg thumbnail attached as multipart `thumb`.
+        // S130-FB1 — Switched from { imageUrl, link } to { videoUrl, thumbnailUrl }
+        //   so the .mp4 uploads as a native FB video instead of a blank link-card.
+        // S130-FB2 — Added asReel:true so the upload lands on /PAGE_ID/video_reels
+        //   instead of /PAGE_ID/videos. Reels get significantly more algorithmic
+        //   reach for vertical short-form content. These clips already meet the
+        //   Reels constraints (9:16 vertical from the pod, ≤60s, ≥540p).
+        //   thumbnailUrl is preserved on the call (harmless on the Reels path —
+        //   it's silently dropped today, but will be used by a future post-publish
+        //   /VIDEO_ID/thumbnails update if we wire one in).
         const fbResult = await publishToFacebook(fbText, {
           videoUrl: clip.publicUrl || undefined,
           thumbnailUrl: clip.thumbnailUrl || undefined,
+          asReel: true,
           brand: brand as "sovereign_synthesis" | "containment_field",
         });
         if (fbResult.success) {

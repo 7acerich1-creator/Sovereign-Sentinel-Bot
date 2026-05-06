@@ -146,6 +146,80 @@ async function alertFacebookPublishFailure(
   }
 }
 
+// ── S130-FB5 — First-commenter (caption-clean CTA in the first comment) ──
+// FB / IG growth pattern: caption stays clean (no link clutter), the click
+// target sits in the first comment. Engagement-ranking algorithms historically
+// favor this layout. Failure of the comment is non-fatal to the parent publish.
+
+async function postFirstComment(
+  pageId: string,
+  token: string,
+  parentPostId: string,
+  text: string,
+  brand: FacebookBrand,
+): Promise<void> {
+  try {
+    const res = await fetch(`${FB_API}/${parentPostId}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text, access_token: token }),
+    });
+    const data = (await res.json()) as any;
+    if (data.id) {
+      console.log(`💬 [FacebookPublisher] First comment posted on ${parentPostId} (${brand}): ${data.id}`);
+      return;
+    }
+    const errCode = data.error?.code || "unknown";
+    const errMsg = data.error?.message || JSON.stringify(data).slice(0, 200);
+    console.warn(`⚠️ [FacebookPublisher] First-comment failed (${brand}): code=${errCode} - ${errMsg}`);
+    // Surface non-auth/non-rate failures so a recurring comment-permission issue gets visibility.
+    const errClass = classifyFacebookPublishError(data);
+    if (errClass !== "auth" && errClass !== "rate") {
+      await alertFacebookPublishFailure(brand, "feed", `first-comment: ${errMsg}`, errCode, errClass);
+    }
+  } catch (err: any) {
+    console.warn(`⚠️ [FacebookPublisher] First-comment network error (${brand}): ${err.message}`);
+  }
+}
+
+// ── S130-FB5 — Reel-publish success DM (graceful verification, mutable) ──
+// After a Reel publishes successfully, DM Architect a one-line message with the
+// reel URL so he can eyeball the auto-extracted cover (post-prepend) by tapping
+// a link instead of hunting through Railway logs. Throttled 12h per brand to
+// avoid noise. Disabled entirely when env FACEBOOK_PUBLISH_DM_DISABLED=1 — set
+// this on Railway when you've seen enough cleanly-landed Reels to trust the
+// chain and don't want the DMs anymore.
+
+const lastReelPublishDmAt = new Map<string, number>();
+const REEL_PUBLISH_DM_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12h per brand
+
+async function dmReelPublishSuccess(brand: FacebookBrand, reelUrl: string): Promise<void> {
+  if (process.env.FACEBOOK_PUBLISH_DM_DISABLED === "1") return;
+  const now = Date.now();
+  const last = lastReelPublishDmAt.get(brand) || 0;
+  if (now - last < REEL_PUBLISH_DM_COOLDOWN_MS) return;
+  lastReelPublishDmAt.set(brand, now);
+
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const chatIdRaw = process.env.TELEGRAM_AUTHORIZED_USER_IDS || process.env.TELEGRAM_AUTHORIZED_USER_ID || process.env.AUTHORIZED_USER_ID || "8593700720";
+  const chatId = chatIdRaw.split(",")[0].trim();
+  if (!botToken || !chatId) return;
+
+  const brandLabel = brand === "sovereign_synthesis" ? "Sovereign Synthesis" : "The Containment Field";
+  const message = `🎬 Reel published — ${brandLabel}\n${reelUrl}\n\n_(Mute via FACEBOOK_PUBLISH_DM_DISABLED=1 on Railway. Throttled 12h per brand.)_`;
+
+  try {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: "Markdown" }),
+    });
+    console.log(`📡 [FacebookPublisher] Reel-publish verification DM dispatched (${brand})`);
+  } catch (err: any) {
+    console.warn(`[FacebookPublisher] Failed to send Reel-publish DM: ${err?.message}`);
+  }
+}
+
 interface FacebookPostResult {
   success: boolean;
   postId?: string;
@@ -154,6 +228,12 @@ interface FacebookPostResult {
   scheduled?: boolean;
   /** Unix timestamp (seconds) when the staged post will auto-publish. */
   scheduledFor?: number;
+  /**
+   * Public URL of the published post when known. Currently set only on the
+   * Reels lane (`https://www.facebook.com/reel/{video_id}`) and used by
+   * the post-publish verification DM. Other lanes leave this undefined.
+   */
+  postUrl?: string;
 }
 
 /**
@@ -282,6 +362,15 @@ export async function publishToFacebook(
      * posts — those don't meet aspect-ratio / duration constraints.
      */
     asReel?: boolean;
+    /**
+     * Optional CTA text. When provided, fires `POST /{post_id}/comments` with
+     * this message immediately after the parent publish succeeds. Lets the
+     * caption stay clean while a CTA link sits in the first comment, where
+     * engagement-pattern algorithms tend to favor it. First-comment failures
+     * are non-fatal — the parent publish stays successful, the failure logs +
+     * fires a publish-failure alert.
+     */
+    firstCommentText?: string;
     brand?: FacebookBrand;
     /** Unix timestamp (seconds). Overrides FACEBOOK_PLANNER_LEAD_MIN env. */
     scheduledPublishTime?: number;
@@ -306,6 +395,23 @@ export async function publishToFacebook(
   // Resolve scheduled-publish timestamp (null = live mode).
   const scheduledFor = resolveScheduledTime(options?.scheduledPublishTime);
 
+  // S130-FB5 — Post-publish hooks. Run after any successful publish in any lane.
+  //   1) firstCommentText  → fires POST /{post_id}/comments (CTA-in-first-comment)
+  //   2) Reel + postUrl    → fires verification DM with reel URL (cover eyeball)
+  // Failures of either hook are non-fatal — the parent publish stays successful,
+  // the failure logs (and for first-comment, also fires a publish-failure alert
+  // so a recurring permissions issue doesn't go silent).
+  const finalize = async (result: FacebookPostResult): Promise<FacebookPostResult> => {
+    if (!result.success) return result;
+    if (result.postId && options?.firstCommentText) {
+      await postFirstComment(pageId, token, result.postId, options.firstCommentText, brand);
+    }
+    if (options?.asReel && result.postUrl) {
+      await dmReelPublishSuccess(brand, result.postUrl);
+    }
+    return result;
+  };
+
   try {
     // Explicit video upload path — caller passes `videoUrl` (the .mp4) and
     // optionally `thumbnailUrl` (the preview image) and/or `asReel` to choose
@@ -317,9 +423,9 @@ export async function publishToFacebook(
     //                  as multipart `thumb` when thumbnailUrl is provided.
     if (options?.videoUrl) {
       if (options?.asReel) {
-        return await postReel(pageId, token, text, options.videoUrl, scheduledFor, brand);
+        return await finalize(await postReel(pageId, token, text, options.videoUrl, scheduledFor, brand));
       }
-      return await postVideo(
+      return await finalize(await postVideo(
         pageId,
         token,
         text,
@@ -327,7 +433,7 @@ export async function publishToFacebook(
         scheduledFor,
         brand,
         options.thumbnailUrl || null,
-      );
+      ));
     }
 
     // Legacy detection: if a video URL was passed via `imageUrl` (older
@@ -338,9 +444,9 @@ export async function publishToFacebook(
       const lowerUrl = options.imageUrl.toLowerCase().split("?")[0];
       const videoExts = [".mp4", ".mov", ".webm", ".m4v", ".avi"];
       if (videoExts.some(ext => lowerUrl.endsWith(ext))) {
-        return await postVideo(pageId, token, text, options.imageUrl, scheduledFor, brand);
+        return await finalize(await postVideo(pageId, token, text, options.imageUrl, scheduledFor, brand));
       }
-      return await postPhoto(pageId, token, text, options.imageUrl, scheduledFor, brand);
+      return await finalize(await postPhoto(pageId, token, text, options.imageUrl, scheduledFor, brand));
     }
 
     const body: Record<string, string> = {
@@ -370,9 +476,11 @@ export async function publishToFacebook(
         ? `🗓️ STAGED in Planner for ${new Date(scheduledFor * 1000).toISOString()}`
         : `✅ Posted live`;
       console.log(`${mode} to ${brand}: ${data.id}`);
-      return scheduledFor !== null
-        ? { success: true, postId: data.id, scheduled: true, scheduledFor }
-        : { success: true, postId: data.id };
+      return await finalize(
+        scheduledFor !== null
+          ? { success: true, postId: data.id, scheduled: true, scheduledFor }
+          : { success: true, postId: data.id },
+      );
     }
 
     const errCode = data.error?.code || "unknown";
@@ -663,10 +771,11 @@ async function postReel(
         ? `🗓️ STAGED Reel for ${new Date(scheduledFor * 1000).toISOString()}`
         : `✅ Reel posted live`;
       const idForResult = finishData.post_id || videoId;
-      console.log(`${mode} to ${brand}: ${idForResult}`);
+      const reelUrl = `https://www.facebook.com/reel/${videoId}`;
+      console.log(`${mode} to ${brand}: ${idForResult} — ${reelUrl}`);
       return scheduledFor !== null
-        ? { success: true, postId: idForResult, scheduled: true, scheduledFor }
-        : { success: true, postId: idForResult };
+        ? { success: true, postId: idForResult, scheduled: true, scheduledFor, postUrl: reelUrl }
+        : { success: true, postId: idForResult, postUrl: reelUrl };
     }
 
     const errCode = finishData.error?.code || "unknown";

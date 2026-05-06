@@ -1332,10 +1332,16 @@ async function scheduleBufferWeek(
         //   thumbnailUrl is preserved on the call (harmless on the Reels path —
         //   it's silently dropped today, but will be used by a future post-publish
         //   /VIDEO_ID/thumbnails update if we wire one in).
+        // S130-FB5 — Added firstCommentText so the CTA link sits in the first
+        //   comment (clean caption, engagement-pattern friendly).
+        const fbFirstComment = brand === "sovereign_synthesis"
+          ? "🧭 Run the pattern diagnostic — sovereign-synthesis.com/diagnostic"
+          : "🌑 The architecture — sovereign-synthesis.com";
         const fbResult = await publishToFacebook(fbText, {
           videoUrl: clip.publicUrl || undefined,
           thumbnailUrl: clip.thumbnailUrl || undefined,
           asReel: true,
+          firstCommentText: fbFirstComment,
           brand: brand as "sovereign_synthesis" | "containment_field",
         });
         if (fbResult.success) {

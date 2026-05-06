@@ -5,6 +5,20 @@
 
 ---
 
+## ⚙️ Sovereign Frequency Standard — How a Session Operates (codified 2026-05-06)
+
+> The bottom line for every session: **full contextual awareness, regardless of the weight of the task.**
+
+1. **Read the actual code that's being touched.** Not summaries, not memory, not a prior session's note. The source. Then what calls it. Then what it calls. Only then propose.
+2. **Don't try to "get the gist" and start working.** That's how cold sessions become nightmares — every fresh session has the temptation to skim, pick what to abide by, and execute. The session that earns its keep absorbs the topic at depth *before* touching anything.
+3. **Understand the system independently AND as a whole.** A change that makes sense in isolation can collide with something three modules away. Trace the wiring.
+4. **Memory + skills + master ref + this file are pointers, not knowledge.** They tell you where to look. They are not a substitute for looking. Treat them as a search index over the system, not the system itself.
+5. **The weight is what it is.** Heavy topics need heavy reads. Light topics need light reads. Don't compress a heavy topic into a light read just because the session is fresh.
+
+The signal this is being met: sessions feel **smooth** — talking, planning, executing without choppy back-and-forth. When sessions feel choppy or shortcut-y, context wasn't built before action started. Stop, read, then continue.
+
+---
+
 ## Naming (do not confuse these — Session 46 confused them for 46 sessions)
 - **Domain (what users see):** `sovereign-synthesis.com`
 - **Repo (where the code lives):** `sovereign-landing` (inside `Sovereign-Mission-Control` or as sibling per `project_gravity_claw_infra.md`)

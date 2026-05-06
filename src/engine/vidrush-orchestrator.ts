@@ -1323,9 +1323,14 @@ async function scheduleBufferWeek(
           ? `Firmware Update incoming. sovereign-synthesis.com #SovereignSynthesis #${niche.replace(/_/g, "")}`
           : `The containment field runs deeper than you think. sovereign-synthesis.com #TheContainmentField #${niche.replace(/_/g, "")}`);
       try {
+        // S130-FB1 — Switched from { imageUrl, link } to { videoUrl, thumbnailUrl }.
+        // Old call posted the .mp4 as a `link`, which made FB render a blank
+        // link-card preview (R2 dev URLs return no Open Graph metadata).
+        // New call uploads the .mp4 to /PAGE_ID/videos as a native FB video,
+        // with the per-clip ffmpeg thumbnail attached as multipart `thumb`.
         const fbResult = await publishToFacebook(fbText, {
-          imageUrl: clip.thumbnailUrl || undefined,
-          link: clip.publicUrl || undefined,
+          videoUrl: clip.publicUrl || undefined,
+          thumbnailUrl: clip.thumbnailUrl || undefined,
           brand: brand as "sovereign_synthesis" | "containment_field",
         });
         if (fbResult.success) {

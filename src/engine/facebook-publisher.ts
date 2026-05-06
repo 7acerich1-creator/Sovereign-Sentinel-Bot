@@ -163,6 +163,20 @@ export async function publishToFacebook(
   options?: {
     link?: string;
     imageUrl?: string;
+    /**
+     * Explicit video URL — uploads as a native FB video via /PAGE_ID/videos.
+     * Use this (not `link`) when you have an .mp4 you want to play on FB.
+     * Posting an .mp4 as a `link` produces a blank link-card preview because
+     * R2/raw .mp4 URLs return no Open Graph metadata.
+     */
+    videoUrl?: string;
+    /**
+     * Optional thumbnail (.jpg/.png URL) attached when `videoUrl` is set.
+     * The image is fetched server-side and sent as multipart `thumb` to the
+     * /videos endpoint so FB renders a non-black preview frame.
+     * Spec: ≥720p, ≤2MB, JPG/PNG, 16:9 or 1:1 recommended.
+     */
+    thumbnailUrl?: string;
     brand?: FacebookBrand;
     /** Unix timestamp (seconds). Overrides FACEBOOK_PLANNER_LEAD_MIN env. */
     scheduledPublishTime?: number;
@@ -188,10 +202,27 @@ export async function publishToFacebook(
   const scheduledFor = resolveScheduledTime(options?.scheduledPublishTime);
 
   try {
-    // Detect video URLs (.mp4, .mov, .webm, etc.) and route to /videos
-    // instead of /photos. Prior to this fix, content_engine_queue rows with
-    // R2-hosted .mp4 in media_url were being POSTed to /photos as `url=...mp4`,
-    // which Meta rejected with "Invalid parameter (code=100)".
+    // Explicit video upload path — caller passes `videoUrl` (the .mp4) and
+    // optionally `thumbnailUrl` (the preview image). Routes to /videos as a
+    // native FB video, with the thumbnail attached as multipart `thumb` so
+    // FB doesn't auto-pick a black frame. This is the path VidRush should
+    // use for posting clips/standalone shorts to FB Page.
+    if (options?.videoUrl) {
+      return await postVideo(
+        pageId,
+        token,
+        text,
+        options.videoUrl,
+        scheduledFor,
+        brand,
+        options.thumbnailUrl || null,
+      );
+    }
+
+    // Legacy detection: if a video URL was passed via `imageUrl` (older
+    // callers like content-engine that don't yet use `videoUrl`), still
+    // route to /videos. No thumbnail in this branch — those callers don't
+    // produce one. Black-preview risk remains until callers migrate.
     if (options?.imageUrl) {
       const lowerUrl = options.imageUrl.toLowerCase().split("?")[0];
       const videoExts = [".mp4", ".mov", ".webm", ".m4v", ".avi"];
@@ -297,9 +328,17 @@ async function postPhoto(
 
 /**
  * S115c — Post a video with description to the Page via /PAGE_ID/videos endpoint.
- * Accepts a hosted file_url (R2 .mp4 in our case). FB pulls the file server-side
- * and auto-generates a thumbnail from frame 0. Returns the video ID + post ID.
+ * Accepts a hosted file_url (R2 .mp4 in our case). FB pulls the file server-side.
+ * Returns the video ID + post ID.
+ *
  * S118c — When `scheduledFor` is provided, the video is staged in Planner.
+ *
+ * S130-FB1 — When `thumbnailUrl` is provided, the thumbnail is fetched
+ * server-side and attached as multipart `thumb` so FB renders a clean preview
+ * frame instead of auto-picking (often a black fade-in frame). Per Meta API,
+ * `thumb` must be a binary upload; URL strings are not accepted in that field.
+ * If the thumbnail fetch fails, we fall back to the JSON path silently — the
+ * post still goes through, just without a custom thumbnail.
  */
 async function postVideo(
   pageId: string,
@@ -307,8 +346,60 @@ async function postVideo(
   description: string,
   videoUrl: string,
   scheduledFor: number | null = null,
-  brand: FacebookBrand = "sovereign_synthesis"
+  brand: FacebookBrand = "sovereign_synthesis",
+  thumbnailUrl: string | null = null,
 ): Promise<FacebookPostResult> {
+  // ── Multipart path: only when a thumbnail URL was passed ────────────
+  if (thumbnailUrl) {
+    try {
+      const thumbResp = await fetch(thumbnailUrl);
+      if (!thumbResp.ok) {
+        console.warn(`⚠️ [FacebookPublisher] Thumbnail fetch ${thumbResp.status} from ${thumbnailUrl}. Falling back to no-thumb upload.`);
+      } else {
+        const thumbBytes = await thumbResp.arrayBuffer();
+        const thumbType = thumbResp.headers.get("content-type") || "image/jpeg";
+        const thumbBlob = new Blob([thumbBytes], { type: thumbType });
+
+        const form = new FormData();
+        form.append("file_url", videoUrl);
+        form.append("description", description);
+        form.append("access_token", token);
+        form.append("thumb", thumbBlob, "thumb.jpg");
+        if (scheduledFor !== null) {
+          form.append("published", "false");
+          form.append("scheduled_publish_time", String(scheduledFor));
+        }
+
+        const res = await fetch(`${FB_API}/${pageId}/videos`, {
+          method: "POST",
+          body: form,
+        });
+        const data = (await res.json()) as any;
+
+        if (data.id) {
+          const mode = scheduledFor !== null
+            ? `🗓️ STAGED Video+thumb in Planner for ${new Date(scheduledFor * 1000).toISOString()}`
+            : `✅ Video+thumb posted live`;
+          console.log(`${mode} to ${brand}: ${data.id}`);
+          return scheduledFor !== null
+            ? { success: true, postId: data.id, scheduled: true, scheduledFor }
+            : { success: true, postId: data.id };
+        }
+
+        const errCode = data.error?.code || "unknown";
+        const errSubcode = data.error?.error_subcode || "";
+        const errMsg = data.error?.message || JSON.stringify(data);
+        console.error(`❌ [FacebookPublisher] Video+thumb API error: code=${errCode} subcode=${errSubcode} - ${errMsg}`);
+        if (isFacebookTokenFailure(data)) await alertFacebookAuthFailure(brand, errMsg);
+        return { success: false, error: `${errMsg} (code=${errCode})` };
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ [FacebookPublisher] Thumbnail fetch network error: ${err.message}. Falling back to no-thumb upload.`);
+      // Fall through to JSON path
+    }
+  }
+
+  // ── JSON path: no thumbnail (or thumbnail fetch failed) ────────────
   const body: Record<string, string> = {
     file_url: videoUrl,
     description,

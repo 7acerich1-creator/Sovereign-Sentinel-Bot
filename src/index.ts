@@ -3099,23 +3099,50 @@ async function main() {
     enabled: true,
     handler: async () => {
       const now = new Date();
-      // S130o (2026-05-05): pause-aware visibility. The 2026-05-03 silent
-      // Sunday couldn't be diagnosed post-hoc because the cron returned
-      // silently when paused. Now: if it WOULD have fired but pause is on,
-      // log it loudly with date + reason. Future Sundays make pause-state
-      // forensically visible in Railway logs.
-      const wouldFire = now.getUTCDay() === 0 && now.getUTCHours() === 14;
+      const wouldFireToday = now.getUTCDay() === 0 && now.getUTCHours() >= 14 && now.getUTCHours() < 17;
+      // S130o (2026-05-05): pause visibility (covered by S130o boot log too).
       if (isAutonomousPaused()) {
-        if (wouldFire) {
+        if (wouldFireToday) {
           const dateStr = now.toISOString().slice(0, 10);
-          console.log(`📭 [AnitaNewsletter] WOULD have fired Sunday ${dateStr} 14:00 UTC but PAUSE_AUTONOMOUS=true. Newsletter SKIPPED. Unset PAUSE_AUTONOMOUS in Railway env to resume.`);
+          console.log(`📭 [AnitaNewsletter] WOULD have fired Sunday ${dateStr} but PAUSE_AUTONOMOUS=true. SKIPPED. Unset PAUSE_AUTONOMOUS in Railway env to resume.`);
         }
         return;
       }
-      // Sunday = 0, target hour 14:00 UTC
-      if (now.getUTCDay() !== 0 || now.getUTCHours() !== 14) return;
+      // S130p (2026-05-05): WIDENED FIRING WINDOW + PERSISTENT IDEMPOTENCY.
+      //   Old cron only fired during hour=14 UTC and tracked firedKeys in-memory.
+      //   That broke 2026-05-03: ~4 Railway deploys that day, one of them landed
+      //   the new container after 14:59 UTC → cron skipped the entire Sunday silently.
+      //   New cron: fires anywhere in 14:00-17:00 UTC (3h grace window) AND checks
+      //   anita_send_log via Supabase to ensure exactly-one fire per Sunday across
+      //   container restarts. Survives deploy collisions cleanly.
+      if (now.getUTCDay() !== 0) return; // Sunday only
+      if (now.getUTCHours() < 14 || now.getUTCHours() >= 17) return; // 3h grace window
       const fireKey = `newsletter-${now.toISOString().slice(0, 10)}`;
-      if (newsletterFiredKeys.has(fireKey)) return;
+      if (newsletterFiredKeys.has(fireKey)) return; // fast-path: in-memory dedup within container
+      // Persistent dedup: query anita_send_log for any newsletter sent today (UTC).
+      // This survives container restarts. If we already shipped today, skip permanently.
+      try {
+        const SUPABASE_URL = process.env.SUPABASE_URL;
+        const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+        if (SUPABASE_URL && SUPABASE_KEY) {
+          const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
+          const dayEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).toISOString();
+          const r = await fetch(
+            `${SUPABASE_URL}/rest/v1/anita_send_log?select=id&send_type=eq.newsletter&sent_at=gte.${dayStart}&sent_at=lt.${dayEnd}&limit=1`,
+            { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } },
+          );
+          if (r.ok) {
+            const rows = await r.json() as any[];
+            if (rows.length > 0) {
+              newsletterFiredKeys.add(fireKey); // populate fast-path so we don't re-query
+              console.log(`📧 [AnitaNewsletter] already shipped today (anita_send_log row exists). Skipping.`);
+              return;
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[AnitaNewsletter] persistent-idempotency check failed: ${err.message} — proceeding with in-memory only`);
+      }
       newsletterFiredKeys.add(fireKey);
       try {
         const anitaChannel = agentLoops.get("anita")?.channel;

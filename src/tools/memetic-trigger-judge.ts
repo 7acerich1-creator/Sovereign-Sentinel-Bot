@@ -79,36 +79,83 @@ export class MemeticTriggerJudgeTool implements Tool {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return "❌ memetic_trigger_judge: GEMINI_API_KEY not set";
 
-    try {
-      const resp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: JUDGMENT_PROMPT(content, contentType, brand) }] }],
-            generationConfig: {
-              temperature: 0.2,
-              maxOutputTokens: 400,
-              responseMimeType: "application/json",
-            },
-          }),
+    // S130q (2026-05-05): Six consecutive parse failures observed in Yuki's dispatch loop.
+    // Root cause: Gemini 2.5 Flash thinking-mode (default ON) consumes the visible token
+    // budget on hidden chain-of-thought BEFORE emitting the JSON. With maxOutputTokens=400
+    // the visible output got truncated mid-string → JSON.parse threw. Fix:
+    //   1. thinkingConfig.thinkingBudget=0 disables hidden CoT for this call
+    //   2. bump maxOutputTokens to 1024 for headroom
+    //   3. fence-tolerant parser strips ```json ``` wrappers if Gemini ignores responseMimeType
+    //   4. single retry on parse fail before surfacing the error
+    // No silent hardcoded fallback — if both attempts fail, the tool returns an error
+    // and Yuki halts content distribution per design (per memory feedback_no_silent_fallbacks).
+    const callGemini = async (): Promise<{ ok: true; text: string } | { ok: false; error: string }> => {
+      try {
+        const r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: JUDGMENT_PROMPT(content, contentType, brand) }] }],
+              generationConfig: {
+                temperature: 0.2,
+                maxOutputTokens: 1024,
+                responseMimeType: "application/json",
+                thinkingConfig: { thinkingBudget: 0 },
+              },
+            }),
+          }
+        );
+        if (!r.ok) {
+          const errText = (await r.text().catch(() => "")).slice(0, 200);
+          return { ok: false, error: `Gemini ${r.status} ${errText}` };
         }
-      );
+        const d = (await r.json()) as any;
+        const t = (d?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+        return { ok: true, text: t };
+      } catch (err: any) {
+        return { ok: false, error: err.message };
+      }
+    };
 
-      if (!resp.ok) {
-        const errText = (await resp.text().catch(() => "")).slice(0, 200);
-        return `❌ memetic_trigger_judge: Gemini ${resp.status} ${errText}`;
+    // Strip markdown fences if Gemini wrapped the JSON despite responseMimeType.
+    // Tolerates ```json ... ```, ``` ... ```, and bare JSON.
+    const extractJson = (raw: string): string => {
+      const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+      if (fenced && fenced[1]) return fenced[1].trim();
+      // If raw starts with prose then has a JSON object, find the first { ... } block.
+      const braceStart = raw.indexOf("{");
+      const braceEnd = raw.lastIndexOf("}");
+      if (braceStart >= 0 && braceEnd > braceStart) return raw.slice(braceStart, braceEnd + 1);
+      return raw;
+    };
+
+    try {
+      let parsed: any = null;
+      let lastRaw = "";
+      let lastError = "";
+
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const result = await callGemini();
+        if (!result.ok) {
+          lastError = result.error;
+          continue;
+        }
+        lastRaw = result.text;
+        try {
+          parsed = JSON.parse(extractJson(result.text));
+          break;
+        } catch (parseErr: any) {
+          lastError = `parse error on attempt ${attempt}: ${parseErr.message}`;
+          if (attempt === 2) {
+            return `❌ memetic_trigger_judge: failed to parse Gemini JSON after 2 attempts. Last error: ${lastError}. Raw: ${lastRaw.slice(0, 200)}`;
+          }
+        }
       }
 
-      const data = (await resp.json()) as any;
-      const text = (data?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
-
-      let parsed: any;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        return `❌ memetic_trigger_judge: failed to parse Gemini JSON output. Raw: ${text.slice(0, 200)}`;
+      if (!parsed) {
+        return `❌ memetic_trigger_judge: Gemini call failed after 2 attempts. Last error: ${lastError}`;
       }
 
       const glitch = clampScore(parsed.glitch_score);
